@@ -43,7 +43,7 @@ Build the normal NON-TEXTMODE library with SDL hooking:
 ```sh
 sudo ./build.sh
 ```
- 
+
 Build an explicit mode:
 
 ```sh
