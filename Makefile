@@ -29,7 +29,8 @@ BIN = $(OUTPUT_DIR)/$(BIN_NAME)
 OBJ_DIR = obj/$(BUILD_MODE)
 
 LDFLAGS += -shared -z execstack -g -pthread
-LDLIBS += -Wl,-Bstatic -lGLEW -Wl,-Bdynamic -lGL -lSDL2 -lvulkan libs/funchook/libfunchook.a libs/funchook/libdistorm.a
+LDFLAGS += -Wl,-rpath,'$$ORIGIN' -Wl,-rpath,/usr/lib -Wl,-rpath,/usr/lib64 -Wl,-rpath,/run/host/usr/lib -Wl,-rpath,/run/host/usr/lib64
+LDLIBS += -lGLEW -lGL -lSDL2 -lvulkan libs/funchook/libfunchook.a libs/funchook/libdistorm.a
 
 OBJ_FILES =  src/cathook.cpp.o # Unity build
 OBJ_FILES += src/core/logger.cpp.o src/core/config/config_store.cpp.o src/core/diagnostics/exception_handler.cpp.o # Core systems

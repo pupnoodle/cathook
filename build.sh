@@ -73,6 +73,61 @@ restore_workspace_permissions() {
 
 trap restore_workspace_permissions EXIT
 
+run_git() {
+    if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_UID:-}" ] && command -v sudo >/dev/null 2>&1; then
+        sudo -u "#$SUDO_UID" git -C "$project_root" "$@"
+    else
+        git -C "$project_root" "$@"
+    fi
+}
+
+update_project_if_needed() {
+    if [ ! -d "$project_root/.git" ]; then
+        echo "Skipping update check: $project_root is not a git repository."
+        return
+    fi
+
+    local upstream_branch
+    upstream_branch="$(run_git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+    if [ -z "$upstream_branch" ]; then
+        echo "Skipping update check: current branch has no upstream."
+        return
+    fi
+
+    echo "Checking for updates from $upstream_branch..."
+    run_git fetch --quiet
+
+    local local_commit
+    local remote_commit
+    local merge_base
+    local_commit="$(run_git rev-parse '@')"
+    remote_commit="$(run_git rev-parse '@{u}')"
+
+    if [ "$local_commit" = "$remote_commit" ]; then
+        echo "Already up to date."
+        return
+    fi
+
+    merge_base="$(run_git merge-base '@' '@{u}')"
+    if [ "$merge_base" = "$remote_commit" ]; then
+        echo "Local branch is ahead of $upstream_branch; no update needed."
+        return
+    fi
+
+    if [ "$merge_base" != "$local_commit" ]; then
+        echo "Local branch is not a fast-forward of $upstream_branch; update manually before building." >&2
+        exit 1
+    fi
+
+    if [ -n "$(run_git status --porcelain --untracked-files=no)" ]; then
+        echo "Working tree has local changes; commit or stash them before updating." >&2
+        exit 1
+    fi
+
+    echo "Updating from $upstream_branch..."
+    run_git pull --ff-only
+}
+
 copy_assets() {
     local install_assets_dir="$1"
 
@@ -222,6 +277,7 @@ selected_mode="$(choose_build_mode)" || {
     exit 1
 }
 
+update_project_if_needed
 require_root_for_install
 ensure_funchook
 build_cat "$selected_mode"
