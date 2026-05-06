@@ -8,6 +8,51 @@ ipc_server_root="$script_dir/catbot-ipc-server-main"
 database_root="$script_dir/catbot-database"
 repo_url="${CAT_REPO_URL:-https://github.com/pupnoodle/cathook}"
 
+usage() {
+    cat <<'EOF'
+Usage: ./botpanel/update [--dev|--no-update]
+
+Use --dev to skip repository/navmesh update checks and never reset local changes.
+
+Environment:
+  CATHOOK_DEV_MODE=1
+EOF
+}
+
+is_enabled() {
+    case "${1:-}" in
+        "" | 0 | false | FALSE | no | NO | off | OFF)
+            return 1
+            ;;
+    esac
+
+    return 0
+}
+
+is_dev_mode() {
+    is_enabled "${CATHOOK_DEV_MODE:-${CAT_DEV_MODE:-0}}"
+}
+
+parse_args() {
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --dev | --no-update)
+                export CATHOOK_DEV_MODE=1
+                ;;
+            -h | --help)
+                usage
+                exit 0
+                ;;
+            *)
+                echo "Unknown update option: $1" >&2
+                usage >&2
+                exit 1
+                ;;
+        esac
+        shift
+    done
+}
+
 run_as_root() {
     if [ "$(id -u)" -eq 0 ]; then
         "$@"
@@ -32,6 +77,11 @@ update_origin_url() {
 update_repo() {
     local old_script=""
     local new_script=""
+
+    if is_dev_mode; then
+        echo "Dev mode enabled; skipping repository update check."
+        return
+    fi
 
     if git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
         old_script="$(git -C "$repo_root" rev-parse HEAD:botpanel/update 2>/dev/null || true)"
@@ -58,7 +108,9 @@ install_dependencies() {
 }
 
 build_and_install_runtime() {
-    run_as_root env CAT_BUILD_MODE="${CAT_BUILD_MODE:-both}" CATHOOK_ROOT="${CATHOOK_ROOT:-/opt/cathook}" bash "$repo_root/build.sh" --both
+    local dev_mode="${CATHOOK_DEV_MODE:-${CAT_DEV_MODE:-0}}"
+
+    run_as_root env CAT_BUILD_MODE="${CAT_BUILD_MODE:-both}" CATHOOK_ROOT="${CATHOOK_ROOT:-/opt/cathook}" CATHOOK_DEV_MODE="$dev_mode" bash "$repo_root/build.sh" --both
 }
 
 build_web_panel() {
@@ -107,6 +159,11 @@ prepare_firejail() {
 update_navmeshes() {
     local tf2_maps="$HOME/.steam/steam/steamapps/common/Team Fortress 2/tf/maps"
 
+    if is_dev_mode; then
+        echo "Dev mode enabled; skipping navmesh update."
+        return
+    fi
+
     if [ ! -d "$tf2_maps" ]; then
         echo "TF2 maps directory not found at $tf2_maps; skipping navmesh copy."
         return
@@ -127,6 +184,8 @@ update_navmeshes() {
     run_as_root rsync "$database_root/nav meshes/"*.nav "$tf2_maps/"
     run_as_root chmod 755 "$tf2_maps/"*.nav
 }
+
+parse_args "$@"
 
 if [ "$(uname -s)" != "Linux" ]; then
     echo "./botpanel/update must run on Linux." >&2

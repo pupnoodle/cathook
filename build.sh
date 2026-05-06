@@ -15,11 +15,27 @@ libcathook.so with SDL hooking enabled.
 
 Install mode writes to /opt/cathook by default and MUST RUN AS SUDO.
 Use --no-install for a local user build without sudo.
+Use --dev or --no-update to skip repository update checks and never reset local changes.
 
 Environment:
   CAT_BUILD_MODE=default|textmode|both
   CATHOOK_ROOT=/opt/cathook
+  CATHOOK_DEV_MODE=1
 EOF
+}
+
+is_enabled() {
+    case "${1:-}" in
+        "" | 0 | false | FALSE | no | NO | off | OFF)
+            return 1
+            ;;
+    esac
+
+    return 0
+}
+
+is_dev_mode() {
+    is_enabled "${CATHOOK_DEV_MODE:-${CAT_DEV_MODE:-0}}"
 }
 
 require_root_for_install() {
@@ -91,6 +107,11 @@ discard_local_tracked_changes() {
 }
 
 update_project_if_needed() {
+    if is_dev_mode; then
+        echo "Dev mode enabled; skipping repository update check."
+        return
+    fi
+
     if [ ! -d "$project_root/.git" ]; then
         echo "Skipping update check: $project_root is not a git repository."
         return
@@ -261,6 +282,9 @@ while [ "$#" -gt 0 ]; do
             ;;
         --no-install)
             install_enabled=0
+            ;;
+        --dev | --no-update)
+            export CATHOOK_DEV_MODE=1
             ;;
         -h | --help)
             usage

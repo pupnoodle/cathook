@@ -54,6 +54,17 @@ sudo ./build.sh --both
 
 For a local build without installing to `/opt/cathook`, use `./build.sh --no-install`.
 
+For local development, use dev mode to skip repository update checks and avoid reset paths:
+
+```sh
+sudo ./build.sh --dev
+sudo ./inject.sh --dev
+./setup.sh --dev
+```
+
+You can also set `CATHOOK_DEV_MODE=1` for `build.sh`, `inject.sh`, `setup.sh`, or `botpanel/update`.
+`--no-update` is accepted as an alias for `--dev`.
+
 Attach to a running TF2 process:
 
 ```sh

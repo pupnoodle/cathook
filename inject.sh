@@ -20,6 +20,24 @@ CATHOOK_DISCORD_REPORTS=${CATHOOK_DISCORD_REPORTS:-1}
 # pls dont spam it, i need it to fix ze bugs und crashes! :(
 CATHOOK_DISCORD_WEBHOOK_URL=${CATHOOK_DISCORD_WEBHOOK_URL:-"https://discord.com/api/webhooks/1501401839831093420/2CNm0glVBv3rRw8-nMGS6uZG8vY3wy1O2a_KLhcJVQvA5P1vRg7GFfIbh8J7OZudj5P7"}
 
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --dev | --no-update)
+            export CATHOOK_DEV_MODE=1
+            ;;
+        -h | --help)
+            echo "Usage: sudo ./inject.sh [--dev|--no-update]"
+            exit 0
+            ;;
+        *)
+            echo "Unknown inject option: $1" >&2
+            echo "Usage: sudo ./inject.sh [--dev|--no-update]" >&2
+            exit 1
+            ;;
+    esac
+    shift
+done
+
 if [[ ! "$CATHOOK_ATTACH_DELAY_SECONDS" =~ ^[0-9]+$ ]]; then
     CATHOOK_ATTACH_DELAY_SECONDS=0
 fi
@@ -40,12 +58,16 @@ fi
 
 is_enabled() {
     case "${1:-}" in
-        ""|0|false|FALSE|no|NO)
+        ""|0|false|FALSE|no|NO|off|OFF)
             return 1
             ;;
     esac
 
     return 0
+}
+
+is_dev_mode() {
+    is_enabled "${CATHOOK_DEV_MODE:-${CAT_DEV_MODE:-0}}"
 }
 
 send_discord_report() {
@@ -271,6 +293,11 @@ check_for_updates() {
 }
 
 maybe_auto_update() {
+    if is_dev_mode; then
+        echo "Dev mode enabled; skipping auto update check."
+        return 0
+    fi
+
     if ! choose_auto_update_preference; then
         return 0
     fi

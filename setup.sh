@@ -14,7 +14,7 @@ if [ "$(id -u)" -eq 0 ]; then
 fi
 
 echo "Installing dependencies, building Cat, and preparing the bundled botpanel..."
-bash "$script_dir/botpanel/update"
+bash "$script_dir/botpanel/update" "$@"
 
 echo
 echo "Setup complete."
