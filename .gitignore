@@ -13,7 +13,6 @@ obj/
 *.a
 
 # Fetched/build-time dependencies
-libs/
 externalprojects/
 
 # Botpanel fetched/runtime artifacts

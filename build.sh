@@ -194,25 +194,25 @@ choose_build_mode() {
     printf '%s\n' "default"
 }
 
-ensure_funchook() {
-    mkdir -p "$project_root/libs"
+# ensure_funchook() {
+#     mkdir -p "$project_root/libs"
 
-    if [ -d "$project_root/libs/funchook" ] &&
-       [ ! -f "$project_root/libs/funchook/libfunchook.a" ] &&
-       [ ! -f "$project_root/libs/funchook/libdistorm.a" ]; then
-        rm -rf "$project_root/libs/funchook"
-    fi
+#     if [ -d "$project_root/libs/funchook" ] &&
+#        [ ! -f "$project_root/libs/funchook/libfunchook.a" ] &&
+#        [ ! -f "$project_root/libs/funchook/libdistorm.a" ]; then
+#         rm -rf "$project_root/libs/funchook"
+#     fi
 
-    if [ ! -d "$project_root/libs/funchook" ]; then
-        git clone https://github.com/Doctor-Coomer/funchook.git "$project_root/libs/funchook"
-    fi
+#     if [ ! -d "$project_root/libs/funchook" ]; then
+#         git clone https://github.com/Doctor-Coomer/funchook.git "$project_root/libs/funchook"
+#     fi
 
-    if [ ! -f "$project_root/libs/funchook/libfunchook.a" ] ||
-       [ ! -f "$project_root/libs/funchook/libdistorm.a" ]; then
-        cmake -S "$project_root/libs/funchook" -B "$project_root/libs/funchook/build" -DCMAKE_BUILD_TYPE=Release
-        cmake --build "$project_root/libs/funchook/build" --parallel "$(nproc 2>/dev/null || echo 1)"
-    fi
-}
+#     if [ ! -f "$project_root/libs/funchook/libfunchook.a" ] ||
+#        [ ! -f "$project_root/libs/funchook/libdistorm.a" ]; then
+#         cmake -S "$project_root/libs/funchook" -B "$project_root/libs/funchook/build" -DCMAKE_BUILD_TYPE=Release
+#         cmake --build "$project_root/libs/funchook/build" --parallel "$(nproc 2>/dev/null || echo 1)"
+#     fi
+# }
 
 clear_execstack_if_needed() {
     local output_binary="$1"
@@ -309,7 +309,7 @@ selected_mode="$(choose_build_mode)" || {
 
 update_project_if_needed
 require_root_for_install
-ensure_funchook
+# ensure_funchook
 build_cat "$selected_mode"
 
 clear_execstack_if_needed "$project_root/bin/libcathook.so"
