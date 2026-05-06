@@ -10,9 +10,8 @@ V  o o  V  file: src/core/diagnostics/exception_handler.cpp
 */
 
 //TODO
-//FIX PLEASE SOMEONE FIX THIS IS DOGSHIT AND I DONT WANNA USE GDB
+//IMPROVE
 // - pupnoodle
-// alright im just using gdb now but leaving this here cuz why not? :shrug:
 
 #include "exception_handler.hpp"
 

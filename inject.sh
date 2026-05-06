@@ -19,7 +19,8 @@ CATHOOK_BINARY=${CATHOOK_BINARY:-}
 CATHOOK_CONFIG_DIR=${CATHOOK_CONFIG_DIR:-$CATHOOK_ROOT/config}
 CATHOOK_AUTO_UPDATE_FILE=${CATHOOK_AUTO_UPDATE_FILE:-$CATHOOK_CONFIG_DIR/auto_update}
 CATHOOK_ATTACH_DELAY_SECONDS=${CATHOOK_ATTACH_DELAY_SECONDS:-0}
-CATHOOK_GDB_CRASH_REPORTS=${CATHOOK_GDB_CRASH_REPORTS:-1}
+CATHOOK_USE_GDB=${CATHOOK_USE_GDB:-0}
+CATHOOK_GDB_CRASH_REPORTS=${CATHOOK_GDB_CRASH_REPORTS:-0}
 CATHOOK_GDB_KEEP_CORE=${CATHOOK_GDB_KEEP_CORE:-0}
 CATHOOK_DISCORD_REPORTS=${CATHOOK_DISCORD_REPORTS:-1}
 # pls dont spam it, i need it to fix ze bugs und crashes! :(
@@ -27,17 +28,30 @@ CATHOOK_DISCORD_WEBHOOK_URL=${CATHOOK_DISCORD_WEBHOOK_URL:-"https://discord.com/
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        --gdb)
+            CATHOOK_USE_GDB=1
+            ;;
+        --no-gdb)
+            CATHOOK_USE_GDB=0
+            ;;
+        --gdb-crash-reports)
+            CATHOOK_GDB_CRASH_REPORTS=1
+            ;;
+        --no-gdb-crash-reports)
+            CATHOOK_GDB_CRASH_REPORTS=0
+            ;;
         --dev | --no-update)
             export CATHOOK_DEV_MODE=1
             ;;
         -h | --help)
-            echo "Usage: sudo ./inject.sh [--dev|--no-update]"
+            echo "Usage: sudo ./inject.sh [--gdb|--no-gdb|--gdb-crash-reports|--no-gdb-crash-reports|--dev|--no-update]"
             echo "Mode: CATHOOK_MODE=default|textmode, CATHOOK_TEXTMODE=1, TEXTMODE=1, or saved first-run choice."
+            echo "GDB injection is disabled by default. Use ./preload for a no-gdb launch or --gdb to force attach injection."
             exit 0
             ;;
         *)
             echo "Unknown inject option: $1" >&2
-            echo "Usage: sudo ./inject.sh [--dev|--no-update]" >&2
+            echo "Usage: sudo ./inject.sh [--gdb|--no-gdb|--gdb-crash-reports|--no-gdb-crash-reports|--dev|--no-update]" >&2
             exit 1
             ;;
     esac
@@ -77,6 +91,16 @@ is_enabled() {
 
 is_dev_mode() {
     is_enabled "${CATHOOK_DEV_MODE:-${CAT_DEV_MODE:-0}}"
+}
+
+require_gdb_injection_enabled() {
+    if is_enabled "$CATHOOK_USE_GDB"; then
+        return
+    fi
+
+    echo "gdb injection is disabled for now."
+    echo "Use ./preload to launch TF2 without gdb, or run CATHOOK_USE_GDB=1 sudo ./inject.sh if you explicitly need attach injection."
+    exit 1
 }
 
 send_discord_report() {
@@ -618,6 +642,7 @@ if ! maybe_auto_update; then
     exit 1
 fi
 
+require_gdb_injection_enabled
 setup_cathook_root
 wait_for_game_process
 

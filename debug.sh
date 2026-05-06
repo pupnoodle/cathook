@@ -33,6 +33,12 @@ if [ -z "$PROCID" ]; then
     exit 1
 fi
 
+if [ "${CATHOOK_USE_GDB:-0}" != "1" ]; then
+    echo "debug.sh uses a live gdb attach and is disabled for now."
+    echo "Run CATHOOK_USE_GDB=1 sudo ./debug.sh if you explicitly want gdb."
+    exit 1
+fi
+
 sudo gdb -n -q -ex "attach $PROCID" \
      -ex "call ((void * (*) (const char*, int)) dlopen)(\"$LIB_PATH\", 1)" \
      -ex "alias un = call call (int (*)(void*))dlclose($1)" \
