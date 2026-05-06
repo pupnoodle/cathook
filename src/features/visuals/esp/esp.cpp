@@ -47,7 +47,7 @@ V  o o  V  file: src/features/visuals/esp/esp.cpp
 #include "games/tf2/sdk/interfaces/render_view.hpp"
 
 #define STB_IMAGE_IMPLEMENTATION
-#include "externalprojects/tf2source/thirdparty/stb/stb_image.h"
+#include "games/tf2/sdk/thirdparty/stb/stb_image.h"
 
 #ifdef Status
 #undef Status
