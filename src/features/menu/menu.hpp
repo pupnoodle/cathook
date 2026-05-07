@@ -1301,7 +1301,7 @@ static void draw_aimbot_content() {
     cat_menu::checkbox("Draw FOV", &config.aimbot.draw_fov);
     cat_menu::checkbox("Shoot through glass", &config.aimbot.shoot_through_glass);
     cat_menu::combo("Aim mode", (int*)&config.aimbot.aim_mode, aim_mode_items, IM_ARRAYSIZE(aim_mode_items));
-    cat_menu::slider_float("Aim FOV", &config.aimbot.fov, 0.1f, 180.0f, "%.0f deg");
+    cat_menu::slider_float("Aim FOV", &config.aimbot.fov, 0.0f, 180.0f, "%.0f deg");
     cat_menu::slider_float("Smooth factor", &config.aimbot.smooth_factor, 1.0f, 30.0f, "%.1f");
     cat_menu::slider_float("Assist strength", &config.aimbot.assist_strength, 0.0f, 100.0f, "%.0f%%");
   });

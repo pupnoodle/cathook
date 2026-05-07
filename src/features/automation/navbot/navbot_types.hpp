@@ -118,6 +118,7 @@ struct path_request
   uint32_t class_id = 0;
   uint32_t hazard_generation = 0;
   float destination_reach_distance = crumb_reach_distance;
+  bool require_exact_goal_area = false;
 };
 
 struct path_result

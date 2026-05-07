@@ -1059,7 +1059,8 @@ inline aimbot_candidate proj_aim_find_splash_candidate(Player* localplayer,
   for (const proj_aim_path_sample& predicted_sample : predicted_samples) {
     const Vec3& predicted_origin = predicted_sample.position;
     const Vec3 predicted_angles = aimbot_calculate_angles_to_position(local_origin, predicted_origin);
-    if (aimbot_calculate_fov(predicted_angles, original_view_angles) > std::max(config.aimbot.fov * 1.35f, 3.0f)) {
+    const float predicted_fov = aimbot_calculate_fov(predicted_angles, original_view_angles);
+    if (!aimbot_fov_within_limit(predicted_fov, 1.35f, 3.0f)) {
       continue;
     }
 
@@ -1099,7 +1100,7 @@ inline aimbot_candidate proj_aim_find_splash_candidate(Player* localplayer,
       }
 
       const float intercept_fov = aimbot_calculate_fov(intercept.aim_angles, original_view_angles);
-      if (intercept_fov > std::max(config.aimbot.fov * 1.2f, 3.0f)) {
+      if (!aimbot_fov_within_limit(intercept_fov, 1.2f, 3.0f)) {
         continue;
       }
 
@@ -1238,7 +1239,7 @@ inline aimbot_candidate proj_aim_find_candidate(Player* localplayer, Weapon* wea
       }
 
       const float direct_fov = aimbot_calculate_fov(intercept.aim_angles, original_view_angles);
-      if (direct_fov > std::max(config.aimbot.fov * 1.2f, 3.0f)) {
+      if (!aimbot_fov_within_limit(direct_fov, 1.2f, 3.0f)) {
         continue;
       }
 

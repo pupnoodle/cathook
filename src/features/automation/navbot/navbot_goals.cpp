@@ -448,9 +448,9 @@ float payload_distance_score(float base_score, const Vec3& local_origin, const V
   return base_score - std::sqrt(distance_squared_2d(local_origin, cart_origin)) * 0.006f;
 }
 
-Vec3 choose_payload_push_destination(Player* localplayer, const Vec3& cart_origin)
+Vec3 choose_payload_push_destination(const navbot_mesh& mesh, Player* localplayer, const Vec3& cart_origin, nav_area_id cart_area_id)
 {
-  auto destination = cart_origin;
+  auto destination = mesh.get_nearest_point(cart_area_id, cart_origin);
   if (localplayer == nullptr)
   {
     return destination;
@@ -463,6 +463,12 @@ Vec3 choose_payload_push_destination(Player* localplayer, const Vec3& cart_origi
   }
 
   return destination;
+}
+
+bool payload_push_destination_in_range(const Vec3& destination, const Vec3& cart_origin)
+{
+  constexpr float max_push_destination_distance = 110.0f;
+  return distance_squared_2d(destination, cart_origin) <= max_push_destination_distance * max_push_destination_distance;
 }
 
 goal_candidate choose_payload_defend_destination(const navbot_mesh& mesh, Player* localplayer, const Vec3& cart_origin, nav_area_id cart_area_id, float base_score)
@@ -618,7 +624,12 @@ goal_candidate choose_payload_goal(const navbot_mesh& mesh, Player* localplayer)
     }
     if (goal == goal_type::push_payload)
     {
-      auto destination = choose_payload_push_destination(localplayer, origin);
+      auto destination = choose_payload_push_destination(mesh, localplayer, origin, area_id);
+      if (!payload_push_destination_in_range(destination, origin))
+      {
+        continue;
+      }
+
       choose_best(best, make_candidate(goal, payload_distance_score(65.0f, local_origin, origin), destination, area_id));
       continue;
     }

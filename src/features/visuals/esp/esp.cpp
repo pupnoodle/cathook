@@ -1920,7 +1920,7 @@ void draw_aimbot_fov_imgui()
   if (engine == nullptr || entity_list == nullptr || !engine->is_in_game()) {
     return;
   }
-  if (!config.aimbot.draw_fov || config.aimbot.fov >= 90.0f) {
+  if (!config.aimbot.draw_fov || config.aimbot.fov <= 0.0f || config.aimbot.fov >= 90.0f) {
     return;
   }
 

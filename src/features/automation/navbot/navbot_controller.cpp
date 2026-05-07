@@ -90,7 +90,7 @@ float destination_reach_distance_for_goal(goal_type type)
   }
   if (type == goal_type::push_payload)
   {
-    return 75.0f;
+    return 45.0f;
   }
   if (type == goal_type::reload_weapons)
   {
@@ -1348,6 +1348,7 @@ void navbot_controller::request_path_if_needed()
   request.class_id = static_cast<uint32_t>(localplayer->get_tf_class());
   request.hazard_generation = hazards_.generation();
   request.destination_reach_distance = destination_reach_distance_for_goal(active_goal_.goal.type);
+  request.require_exact_goal_area = active_goal_.goal.type == goal_type::push_payload;
 
   pending_job_ = jobs_.submit_path_request(request);
   next_path_request_time_ = current_time;

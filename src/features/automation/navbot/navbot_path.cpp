@@ -400,6 +400,12 @@ path_result solve_path_request(const navbot_mesh& mesh, const navbot_hazards& ha
 
   if (!solved)
   {
+    if (request.require_exact_goal_area)
+    {
+      result.status = path_status::no_path;
+      return result;
+    }
+
     if (best_index == start_index)
     {
       result.status = path_status::no_path;

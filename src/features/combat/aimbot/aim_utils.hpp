@@ -903,6 +903,25 @@ inline float aimbot_effective_fov(const aimbot_candidate& candidate) {
   return candidate.preferred ? candidate.fov * 0.2f : candidate.fov;
 }
 
+inline bool aimbot_fov_unlimited() {
+  return config.aimbot.fov <= 0.0f;
+}
+
+inline float aimbot_fov_limit(float scale = 1.0f, float minimum = 0.0f, float extra = 0.0f) {
+  if (aimbot_fov_unlimited()) {
+    return FLT_MAX;
+  }
+
+  return std::max(config.aimbot.fov * scale, minimum) + extra;
+}
+
+inline bool aimbot_fov_within_limit(float fov,
+  float scale = 1.0f,
+  float minimum = 0.0f,
+  float extra = 0.0f) {
+  return fov <= aimbot_fov_limit(scale, minimum, extra);
+}
+
 inline float aimbot_effective_distance(const aimbot_candidate& candidate) {
   return candidate.preferred ? candidate.distance * 0.35f : candidate.distance;
 }
@@ -948,7 +967,7 @@ inline float aimbot_assist_strength(const Vec3& original_view_angles, const Vec3
     return 0.0f;
   }
 
-  const float aim_fov = std::max(config.aimbot.fov, 1.0f);
+  const float aim_fov = aimbot_fov_limit(1.0f, 1.0f);
   const float fov_ratio = std::clamp(aimbot_calculate_fov(target_view_angles, original_view_angles) / aim_fov, 0.0f, 1.0f);
   return std::clamp(assist_strength * std::clamp(1.0f - fov_ratio, 0.05f, 1.0f), 0.0f, 1.0f);
 }
@@ -1055,7 +1074,7 @@ inline bool aimbot_simple_move_sim_valid(Player* localplayer, Player* target, fl
   Vec3 predicted_origin = local_prediction_predict_entity_origin(target, horizon_seconds);
   Vec3 predicted_angles = aimbot_calculate_angles_to_position(localplayer->get_shoot_pos(), predicted_origin);
   float predicted_fov = aimbot_calculate_fov(predicted_angles, localplayer->get_punch_angles());
-  return predicted_fov <= std::max(config.aimbot.fov * 1.25f, 4.0f) &&
+  return aimbot_fov_within_limit(predicted_fov, 1.25f, 4.0f) &&
          aimbot_trace_visible_to_position(localplayer, target, predicted_origin);
 }
 
@@ -1065,7 +1084,7 @@ inline bool aimbot_simple_move_sim_valid_no_visibility(Player* localplayer, Play
   Vec3 predicted_origin = local_prediction_predict_entity_origin(target, horizon_seconds);
   Vec3 predicted_angles = aimbot_calculate_angles_to_position(localplayer->get_shoot_pos(), predicted_origin);
   float predicted_fov = aimbot_calculate_fov(predicted_angles, localplayer->get_punch_angles());
-  return predicted_fov <= std::max(config.aimbot.fov * 1.25f, 4.0f);
+  return aimbot_fov_within_limit(predicted_fov, 1.25f, 4.0f);
 }
 
 inline bool aimbot_should_auto_scope(Player* localplayer, Weapon* weapon, const aimbot_candidate& candidate) {

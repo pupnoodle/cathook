@@ -312,8 +312,10 @@ aimbot_candidate aimbot_find_best_projectile_candidate(Player* localplayer,
     const float fov = std::min(current_fov, lead_fov);
     const float target_speed = local_prediction_velocity_2d_length(target_velocity);
     const float speed_lead_fov = std::atan2(target_speed * approximate_time, std::max(distance, 1.0f)) * radpi;
-    const float fov_limit = std::max(config.aimbot.fov * (current ? 3.5f : 2.75f), current ? 90.0f : 64.0f) +
-      (speed_lead_fov * 0.75f);
+    const float fov_limit = aimbot_fov_limit(
+      current ? 3.5f : 2.75f,
+      current ? 90.0f : 64.0f,
+      speed_lead_fov * 0.75f);
     if (!current && fov > fov_limit) {
       continue;
     }
@@ -360,8 +362,7 @@ aimbot_candidate aimbot_find_best_projectile_candidate(Player* localplayer,
       continue;
     }
 
-    const float fov_limit = config.aimbot.fov * (candidate.preferred ? 1.35f : 1.0f);
-    if (!candidate.visible || candidate.fov > fov_limit) {
+    if (!candidate.visible || !aimbot_fov_within_limit(candidate.fov, candidate.preferred ? 1.35f : 1.0f)) {
       continue;
     }
 
@@ -434,7 +435,7 @@ static void aimbot_consider_non_player_target(Player* localplayer,
     return;
   }
 
-  if (!candidate.visible || candidate.fov > config.aimbot.fov) {
+  if (!candidate.visible || !aimbot_fov_within_limit(candidate.fov)) {
     return;
   }
 
@@ -492,8 +493,7 @@ static aimbot_candidate aimbot_find_best_candidate(Player* localplayer, Weapon* 
         continue;
       }
 
-      float fov_limit = config.aimbot.fov * (candidate.preferred ? 1.35f : 1.0f);
-      if (!candidate.visible || candidate.fov > fov_limit) {
+      if (!candidate.visible || !aimbot_fov_within_limit(candidate.fov, candidate.preferred ? 1.35f : 1.0f)) {
         continue;
       }
 
@@ -528,8 +528,7 @@ static aimbot_candidate aimbot_find_best_scope_candidate(Player* localplayer, We
       continue;
     }
 
-    float fov_limit = config.aimbot.fov * (candidate.preferred ? 1.35f : 1.0f);
-    if (candidate.fov > fov_limit) {
+    if (!aimbot_fov_within_limit(candidate.fov, candidate.preferred ? 1.35f : 1.0f)) {
       continue;
     }
 

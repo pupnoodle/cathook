@@ -840,6 +840,10 @@ void config_store::export_config(Config& config) const
     config.misc.exploits.null_graphics_render_stubs = get_bool(
         "misc.exploits.null_graphics_render_stubs",
         config.misc.exploits.null_graphics_render_stubs);
+#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
+    config.misc.exploits.null_graphics = true;
+    config.misc.exploits.null_graphics_render_stubs = true;
+#endif
     config.misc.exploits.legacy_tickbase_indicator = false;
     config.misc.exploits.keybind_indicator = (config.visuals.indicators.enabled_mask & Visuals::Indicators::keybinds) != 0;
     config.misc.exploits.legacy_tickbase_indicator_x = config.visuals.indicators.legacy_ticks_x;
