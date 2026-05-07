@@ -18,6 +18,8 @@ V  o o  V  file: src/features/visuals/glow/player_model_glow.cpp
 
 #include "features/menu/config.hpp"
 
+#include "core/print.hpp"
+
 #include "games/tf2/sdk/entities/player.hpp"
 #include "games/tf2/sdk/interfaces/engine.hpp"
 #include "games/tf2/sdk/interfaces/entity_list.hpp"
@@ -48,6 +50,20 @@ struct render_state
   Material* material = nullptr;
   OverrideType override_type = OVERRIDE_NORMAL;
   bool material_ignore_z = false;
+};
+
+enum class glow_resource_status
+{
+  ready,
+  missing_interfaces,
+  invalid_render_size,
+  missing_glow_color_material,
+  missing_render_buffer_1,
+  missing_render_buffer_2,
+  missing_halo_add_to_screen_material,
+  missing_blur_x_material,
+  missing_blur_y_material,
+  missing_bloom_amount,
 };
 
 struct scoped_rendering_flag
@@ -94,6 +110,7 @@ render_state g_original_state{};
 int g_render_width = 0;
 int g_render_height = 0;
 bool g_rendering = false;
+glow_resource_status g_last_resource_status = glow_resource_status::ready;
 
 scoped_rendering_flag::scoped_rendering_flag()
   : previous(g_rendering)
@@ -239,6 +256,11 @@ void release_resources()
   g_render_height = 0;
 }
 
+void destroy_key_values(KeyValues* values)
+{
+  delete values;
+}
+
 [[nodiscard]] Material* create_material_from_buffer(
   const std::string_view name,
   const std::string_view shader,
@@ -250,6 +272,7 @@ void release_resources()
 
   auto* values = new KeyValues(shader.data());
   if (!values->load_from_buffer(name.data(), material_text.data())) {
+    destroy_key_values(values);
     return nullptr;
   }
 
@@ -259,6 +282,46 @@ void release_resources()
   }
 
   return material;
+}
+
+[[nodiscard]] const char* glow_resource_status_text(const glow_resource_status status)
+{
+  switch (status) {
+    case glow_resource_status::ready:
+      return "ready";
+    case glow_resource_status::missing_interfaces:
+      return "missing interfaces";
+    case glow_resource_status::invalid_render_size:
+      return "invalid render size";
+    case glow_resource_status::missing_glow_color_material:
+      return "missing dev/glow_color";
+    case glow_resource_status::missing_render_buffer_1:
+      return "missing render buffer 1";
+    case glow_resource_status::missing_render_buffer_2:
+      return "missing render buffer 2";
+    case glow_resource_status::missing_halo_add_to_screen_material:
+      return "missing halo material";
+    case glow_resource_status::missing_blur_x_material:
+      return "missing blur x material";
+    case glow_resource_status::missing_blur_y_material:
+      return "missing blur y material";
+    case glow_resource_status::missing_bloom_amount:
+      return "missing bloom amount";
+  }
+
+  return "unknown";
+}
+
+void report_resource_status(const glow_resource_status status)
+{
+  if (g_last_resource_status == status) {
+    return;
+  }
+
+  g_last_resource_status = status;
+  if (status != glow_resource_status::ready) {
+    print("[player_model_glow] resources unavailable: %s\n", glow_resource_status_text(status));
+  }
 }
 
 [[nodiscard]] Material* find_referenced_material(const char* name, const char* texture_group)
@@ -313,16 +376,16 @@ void release_resources()
   return true;
 }
 
-[[nodiscard]] bool ensure_resources()
+[[nodiscard]] glow_resource_status ensure_resources()
 {
   if (material_system == nullptr || render_view == nullptr || model_render == nullptr || engine == nullptr) {
-    return false;
+    return glow_resource_status::missing_interfaces;
   }
 
   auto width = 0;
   auto height = 0;
   if (!get_render_size(&width, &height)) {
-    return false;
+    return glow_resource_status::invalid_render_size;
   }
 
   if (g_render_width != 0 && g_render_height != 0 && (g_render_width != width || g_render_height != height)) {
@@ -356,7 +419,8 @@ void release_resources()
 )#");
   }
 
-  if (g_blur_x_material == nullptr) {
+  const auto needs_blur = glow_blur_scale() > 0.0f;
+  if (needs_blur && g_blur_x_material == nullptr) {
     g_blur_x_material = create_material_from_buffer(
       "CatGlowBlurX",
       "BlurFilterX",
@@ -367,7 +431,7 @@ void release_resources()
 )#");
   }
 
-  if (g_blur_y_material == nullptr) {
+  if (needs_blur && g_blur_y_material == nullptr) {
     g_blur_y_material = create_material_from_buffer(
       "CatGlowBlurY",
       "BlurFilterY",
@@ -382,13 +446,46 @@ void release_resources()
     }
   }
 
-  return g_glow_color_material != nullptr
-      && g_render_buffer_1 != nullptr
-      && g_render_buffer_2 != nullptr
-      && g_halo_add_to_screen_material != nullptr
-      && g_blur_x_material != nullptr
-      && g_blur_y_material != nullptr
-      && g_bloom_amount != nullptr;
+  if (g_glow_color_material == nullptr) {
+    return glow_resource_status::missing_glow_color_material;
+  }
+  if (g_render_buffer_1 == nullptr) {
+    return glow_resource_status::missing_render_buffer_1;
+  }
+  if (g_render_buffer_2 == nullptr) {
+    return glow_resource_status::missing_render_buffer_2;
+  }
+  if (g_halo_add_to_screen_material == nullptr) {
+    return glow_resource_status::missing_halo_add_to_screen_material;
+  }
+  if (!needs_blur) {
+    return glow_resource_status::ready;
+  }
+  if (g_blur_x_material == nullptr) {
+    return glow_resource_status::missing_blur_x_material;
+  }
+  if (g_blur_y_material == nullptr) {
+    return glow_resource_status::missing_blur_y_material;
+  }
+  if (g_bloom_amount == nullptr) {
+    return glow_resource_status::missing_bloom_amount;
+  }
+
+  return glow_resource_status::ready;
+}
+
+[[nodiscard]] bool ensure_resources_ready()
+{
+  const auto status = ensure_resources();
+  report_resource_status(status);
+  return status == glow_resource_status::ready;
+}
+
+void restore_screen_space_modulation()
+{
+  const auto white = RGBA_float{1.0f, 1.0f, 1.0f, 1.0f};
+  render_view->set_color_modulation(&white);
+  render_view->set_blend(1.0f);
 }
 
 void begin_model_glow(const bool ignore_z)
@@ -468,6 +565,7 @@ void draw_halo_rectangle(RenderContext* render_context, int dest_x, int dest_y)
 void second_end(RenderContext* render_context)
 {
   render_context->pop_render_target_and_viewport();
+  restore_screen_space_modulation();
 
   const auto blur = glow_blur_scale();
   if (blur > 0.0f) {
@@ -596,7 +694,7 @@ void store()
 
 void render_first()
 {
-  if (g_entities.empty() || !ensure_resources()) {
+  if (g_entities.empty() || !ensure_resources_ready()) {
     return;
   }
 
@@ -614,7 +712,7 @@ void render_first()
 
 void render_second()
 {
-  if (g_entities.empty() || !ensure_resources()) {
+  if (g_entities.empty() || !ensure_resources_ready()) {
     return;
   }
 
@@ -637,6 +735,7 @@ void shutdown()
   g_entities.clear();
   release_resources();
   g_original_state = render_state{};
+  g_last_resource_status = glow_resource_status::ready;
   g_rendering = false;
 }
 
