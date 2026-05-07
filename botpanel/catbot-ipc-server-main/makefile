@@ -1,4 +1,5 @@
 CXX ?= g++
+SHELL := $(if $(wildcard /bin/sh),/bin/sh,$(if $(wildcard /bin/bash),/bin/bash,/usr/bin/bash))
 BUILD_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 REPO_ROOT ?= ../..
 OUT_DIR = bin
