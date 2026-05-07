@@ -143,7 +143,7 @@ fi
 
 run_as_root apt-get install -y --no-install-recommends "${packages[@]}"
 
-if apt-cache show execstack >/dev/null 2>&1; then
+if package_available execstack; then
     run_as_root apt-get install -y --no-install-recommends execstack
 else
     echo "execstack package is not available on this apt repository; build.sh will skip it."
