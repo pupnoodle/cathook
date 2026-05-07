@@ -17,6 +17,10 @@ bool in_cond_hook(void* me, int mask) {
     return false;
   }
 
+  if (in_cond_original == nullptr) {
+    return false;
+  }
+
   bool re = in_cond_original(me, mask);
   
   return re;

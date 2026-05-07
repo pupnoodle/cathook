@@ -566,6 +566,10 @@ public:
     return (void*)(this + 0x1E78);
   }
 
+  static bool has_in_cond_original() {
+    return in_cond_original != nullptr;
+  }
+
   int get_crit_mult_raw() {
     static const int offset = tf2_netvars::find_offset("DT_TFPlayerShared", {"m_iCritMult"});
     if (offset <= 0) {
@@ -590,15 +594,19 @@ public:
   }
   
   bool in_cond(tf_cond condition) {
+    if (!has_in_cond_original()) {
+      return false;
+    }
+
     return in_cond_original(get_shared(), condition);
   }
   
   bool is_scoped(void) {
-    return in_cond_original(get_shared(), TF_COND_ZOOMED);
+    return in_cond(TF_COND_ZOOMED);
   }
 
   bool is_heavy_revved(void) {
-    return get_tf_class() == tf_class::HEAVYWEAPONS && in_cond_original(get_shared(), TF_COND_AIMING);
+    return get_tf_class() == tf_class::HEAVYWEAPONS && in_cond(TF_COND_AIMING);
   }
 
   bool is_ducking(void) {

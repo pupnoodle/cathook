@@ -1105,6 +1105,9 @@ bool initialize_game_runtime() {
   unsigned long global_vars_next_instruction = (unsigned long)(hud_update + 0x1A);
   global_vars = (GlobalVars*)(*(void **)(global_vars_next_instruction + global_vars_eaddr));
   error_assert(global_vars == nullptr, "CGlobalVars is missing");
+
+  in_cond_original = (bool (*)(void*, int))sigscan_module("client.so", sigs::in_cond);
+  error_assert(in_cond_original == nullptr, "Failed to find InCond");
  
   // VMT Function Hooks
   client_mode_vtable = *(void***)client_mode_interface;  
@@ -1194,8 +1197,6 @@ bool initialize_game_runtime() {
   
   // Non-VMT Function hooks
   funchook = funchook_create();
-  
-  in_cond_original = (bool (*)(void*, int))sigscan_module("client.so", sigs::in_cond);
   
   load_white_list_original = (void* (*)(void*, const char*))sigscan_module("engine.so", sigs::load_white_list);
 
