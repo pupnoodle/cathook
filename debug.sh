@@ -33,9 +33,8 @@ if [ -z "$PROCID" ]; then
     exit 1
 fi
 
-if [ "${CATHOOK_USE_GDB:-0}" != "1" ]; then
-    echo "debug.sh uses a live gdb attach and is disabled for now."
-    echo "Run CATHOOK_USE_GDB=1 sudo ./debug.sh if you explicitly want gdb."
+if [ "${CATHOOK_USE_GDB:-1}" != "1" ]; then
+    echo "debug.sh uses a live gdb attach and was disabled by CATHOOK_USE_GDB=0."
     exit 1
 fi
 
