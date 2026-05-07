@@ -495,6 +495,8 @@ class Bot extends EventEmitter {
     botSteamPath(steam_path) {
         try {
             const real_steam_path = fs.realpathSync(steam_path);
+            if (real_steam_path === this.home || path_is_inside(real_steam_path, this.home))
+                return real_steam_path;
             if (real_steam_path === USER.home || path_is_inside(real_steam_path, USER.home))
                 return path.resolve(this.home, path.relative(USER.home, real_steam_path));
         } catch (error) { }

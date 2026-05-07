@@ -565,6 +565,15 @@ start_ipc_server() {
     fi
 }
 
+start_detached_panel() {
+    if command -v setsid >/dev/null 2>&1; then
+        nohup setsid "$@" >/dev/null 2>&1 &
+        return
+    fi
+
+    nohup "$@" >/dev/null 2>&1 &
+}
+
 warn_if_steam_missing() {
     if command -v steam >/dev/null 2>&1 || command -v steam-native >/dev/null 2>&1; then
         return
@@ -620,7 +629,7 @@ start_panel() {
     cd "$web_panel_root"
 
     if [ "$(id -u)" -eq 0 ]; then
-        env \
+        start_detached_panel env \
             PATH="$PATH" \
             SUDO_USER="${SUDO_USER:-$USER}" \
             DISPLAY="$display" \
@@ -633,7 +642,7 @@ start_panel() {
             CAT_STEAM_WEB_API_KEY="${CAT_STEAM_WEB_API_KEY:-}" \
             STEAM_LD_PRELOAD="${STEAM_LD_PRELOAD:-}" \
             CATHOOK_ROOT="$install_root" \
-            bash ./run.sh &
+            bash ./run.sh
         return
     fi
 
@@ -650,7 +659,7 @@ start_panel() {
         CAT_STEAM_WEB_API_KEY="${CAT_STEAM_WEB_API_KEY:-}" \
         STEAM_LD_PRELOAD="${STEAM_LD_PRELOAD:-}" \
         CATHOOK_ROOT="$install_root" \
-        bash ./run.sh &
+        bash -c 'if command -v setsid >/dev/null 2>&1; then nohup setsid bash ./run.sh >/dev/null 2>&1 & else nohup bash ./run.sh >/dev/null 2>&1 & fi'
 }
 
 print_panel_password() {
