@@ -8,7 +8,7 @@
 
 ##
 
-USE OpenGL, VULKAN ISNT SUPPORTED!!
+## USE OpenGL, VULKAN ISNT SUPPORTED!!
 
 ## Risk of Manual Ban
 
