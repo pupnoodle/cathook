@@ -428,6 +428,10 @@ ensure_firejail_config() {
 }
 
 xpra_display_running() {
+    local display_number="${display#:}"
+    local lock_path="/tmp/.X${display_number}-lock"
+    local lock_pid=""
+
     xpra list 2>/dev/null | awk -v target="$display" '
     {
         for (field_index = 1; field_index <= NF; ++field_index) {
@@ -438,7 +442,16 @@ xpra_display_running() {
     }
     END {
         exit found ? 0 : 1
-    }'
+    }' && return 0
+
+    if [ -f "$lock_path" ]; then
+        lock_pid="$(tr -d '[:space:]' <"$lock_path" 2>/dev/null || true)"
+        if [ -n "$lock_pid" ] && ps -p "$lock_pid" >/dev/null 2>&1; then
+            return 0
+        fi
+    fi
+
+    pgrep -u "$(id -u)" -f "Xvfb-for-Xpra-${display}" >/dev/null 2>&1
 }
 
 ensure_xpra_config() {
@@ -552,8 +565,15 @@ start_xpra() {
 
 start_ipc_server() {
     if [ -f /tmp/cat-ipc-server.pid ] && ps -p "$(cat /tmp/cat-ipc-server.pid)" >/dev/null 2>&1; then
-        return
+        kill "$(cat /tmp/cat-ipc-server.pid)" 2>/dev/null || true
+        sleep 1
+        if ps -p "$(cat /tmp/cat-ipc-server.pid)" >/dev/null 2>&1; then
+            kill -KILL "$(cat /tmp/cat-ipc-server.pid)" 2>/dev/null || true
+        fi
     fi
+
+    rm -f /tmp/cat-ipc-server.pid /tmp/cat-ipc-server.log 2>/dev/null || true
+    rm -f /dev/shm/cathook_followbot_server 2>/dev/null || true
 
     "$install_root/ipc/bin/server" -s >/tmp/cat-ipc-server.log 2>&1 &
     echo "$!" >/tmp/cat-ipc-server.pid
