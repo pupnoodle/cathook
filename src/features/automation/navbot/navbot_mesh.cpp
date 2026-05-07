@@ -14,6 +14,7 @@ V  o o  V  file: src/features/automation/navbot/navbot_mesh.cpp
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -199,6 +200,17 @@ std::filesystem::path resolve_nav_path(const std::string& map_name)
 
     search_roots.push_back(current_root);
   }
+
+  if (const auto* home = std::getenv("HOME"); home != nullptr && home[0] != '\0')
+  {
+    const auto home_path = std::filesystem::path(home);
+    search_roots.push_back(home_path / ".steam/steam/steamapps/common/Team Fortress 2");
+    search_roots.push_back(home_path / ".steam/debian-installation/steamapps/common/Team Fortress 2");
+    search_roots.push_back(home_path / ".local/share/Steam/steamapps/common/Team Fortress 2");
+  }
+
+  search_roots.push_back("/opt/cathook/navmeshes");
+  search_roots.push_back("/opt/steamapps/common/Team Fortress 2");
 
   for (const auto& root : search_roots)
   {

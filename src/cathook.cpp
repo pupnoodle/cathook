@@ -302,17 +302,6 @@ constexpr long attach_ready_delay_max_seconds = 300;
 
 constexpr std::string_view steamclient_module = "steamclient.so";
 
-constexpr std::array<const char*, 8> required_modules = {
-  "client.so",
-  "engine.so",
-  "vgui2.so",
-  "vguimatsurface.so",
-  "materialsystem.so",
-  "libvstdlib.so",
-  "libtier0.so",
-  "steamclient.so",
-};
-
 constexpr std::array<const char*, 16> game_events = {
   "client_beginconnect",
   "client_connected",
@@ -360,39 +349,25 @@ bool is_module_loaded(const char* module_name)
   return !find_loaded_module_path(module_name).empty();
 }
 
-bool are_required_modules_loaded()
-{
-  for (const char* module_name : required_modules) {
-    if (!is_module_loaded(module_name)) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-bool wait_for_game_modules()
+bool wait_for_module(const char* module_name)
 {
   auto next_missing_modules_log = std::chrono::steady_clock::now();
   const auto wait_start = std::chrono::steady_clock::now();
 
   while (!attach_worker_stop.load(std::memory_order_acquire)
       && !process_exiting.load(std::memory_order_acquire)) {
-    if (are_required_modules_loaded()) {
+    if (is_module_loaded(module_name)) {
       return true;
     }
 
     const auto now = std::chrono::steady_clock::now();
     if (now >= next_missing_modules_log) {
       const auto waited_seconds = std::chrono::duration_cast<std::chrono::seconds>(now - wait_start).count();
-      print("cathook attach worker missing modules waited_seconds=%lld:", static_cast<long long>(waited_seconds));
-      for (const char* module_name : required_modules) {
-        if (!is_module_loaded(module_name)) {
-          print(" %s", module_name);
-          if (std::string_view{module_name} == steamclient_module) {
-            print("(check ~/.steam/sdk64/steamclient.so and Steam runtime symlinks)");
-          }
-        }
+      print("cathook attach worker waiting for %s waited_seconds=%lld",
+        module_name,
+        static_cast<long long>(waited_seconds));
+      if (std::string_view{module_name} == steamclient_module) {
+        print(" (check ~/.steam/sdk64/steamclient.so and Steam runtime symlinks)");
       }
       print("\n");
       next_missing_modules_log = now + std::chrono::seconds(2);
@@ -444,12 +419,11 @@ bool is_environment_enabled(const char* name)
 
 void attach_worker_main()
 {
-  print("cathook attach worker waiting for game modules\n");
+  print("cathook attach worker initializing module stages\n");
 
-  if (wait_for_game_modules()) {
+  {
     const auto delay = attach_ready_delay();
     const auto delay_seconds = std::chrono::duration_cast<std::chrono::seconds>(delay).count();
-    print("cathook attach worker found required modules\n");
 
     if (delay_seconds > 0) {
       print("cathook attach worker waiting %lld seconds for game runtime\n",
@@ -1004,17 +978,72 @@ bool initialize_game_runtime() {
   //std::signal(SIGKILL, signal_handler);
   
   // Interfaces
-  client = (Client*)get_interface("./tf/bin/linux64/client.so", "VClient017");
-  error_assert(client == nullptr, "VClient017 is missing");
-  
+  if (!cathook::core::wait_for_module("engine.so")) {
+    return false;
+  }
+
   engine = (Engine*)get_interface("./bin/linux64/engine.so", "VEngineClient014");
   error_assert(engine == nullptr, "VEngineClient014 is missing");
+
+  overlay = (DebugOverlay*)get_interface("./bin/linux64/engine.so", "VDebugOverlay003");
+  error_assert(overlay == nullptr, "VDebugOverlay003 is missing");
+
+  render_view = (RenderView*)get_interface("./bin/linux64/engine.so", "VEngineRenderView014");
+  error_assert(render_view == nullptr, "VEngineRenderView014 is missing");
+
+  engine_trace = (EngineTrace*)get_interface("./bin/linux64/engine.so", "EngineTraceClient003");
+  error_assert(engine_trace == nullptr, "EngineTraceClient003 is missing");
+
+  model_render = (ModelRender*)get_interface("./bin/linux64/engine.so", "VEngineModel016");
+  error_assert(model_render == nullptr, "VEngineModel016 is missing");
+
+  model_info = (ModelInfo*)get_interface("./bin/linux64/engine.so", "VModelInfoClient006");
+  error_assert(model_info == nullptr, "VModelInfoClient006 is missing");
+
+  unsigned long rcon_addr_change_address = (unsigned long)sigscan_module("engine.so", sigs::client_state);
+  unsigned int client_state_eaddr = *(unsigned int*)(rcon_addr_change_address + 0x3);
+  unsigned long rcon_addr_change_next_instruction = (unsigned long)(rcon_addr_change_address + 0x7);
+  client_state = (ClientState*)((void*)(rcon_addr_change_next_instruction + client_state_eaddr));
+  error_assert(client_state == nullptr, "CClientState is missing");
+
+  if (!cathook::core::wait_for_module("vgui2.so")) {
+    return false;
+  }
   
   vgui = get_interface("./bin/linux64/vgui2.so", "VGUI_Panel009");
   error_assert(vgui == nullptr, "VGUI_Panel009 is missing");
+
+  if (!cathook::core::wait_for_module("vguimatsurface.so")) {
+    return false;
+  }
   
   surface = (Surface*)get_interface("./bin/linux64/vguimatsurface.so", "VGUI_Surface030");
   error_assert(surface == nullptr, "VGUI_Surface030 is missing");
+
+  if (!cathook::core::wait_for_module("materialsystem.so")) {
+    return false;
+  }
+
+  material_system = (MaterialSystem*)get_interface("./bin/linux64/materialsystem.so", "VMaterialSystem082");
+  error_assert(material_system == nullptr, "VMaterialSystem082 is missing");
+
+  if (!cathook::core::wait_for_module("libvstdlib.so")) {
+    return false;
+  }
+
+  convar_system = (ConvarSystem*)get_interface("./bin/linux64/libvstdlib.so", "VEngineCvar004");
+  error_assert(convar_system == nullptr, "VEngineCvar004 is missing");
+
+  if (!cathook::core::wait_for_module("steamclient.so")) {
+    return false;
+  }
+
+  if (!cathook::core::wait_for_module("client.so")) {
+    return false;
+  }
+
+  client = (Client*)get_interface("./tf/bin/linux64/client.so", "VClient017");
+  error_assert(client == nullptr, "VClient017 is missing");
   
   unsigned long func_address = (unsigned long)sigscan_module("client.so", sigs::input);
   unsigned int input_eaddr = *(unsigned int*)(func_address + 0x3);
@@ -1027,42 +1056,15 @@ bool initialize_game_runtime() {
   unsigned long check_stuck_next_instruction = (unsigned long)(check_stuck_address + 0x7);
   move_helper = (MoveHelper*)(*(void**)(check_stuck_next_instruction + move_helper_eaddr));
   error_assert(move_helper == nullptr, "CMoveHelper is missing");
-  
-  unsigned long rcon_addr_change_address = (unsigned long)sigscan_module("engine.so", sigs::client_state);
-  unsigned int client_state_eaddr = *(unsigned int*)(rcon_addr_change_address + 0x3);
-  unsigned long rcon_addr_change_next_instruction = (unsigned long)(rcon_addr_change_address + 0x7);
-  client_state = (ClientState*)((void*)(rcon_addr_change_next_instruction + client_state_eaddr));
-  error_assert(client_state == nullptr, "CClientState is missing");
-  
+
   prediction = (Prediction*)get_interface("./tf/bin/linux64/client.so", "VClientPrediction001");
   error_assert(prediction == nullptr, "VClientPrediction001 is missing");
  
   game_movement = (GameMovement*)get_interface("./tf/bin/linux64/client.so", "GameMovement001");
   error_assert(game_movement == nullptr, "GameMovement001 is missing");
  
-  overlay = (DebugOverlay*)get_interface("./bin/linux64/engine.so", "VDebugOverlay003");
-  error_assert(overlay == nullptr, "VDebugOverlay003 is missing");
- 
   entity_list = (EntityList*)get_interface("./tf/bin/linux64/client.so", "VClientEntityList003");
   error_assert(entity_list == nullptr, "VClientEntityList003 is missing");
- 
-  render_view = (RenderView*)get_interface("./bin/linux64/engine.so", "VEngineRenderView014");
-  error_assert(render_view == nullptr, "VEngineRenderView014 is missing");
- 
-  engine_trace = (EngineTrace*)get_interface("./bin/linux64/engine.so", "EngineTraceClient003");
-  error_assert(engine_trace == nullptr, "EngineTraceClient003 is missing");
- 
-  model_render = (ModelRender*)get_interface("./bin/linux64/engine.so", "VEngineModel016");
-  error_assert(model_render == nullptr, "VEngineModel016 is missing");
-
-  model_info = (ModelInfo*)get_interface("./bin/linux64/engine.so", "VModelInfoClient006");
-  error_assert(model_info == nullptr, "VModelInfoClient006 is missing");
-
-  material_system = (MaterialSystem*)get_interface("./bin/linux64/materialsystem.so", "VMaterialSystem082");
-  error_assert(material_system == nullptr, "VMaterialSystem082 is missing");
- 
-  convar_system = (ConvarSystem*)get_interface("./bin/linux64/libvstdlib.so", "VEngineCvar004");
-  error_assert(convar_system == nullptr, "VEngineCvar004 is missing");
 
   game_file_system = (file_system*)get_interface("./bin/linux64/filesystem_stdio.so", "VFileSystem022");
   if (game_file_system == nullptr) {

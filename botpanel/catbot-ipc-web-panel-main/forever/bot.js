@@ -528,6 +528,23 @@ class Bot extends EventEmitter {
         ) || null;
     }
 
+    tf2InstallCandidates() {
+        const steam_roots = unique_paths([
+            this.steamPath,
+            ...this.steamInstallCandidates(),
+            ...this.hostSteamInstallCandidates().map((steam_path) => this.botSteamPath(steam_path))
+        ]);
+
+        return unique_paths([
+            process.env.TF2_PATH,
+            ...steam_roots.map((steam_path) => path.join(steam_path, 'steamapps/common/Team Fortress 2')),
+            path.join(this.home, '.steam/debian-installation/steamapps/common/Team Fortress 2'),
+            path.join(this.home, '.steam/steam/steamapps/common/Team Fortress 2'),
+            path.join(this.home, '.local/share/Steam/steamapps/common/Team Fortress 2'),
+            '/opt/steamapps/common/Team Fortress 2'
+        ]);
+    }
+
     prepareDebianSteamInstall() {
         const source_path = this.hostSteamInstallSource();
         if (!source_path)
@@ -710,11 +727,9 @@ class Bot extends EventEmitter {
         this.steamPath = this.botSteamPath(steam_path);
         this.steamApps = path.join(this.steamPath, 'steamapps');
 
-        this.tf2Path = process.env.TF2_PATH || path.join(this.steamApps, 'common/Team Fortress 2');
         if (this.shouldSetupSteamapps())
             this.setupSteamapps();
-        if (!tf2_install_ready(this.tf2Path) && tf2_install_ready('/opt/steamapps/common/Team Fortress 2'))
-            this.tf2Path = '/opt/steamapps/common/Team Fortress 2';
+        this.tf2Path = this.tf2InstallCandidates().find(tf2_install_ready) || path.join(this.steamApps, 'common/Team Fortress 2');
 
         if (!this.repairSteamSdk64())
             return false;
