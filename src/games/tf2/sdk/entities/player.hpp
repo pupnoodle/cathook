@@ -461,7 +461,12 @@ public:
   }
 
   int get_hitbox_set(void) {
-    return 0;
+    static const int offset = tf2_netvars::find_offset("DT_BaseAnimating", {"m_nHitboxSet"});
+    if (offset <= 0) {
+      return 0;
+    }
+
+    return *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset));
   }
 
   bool get_hitbox_center(int hitbox_id, Vec3* center_out, int* bone_out = nullptr) {

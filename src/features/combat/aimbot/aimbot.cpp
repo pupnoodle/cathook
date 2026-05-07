@@ -675,6 +675,8 @@ bool aimbot(user_cmd* user_cmd, Vec3 original_view_angles) {
     user_cmd,
     best_candidate,
     projectile_view_angles);
+  const bool hitscan_solution = !aimbot_is_projectile_weapon(weapon) && !aimbot_is_melee_weapon(weapon);
+  const bool hitscan_ready = !hitscan_solution || hitscan_aim_trace_candidate(localplayer, best_candidate, user_cmd->view_angles);
 
   const bool headshot_ready = aimbot_wait_for_headshot_ready(localplayer, weapon);
   if (!headshot_ready) {
@@ -683,6 +685,7 @@ bool aimbot(user_cmd* user_cmd, Vec3 original_view_angles) {
 
   const bool attack_ready = localplayer->can_shoot(best_candidate.entity) &&
     projectile_ready &&
+    hitscan_ready &&
     headshot_ready &&
     !(user_cmd->buttons & IN_ATTACK2);
   if (config.aimbot.auto_shoot && attack_ready) {

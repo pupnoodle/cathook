@@ -16,6 +16,7 @@ V  o o  V  file: src/features/combat/aimbot/aim_utils.hpp
 #include <cmath>
 #include <cfloat>
 #include <climits>
+#include <cstddef>
 
 #include "core/entity_cache.hpp"
 #include "core/math/math.hpp"
@@ -63,6 +64,99 @@ struct aimbot_point {
   float fov = FLT_MAX;
 };
 
+inline bool aimbot_vec3_is_finite(const Vec3& value) {
+  return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+}
+
+inline float aimbot_distance_squared(const Vec3& left, const Vec3& right) {
+  const Vec3 delta = left - right;
+  return (delta.x * delta.x) + (delta.y * delta.y) + (delta.z * delta.z);
+}
+
+inline Vec3 aimbot_transform_point(const Vec3& point, const matrix_3x4& matrix) {
+  return Vec3{
+    (point.x * matrix.mat[0][0]) + (point.y * matrix.mat[0][1]) + (point.z * matrix.mat[0][2]) + matrix.mat[0][3],
+    (point.x * matrix.mat[1][0]) + (point.y * matrix.mat[1][1]) + (point.z * matrix.mat[1][2]) + matrix.mat[1][3],
+    (point.x * matrix.mat[2][0]) + (point.y * matrix.mat[2][1]) + (point.z * matrix.mat[2][2]) + matrix.mat[2][3]
+  };
+}
+
+inline Vec3 aimbot_inverse_transform_point(const Vec3& point, const matrix_3x4& matrix) {
+  const Vec3 delta{
+    point.x - matrix.mat[0][3],
+    point.y - matrix.mat[1][3],
+    point.z - matrix.mat[2][3]
+  };
+
+  return Vec3{
+    (delta.x * matrix.mat[0][0]) + (delta.y * matrix.mat[1][0]) + (delta.z * matrix.mat[2][0]),
+    (delta.x * matrix.mat[0][1]) + (delta.y * matrix.mat[1][1]) + (delta.z * matrix.mat[2][1]),
+    (delta.x * matrix.mat[0][2]) + (delta.y * matrix.mat[1][2]) + (delta.z * matrix.mat[2][2])
+  };
+}
+
+inline Vec3 aimbot_clamp_to_hitbox(const Vec3& point, const studio_box& hitbox) {
+  return Vec3{
+    std::clamp(point.x, hitbox.bbmin.x, hitbox.bbmax.x),
+    std::clamp(point.y, hitbox.bbmin.y, hitbox.bbmax.y),
+    std::clamp(point.z, hitbox.bbmin.z, hitbox.bbmax.z)
+  };
+}
+
+inline bool aimbot_add_local_hitbox_point(Vec3* points, int* point_count, int max_points, const Vec3& point) {
+  if (points == nullptr || point_count == nullptr || *point_count >= max_points || !aimbot_vec3_is_finite(point)) {
+    return false;
+  }
+
+  for (int index = 0; index < *point_count; ++index) {
+    if (aimbot_distance_squared(points[index], point) < 0.25f) {
+      return false;
+    }
+  }
+
+  points[*point_count] = point;
+  ++(*point_count);
+  return true;
+}
+
+inline int aimbot_build_local_hitbox_points(const studio_box& hitbox,
+  const matrix_3x4& bone_to_world,
+  const Vec3& shoot_pos,
+  Vec3* points,
+  int max_points,
+  bool include_multipoint) {
+  int point_count = 0;
+  const Vec3 center = (hitbox.bbmin + hitbox.bbmax) * 0.5f;
+  aimbot_add_local_hitbox_point(points, &point_count, max_points, center);
+
+  if (!include_multipoint) {
+    return point_count;
+  }
+
+  const Vec3 local_shoot_pos = aimbot_inverse_transform_point(shoot_pos, bone_to_world);
+  aimbot_add_local_hitbox_point(points, &point_count, max_points, aimbot_clamp_to_hitbox(local_shoot_pos, hitbox));
+
+  const Vec3 extent = (hitbox.bbmax - hitbox.bbmin) * 0.5f;
+  constexpr float point_scale = 0.62f;
+
+  if (std::fabs(extent.x) > 1.0f) {
+    aimbot_add_local_hitbox_point(points, &point_count, max_points, center + Vec3{extent.x * point_scale, 0.0f, 0.0f});
+    aimbot_add_local_hitbox_point(points, &point_count, max_points, center - Vec3{extent.x * point_scale, 0.0f, 0.0f});
+  }
+
+  if (std::fabs(extent.y) > 1.0f) {
+    aimbot_add_local_hitbox_point(points, &point_count, max_points, center + Vec3{0.0f, extent.y * point_scale, 0.0f});
+    aimbot_add_local_hitbox_point(points, &point_count, max_points, center - Vec3{0.0f, extent.y * point_scale, 0.0f});
+  }
+
+  if (std::fabs(extent.z) > 1.0f) {
+    aimbot_add_local_hitbox_point(points, &point_count, max_points, center + Vec3{0.0f, 0.0f, extent.z * point_scale});
+    aimbot_add_local_hitbox_point(points, &point_count, max_points, center - Vec3{0.0f, 0.0f, extent.z * point_scale});
+  }
+
+  return point_count;
+}
+
 inline unsigned int aimbot_visibility_trace_mask() {
   unsigned int trace_mask = MASK_SHOT | CONTENTS_GRATE;
   if (config.aimbot.shoot_through_glass) {
@@ -72,8 +166,17 @@ inline unsigned int aimbot_visibility_trace_mask() {
   return trace_mask;
 }
 
+inline unsigned int aimbot_hitscan_trace_mask() {
+  unsigned int trace_mask = MASK_SOLID | CONTENTS_HITBOX;
+  if (config.aimbot.shoot_through_glass) {
+    trace_mask &= ~CONTENTS_WINDOW;
+  }
+
+  return trace_mask;
+}
+
 inline bool is_player_visible(Player* localplayer, Player* entity, int bone) {
-  if (localplayer == nullptr || entity == nullptr) return false;
+  if (localplayer == nullptr || entity == nullptr || engine_trace == nullptr) return false;
 
   Vec3 start_pos = localplayer->get_shoot_pos();
   Vec3 target_pos = entity->get_bone_pos(bone);
@@ -82,13 +185,16 @@ inline bool is_player_visible(Player* localplayer, Player* entity, int bone) {
   struct trace_filter filter;
   engine_trace->init_trace_filter(&filter, localplayer);
 
-  struct trace_t trace_world;
+  struct trace_t trace_world{};
   engine_trace->trace_ray(&ray, aimbot_visibility_trace_mask(), &filter, &trace_world);
-  return trace_world.entity == entity || trace_world.fraction > 0.97f;
+  return trace_world.entity == entity || (!trace_world.all_solid && !trace_world.start_solid && trace_world.fraction >= 0.999f);
 }
 
-inline bool aimbot_trace_visible_to_position(Player* localplayer, Entity* target, const Vec3& target_pos) {
-  if (localplayer == nullptr || target == nullptr) return false;
+inline bool aimbot_trace_visible_to_position(Player* localplayer,
+  Entity* target,
+  const Vec3& target_pos,
+  unsigned int trace_mask = aimbot_visibility_trace_mask()) {
+  if (localplayer == nullptr || target == nullptr || engine_trace == nullptr || !aimbot_vec3_is_finite(target_pos)) return false;
 
   Vec3 start_pos = localplayer->get_shoot_pos();
   Vec3 end_pos = target_pos;
@@ -97,9 +203,9 @@ inline bool aimbot_trace_visible_to_position(Player* localplayer, Entity* target
   struct trace_filter filter;
   engine_trace->init_trace_filter(&filter, localplayer);
 
-  struct trace_t trace_world;
-  engine_trace->trace_ray(&ray, aimbot_visibility_trace_mask(), &filter, &trace_world);
-  return trace_world.entity == target || trace_world.fraction > 0.97f;
+  struct trace_t trace_world{};
+  engine_trace->trace_ray(&ray, trace_mask, &filter, &trace_world);
+  return trace_world.entity == target || (!trace_world.all_solid && !trace_world.start_solid && trace_world.fraction >= 0.999f);
 }
 
 inline Vec3 aimbot_calculate_angles_to_position(const Vec3& start, const Vec3& target) {
@@ -230,7 +336,8 @@ inline aimbot_point aimbot_find_best_point(Player* localplayer,
   Weapon* weapon,
   const Vec3& original_view_angles,
   uint32_t hitbox_mask,
-  bool require_visibility = true) {
+  bool require_visibility = true,
+  unsigned int trace_mask = aimbot_visibility_trace_mask()) {
   aimbot_point best_point{};
   if (localplayer == nullptr || target == nullptr) {
     return best_point;
@@ -238,6 +345,67 @@ inline aimbot_point aimbot_find_best_point(Player* localplayer,
 
   if (hitbox_mask == aim_hitbox_mask_none) {
     hitbox_mask = aim_hitbox_mask_default_hitscan;
+  }
+
+  const model_t* model = target->get_model();
+  if (model != nullptr && model_info != nullptr) {
+    studio_hdr* hdr = model_info->get_studio_model(model);
+    studio_hitbox_set* hitbox_set = hdr != nullptr ? hdr->hitbox_set(target->get_hitbox_set()) : nullptr;
+    if (hitbox_set != nullptr) {
+      matrix_3x4 bone_to_world[128]{};
+      if (target->setup_bones(bone_to_world, 128, 0x100, target->get_simulation_time())) {
+        const Vec3 shoot_pos = localplayer->get_shoot_pos();
+        for (int hitbox_id = aim_hitbox_head; hitbox_id <= aim_hitbox_right_foot; ++hitbox_id) {
+          if (!aimbot_hitbox_matches_mask(hitbox_id, hitbox_mask) || hitbox_id >= hitbox_set->num_hitboxes) {
+            continue;
+          }
+
+          studio_box* hitbox = hitbox_set->hitbox(hitbox_id);
+          if (hitbox == nullptr || hitbox->bone < 0 || hitbox->bone >= 128) {
+            continue;
+          }
+
+          Vec3 local_points[8]{};
+          const int point_count = aimbot_build_local_hitbox_points(
+            *hitbox,
+            bone_to_world[hitbox->bone],
+            shoot_pos,
+            local_points,
+            8,
+            require_visibility);
+
+          for (int point_index = 0; point_index < point_count; ++point_index) {
+            const Vec3 hitbox_position = aimbot_transform_point(local_points[point_index], bone_to_world[hitbox->bone]);
+            if (!aimbot_vec3_is_finite(hitbox_position)) {
+              continue;
+            }
+
+            if (require_visibility && !aimbot_trace_visible_to_position(localplayer, target, hitbox_position, trace_mask)) {
+              continue;
+            }
+
+            aimbot_point point{};
+            point.valid = true;
+            point.bone = hitbox->bone;
+            point.hitbox = hitbox_id;
+            point.priority = aimbot_hitbox_priority(localplayer, target, weapon, hitbox_id);
+            point.position = hitbox_position;
+            point.angles = aimbot_calculate_angles_to_position(shoot_pos, hitbox_position);
+            point.fov = aimbot_calculate_fov(point.angles, original_view_angles);
+
+            if (!best_point.valid ||
+                point.priority < best_point.priority ||
+                (point.priority == best_point.priority && point.fov < best_point.fov)) {
+              best_point = point;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (best_point.valid) {
+    return best_point;
   }
 
   for (int hitbox_id = aim_hitbox_head; hitbox_id <= aim_hitbox_right_foot; ++hitbox_id) {
@@ -251,7 +419,11 @@ inline aimbot_point aimbot_find_best_point(Player* localplayer,
       continue;
     }
 
-    if (require_visibility && !aimbot_trace_visible_to_position(localplayer, target, hitbox_position)) {
+    if (!aimbot_vec3_is_finite(hitbox_position)) {
+      continue;
+    }
+
+    if (require_visibility && !aimbot_trace_visible_to_position(localplayer, target, hitbox_position, trace_mask)) {
       continue;
     }
 
@@ -277,7 +449,11 @@ inline aimbot_point aimbot_find_best_point(Player* localplayer,
 
   const int fallback_bone = aimbot_default_bone(localplayer, target, weapon);
   const Vec3 fallback_position = target->get_bone_pos(fallback_bone);
-  if (require_visibility && !aimbot_trace_visible_to_position(localplayer, target, fallback_position)) {
+  if (!aimbot_vec3_is_finite(fallback_position)) {
+    return {};
+  }
+
+  if (require_visibility && !aimbot_trace_visible_to_position(localplayer, target, fallback_position, trace_mask)) {
     return {};
   }
 
