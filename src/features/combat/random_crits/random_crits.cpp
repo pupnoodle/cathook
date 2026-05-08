@@ -13,6 +13,7 @@ V  o o  V  file: src/features/combat/random_crits/random_crits.cpp
 #include "random_crits.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <climits>
 #include <cmath>
 #include <cstdint>
@@ -54,6 +55,7 @@ Weapon* selected_weapon = nullptr;
 int selected_seed = 0;
 int selected_roll = -1;
 int selected_offset = 0;
+std::atomic<int> indicator_command_number{0};
 
 enum class selected_mode {
   none,
@@ -448,6 +450,10 @@ void apply_command_number(user_cmd* cmd, Weapon* weapon, int command_number, int
 
 void run(user_cmd* cmd)
 {
+  if (cmd != nullptr && cmd->command_number > 0) {
+    indicator_command_number.store(cmd->command_number, std::memory_order_relaxed);
+  }
+
   clear_selection();
 
   if (cmd == nullptr || (cmd->buttons & IN_ATTACK) == 0) {
@@ -584,12 +590,12 @@ indicator_state get_indicator_state()
   state.potential_crits = bucket_info.potential_crits;
   state.next_crit = bucket_info.next_crit;
 
-  auto* current_cmd = localplayer->get_current_cmd();
-  if (current_cmd != nullptr && state.available_crits > 0 && state.can_random_crit && !state.crit_banned && state.rapid_wait <= 0.0f) {
-    const int command_number = find_command_number(localplayer, weapon, current_cmd->command_number, true);
+  const int current_command_number = indicator_command_number.load(std::memory_order_relaxed);
+  if (current_command_number > 0 && state.available_crits > 0 && state.can_random_crit && !state.crit_banned && state.rapid_wait <= 0.0f) {
+    const int command_number = find_command_number(localplayer, weapon, current_command_number, true);
     if (command_number != 0) {
       const int seed = MD5_PseudoRandom(static_cast<unsigned int>(command_number)) & INT_MAX;
-      state.next_crit_seed_offset = std::max(0, command_number - current_cmd->command_number);
+      state.next_crit_seed_offset = std::max(0, command_number - current_command_number);
       state.next_crit_seed_roll = crit_roll(localplayer, weapon, seed);
     }
   }
