@@ -1821,10 +1821,11 @@ static void draw_cat_bot_content() {
     cat_menu::slider_float("Taunt safety distance", &config.misc.automation.autotaunt_safety_distance, 0.0f, 5000.0f, "%.0f HU");
     cat_menu::slider_int("Taunt weapon slot", &config.misc.automation.autotaunt_weapon_slot, 0, 5);
   });
-  cat_menu::flow_panel("Autoqueue", 0, 178.0f, [&]() {
+  cat_menu::flow_panel("Autoqueue", 0, 198.0f, [&]() {
     cat_menu::checkbox("Auto queue", &config.misc.automation.auto_queue);
     cat_menu::checkbox("Auto requeue", &config.misc.automation.auto_requeue);
     cat_menu::checkbox("Requeue on kick", &config.misc.automation.requeue_on_kick);
+    cat_menu::checkbox("Auto casual join", &config.misc.automation.auto_casual_join);
     cat_menu::combo("Queue mode", &config.misc.automation.auto_queue_mode, queue_mode_items, IM_ARRAYSIZE(queue_mode_items));
     cat_menu::slider_int("RQ if players <=", &config.misc.automation.rq_if_players_lte, 0, 32);
     cat_menu::slider_int("RQ if players >=", &config.misc.automation.rq_if_players_gte, 0, 32);
@@ -1925,10 +1926,11 @@ static void draw_queue_content() {
     cat_menu::checkbox("Auto class select", &config.misc.automation.auto_class_select);
     cat_menu::combo("Preferred class", (int*)&config.misc.automation.class_selected, class_items, IM_ARRAYSIZE(class_items));
   });
-  cat_menu::flow_panel("Queue", 1, 210.0f, [&]() {
+  cat_menu::flow_panel("Queue", 1, 230.0f, [&]() {
     cat_menu::checkbox("Auto queue", &config.misc.automation.auto_queue);
     cat_menu::checkbox("Auto requeue", &config.misc.automation.auto_requeue);
     cat_menu::checkbox("Requeue on kick", &config.misc.automation.requeue_on_kick);
+    cat_menu::checkbox("Auto casual join", &config.misc.automation.auto_casual_join);
     cat_menu::combo("Queue mode", &config.misc.automation.auto_queue_mode, queue_mode_items, IM_ARRAYSIZE(queue_mode_items));
     cat_menu::slider_int("RQ if players <=", &config.misc.automation.rq_if_players_lte, 0, 32);
     cat_menu::slider_int("RQ if players >=", &config.misc.automation.rq_if_players_gte, 0, 32);
@@ -2170,7 +2172,7 @@ static void draw_exploits_content() {
   };
 
   cat_menu::begin_flow_layout("exploits_layout", 3);
-  cat_menu::flow_panel("Bypasses", 0, 182.0f, [&]() {
+  cat_menu::flow_panel("Bypasses", 0, 204.0f, [&]() {
     cat_menu::checkbox("Bypass sv_pure", &config.misc.exploits.bypasspure);
     cat_menu::checkbox("Pure bypass", &config.misc.exploits.pure_bypass);
     cat_menu::checkbox("Cheats bypass", &config.misc.exploits.cheats_bypass);
@@ -2179,6 +2181,7 @@ static void draw_exploits_content() {
     cat_menu::checkbox("No engine sleep", &config.misc.exploits.no_engine_sleep);
     cat_menu::checkbox("Null graphics", &config.misc.exploits.null_graphics);
     cat_menu::checkbox("Null render stubs", &config.misc.exploits.null_graphics_render_stubs);
+    cat_menu::checkbox("Experimental nographic hooks", &config.misc.exploits.experimental_nographic_hooks);
   });
   cat_menu::flow_panel("Tickbase", 1, 224.0f, [&]() {
     cat_menu::checkbox("Tickbase", &config.misc.exploits.tickbase);
@@ -2287,6 +2290,7 @@ static void draw_misc_content() {
       cat_menu::checkbox("No engine sleep", &config.misc.exploits.no_engine_sleep);
       cat_menu::checkbox("Null graphics", &config.misc.exploits.null_graphics);
       cat_menu::checkbox("Null render stubs", &config.misc.exploits.null_graphics_render_stubs);
+      cat_menu::checkbox("Experimental nographic hooks", &config.misc.exploits.experimental_nographic_hooks);
     });
     cat_menu::flow_panel("Anti-aim", 1, 286.0f, [&]() {
       cat_menu::checkbox("Enable", &config.misc.exploits.anti_aim);

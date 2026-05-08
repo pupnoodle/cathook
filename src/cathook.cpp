@@ -88,6 +88,7 @@ V  o o  V  file: src/cathook.cpp
 #include "core/hooks/calc_is_attack_critical.cpp"
 #include "core/hooks/equip_region_unlock.cpp"
 #include "core/hooks/region_selector.cpp"
+#include "core/hooks/tf_gc_client_system.cpp"
 #include "core/hooks/setup_bones.cpp"
 #include "core/hooks/inspect_target.cpp"
 #include "core/hooks/paint_traverse.cpp"
@@ -1196,6 +1197,24 @@ bool initialize_game_runtime() {
     print("Failed to find CTFPartyClient::RequestQueueForMatch; region selector queue refresh disabled\n");
   }
 
+  tf_gc_client_system_so_event_original =
+    (void (*)(void*, void*, int))sigscan_module("client.so", sigs::tf_gc_client_system_so_event);
+  if (tf_gc_client_system_so_event_original == nullptr) {
+    print("Failed to find CTFGCClientSystem SO event handler; auto casual join disabled\n");
+  }
+
+  tf_gc_client_system_join_mm_match =
+    (void (*)(void*))sigscan_module("client.so", sigs::tf_gc_client_system_join_mm_match);
+  if (tf_gc_client_system_join_mm_match == nullptr) {
+    print("Failed to find CTFGCClientSystem::JoinMMMatch; auto casual match joining disabled\n");
+  }
+
+  tf_gc_client_system_request_accept_match_invite =
+    (void (*)(void*, std::uint64_t))sigscan_module("client.so", sigs::tf_gc_client_system_request_accept_match_invite);
+  if (tf_gc_client_system_request_accept_match_invite == nullptr) {
+    print("Failed to find CTFGCClientSystem::RequestAcceptMatchInvite; auto casual invite accepting disabled\n");
+  }
+
   auto host_should_run = (tickbase::host_should_run_fn)sigscan_module("engine.so", sigs::host_should_run);
   error_assert(host_should_run == nullptr, "Failed to find Host_ShouldRun");
 
@@ -1261,6 +1280,14 @@ bool initialize_game_runtime() {
       (void**)&region_selector_request_queue_for_match_original,
       (void*)region_selector_request_queue_for_match_hook);
     error_assert(rv != 0, "Failed to prepare CTFPartyClient::RequestQueueForMatch hook\n");
+  }
+
+  if (tf_gc_client_system_so_event_original != nullptr) {
+    rv = funchook_prepare(
+      funchook,
+      (void**)&tf_gc_client_system_so_event_original,
+      (void*)tf_gc_client_system_so_event_hook);
+    error_assert(rv != 0, "Failed to prepare CTFGCClientSystem SO event hook\n");
   }
 
   rv = funchook_prepare(funchook, (void**)&prediction_run_simulation_original, (void*)prediction_run_simulation_hook);

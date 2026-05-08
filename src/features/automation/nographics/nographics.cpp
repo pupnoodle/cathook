@@ -15,6 +15,7 @@ V  o o  V  file: src/features/automation/nographics/nographics.cpp
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 
 #include "core/memory/byte_patch.hpp"
 #include "core/print.hpp"
@@ -75,6 +76,7 @@ bool render_patches_applied = false;
 bool initialized = false;
 bool render_patches_initialized = false;
 bool render_patches_ready = false;
+bool optional_render_patches_initialized = false;
 
 #if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
 constexpr bool textmode_build = true;
@@ -88,6 +90,12 @@ byte_patch particle_precache_patch{};
 byte_patch particle_effect_create_patch{};
 byte_patch view_render_patch{};
 byte_patch steam_rich_presence_patch{};
+byte_patch cl_decay_lights_patch{};
+byte_patch mod_load_lighting_patch{};
+byte_patch mod_load_worldlights_patch{};
+byte_patch sprite_load_model_patch{};
+byte_patch overlay_mgr_load_overlays_patch{};
+byte_patch material_system_begin_frame_patch{};
 constexpr std::size_t replay_ui_nullcheck_patch_count = 9;
 constexpr std::size_t character_info_command_patch_count = 5;
 std::array<byte_patch, replay_ui_nullcheck_patch_count> replay_ui_nullcheck_patches{};
@@ -259,15 +267,77 @@ void* resolve_rip_target(std::uint8_t* instruction, int displacement_offset, int
   return instruction + instruction_size + displacement;
 }
 
-std::uint8_t* scan_client_patch(const char* signature, int offset)
+std::uint8_t* scan_module_patch(const char* module_name, const char* signature, int offset)
 {
-  auto* match = reinterpret_cast<std::uint8_t*>(sigscan_module("client.so", signature));
+  auto* match = reinterpret_cast<std::uint8_t*>(sigscan_module(module_name, signature));
   if (match == nullptr)
   {
     return nullptr;
   }
 
   return match + offset;
+}
+
+std::uint8_t* scan_client_patch(const char* signature, int offset)
+{
+  return scan_module_patch("client.so", signature, offset);
+}
+
+bool initialize_optional_patch(byte_patch& patch,
+                               const char* module_name,
+                               const char* signature,
+                               int offset,
+                               std::initializer_list<std::uint8_t> patch_bytes,
+                               const char* patch_name)
+{
+  auto* patch_site = scan_module_patch(module_name, signature, offset);
+  if (patch_site == nullptr)
+  {
+    print("[nographics] optional patch scan failed name=%s module=%s\n", patch_name, module_name);
+    return false;
+  }
+
+  patch = byte_patch(patch_site, patch_bytes);
+  return true;
+}
+
+void initialize_optional_render_patches()
+{
+  if (optional_render_patches_initialized)
+  {
+    return;
+  }
+
+  optional_render_patches_initialized = true;
+  initialize_optional_patch(cl_decay_lights_patch, "engine.so", sigs::cl_decay_lights, 0, { 0xC3 }, "cl_decay_lights");
+  initialize_optional_patch(mod_load_lighting_patch, "engine.so", sigs::mod_load_lighting, 0, { 0x31, 0xC0, 0xC3 }, "mod_load_lighting");
+  initialize_optional_patch(mod_load_worldlights_patch, "engine.so", sigs::mod_load_worldlights, 0, { 0x31, 0xC0, 0xC3 }, "mod_load_worldlights");
+  initialize_optional_patch(sprite_load_model_patch, "engine.so", sigs::sprite_load_model, 0, { 0xC3 }, "sprite_load_model");
+  initialize_optional_patch(overlay_mgr_load_overlays_patch, "engine.so", sigs::overlay_mgr_load_overlays, 0, { 0xB0, 0x01, 0xC3 }, "overlay_mgr_load_overlays");
+  initialize_optional_patch(material_system_begin_frame_patch, "materialsystem.so", sigs::material_system_begin_frame, 0, { 0xC3 }, "material_system_begin_frame");
+}
+
+void restore_optional_render_patches()
+{
+  cl_decay_lights_patch.restore();
+  mod_load_lighting_patch.restore();
+  mod_load_worldlights_patch.restore();
+  sprite_load_model_patch.restore();
+  overlay_mgr_load_overlays_patch.restore();
+  material_system_begin_frame_patch.restore();
+}
+
+void apply_optional_patch(byte_patch& patch, const char* patch_name)
+{
+  if (!patch.valid())
+  {
+    return;
+  }
+
+  if (!patch.apply())
+  {
+    print("[nographics] optional patch apply failed name=%s\n", patch_name);
+  }
 }
 
 bool initialize_replay_ui_nullcheck_patches()
@@ -364,6 +434,7 @@ void restore_render_patch_objects()
   particle_effect_create_patch.restore();
   view_render_patch.restore();
   steam_rich_presence_patch.restore();
+  restore_optional_render_patches();
 
   for (auto& patch : replay_ui_nullcheck_patches)
   {
@@ -454,6 +525,21 @@ void apply_render_patches()
     restore_render_patch_objects();
     print("[nographics] render patch apply failed\n");
     return;
+  }
+
+  if (config.misc.exploits.experimental_nographic_hooks)
+  {
+    initialize_optional_render_patches();
+    apply_optional_patch(cl_decay_lights_patch, "cl_decay_lights");
+    apply_optional_patch(mod_load_lighting_patch, "mod_load_lighting");
+    apply_optional_patch(mod_load_worldlights_patch, "mod_load_worldlights");
+    apply_optional_patch(sprite_load_model_patch, "sprite_load_model");
+    apply_optional_patch(overlay_mgr_load_overlays_patch, "overlay_mgr_load_overlays");
+    apply_optional_patch(material_system_begin_frame_patch, "material_system_begin_frame");
+  }
+  else
+  {
+    restore_optional_render_patches();
   }
 
   render_patches_applied = true;

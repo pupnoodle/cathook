@@ -432,6 +432,7 @@ struct Misc {
     bool null_graphics = false;
     bool null_graphics_render_stubs = false;
 #endif
+    bool experimental_nographic_hooks = false;
     bool legacy_tickbase_indicator = true;
     bool keybind_indicator = true;
     float legacy_tickbase_indicator_x = 24.0f;
@@ -549,6 +550,11 @@ struct Misc {
     bool auto_queue = false;
     bool auto_requeue = false;
     bool requeue_on_kick = false;
+#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
+    bool auto_casual_join = true;
+#else
+    bool auto_casual_join = false;
+#endif
     int auto_queue_mode = 7;
     int rq_if_players_lte = 0;
     int rq_if_players_gte = 0;

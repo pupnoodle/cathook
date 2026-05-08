@@ -406,6 +406,7 @@ inline void register_builtin_targets() {
   register_target("misc.automation.killsay", "Killsay", reinterpret_cast<int*>(&config.misc.automation.killsay));
   register_target("misc.exploits.null_graphics", "Null graphics", &config.misc.exploits.null_graphics);
   register_target("misc.exploits.null_graphics_render_stubs", "Null render stubs", &config.misc.exploits.null_graphics_render_stubs);
+  register_target("misc.exploits.experimental_nographic_hooks", "Experimental nographic hooks", &config.misc.exploits.experimental_nographic_hooks);
   register_target("debug.font_height", "Font height", &config.debug.font_height);
   register_target("debug.font_weight", "Font weight", &config.debug.font_weight);
 
@@ -443,6 +444,7 @@ inline void register_builtin_targets() {
   register_target("misc.automation.auto_queue_mode", "Queue mode", &config.misc.automation.auto_queue_mode);
   register_target("misc.automation.auto_requeue", "Auto requeue", &config.misc.automation.auto_requeue);
   register_target("misc.automation.requeue_on_kick", "Requeue on kick", &config.misc.automation.requeue_on_kick);
+  register_target("misc.automation.auto_casual_join", "Auto casual join", &config.misc.automation.auto_casual_join);
   register_target("misc.automation.rq_if_players_lte", "RQ if players <=", &config.misc.automation.rq_if_players_lte);
   register_target("misc.automation.rq_if_players_gte", "RQ if players >=", &config.misc.automation.rq_if_players_gte);
   register_target("misc.automation.rq_ignore_friends", "RQ ignore friends", &config.misc.automation.rq_ignore_friends);
