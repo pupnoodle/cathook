@@ -60,10 +60,18 @@ function updateData() {
 function commandButtonCallback() {
     var cmdz = prompt('Enter a command');
     if (cmdz) {
+		const target = parseInt($(this).parent().parent().find('.client-id').text());
+		if (!Number.isFinite(target)) {
+			status.error('Bot IPC id is not available yet');
+			return;
+		}
 		cmd('exec', {
-			target: parseInt($(this).parent().parent().find('.client-id').text()),
+			target: target,
 			cmd: cmdz
-		}, null)
+		}, function(e) {
+			if (!e)
+				status.info('Command sent');
+		})
     }
 }
 
@@ -198,16 +206,21 @@ function cmd(command, data, callback) {
 			"Content-Type": "application/json"
 		}
 	}, function(e, r, b) {
-		if (e) {
-			console.log(e);
-			status.error('Error making request!');
+		if (request_failed(e, r)) {
+			console.log(e, b);
+			if (r && r.statusCode === 403)
+				status.error('Not authorized; log in with the panel password');
+			else
+				status.error('Command request failed');
 			if (callback)
-				callback(e);
+				callback(e || new Error(b || 'request failed'));
 			return;
 		}
 		try {
 			if (callback)
 				callback(null, JSON.parse(b));
+			else
+				status.info('Command sent');
 		} catch (e) {
 			console.log(e);
 			status.error('Error parsing data from server!');
@@ -359,8 +372,14 @@ function addClientRow(botid) {
 }
 
 function runCommand() {
-	cmd('exec_all', { cmd: $('#console').val() });
-	$('#console').val('');
+	const command_text = $('#console').val();
+	if (!command_text)
+		return;
+
+	cmd('exec_all', { cmd: command_text }, function(e) {
+		if (!e)
+			$('#console').val('');
+	});
 }
 
 function refreshComplete() {

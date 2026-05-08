@@ -612,7 +612,7 @@ void process_collected_commands(const std::vector<pending_command>& commands_to_
   }
 }
 
-void service_ipc_locked(bool full_telemetry)
+void service_ipc_locked(bool full_telemetry, bool process_commands)
 {
   if (ipc_state == nullptr)
   {
@@ -625,7 +625,10 @@ void service_ipc_locked(bool full_telemetry)
   }
 
   std::vector<pending_command> commands_to_process{};
-  collect_commands(commands_to_process);
+  if (process_commands)
+  {
+    collect_commands(commands_to_process);
+  }
 
   {
     try_scoped_lock lock{ipc_state};
@@ -655,7 +658,9 @@ void ipc_worker_main()
       std::lock_guard lock{ipc_mutex};
       if (ipc_enabled)
       {
-        service_ipc_locked(false);
+        // The textmode worker keeps early IPC state alive, but Source client
+        // commands must be executed from the game thread via tick().
+        service_ipc_locked(false, false);
       }
     }
 
@@ -729,7 +734,7 @@ void tick()
   }
 
   std::lock_guard lock{ipc_mutex};
-  service_ipc_locked(true);
+  service_ipc_locked(true, true);
 }
 
 void on_game_event(GameEvent* event)
