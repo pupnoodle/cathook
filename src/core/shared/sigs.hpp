@@ -125,8 +125,8 @@ constexpr const char* launcher_source_lock =
   "55 48 89 E5 41 55 41 54 4C 8D AD ? ? ? ? 48 81 EC ? ? ? ? E8 ? ? ? ?";
 constexpr const char* client_file_system =
   "31 F6 4C 89 EF FF 13 48 83 3D ? ? ? ? 00 48 89 05 ? ? ? ? 0F 85";
-constexpr const char* base_animating_play_sequence =
-  "48 85 F6 0F 84 ? ? ? ? 55 48 89 E5 41 57 41 56 41 55 41 54 49 89 FC";
+constexpr const char* base_animating_dispatch_anim_events =
+  "48 85 F6 0F 84 ? ? ? ? 55 48 89 E5 41 57 41 56 41 55 41 54 49 89 FC 53 48 83 EC ? 83 BF ? ? ? ? ? 0F 84 ? ? ? ? 66 83 BF ? ? ? ? ?";
 constexpr const char* cl_decay_lights =
   "55 48 8D 3D ? ? ? ? 48 89 E5 41 57 41 56 41 55 41 54 53 48 83 EC ? E8 ? ? ? ? 66 0F EF C9";
 constexpr const char* mod_load_lighting =
@@ -140,12 +140,14 @@ constexpr const char* overlay_mgr_load_overlays =
 constexpr const char* material_system_begin_frame =
   "55 48 89 E5 41 57 41 56 41 55 41 54 53 48 89 FB 48 83 EC ? F3 0F 11 85 ? ? ? ?";
 constexpr const char* particle_property_create =
-  "55 48 89 E5 41 57 41 56 49 89 F6 41 55 41 54 53 48 89 FB 48 83 EC ? 48 8D 05 ? ? ? ?";
+  "55 48 89 E5 41 57 41 56 49 89 F6 41 55 41 54 53 48 89 FB 48 83 EC ? 48 8D 05 ? ? ? ? 89 55 ? 89 4D ? 66 0F D6 45 ?";
 constexpr const char* particle_system_precache =
   "31 C0 48 85 FF 74 ? 55 48 89 E5 41 54 49 89 FC 48 83 EC ? 48 8B 3D ? ? ? ?";
 constexpr const char* particle_effect_create_event =
   "55 41 89 C9 48 89 E5 41 57 41 56 41 55 4D 89 C5 41 54 49 89 FC 53 48 81 EC ? ? ? ?";
 constexpr const char* view_render_render =
+  "55 31 C0 48 89 E5 41 57 49 89 FF 41 56 41 55 41 54 53 48 81 EC ? ? ? ? 48 8B 1D ? ? ? ? 48 89 B5 ? ? ? ? 48 C7 85 ? ? ? ? ? ? ? ?";
+constexpr const char* replay_screenshot_render =
   "55 48 89 E5 41 57 41 56 41 55 41 54 53 48 81 EC ? ? ? ? 48 83 3F ?";
 constexpr const char* client_update_steam_rich_presence =
   "55 48 89 E5 41 57 41 56 41 55 49 89 FD 41 54 53 48 81 EC ? ? ? ? 48 8B 1D ? ? ? ? 48 C7 85 ? ? ? ? ? ? ? ? 48 8B 3B 48 85 FF";

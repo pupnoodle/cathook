@@ -86,11 +86,12 @@ constexpr bool textmode_build = true;
 constexpr bool textmode_build = false;
 #endif
 
-byte_patch play_sequence_patch{};
+byte_patch dispatch_anim_events_patch{};
 byte_patch particle_create_patch{};
 byte_patch particle_precache_patch{};
 byte_patch particle_effect_create_patch{};
 byte_patch view_render_patch{};
+byte_patch replay_screenshot_patch{};
 byte_patch steam_rich_presence_patch{};
 byte_patch cl_decay_lights_patch{};
 byte_patch mod_load_lighting_patch{};
@@ -486,6 +487,24 @@ bool initialize_optional_patch(byte_patch& patch,
   return true;
 }
 
+bool initialize_core_render_patch(byte_patch& patch,
+                                  const char* module_name,
+                                  const char* signature,
+                                  int offset,
+                                  std::initializer_list<std::uint8_t> patch_bytes,
+                                  const char* patch_name)
+{
+  auto* patch_site = scan_module_patch(module_name, signature, offset);
+  if (patch_site == nullptr)
+  {
+    print("[nographics] core patch scan failed name=%s module=%s\n", patch_name, module_name);
+    return false;
+  }
+
+  patch = byte_patch(patch_site, patch_bytes);
+  return true;
+}
+
 void initialize_optional_render_patches()
 {
   if (optional_render_patches_initialized)
@@ -525,6 +544,22 @@ void apply_optional_patch(byte_patch& patch, const char* patch_name)
   }
 }
 
+bool apply_render_patch_if_valid(byte_patch& patch, const char* patch_name)
+{
+  if (!patch.valid())
+  {
+    return true;
+  }
+
+  if (!patch.apply())
+  {
+    print("[nographics] render patch apply failed name=%s\n", patch_name);
+    return false;
+  }
+
+  return true;
+}
+
 bool initialize_replay_ui_nullcheck_patches()
 {
   constexpr int call_offset_after_global_load = 13;
@@ -543,25 +578,28 @@ bool initialize_replay_ui_nullcheck_patches()
     scan_client_patch(sigs::replay_ui_nullcheck_8, call_offset_after_global_load),
   };
 
+  bool initialized_any_patch = false;
   for (std::size_t index = 0; index < patch_sites.size(); ++index)
   {
     if (patch_sites[index] == nullptr)
     {
-      print("[nographics] replay ui nullcheck patch scan failed index=%zu\n", index);
-      return false;
+      print("[nographics] optional replay ui nullcheck patch scan failed index=%zu\n", index);
+      continue;
     }
+
+    if (index == 6 || index == 8)
+    {
+      replay_ui_nullcheck_patches[index] = byte_patch(patch_sites[index], { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
+    }
+    else
+    {
+      replay_ui_nullcheck_patches[index] = byte_patch(patch_sites[index], { 0x30, 0xC0, 0x90 });
+    }
+
+    initialized_any_patch = true;
   }
 
-  replay_ui_nullcheck_patches[0] = byte_patch(patch_sites[0], { 0x30, 0xC0, 0x90 });
-  replay_ui_nullcheck_patches[1] = byte_patch(patch_sites[1], { 0x30, 0xC0, 0x90 });
-  replay_ui_nullcheck_patches[2] = byte_patch(patch_sites[2], { 0x30, 0xC0, 0x90 });
-  replay_ui_nullcheck_patches[3] = byte_patch(patch_sites[3], { 0x30, 0xC0, 0x90 });
-  replay_ui_nullcheck_patches[4] = byte_patch(patch_sites[4], { 0x30, 0xC0, 0x90 });
-  replay_ui_nullcheck_patches[5] = byte_patch(patch_sites[5], { 0x30, 0xC0, 0x90 });
-  replay_ui_nullcheck_patches[6] = byte_patch(patch_sites[6], { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
-  replay_ui_nullcheck_patches[7] = byte_patch(patch_sites[7], { 0x30, 0xC0, 0x90 });
-  replay_ui_nullcheck_patches[8] = byte_patch(patch_sites[8], { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
-  return true;
+  return initialized_any_patch;
 }
 
 bool initialize_extra_crashfix_patches()
@@ -577,47 +615,54 @@ bool initialize_extra_crashfix_patches()
   auto* item_definition_index = scan_client_patch(sigs::econ_item_view_get_item_definition_index, 0);
   if (item_definition_index == nullptr)
   {
-    print("[nographics] econ item definition index patch scan failed\n");
-    return false;
+    print("[nographics] optional econ item definition index patch scan failed\n");
   }
 
+  bool initialized_any_patch = false;
   for (std::size_t index = 0; index < character_info_command_sigs.size(); ++index)
   {
     auto* patch_site = scan_client_patch(character_info_command_sigs[index], 0);
     if (patch_site == nullptr)
     {
-      print("[nographics] character info command patch scan failed index=%zu\n", index);
-      return false;
+      print("[nographics] optional character info command patch scan failed index=%zu\n", index);
+      continue;
     }
 
     character_info_command_patches[index] = byte_patch(patch_site, { 0x31, 0xC0, 0xC3 });
+    initialized_any_patch = true;
   }
 
-  econ_item_definition_index_patch = byte_patch(item_definition_index, {
-    0x48, 0x8B, 0x47, 0x08,
-    0x48, 0x85, 0xC0,
-    0x75, 0x0F,
-    0x48, 0x8B, 0x07,
-    0x48, 0x85, 0xC0,
-    0x74, 0x0B,
-    0x8B, 0x80, 0xBC, 0x00, 0x00, 0x00,
-    0xC3,
-    0x8B, 0x40, 0x20,
-    0xC3,
-    0x31, 0xC0,
-    0xC3,
-    0x90,
-  });
-  return true;
+  if (item_definition_index != nullptr)
+  {
+    econ_item_definition_index_patch = byte_patch(item_definition_index, {
+      0x48, 0x8B, 0x47, 0x08,
+      0x48, 0x85, 0xC0,
+      0x75, 0x0F,
+      0x48, 0x8B, 0x07,
+      0x48, 0x85, 0xC0,
+      0x74, 0x0B,
+      0x8B, 0x80, 0xBC, 0x00, 0x00, 0x00,
+      0xC3,
+      0x8B, 0x40, 0x20,
+      0xC3,
+      0x31, 0xC0,
+      0xC3,
+      0x90,
+    });
+    initialized_any_patch = true;
+  }
+
+  return initialized_any_patch;
 }
 
 void restore_render_patch_objects()
 {
-  play_sequence_patch.restore();
+  dispatch_anim_events_patch.restore();
   particle_create_patch.restore();
   particle_precache_patch.restore();
   particle_effect_create_patch.restore();
   view_render_patch.restore();
+  replay_screenshot_patch.restore();
   steam_rich_presence_patch.restore();
   restore_optional_render_patches();
 
@@ -641,45 +686,42 @@ bool initialize_render_patches()
     return render_patches_ready;
   }
 
-  auto* play_sequence = sigscan_module("client.so", sigs::base_animating_play_sequence);
-  auto* particle_create = sigscan_module("client.so", sigs::particle_property_create);
-  auto* particle_precache = sigscan_module("client.so", sigs::particle_system_precache);
-  auto* particle_effect_create = sigscan_module("client.so", sigs::particle_effect_create_event);
-  auto* view_render = sigscan_module("client.so", sigs::view_render_render);
-  auto* steam_rich_presence = sigscan_module("client.so", sigs::client_update_steam_rich_presence);
-
   render_patches_initialized = true;
 
-  if (play_sequence == nullptr || particle_create == nullptr || particle_precache == nullptr ||
-      particle_effect_create == nullptr || view_render == nullptr || steam_rich_presence == nullptr)
+  std::size_t core_patch_count = 0;
+  if (initialize_core_render_patch(dispatch_anim_events_patch, "client.so", sigs::base_animating_dispatch_anim_events, 0, { 0xC3 }, "base_animating_dispatch_anim_events"))
   {
-    print("[nographics] render patch scan failed play_sequence=%p particle_create=%p particle_precache=%p particle_effect_create=%p view_render=%p steam_rich_presence=%p\n",
-          play_sequence, particle_create, particle_precache, particle_effect_create, view_render, steam_rich_presence);
-    render_patches_ready = false;
-    return false;
+    ++core_patch_count;
+  }
+  if (initialize_core_render_patch(particle_create_patch, "client.so", sigs::particle_property_create, 0, { 0x31, 0xC0, 0xC3 }, "particle_property_create"))
+  {
+    ++core_patch_count;
+  }
+  if (initialize_core_render_patch(particle_precache_patch, "client.so", sigs::particle_system_precache, 0, { 0x31, 0xC0, 0xC3 }, "particle_system_precache"))
+  {
+    ++core_patch_count;
+  }
+  if (initialize_core_render_patch(particle_effect_create_patch, "client.so", sigs::particle_effect_create_event, 0, { 0x31, 0xC0, 0xC3 }, "particle_effect_create_event"))
+  {
+    ++core_patch_count;
+  }
+  if (initialize_core_render_patch(view_render_patch, "client.so", sigs::view_render_render, 0, { 0xC3 }, "view_render_render"))
+  {
+    ++core_patch_count;
   }
 
-  if (!initialize_replay_ui_nullcheck_patches())
+  initialize_optional_patch(replay_screenshot_patch, "client.so", sigs::replay_screenshot_render, 0, { 0xB0, 0x01, 0xC3 }, "replay_screenshot_render");
+  initialize_optional_patch(steam_rich_presence_patch, "client.so", sigs::client_update_steam_rich_presence, 0, { 0xC3 }, "client_update_steam_rich_presence");
+  initialize_replay_ui_nullcheck_patches();
+  initialize_extra_crashfix_patches();
+
+  render_patches_ready = core_patch_count != 0;
+  if (!render_patches_ready)
   {
-    render_patches_ready = false;
-    return false;
+    print("[nographics] no core render patches initialized\n");
   }
 
-  if (!initialize_extra_crashfix_patches())
-  {
-    render_patches_ready = false;
-    return false;
-  }
-
-  play_sequence_patch = byte_patch(play_sequence, { 0xC3 });
-  particle_create_patch = byte_patch(particle_create, { 0x31, 0xC0, 0xC3 });
-  particle_precache_patch = byte_patch(particle_precache, { 0x31, 0xC0, 0xC3 });
-  particle_effect_create_patch = byte_patch(particle_effect_create, { 0x31, 0xC0, 0xC3 });
-  view_render_patch = byte_patch(view_render, { 0xB0, 0x01, 0xC3 });
-  steam_rich_presence_patch = byte_patch(steam_rich_presence, { 0xC3 });
-
-  render_patches_ready = true;
-  return true;
+  return render_patches_ready;
 }
 
 void apply_render_patches()
@@ -689,21 +731,22 @@ void apply_render_patches()
     return;
   }
 
-  bool ok = play_sequence_patch.apply() &&
-            particle_create_patch.apply() &&
-            particle_precache_patch.apply() &&
-            particle_effect_create_patch.apply() &&
-            view_render_patch.apply() &&
-            steam_rich_presence_patch.apply();
+  bool ok = apply_render_patch_if_valid(dispatch_anim_events_patch, "base_animating_dispatch_anim_events") &&
+            apply_render_patch_if_valid(particle_create_patch, "particle_property_create") &&
+            apply_render_patch_if_valid(particle_precache_patch, "particle_system_precache") &&
+            apply_render_patch_if_valid(particle_effect_create_patch, "particle_effect_create_event") &&
+            apply_render_patch_if_valid(view_render_patch, "view_render_render") &&
+            apply_render_patch_if_valid(replay_screenshot_patch, "replay_screenshot_render") &&
+            apply_render_patch_if_valid(steam_rich_presence_patch, "client_update_steam_rich_presence");
   for (auto& patch : replay_ui_nullcheck_patches)
   {
-    ok = ok && patch.apply();
+    ok = ok && apply_render_patch_if_valid(patch, "replay_ui_nullcheck");
   }
   for (auto& patch : character_info_command_patches)
   {
-    ok = ok && patch.apply();
+    ok = ok && apply_render_patch_if_valid(patch, "character_info_command");
   }
-  ok = ok && econ_item_definition_index_patch.apply();
+  ok = ok && apply_render_patch_if_valid(econ_item_definition_index_patch, "econ_item_definition_index");
 
   if (!ok)
   {
