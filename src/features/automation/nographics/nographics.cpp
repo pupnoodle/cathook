@@ -800,10 +800,8 @@ bool initialize_render_patches()
   render_patches_initialized = true;
 
   std::size_t core_patch_count = 0;
-  if (initialize_core_render_patch(dispatch_anim_events_patch, "client.so", sigs::base_animating_dispatch_anim_events, 0, { 0xC3 }, "base_animating_dispatch_anim_events"))
-  {
-    ++core_patch_count;
-  }
+  // Keep animation events alive in textmode. Stubbing this can leave client animation
+  // state stale enough to break hitscan hitbox alignment.
   if (initialize_core_render_patch(particle_create_patch, "client.so", sigs::particle_property_create, 0, { 0x31, 0xC0, 0xC3 }, "particle_property_create"))
   {
     ++core_patch_count;
@@ -842,7 +840,6 @@ void apply_render_patches()
 
   if (core_patches_ready)
   {
-    ok = apply_render_patch_if_valid(dispatch_anim_events_patch, "base_animating_dispatch_anim_events") && ok;
     ok = apply_render_patch_if_valid(particle_create_patch, "particle_property_create") && ok;
     ok = apply_render_patch_if_valid(particle_precache_patch, "particle_system_precache") && ok;
     ok = apply_render_patch_if_valid(particle_effect_create_patch, "particle_effect_create_event") && ok;
