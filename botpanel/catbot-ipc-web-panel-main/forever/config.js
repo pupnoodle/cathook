@@ -4,7 +4,7 @@ const config = {
     discord_reports: true,
     discord_webhook_url: '',
     ban_tracker_enabled: false,
-    max_concurrent_bots: 1
+    max_concurrent_bots: 3
 }
 
 module.exports = config;
