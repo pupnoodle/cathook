@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+
+# Create user_instances directory if it doesn't exist
+mkdir -p user_instances
+
+# Download the b0 archive
+echo "Downloading B0 archive..."
+wget "https://download1589.mediafire.com/ow1eghgm2xlgaE0q1Hl_E37TlnPC-FYIGjKdOPlHK4Lu9-XAoOwA7IWm25G6K0jpMHEfyoy-JL2dUu_45YDYEvi2f6P_wYMChomRyO9DMs8yzgIyvD0JWm47ASAWVGdqIRYvZN5V1B2je_UtUETZbZZVI5UvT4V7YXISjPc4ZicXfck/52mw2hkbcmfpe83/b0.tar.gz" -O /tmp/b0.tar.gz
+
+# Check if download was successful
+if [ $? -ne 0 ]; then
+    echo "Failed to download b0 archive!"
+    exit 1
+fi
+
+# Extract the archive to user_instances
+echo "Extracting archive to user_instances..."
+tar xzf /tmp/b0.tar.gz -C user_instances/
+
+# Check if extraction was successful
+if [ $? -ne 0 ]; then
+    echo "Failed to extract B0 archive!"
+    rm -f /tmp/b0.tar.gz
+    exit 1
+fi
+
+# Clean up
+rm -f /tmp/b0.tar.gz
+
+# Set permissions for user access
+chmod -R u+rwX user_instances/
+
+echo "B0 installation completed successfully!" 
