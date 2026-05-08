@@ -5,7 +5,7 @@ class SimpleAuth
 {
     constructor(app)
     {
-        this.password = process.env.CAT_WEB_PASSWORD || randomstring.generate(6);
+        this.password = process.env.CAT_WEB_PASSWORD || randomstring.generate(12);
         this.apikey = randomstring.generate(64);
 
         app.post('/api/auth', this.handleLogin.bind(this));

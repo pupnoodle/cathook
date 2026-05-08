@@ -325,7 +325,7 @@ prepare_firejail() {
 
     run_as_root cp -n "$config_path" "$config_path.CATHOOK.bak" 2>/dev/null || true
     local config_entry config_key config_value
-    for config_entry in "network yes" "x11 yes"; do
+    for config_entry in "network yes" "x11 yes" "bind yes"; do
         config_key="${config_entry%% *}"
         config_value="${config_entry#* }"
 

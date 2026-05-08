@@ -14,6 +14,7 @@ const steam_id = require('../steam_id');
 const CATHOOK_ROOT = process.env.CATHOOK_ROOT || '/opt/cathook';
 const BOT_DISPLAY = process.env.DISPLAY || ':1';
 const BOT_XAUTHORITY = process.env.XAUTHORITY || path.join(process.env.HOME || '', '.Xauthority');
+const x11_socket_dir = '/tmp/.X11-unix';
 const VISIBLE_WINDOWS = process.env.CAT_VISIBLE_WINDOWS === '1';
 const TEXTMODE_GAME = process.env.CAT_TEXTMODE_GAME === '1' || (!VISIBLE_WINDOWS && process.env.CAT_TEXTMODE_GAME !== '0');
 const GDB_CRASH_REPORTS = process.env.CAT_GDB_CRASH_REPORTS === '1' || config.gdb_crash_reports === true;
@@ -124,7 +125,10 @@ function command_succeeds(command, args) {
 }
 
 function firejail_x11_options() {
-    return '--ignore=private-tmp';
+    const options = ['--ignore=private-tmp'];
+    if (fs.existsSync(x11_socket_dir))
+        options.push(`--bind=${x11_socket_dir},${x11_socket_dir}`);
+    return options.join(' ');
 }
 
 function send_discord_report(file_path, report_name, log) {
