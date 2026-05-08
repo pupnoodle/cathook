@@ -1241,6 +1241,15 @@ class Bot extends EventEmitter {
         }
     }
 
+    clearStaleSteamRuntimeFiles() {
+        const steam_config_path = path.join(this.home, '.steam');
+        for (const file_name of ['steam.pid', 'steam.pipe', 'steam.token']) {
+            try {
+                fs.rmSync(path.join(steam_config_path, file_name), { force: true });
+            } catch (error) { }
+        }
+    }
+
     logSteamTails(prefix, line_count) {
         const logs = this.existingSteamLogPaths();
         if (!logs.length) {
@@ -1453,6 +1462,7 @@ class Bot extends EventEmitter {
         }
 
         self.clearSteamStartupLogs();
+        self.clearStaleSteamRuntimeFiles();
         const xauthority_path = self.ensureVisibleXauthority();
 
         var steambin = this.steamLaunchCommand();
