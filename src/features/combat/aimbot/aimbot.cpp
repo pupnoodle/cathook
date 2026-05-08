@@ -218,17 +218,34 @@ struct aimbot_projectile_target_hint {
   bool current = false;
 };
 
+float aimbot_actual_frame_time()
+{
+  if (global_vars == nullptr) {
+    return 0.0f;
+  }
+
+  float frame_time = 0.0f;
+  if (std::isfinite(global_vars->frametime) && global_vars->frametime > 0.0f) {
+    frame_time = std::max(frame_time, global_vars->frametime);
+  }
+
+  if (std::isfinite(global_vars->absolute_frametime) && global_vars->absolute_frametime > 0.0f) {
+    frame_time = std::max(frame_time, global_vars->absolute_frametime);
+  }
+
+  return frame_time;
+}
+
 int aimbot_projectile_target_attempt_cap(size_t target_count)
 {
   int cap = 5;
-  if (global_vars != nullptr) {
-    if (global_vars->frametime > (1.0f / 45.0f)) {
-      cap = 2;
-    } else if (global_vars->frametime > (1.0f / 60.0f)) {
-      cap = 3;
-    } else if (global_vars->frametime > (1.0f / 75.0f)) {
-      cap = 4;
-    }
+  const float frame_time = aimbot_actual_frame_time();
+  if (frame_time > (1.0f / 45.0f)) {
+    cap = 2;
+  } else if (frame_time > (1.0f / 60.0f)) {
+    cap = 3;
+  } else if (frame_time > (1.0f / 75.0f)) {
+    cap = 4;
   }
 
   if (target_count >= 8) {
@@ -407,6 +424,15 @@ void aimbot_request_walk_to_target(Player* localplayer, Weapon* weapon, const ai
 
 }
 
+static bool aimbot_should_relax_final_trace()
+{
+  if (nographics::should_use_aimbot_trace_fallback()) {
+    return true;
+  }
+
+  return aimbot_actual_frame_time() >= (1.0f / 30.0f);
+}
+
 static void aimbot_apply_visible_view(user_cmd* user_cmd) {
   if (user_cmd == nullptr || config.aimbot.aim_mode == Aim::AimMode::PSILENT) {
     return;
@@ -472,12 +498,31 @@ static aimbot_candidate aimbot_find_best_non_player_candidate(Player* localplaye
   return best_candidate;
 }
 
+static aimbot_candidate aimbot_find_hitscan_candidate(Player* localplayer,
+  Weapon* weapon,
+  Player* player,
+  const Vec3& original_view_angles,
+  bool relaxed_selection) {
+  aimbot_candidate candidate = hitscan_aim_find_candidate(localplayer, weapon, player, original_view_angles);
+  if (candidate.entity != nullptr || !relaxed_selection) {
+    return candidate;
+  }
+
+  candidate = hitscan_aim_find_occluded_candidate(localplayer, weapon, player, original_view_angles);
+  if (!candidate.visible) {
+    return {};
+  }
+
+  return candidate;
+}
+
 static aimbot_candidate aimbot_find_best_candidate(Player* localplayer, Weapon* weapon, user_cmd* user_cmd, const Vec3& original_view_angles) {
   aimbot_candidate best_candidate{};
 
   if (aimbot_is_projectile_weapon(weapon)) {
     best_candidate = aimbot_find_best_projectile_candidate(localplayer, weapon, user_cmd, original_view_angles);
   } else {
+    const bool relaxed_hitscan_selection = !aimbot_is_melee_weapon(weapon) && aimbot_should_relax_final_trace();
     for (Entity* entity : entity_cache[class_id::PLAYER]) {
       Player* player = static_cast<Player*>(entity);
       if (aimbot_should_skip_player(localplayer, player)) {
@@ -488,7 +533,12 @@ static aimbot_candidate aimbot_find_best_candidate(Player* localplayer, Weapon* 
       if (aimbot_is_melee_weapon(weapon)) {
         candidate = melee_aim_find_candidate(localplayer, weapon, player, user_cmd, original_view_angles);
       } else {
-        candidate = hitscan_aim_find_candidate(localplayer, weapon, player, original_view_angles);
+        candidate = aimbot_find_hitscan_candidate(
+          localplayer,
+          weapon,
+          player,
+          original_view_angles,
+          relaxed_hitscan_selection);
       }
 
       if (candidate.entity == nullptr) {
@@ -605,15 +655,6 @@ static bool aimbot_projectile_solution_ready(Player* localplayer,
     hitbox_mask,
     nullptr,
     predicted_target_origin);
-}
-
-static bool aimbot_should_relax_final_trace()
-{
-  if (nographics::should_use_aimbot_trace_fallback()) {
-    return true;
-  }
-
-  return global_vars != nullptr && global_vars->frametime >= (1.0f / 30.0f);
 }
 
 bool aimbot(user_cmd* user_cmd, Vec3 original_view_angles) {

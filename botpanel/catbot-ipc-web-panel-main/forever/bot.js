@@ -55,7 +55,7 @@ const STEAMWEBHELPER_CLEANUP_ENABLED = process.env.CAT_STEAMWEBHELPER_CLEANUP ==
 const STEAMWEBHELPER_CLEANUP_DELAY_SECONDS_VALUE = Number.parseInt(process.env.CAT_STEAMWEBHELPER_CLEANUP_SECONDS || '10', 10);
 const STEAMWEBHELPER_CLEANUP_DELAY = (Number.isFinite(STEAMWEBHELPER_CLEANUP_DELAY_SECONDS_VALUE) ? Math.max(0, STEAMWEBHELPER_CLEANUP_DELAY_SECONDS_VALUE) : 10) * 1000;
 // Time to delay individual bot starts by to prevent IPC ID conflicts
-const DELAY_START_TIME = 1000;
+const DELAY_START_TIME = Number.parseInt(process.env.CAT_BOT_START_INTERVAL_SECONDS || '20', 10) * 1000;
 const GAME_STARTUP_FATAL_PATTERNS = [
     'AppFramework : Unable to load module engine.so!',
     'Unable to load interface VCvarQuery001 from engine.so'
@@ -64,7 +64,10 @@ const STEAM_STARTUP_FATAL_PATTERNS = [
     'Error: Couldn\'t set up the Steam Runtime.',
     'LD_LIBRARY_PATH: unbound variable'
 ];
+const MAX_STEAM_PREPARE_JOBS = Number.parseInt(process.env.CAT_STEAM_PREPARE_JOBS || '1', 10);
+const STEAM_LOG_READ_BYTES = Number.parseInt(process.env.CAT_STEAM_LOG_READ_BYTES || String(256 * 1024), 10);
 let navmesh_sync_done = false;
+let game_dependency_check_done = false;
 
 const STATE = {
     INITIALIZING: 0,
@@ -107,11 +110,28 @@ function log_file_tail(file_path, line_count) {
         if (!fs.existsSync(file_path))
             return '';
 
-        const lines = fs.readFileSync(file_path, 'utf8').trimEnd().split(/\r?\n/);
+        const lines = read_recent_file_text(file_path).trimEnd().split(/\r?\n/);
         return lines.slice(-line_count).join('\n');
     } catch (error) {
         return `failed to read ${file_path}: ${error.message}`;
     }
+}
+
+function read_recent_file_text(file_path, max_bytes = STEAM_LOG_READ_BYTES) {
+    const status = fs.statSync(file_path);
+    if (!status.size)
+        return '';
+
+    const read_size = Math.min(status.size, Math.max(4096, max_bytes));
+    const buffer = Buffer.allocUnsafe(read_size);
+    const fd = fs.openSync(file_path, 'r');
+    try {
+        fs.readSync(fd, buffer, 0, read_size, status.size - read_size);
+    } finally {
+        fs.closeSync(fd);
+    }
+
+    return buffer.toString('utf8');
 }
 
 function bash_double_quote_escape(value) {
@@ -502,6 +522,25 @@ function ensure_directory_not_symlink(directory_path) {
     fs.mkdirSync(directory_path, { recursive: true });
 }
 
+function run_shell_async(command, env = {}) {
+    return new Promise((resolve) => {
+        const child = child_process.spawn('bash', ['-lc', command], {
+            env: Object.assign({}, process.env, env),
+            stdio: ['ignore', 'pipe', 'pipe']
+        });
+        let stdout = '';
+        let stderr = '';
+        child.stdout.on('data', (data) => { stdout += data.toString(); });
+        child.stderr.on('data', (data) => { stderr += data.toString(); });
+        child.on('error', (error) => {
+            resolve({ code: -1, stdout, stderr: stderr + error.message });
+        });
+        child.on('exit', (code, signal) => {
+            resolve({ code: code === null ? -1 : code, signal, stdout, stderr });
+        });
+    });
+}
+
 function get_default_network_interface() {
     if (process.env.CATHOOK_NET_INTERFACE)
         return process.env.CATHOOK_NET_INTERFACE;
@@ -574,11 +613,11 @@ class Bot extends EventEmitter {
         this.botid = botid;
         this.home = path.join(__dirname, "..", "..", "user_instances", this.name)
 
-        // Create a network namespace for this bot
-        if (!USER.SUPPORTS_FJ_NET)
-            child_process.execSync("./scripts/ns-inet " + this.botid)
-
         this.stopped = false;
+        this.network_namespace_ready = USER.SUPPORTS_FJ_NET;
+        this.steam_prepare_running = false;
+        this.steam_prepare_done = false;
+        this.steam_prepare_error = null;
         this.account = null;
         this.account_generation = 0;
         this.restarts = 0;
@@ -888,6 +927,114 @@ class Bot extends EventEmitter {
         chown_tree(steam_config_path, USER.uid, USER.uid);
     }
 
+    steamPrepareCommand(source_path, target_path, steam_config_path) {
+        const skip_names = ['appcache', 'config', 'logs', 'steamapps', 'steamapps_old', 'userdata'];
+        const skip_tests = skip_names.map((name) => `! -name ${shell_quote(name)}`).join(' ');
+        const link_target = path.relative(steam_config_path, target_path) || '.';
+        return [
+            'set -e',
+            `source_path=${shell_quote(source_path)}`,
+            `target_path=${shell_quote(target_path)}`,
+            `steam_config_path=${shell_quote(steam_config_path)}`,
+            `link_target=${shell_quote(link_target)}`,
+            'mkdir -p "$(dirname "$target_path")" "$target_path" "$steam_config_path"',
+            `find "$source_path" -mindepth 1 -maxdepth 1 ${skip_tests} -exec cp -a --reflink=auto -t "$target_path" {} +`,
+            `chown -R ${USER.uid}:${USER.uid} "$target_path" "$steam_config_path"`,
+            'for link_name in steam root; do ln -sfn "$link_target" "$steam_config_path/$link_name"; done',
+            `chown -h ${USER.uid}:${USER.uid} "$steam_config_path/steam" "$steam_config_path/root" 2>/dev/null || true`
+        ].join('\n');
+    }
+
+    prepareSteamInstallAsync(done) {
+        if (this.steam_prepare_done) {
+            done(true);
+            return;
+        }
+
+        if (this.steam_prepare_running)
+            return;
+
+        const source_path = this.hostSteamInstallSource();
+        if (!source_path) {
+            this.steam_prepare_error = 'host Steam install source was not found';
+            this.log(`[ERROR] ${this.steam_prepare_error}`);
+            done(false);
+            return;
+        }
+
+        const target_path = this.botSteamPath(source_path);
+        const steam_config_path = path.join(this.home, '.steam');
+        if (steam_root_ready(target_path)) {
+            try {
+                fs.mkdirSync(steam_config_path, { recursive: true });
+                for (const link_name of ['steam', 'root']) {
+                    const link_path = path.join(steam_config_path, link_name);
+                    const link_target = path.relative(steam_config_path, target_path) || '.';
+                    try {
+                        const status = fs.lstatSync(link_path);
+                        if (!status.isSymbolicLink() || fs.readlinkSync(link_path) !== link_target)
+                            fs.rmSync(link_path, { recursive: true, force: true });
+                    } catch (error) {
+                        if (error.code !== 'ENOENT')
+                            throw error;
+                    }
+                    if (!fs.existsSync(link_path))
+                        fs.symlinkSync(link_target, link_path);
+                }
+                chown_tree(steam_config_path, USER.uid, USER.uid);
+                this.steam_prepare_done = true;
+                done(true);
+            } catch (error) {
+                this.steam_prepare_error = error.message;
+                this.log(`[ERROR] Failed to prepare Steam links: ${error.message}`);
+                done(false);
+            }
+            return;
+        }
+
+        if (module.exports.currentlyPreparingSteam >= MAX_STEAM_PREPARE_JOBS)
+            return;
+
+        this.steam_prepare_running = true;
+        module.exports.currentlyPreparingSteam++;
+        this.log(`Preparing Steam client in background from ${source_path} to ${target_path}`);
+        if (fs.existsSync(target_path)) {
+            this.log(`Removing incomplete bot Steam install at ${target_path}`);
+            fs.rmSync(target_path, { recursive: true, force: true });
+        }
+
+        run_shell_async(this.steamPrepareCommand(source_path, target_path, steam_config_path)).then((result) => {
+            this.steam_prepare_running = false;
+            module.exports.currentlyPreparingSteam = Math.max(0, module.exports.currentlyPreparingSteam - 1);
+            if (result.code === 0 && steam_root_ready(target_path)) {
+                this.steam_prepare_done = true;
+                this.log(`Steam client prepared at ${target_path}`);
+                done(true);
+                return;
+            }
+
+            this.steam_prepare_error = (result.stderr || result.stdout || `exit code ${result.code}`).trim();
+            this.log(`[ERROR] Steam client preparation failed: ${this.steam_prepare_error}`);
+            done(false);
+        });
+    }
+
+    ensureNetworkNamespace() {
+        if (this.network_namespace_ready)
+            return true;
+
+        try {
+            child_process.execFileSync('./scripts/ns-inet', [String(this.botid)], { stdio: 'pipe' });
+            this.network_namespace_ready = true;
+            this.log(`Network namespace ready: catbotns${this.botid}`);
+            return true;
+        } catch (error) {
+            const stderr = error.stderr ? error.stderr.toString().trim() : '';
+            this.log(`[ERROR] Failed to create network namespace catbotns${this.botid}: ${stderr || error.message}`);
+            return false;
+        }
+    }
+
     steamid32FromLoginUsers() {
         if (!this.account || !this.account.login)
             return null;
@@ -934,7 +1081,7 @@ class Bot extends EventEmitter {
         for (const log_path of log_paths) {
             let text = '';
             try {
-                text = fs.readFileSync(log_path, 'utf8');
+                text = read_recent_file_text(log_path);
             } catch (error) {
                 continue;
             }
@@ -1065,19 +1212,12 @@ class Bot extends EventEmitter {
             log_paths.push(
                 path.join(steam_root, 'error.log'),
                 path.join(steam_root, 'logs/bootstrap_log.txt'),
-                path.join(steam_root, 'logs/cef_log.txt'),
                 path.join(steam_root, 'logs/connection_log.txt'),
-                path.join(steam_root, 'logs/content_log.txt'),
-                path.join(steam_root, 'logs/systemdisplaymanager.txt')
+                path.join(steam_root, 'logs/console_log.txt'),
+                path.join(steam_root, 'logs/console-linux.txt'),
+                path.join(steam_root, 'logs/steamui_login.txt'),
+                path.join(steam_root, 'logs/webhelper_js.txt')
             );
-
-            const logs_dir = path.join(steam_root, 'logs');
-            try {
-                for (var entry of fs.readdirSync(logs_dir)) {
-                    if (entry.endsWith('.log') || entry.endsWith('.txt'))
-                        log_paths.push(path.join(logs_dir, entry));
-                }
-            } catch (error) { }
         }
 
         return unique_paths(log_paths);
@@ -1119,7 +1259,7 @@ class Bot extends EventEmitter {
     steamFatalStartupLogPath() {
         for (var log_path of this.existingSteamLogPaths()) {
             try {
-                const log_text = fs.readFileSync(log_path, 'utf8');
+                const log_text = read_recent_file_text(log_path);
                 if (steam_startup_log_has_fatal_error(log_text))
                     return log_path;
             } catch (error) { }
@@ -1232,14 +1372,19 @@ class Bot extends EventEmitter {
     }
 
     validateGameDependencies(game_launch_path) {
+        if (game_dependency_check_done)
+            return true;
+
         try {
             const ldd_output = child_process.execFileSync('bash', ['-lc', this.game_dependency_check_command(game_launch_path)], {
                 encoding: 'utf8',
                 env: Object.assign({}, process.env, this.spawnOptions.env)
             });
             const missing_libraries = [...ldd_output.matchAll(/^\s*(\S+)\s+=>\s+not found\s*$/gm)].map((match) => match[1]);
-            if (!missing_libraries.length)
+            if (!missing_libraries.length) {
+                game_dependency_check_done = true;
                 return true;
+            }
 
             this.log(`[ERROR] TF2 dependency check failed, missing=${[...new Set(missing_libraries)].join(', ')}`);
             this.log('Install missing runtime libraries with ./install-deps or botpanel/start, then restart the panel.');
@@ -1264,7 +1409,7 @@ class Bot extends EventEmitter {
 
         for (var logPath of this.steamLogPaths()) {
             try {
-                const log_text = fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8') : '';
+                const log_text = fs.existsSync(logPath) ? read_recent_file_text(logPath) : '';
                 if (steam_client_initialized_from_log(log_text)) {
                     this.mark_steam_client_initialized(path.basename(logPath) === 'error.log' ? path.dirname(logPath) : null, log_text);
                     return true;
@@ -1290,7 +1435,23 @@ class Bot extends EventEmitter {
             fs.mkdirSync(self.home);
             fs.chownSync(self.home, USER.uid, USER.uid);
         }
-        self.prepareSteamInstall();
+        if (!self.ensureNetworkNamespace()) {
+            self.shouldRun = false;
+            self.shouldRestart = false;
+            return;
+        }
+        if (!self.steam_prepare_done) {
+            self.prepareSteamInstallAsync((ok) => {
+                if (ok && self.shouldRun && !self.procFirejailSteam)
+                    self.spawnSteam();
+                else if (!ok) {
+                    self.shouldRun = false;
+                    self.shouldRestart = false;
+                }
+            });
+            return;
+        }
+
         self.clearSteamStartupLogs();
         const xauthority_path = self.ensureVisibleXauthority();
 
@@ -1405,6 +1566,8 @@ class Bot extends EventEmitter {
         });
         self.log(`Launched ${steambin} (${self.procFirejailSteam.pid})`);
         self.log(`Steam log capture: ./logs/${self.name}.steam.log plus ${self.steamInstallCandidates().map((steam_path) => path.join(steam_path, 'logs')).join(', ')}`);
+        self.time_steamWorking = Date.now() + TIMEOUT_STEAM_RUNNING;
+        self.time_steamAssumeReady = TIMEOUT_STEAM_ASSUME_READY ? Date.now() + TIMEOUT_STEAM_ASSUME_READY : 0;
         self.emit('start-steam', self.procFirejailSteam.pid);
     }
 
@@ -1998,14 +2161,17 @@ class Bot extends EventEmitter {
     full_stop() {
         this.stop();
         // Delete the network namespace for this bot
-        if (!USER.SUPPORTS_FJ_NET && fs.existsSync(`/var/run/netns/catbotns${this.botid}`))
-            child_process.execSync(`./scripts/ns-delete ${this.botid}`)
+        if (!USER.SUPPORTS_FJ_NET && fs.existsSync(`/var/run/netns/catbotns${this.botid}`)) {
+            child_process.execFileSync('./scripts/ns-delete', [String(this.botid)]);
+            this.network_namespace_ready = false;
+        }
         return !(this.procFirejailGame || this.procFirejailSteam)
     }
 }
 
 module.exports.bot = Bot;
 module.exports.currentlyStartingGames = 0;
+module.exports.currentlyPreparingSteam = 0;
 module.exports.lastStartTime = 0;
 module.exports.states = STATE;
 Object.defineProperty(module.exports, 'MAX_CONCURRENT_BOTS', {
