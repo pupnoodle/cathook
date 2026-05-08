@@ -324,6 +324,17 @@ prepare_firejail() {
     fi
 
     run_as_root cp -n "$config_path" "$config_path.CATHOOK.bak" 2>/dev/null || true
+    local config_entry config_key config_value
+    for config_entry in "network yes" "x11 yes" "bind yes"; do
+        config_key="${config_entry%% *}"
+        config_value="${config_entry#* }"
+
+        if run_as_root grep -Eq "^[[:space:]]*#?[[:space:]]*${config_key}[[:space:]]+(yes|no)" "$config_path"; then
+            run_as_root sed -i -E "s/^[[:space:]]*#?[[:space:]]*${config_key}[[:space:]]+(yes|no).*/${config_key} ${config_value}/" "$config_path"
+        else
+            printf '\n%s %s\n' "$config_key" "$config_value" | run_as_root tee -a "$config_path" >/dev/null
+        fi
+    done
     run_as_root sed -i -E 's/^[[:space:]]*restricted-network[[:space:]]+yes/# restricted-network yes/' "$config_path"
 }
 

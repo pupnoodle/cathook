@@ -14,6 +14,7 @@ const steam_id = require('../steam_id');
 const CATHOOK_ROOT = process.env.CATHOOK_ROOT || '/opt/cathook';
 const BOT_DISPLAY = process.env.DISPLAY || ':1';
 const BOT_XAUTHORITY = process.env.XAUTHORITY || path.join(process.env.HOME || '', '.Xauthority');
+const x11_socket_dir = '/tmp/.X11-unix';
 const VISIBLE_WINDOWS = process.env.CAT_VISIBLE_WINDOWS === '1';
 const TEXTMODE_GAME = process.env.CAT_TEXTMODE_GAME === '1' || (!VISIBLE_WINDOWS && process.env.CAT_TEXTMODE_GAME !== '0');
 const GDB_CRASH_REPORTS = process.env.CAT_GDB_CRASH_REPORTS === '1' || config.gdb_crash_reports === true;
@@ -29,7 +30,7 @@ const GAME_MODE_OPTIONS = TEXTMODE_GAME
 const SHARED_STEAMAPPS = '/opt/steamapps';
 const CATHOOK_ATTACH_DELAY_SECONDS = Number.parseInt(process.env.CATHOOK_ATTACH_DELAY_SECONDS || '5', 10);
 
-const LAUNCH_OPTIONS_STEAM = `firejail --dns=1.1.1.1 %NETWORK% --noprofile --private="%HOME%" --name=%JAILNAME% --env=PULSE_SERVER="unix:/tmp/pulse.sock" --env=DISPLAY=%DISPLAY% --env=XAUTHORITY=%XAUTHORITY% --env=LD_PRELOAD=%LD_PRELOAD% %STEAM% ${STEAM_WINDOW_OPTIONS} -login %LOGIN% %PASSWORD%`
+const LAUNCH_OPTIONS_STEAM = `firejail --dns=1.1.1.1 %NETWORK% %X11_OPTIONS% --noprofile --private="%HOME%" --name=%JAILNAME% --env=PULSE_SERVER="unix:/tmp/pulse.sock" --env=DISPLAY=%DISPLAY% --env=XAUTHORITY=%XAUTHORITY% --env=LD_PRELOAD=%LD_PRELOAD% %STEAM% ${STEAM_WINDOW_OPTIONS} -login %LOGIN% %PASSWORD%`
 const LAUNCH_OPTIONS_STEAM_RESET = 'firejail --net=none --noprofile --private="%HOME%" %STEAM% --reset'
 const LAUNCH_OPTIONS_GAME = `firejail --join=%JAILNAME% bash -c 'cd "%GAMEPATH%" && %RUNTIME_PREFIX% SteamAppId=440 SteamGameId=440 SteamOverlayGameId=440 SteamEnv=1 CATHOOK_ROOT="%CATHOOK_ROOT%" CATHOOK_AUTO_ATTACH=1 CATHOOK_ATTACH_DELAY_SECONDS=%CATHOOK_ATTACH_DELAY_SECONDS% CAT_BOT_ID=%BOT_ID% CAT_BOT_NAME=%BOT_NAME% CAT_STEAMID32=%STEAMID32% LD_PRELOAD=%LD_PRELOAD% DISPLAY=%DISPLAY% XAUTHORITY="%XAUTHORITY%" PULSE_SERVER="unix:/tmp/pulse.sock" %GAME_BINARY% -steam -game tf ${GAME_WINDOW_OPTIONS} -novid -nojoy -noipx -nomessagebox -nominidumps -nohltv -nobreakpad -reuse -noquicktime -precachefontchars -particles 1 -snoforceformat -softparticlesdefaultoff ${GAME_MODE_OPTIONS} -forcenovsync -insecure +clientport 27006-27014'`
 const GAME_LIBRARY_PATH = './bin:./bin/linux64:./tf/bin:./tf/bin/linux64:./platform:./platform/bin:./platform/bin/linux64:.';
@@ -121,6 +122,13 @@ function command_succeeds(command, args) {
     } catch (error) {
         return false;
     }
+}
+
+function firejail_x11_options() {
+    const options = ['--ignore=private-tmp'];
+    if (fs.existsSync(x11_socket_dir))
+        options.push(`--bind=${x11_socket_dir},${x11_socket_dir}`);
+    return options.join(' ');
 }
 
 function send_discord_report(file_path, report_name, log) {
@@ -857,11 +865,9 @@ class Bot extends EventEmitter {
     ensureVisibleXauthority() {
         this.xauthorityPath = BOT_XAUTHORITY;
 
-        if (!VISIBLE_WINDOWS)
-            return this.xauthorityPath;
-
         if (!BOT_XAUTHORITY || !fs.existsSync(BOT_XAUTHORITY)) {
-            this.log(`Visible windows requested but XAUTHORITY is missing: ${BOT_XAUTHORITY}`);
+            if (VISIBLE_WINDOWS)
+                this.log(`Visible windows requested but XAUTHORITY is missing: ${BOT_XAUTHORITY}`);
             return this.xauthorityPath;
         }
 
@@ -872,7 +878,7 @@ class Bot extends EventEmitter {
             fs.chownSync(target_path, USER.uid, USER.uid);
             this.xauthorityPath = target_path;
         } catch (error) {
-            this.log(`Failed to copy XAUTHORITY for visible windows: ${error.message}`);
+            this.log(`Failed to copy XAUTHORITY into bot home: ${error.message}`);
         }
 
         return this.xauthorityPath;
@@ -1076,6 +1082,7 @@ class Bot extends EventEmitter {
             // XOrg Display
             .replace("%DISPLAY%", shell_quote(BOT_DISPLAY))
             .replace("%XAUTHORITY%", shell_quote(xauthority_path))
+            .replace("%X11_OPTIONS%", firejail_x11_options())
             // Network
             .replace("%NETWORK%", USER.SUPPORTS_FJ_NET ? `--net=${USER.interface}` : `--netns=catbotns${this.botid}`)
             // Home folder
