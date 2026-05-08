@@ -1,2 +1,2 @@
-chmod +x ./build.sh ./install-deps ./packages/distros/*.sh
+sudo chown -R "$USER:$USER" .git
 sudo ./build.sh
