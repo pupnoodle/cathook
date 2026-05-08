@@ -35,15 +35,12 @@ const LAUNCH_OPTIONS_GAME = `firejail --join=%JAILNAME% bash -c 'cd "%GAMEPATH%"
 const GAME_LIBRARY_PATH = './bin:./bin/linux64:./tf/bin:./tf/bin/linux64:./platform:./platform/bin:./platform/bin/linux64:.';
 
 // Adjust these values as needed to optimize catbot performance
-// Static delay after Steam is ready before launching TF2
-const TIMEOUT_LAUNCH_GAME = 15000;
 // How long to wait for the TF2 process to be created by firejail
 const TIMEOUT_START_GAME = 10000;
 // Timeout for cathook to connect to the IPC server once injected
 const TIMEOUT_IPC_STATE = Number.parseInt(process.env.CAT_IPC_TIMEOUT_SECONDS || '90', 10) * 1000;
 // Time to wait for steam to be "ready"
 const TIMEOUT_STEAM_RUNNING = Number.parseInt(process.env.CAT_STEAM_TIMEOUT_SECONDS || '300', 10) * 1000;
-const TIMEOUT_STEAM_ASSUME_READY = Number.parseInt(process.env.CAT_STEAM_READY_SECONDS || '0', 10) * 1000;
 const STEAMWEBHELPER_CLEANUP_ENABLED = process.env.CAT_STEAMWEBHELPER_CLEANUP !== '0';
 const STEAMWEBHELPER_CLEANUP_DELAY_SECONDS_VALUE = Number.parseInt(process.env.CAT_STEAMWEBHELPER_CLEANUP_SECONDS || '10', 10);
 const STEAMWEBHELPER_CLEANUP_DELAY = (Number.isFinite(STEAMWEBHELPER_CLEANUP_DELAY_SECONDS_VALUE) ? Math.max(0, STEAMWEBHELPER_CLEANUP_DELAY_SECONDS_VALUE) : 10) * 1000;
@@ -593,8 +590,6 @@ class Bot extends EventEmitter {
         this.shouldRestart = false;
         this.isSteamWorking = false;
         this.time_steamWorking = 0;
-        this.time_steamAssumeReady = 0;
-        this.time_game_launch = 0;
         this.time_gameCheck = 0;
         this.time_ipcState = 0;
         this.time_steamStatusLog = 0;
@@ -1253,7 +1248,6 @@ class Bot extends EventEmitter {
         this.ipcLastHeartbeat = 0;
         this.gameStarted = 0;
         this.gamePid = -1;
-        this.time_game_launch = 0;
         this.time_gameCheck = 0;
         this.time_ipcState = 0;
         this.time_steamwebhelper_cleanup = 0;
@@ -1268,8 +1262,6 @@ class Bot extends EventEmitter {
         this.procFirejailSteam = null;
         this.isSteamWorking = false;
         this.time_steamWorking = 0;
-        this.time_steamAssumeReady = 0;
-        this.time_game_launch = 0;
         this.time_gameCheck = 0;
         this.time_ipcState = 0;
         this.time_steamwebhelper_cleanup = 0;
@@ -1592,12 +1584,6 @@ class Bot extends EventEmitter {
                         this.time_steamStatusLog = time + 10000;
                     }
 
-                    if (this.time_steamAssumeReady && time > this.time_steamAssumeReady) {
-                        this.log('Steam readiness marker was not found; continuing because CAT_STEAM_READY_SECONDS fallback is enabled.');
-                        this.markSteamReady();
-                        return;
-                    }
-
                     if (this.time_steamWorking && time > this.time_steamWorking) {
                         this.log('Steam login/readiness timed out.');
                         this.logSteamTails('Steam startup log tail', 12);
@@ -1608,15 +1594,7 @@ class Bot extends EventEmitter {
                 }
                 else {
                     if (!this.procFirejailGame) {
-                        if (!this.time_game_launch) {
-                            this.time_game_launch = time + TIMEOUT_LAUNCH_GAME;
-                            this.log(`Steam ready; launching game in ${TIMEOUT_LAUNCH_GAME / 1000} seconds.`);
-                            return;
-                        }
-                        if (time < this.time_game_launch)
-                            return;
-
-                        this.time_game_launch = 0;
+                        this.log('Steam ready; launching game.');
                         this.spawnGame();
                         this.state = STATE.WAITING;
                         this.time_gameCheck = time + TIMEOUT_START_GAME;
@@ -1669,7 +1647,6 @@ class Bot extends EventEmitter {
                         this.reset();
                         this.spawnSteam();
                         this.time_steamWorking = time + TIMEOUT_STEAM_RUNNING;
-                        this.time_steamAssumeReady = TIMEOUT_STEAM_ASSUME_READY ? time + TIMEOUT_STEAM_ASSUME_READY : 0;
                     }
                 }
             }
