@@ -138,6 +138,10 @@ function steam_client_initialized_from_log(text) {
     return STEAM_CLIENT_INITIALIZED_PATTERNS.some((pattern) => text.includes(pattern));
 }
 
+function escape_regex(text) {
+    return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function game_startup_log_has_fatal_error(text) {
     return GAME_STARTUP_FATAL_PATTERNS.some((pattern) => text.includes(pattern));
 }
@@ -1017,8 +1021,34 @@ class Bot extends EventEmitter {
         return this.steamid32FromLoginUsers() || this.steamid32FromSteamLogs();
     }
 
+    steamLiveLoggedIn() {
+        const login = this.account && this.account.login ? escape_regex(this.account.login) : null;
+        const login_state_ready = login ? new RegExp(`OnLoginStateChange\\s+${login}\\s+5\\s+`, 'i') : null;
+        const ready_patterns = [
+            /Logged in OK/i,
+            /Logged into Steam/i,
+            /Steam signed in/i,
+            /Steam client ready/i,
+            /Refresh complete/i,
+            /RecvMsgClientLogOnResponse\(\)\s*:\s*\[U:1:\d+\]\s*'OK'/i,
+            /\[Logged On,[^\]]*\]\s*\[U:1:\d+\]\s*RecvMsgClientLogOnResponse\(\)\s*:\s*processing complete/i,
+        ];
+
+        for (const log_path of this.existingSteamLogPaths()) {
+            try {
+                const log_text = fs.readFileSync(log_path, 'utf8');
+                if ((login_state_ready && login_state_ready.test(log_text)) ||
+                    ready_patterns.some((pattern) => pattern.test(log_text))) {
+                    return true;
+                }
+            } catch (error) { }
+        }
+
+        return false;
+    }
+
     steamLoggedIn() {
-        return !!this.steamid32FromSteamState();
+        return this.steamLiveLoggedIn() && !!this.steamid32FromSteamState();
     }
 
     sandboxHomePath(host_path) {

@@ -318,6 +318,11 @@ bool should_block_file(const char* raw_filename)
     return false;
   }
 
+  if (path_equals(extension, ".bsp") || path_equals(extension, ".nav") || is_required_model_asset(filename, extension))
+  {
+    return false;
+  }
+
   if (is_soundscape_script(filename) ||
       path_starts_with(filename, "materials/console/") ||
       path_starts_with(filename, "debug/"))
@@ -335,11 +340,6 @@ bool should_block_file(const char* raw_filename)
   }
 
   if (extension.empty())
-  {
-    return false;
-  }
-
-  if (path_equals(extension, ".bsp") || path_equals(extension, ".nav") || is_required_model_asset(filename, extension))
   {
     return false;
   }
