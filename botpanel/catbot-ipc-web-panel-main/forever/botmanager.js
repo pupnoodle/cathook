@@ -70,7 +70,7 @@ class BotManager {
     enforceQuota() {
         if (this.bots.length == this.quota)
             this.quota = this.wanted_quota;
-        if (this.bots.length < this.quota) {
+        while (this.bots.length < this.quota) {
             this.bots.push(new Bot.bot(this.bots.length));
         }
     }
