@@ -175,6 +175,30 @@ bool aimbot_projectile_charge_started(Weapon* weapon)
   }
 }
 
+bool aimbot_hitscan_cached_primary_ready(Player* localplayer, Weapon* weapon)
+{
+  static Weapon* last_weapon = nullptr;
+  static float cached_next_primary_attack = 0.0f;
+  static float last_fire_time = 0.0f;
+
+  if (localplayer == nullptr || weapon == nullptr || aimbot_is_projectile_weapon(weapon) || aimbot_is_melee_weapon(weapon)) {
+    return false;
+  }
+
+  const float weapon_last_fire_time = weapon->get_last_attack();
+  if (weapon != last_weapon || weapon_last_fire_time != last_fire_time) {
+    cached_next_primary_attack = weapon->get_next_primary_attack();
+    last_fire_time = weapon_last_fire_time;
+    last_weapon = weapon;
+  }
+
+  const float tick_interval = global_vars != nullptr && global_vars->interval_per_tick > 0.0f
+    ? global_vars->interval_per_tick
+    : static_cast<float>(TICK_INTERVAL);
+  const float server_time = static_cast<float>(localplayer->get_tickbase()) * tick_interval;
+  return cached_next_primary_attack <= server_time;
+}
+
 bool aimbot_weapon_can_attack_or_release_projectile(Player* localplayer, Weapon* weapon)
 {
   if (localplayer == nullptr || weapon == nullptr) {
@@ -182,6 +206,10 @@ bool aimbot_weapon_can_attack_or_release_projectile(Player* localplayer, Weapon*
   }
 
   if (weapon->can_primary_attack()) {
+    return true;
+  }
+
+  if (aimbot_hitscan_cached_primary_ready(localplayer, weapon)) {
     return true;
   }
 
