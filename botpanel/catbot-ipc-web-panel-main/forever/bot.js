@@ -1234,19 +1234,32 @@ class Bot extends EventEmitter {
 
         for (const steam_root of this.steamInstallCandidates()) {
             cache_paths.push(path.join(steam_root, 'config/htmlcache'));
+            cache_paths.push(path.join(steam_root, 'config/cefdata'));
+            cache_paths.push(path.join(steam_root, 'config/overlayhtmlcache'));
             cache_paths.push(path.join(steam_root, 'appcache/httpcache'));
+            cache_paths.push(path.join(steam_root, 'appcache/cefdata'));
         }
 
-        const real_cache_paths = [];
+        const removable_cache_paths = [];
         for (const cache_path of unique_paths(cache_paths)) {
+            const resolved_cache_path = path.resolve(cache_path);
+            if (resolved_cache_path !== path.resolve(this.home) && !path_is_inside(resolved_cache_path, path.resolve(this.home)))
+                continue;
+
             try {
+                const cache_status = fs.lstatSync(cache_path);
+                if (cache_status.isSymbolicLink()) {
+                    removable_cache_paths.push(cache_path);
+                    continue;
+                }
+
                 const cache_real_path = fs.realpathSync(cache_path);
                 if (cache_real_path === home_real_path || path_is_inside(cache_real_path, home_real_path))
-                    real_cache_paths.push(cache_real_path);
+                    removable_cache_paths.push(cache_real_path);
             } catch (error) { }
         }
 
-        return unique_paths(real_cache_paths);
+        return unique_paths(removable_cache_paths);
     }
 
     clear_steam_webhelper_cache() {
