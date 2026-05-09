@@ -433,6 +433,14 @@ static bool aimbot_should_relax_final_trace()
   return aimbot_actual_frame_time() >= (1.0f / 30.0f);
 }
 
+static bool aimbot_weapon_allows_primary_fire(Player* localplayer, Weapon* weapon) {
+  if (localplayer == nullptr || weapon == nullptr) {
+    return false;
+  }
+
+  return localplayer->is_scoped() || weapon->get_def_id() != Sniper_m_TheMachina;
+}
+
 static void aimbot_apply_visible_view(user_cmd* user_cmd) {
   if (user_cmd == nullptr || config.aimbot.aim_mode == Aim::AimMode::PSILENT) {
     return;
@@ -773,7 +781,7 @@ bool aimbot(user_cmd* user_cmd, Vec3 original_view_angles) {
   const bool relaxed_final_trace = aimbot_should_relax_final_trace();
   const bool hitscan_solution = !aimbot_is_projectile_weapon(weapon) && !aimbot_is_melee_weapon(weapon);
   const bool hitscan_ready = !hitscan_solution ||
-    (relaxed_final_trace && best_candidate.visible) ||
+    best_candidate.visible ||
     hitscan_aim_trace_candidate(localplayer, best_candidate, user_cmd->view_angles);
   const bool melee_solution = aimbot_is_melee_weapon(weapon);
   const bool relaxed_melee_ready = relaxed_final_trace &&
@@ -804,7 +812,7 @@ bool aimbot(user_cmd* user_cmd, Vec3 original_view_angles) {
     !aimbot_mode_uses_visible_steering() ||
     attack_requested ||
     aimbot_calculate_fov(projectile_view_angles, user_cmd->view_angles) <= aimbot_projectile_visible_settle_fov(best_candidate);
-  const bool attack_ready = localplayer->can_shoot(best_candidate.entity) &&
+  const bool attack_ready = aimbot_weapon_allows_primary_fire(localplayer, weapon) &&
     projectile_visible_settled &&
     projectile_ready &&
     hitscan_ready &&
