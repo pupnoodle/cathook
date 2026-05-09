@@ -674,6 +674,7 @@ bool aimbot(user_cmd* user_cmd, Vec3 original_view_angles) {
     target_entity = nullptr;
     clear_aimbot_preference();
     reset_autoscope_scope_state();
+    reset_aimbot_scope_timing();
     reset_aimbot_input_history();
     return false;
   }
@@ -683,15 +684,19 @@ bool aimbot(user_cmd* user_cmd, Vec3 original_view_angles) {
     target_player = nullptr;
     target_entity = nullptr;
     reset_autoscope_scope_state();
+    reset_aimbot_scope_timing();
     reset_aimbot_input_history();
     return false;
   }
+
+  update_aimbot_scope_timing(localplayer);
 
   Weapon* weapon = localplayer->get_weapon();
   if (weapon == nullptr) {
     target_player = nullptr;
     target_entity = nullptr;
     reset_autoscope_scope_state();
+    reset_aimbot_scope_timing();
     store_aimbot_input_angles(source_view_angles);
     return false;
   }
@@ -772,13 +777,8 @@ bool aimbot(user_cmd* user_cmd, Vec3 original_view_angles) {
   const Vec3 projectile_view_angles = projectile_solution
     ? aimbot_apply_projectile_random_compensation(localplayer, weapon, user_cmd, projectile_base_angles)
     : user_cmd->view_angles;
-  const bool projectile_ready = aimbot_projectile_solution_ready(
-    localplayer,
-    weapon,
-    user_cmd,
-    best_candidate,
-    projectile_view_angles);
   const bool relaxed_final_trace = aimbot_should_relax_final_trace();
+  const bool visible_steering = aimbot_mode_uses_visible_steering();
   const bool hitscan_solution = !aimbot_is_projectile_weapon(weapon) && !aimbot_is_melee_weapon(weapon);
   const bool hitscan_ready = !hitscan_solution ||
     best_candidate.visible ||
@@ -788,6 +788,7 @@ bool aimbot(user_cmd* user_cmd, Vec3 original_view_angles) {
     ((best_candidate.player != nullptr && best_candidate.melee_has_prediction) ||
       (best_candidate.player == nullptr && best_candidate.entity != nullptr && best_candidate.visible));
   const bool melee_ready = !melee_solution ||
+    (!visible_steering && best_candidate.visible) ||
     relaxed_melee_ready ||
     (best_candidate.player != nullptr &&
       best_candidate.melee_has_prediction &&
@@ -809,9 +810,17 @@ bool aimbot(user_cmd* user_cmd, Vec3 original_view_angles) {
 
   const bool attack_requested = (user_cmd->buttons & IN_ATTACK) != 0;
   const bool projectile_visible_settled = !projectile_solution ||
-    !aimbot_mode_uses_visible_steering() ||
+    !visible_steering ||
     attack_requested ||
     aimbot_calculate_fov(projectile_view_angles, user_cmd->view_angles) <= aimbot_projectile_visible_settle_fov(best_candidate);
+  const bool projectile_ready = !projectile_solution ||
+    (projectile_visible_settled && best_candidate.visible) ||
+    aimbot_projectile_solution_ready(
+      localplayer,
+      weapon,
+      user_cmd,
+      best_candidate,
+      projectile_view_angles);
   const bool attack_ready = aimbot_weapon_allows_primary_fire(localplayer, weapon) &&
     projectile_visible_settled &&
     projectile_ready &&

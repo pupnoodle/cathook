@@ -832,9 +832,14 @@ inline bool aimbot_wait_for_headshot_ready(Player* localplayer, Weapon* weapon) 
   if (attribute_manager != nullptr && attribute_manager->attrib_hook_value(0, "sniper_crit_no_scope", weapon->to_entity()) != 0) return true;
   if (!localplayer->is_scoped() || localplayer->get_fov() >= localplayer->get_default_fov()) return false;
 
-  float current_time = global_vars != nullptr ? global_vars->curtime : localplayer->get_tickbase() * TICK_INTERVAL;
-  float scoped_time = current_time - localplayer->get_fov_time();
-  return scoped_time >= 0.2f;
+  const float tracked_scoped_time = aimbot_tracked_scoped_time(localplayer);
+  if (tracked_scoped_time >= 0.2f) {
+    return true;
+  }
+
+  const float current_time = global_vars != nullptr ? global_vars->curtime : localplayer->get_tickbase() * TICK_INTERVAL;
+  const float fov_scoped_time = current_time - localplayer->get_fov_time();
+  return fov_scoped_time >= 0.2f;
 }
 
 inline bool aimbot_is_projectile_weapon(Weapon* weapon) {
