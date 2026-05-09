@@ -159,6 +159,9 @@ function steam_webhelper_browser_stalled(text) {
     if (text.includes('Timed out waiting for webhelper init'))
         return true;
 
+    if (text.includes('LockMgrMutex failed') || text.includes('pthreads futex robust_list is corrupt'))
+        return true;
+
     if (!text.includes('CreateResponse') && !text.includes('BrowserReady')) {
         const restart_count = (text.match(/Restart webhelper process/g) || []).length;
         if (restart_count >= 2)
@@ -2220,9 +2223,8 @@ class Bot extends EventEmitter {
                         this.account = accounts.get(this.botid, this.account_generation);
                     }
                     const start_slots_available = module.exports.currentlyStartingGames < max_concurrent_bots();
-                    const starting_batch_active = module.exports.currentlyStartingGames > 0;
                     const start_delay_elapsed = module.exports.lastStartTime + DELAY_START_TIME < time;
-                    if (this.account && start_slots_available && (starting_batch_active || start_delay_elapsed)) {
+                    if (this.account && start_slots_available && start_delay_elapsed) {
                         module.exports.lastStartTime = time;
                         module.exports.currentlyStartingGames++;
                         this.state = STATE.STARTING;
