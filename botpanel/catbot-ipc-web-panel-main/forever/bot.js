@@ -1227,14 +1227,16 @@ class Bot extends EventEmitter {
             cache_paths.push(path.join(steam_root, 'appcache/httpcache'));
         }
 
-        return unique_paths(cache_paths).filter((cache_path) => {
+        const real_cache_paths = [];
+        for (const cache_path of unique_paths(cache_paths)) {
             try {
                 const cache_real_path = fs.realpathSync(cache_path);
-                return cache_real_path === home_real_path || path_is_inside(cache_real_path, home_real_path);
-            } catch (error) {
-                return false;
-            }
-        });
+                if (cache_real_path === home_real_path || path_is_inside(cache_real_path, home_real_path))
+                    real_cache_paths.push(cache_real_path);
+            } catch (error) { }
+        }
+
+        return unique_paths(real_cache_paths);
     }
 
     clear_steam_webhelper_cache() {
@@ -1242,12 +1244,11 @@ class Bot extends EventEmitter {
 
         for (const cache_path of this.steam_webhelper_cache_paths()) {
             try {
-                const cache_real_path = fs.realpathSync(cache_path);
-                if (removed_paths.has(cache_real_path))
+                if (removed_paths.has(cache_path))
                     continue;
 
-                fs.rmSync(cache_real_path, { recursive: true, force: true });
-                removed_paths.add(cache_real_path);
+                fs.rmSync(cache_path, { recursive: true, force: true });
+                removed_paths.add(cache_path);
             } catch (error) {
                 this.log(`Failed to clear Steam webhelper cache ${cache_path}: ${error.message}`);
             }
@@ -2158,7 +2159,10 @@ class Bot extends EventEmitter {
                         this.log(`Preparing to restart with account generation ${this.account_generation}...`);
                         this.account = accounts.get(this.botid, this.account_generation);
                     }
-                    if (this.account && module.exports.currentlyStartingGames < max_concurrent_bots() && module.exports.lastStartTime + DELAY_START_TIME < time) {
+                    const start_slots_available = module.exports.currentlyStartingGames < max_concurrent_bots();
+                    const starting_batch_active = module.exports.currentlyStartingGames > 0;
+                    const start_delay_elapsed = module.exports.lastStartTime + DELAY_START_TIME < time;
+                    if (this.account && start_slots_available && (starting_batch_active || start_delay_elapsed)) {
                         module.exports.lastStartTime = time;
                         module.exports.currentlyStartingGames++;
                         this.state = STATE.STARTING;
