@@ -180,6 +180,13 @@ bool client_mode_create_move_hook(void* me, float sample_time, user_cmd* user_cm
   }
 
   if (g_client_create_move_owns_features) {
+    if (can_run_move_features(user_cmd)) {
+      Player* localplayer = entity_list->get_localplayer();
+      if (should_run_taunt_slide(localplayer)) {
+        return false;
+      }
+    }
+
     return client_mode_create_move_original(me, sample_time, user_cmd);
   }
 
