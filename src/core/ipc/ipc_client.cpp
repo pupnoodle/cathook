@@ -30,6 +30,7 @@ V  o o  V  file: src/core/ipc/ipc_client.cpp
 #include <cstring>
 #include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -54,8 +55,8 @@ shared_state* ipc_state = nullptr;
 int local_peer_id = -1;
 unsigned long last_command = 0;
 std::time_t injected_time = 0;
-bool ipc_enabled = true;
-bool auto_ignore_enabled = true;
+std::atomic_bool ipc_enabled = true;
+std::atomic_bool auto_ignore_enabled = true;
 bool was_connected_to_server = false;
 std::uint32_t cached_local_account_id = 0;
 std::chrono::steady_clock::time_point next_connect_attempt{};
@@ -63,6 +64,7 @@ std::chrono::steady_clock::time_point game_telemetry_ready_since{};
 std::mutex ipc_mutex{};
 std::thread ipc_worker{};
 std::atomic_bool ipc_worker_running = false;
+std::shared_mutex local_ipc_friends_mutex{};
 std::unordered_set<std::uint32_t> local_ipc_friends{};
 
 [[nodiscard]] auto textmode_build() -> bool
@@ -230,26 +232,35 @@ void reset_game_telemetry_locked(user_data_s& data)
 
 void refresh_local_ipc_friends_locked()
 {
+  std::unordered_set<std::uint32_t> refreshed_friends{};
+  refreshed_friends.reserve(max_peers);
+
+  if (ipc_state != nullptr)
+  {
+    const auto now = now_seconds();
+    for (auto index = 0u; index < max_peers; ++index)
+    {
+      if (!peer_alive(ipc_state->peer_data[index], now))
+      {
+        continue;
+      }
+
+      const auto friend_id = ipc_state->peer_user_data[index].friendid;
+      if (friend_id != 0)
+      {
+        refreshed_friends.insert(friend_id);
+      }
+    }
+  }
+
+  std::unique_lock lock{local_ipc_friends_mutex};
+  local_ipc_friends.swap(refreshed_friends);
+}
+
+void clear_local_ipc_friends()
+{
+  std::unique_lock lock{local_ipc_friends_mutex};
   local_ipc_friends.clear();
-  if (ipc_state == nullptr)
-  {
-    return;
-  }
-
-  const auto now = now_seconds();
-  for (auto index = 0u; index < max_peers; ++index)
-  {
-    if (!peer_alive(ipc_state->peer_data[index], now))
-    {
-      continue;
-    }
-
-    const auto friend_id = ipc_state->peer_user_data[index].friendid;
-    if (friend_id != 0)
-    {
-      local_ipc_friends.insert(friend_id);
-    }
-  }
 }
 
 void mark_peer_free()
@@ -317,7 +328,7 @@ void mark_peer_free()
 
 void try_connect()
 {
-  if (!ipc_enabled || ipc_state != nullptr)
+  if (!ipc_enabled.load(std::memory_order_acquire) || ipc_state != nullptr)
   {
     return;
   }
@@ -656,7 +667,7 @@ void ipc_worker_main()
   {
     {
       std::lock_guard lock{ipc_mutex};
-      if (ipc_enabled)
+      if (ipc_enabled.load(std::memory_order_acquire))
       {
         // The textmode worker keeps early IPC state alive, but Source client
         // commands must be executed from the game thread via tick().
@@ -695,8 +706,8 @@ void stop_ipc_worker()
 
 void set_enabled(bool enabled)
 {
-  ipc_enabled = textmode_build() || enabled;
-  if (!ipc_enabled)
+  ipc_enabled.store(textmode_build() || enabled, std::memory_order_release);
+  if (!ipc_enabled.load(std::memory_order_acquire))
   {
     shutdown();
   }
@@ -704,7 +715,7 @@ void set_enabled(bool enabled)
 
 void set_auto_ignore_enabled(bool enabled)
 {
-  auto_ignore_enabled = textmode_build() || enabled;
+  auto_ignore_enabled.store(textmode_build() || enabled, std::memory_order_release);
 }
 
 void start()
@@ -792,7 +803,7 @@ void shutdown()
   local_peer_id = -1;
   last_command = 0;
   game_telemetry_ready_since = {};
-  local_ipc_friends.clear();
+  clear_local_ipc_friends();
 }
 
 bool connected()
@@ -807,7 +818,13 @@ int peer_id()
 
 bool is_local_ipc_friend(std::uint32_t friend_id)
 {
-  return auto_ignore_enabled && friend_id != 0 && local_ipc_friends.contains(friend_id);
+  if (!auto_ignore_enabled.load(std::memory_order_acquire) || friend_id == 0)
+  {
+    return false;
+  }
+
+  std::shared_lock lock{local_ipc_friends_mutex};
+  return local_ipc_friends.find(friend_id) != local_ipc_friends.end();
 }
 
 } // namespace cat_ipc::client

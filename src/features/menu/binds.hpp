@@ -117,6 +117,11 @@ inline std::unordered_map<std::string, void*>& key_to_pointer() {
   return value;
 }
 
+inline std::unordered_map<std::string, value_type>& key_to_type() {
+  static std::unordered_map<std::string, value_type> value{};
+  return value;
+}
+
 inline std::vector<button_entry>& button_entries() {
   static std::vector<button_entry> value{};
   return value;
@@ -228,8 +233,10 @@ inline const char* mode_label(const button::mode_type mode) {
 
 template <typename value_t>
 inline void register_target(const char* target_key, const char* label, value_t* target) {
+  const value_type target_type = get_value_type(target);
   pointer_to_key()[target] = target_key;
   key_to_pointer()[target_key] = target;
+  key_to_type()[target_key] = target_type;
 
   if (bind_entry* entry = find_entry(target_key)) {
     entry->target = target;
@@ -237,7 +244,7 @@ inline void register_target(const char* target_key, const char* label, value_t* 
       entry->label = label;
     }
     entry->default_label = label;
-    entry->type = get_value_type(target);
+    entry->type = target_type;
   }
 }
 
@@ -972,7 +979,8 @@ inline void load(cathook::core::config_store* store) {
   register_builtin_button_targets();
   entries().clear();
 
-  const int count = std::max(0, store->get_int("binds.count", 0));
+  const int count = std::clamp(store->get_int("binds.count", 0), 0, static_cast<int>(key_to_pointer().size()));
+  entries().reserve(static_cast<std::size_t>(count));
   for (int index = 0; index < count; ++index) {
     const std::string prefix = "binds." + std::to_string(index) + ".";
     bind_entry entry{};
@@ -981,16 +989,21 @@ inline void load(cathook::core::config_store* store) {
       continue;
     }
 
+    const auto target_it = key_to_pointer().find(entry.target_key);
+    const auto type_it = key_to_type().find(entry.target_key);
+    if (target_it == key_to_pointer().end() || type_it == key_to_type().end() || target_it->second == nullptr) {
+      continue;
+    }
+
+    entry.target = target_it->second;
+    entry.type = type_it->second;
     entry.label = store->get_string(prefix + "label", entry.target_key);
-    entry.type = static_cast<value_type>(std::clamp(store->get_int(prefix + "type", 0), 0, 2));
     entry.widget = static_cast<widget_type>(std::clamp(store->get_int(prefix + "widget", 0), 0, 3));
     entry.trigger.button = store->get_int(prefix + "button", SDLK_UNKNOWN);
     entry.trigger.mode = static_cast<button::mode_type>(std::clamp(store->get_int(prefix + "mode", 0), 0, 2));
     entry.enabled = store->get_bool(prefix + "enabled", true);
     entry.show_in_indicator = store->get_bool(prefix + "show_in_indicator", true);
     reset_button_state(entry.trigger);
-    const auto target_it = key_to_pointer().find(entry.target_key);
-    entry.target = target_it != key_to_pointer().end() ? target_it->second : nullptr;
 
     if (entry.type == value_type::boolean) {
       entry.default_value = store->get_bool(prefix + "default_bool", entry.target != nullptr ? *static_cast<bool*>(entry.target) : false);
@@ -1008,7 +1021,7 @@ inline void load(cathook::core::config_store* store) {
     entries().push_back(entry);
   }
 
-  const int button_count = std::max(0, store->get_int("button_binds.count", 0));
+  const int button_count = std::clamp(store->get_int("button_binds.count", 0), 0, static_cast<int>(button_entries().size()));
   for (int index = 0; index < button_count; ++index) {
     const std::string prefix = "button_binds." + std::to_string(index) + ".";
     const std::string target_key = store->get_string(prefix + "target_key", "");

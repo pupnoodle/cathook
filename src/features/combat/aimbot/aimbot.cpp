@@ -776,7 +776,7 @@ static bool aimbot_projectile_solution_ready(Player* localplayer,
 
 bool aimbot(user_cmd* user_cmd, Vec3 original_view_angles) {
   g_aimbot_requested_shot = false;
-  const Vec3 source_view_angles = user_cmd != nullptr ? user_cmd->view_angles : original_view_angles;
+  const Vec3 source_view_angles = original_view_angles;
 
   if (!config.aimbot.master) {
     target_player = nullptr;
@@ -893,7 +893,6 @@ bool aimbot(user_cmd* user_cmd, Vec3 original_view_angles) {
   const bool visible_steering = aimbot_mode_uses_visible_steering();
   const bool hitscan_solution = !aimbot_is_projectile_weapon(weapon) && !aimbot_is_melee_weapon(weapon);
   const bool hitscan_ready = !hitscan_solution ||
-    best_candidate.visible ||
     hitscan_aim_trace_candidate(localplayer, best_candidate, user_cmd->view_angles);
   const bool melee_solution = aimbot_is_melee_weapon(weapon);
   const bool relaxed_melee_ready = relaxed_final_trace &&
@@ -945,6 +944,14 @@ bool aimbot(user_cmd* user_cmd, Vec3 original_view_angles) {
   }
   if (config.aimbot.auto_shoot && attack_ready) {
     g_aimbot_requested_shot = aimbot_apply_projectile_auto_shoot(user_cmd, weapon, projectile_solution);
+  }
+
+  if (attack_ready &&
+      hitscan_solution &&
+      best_candidate.player != nullptr &&
+      (user_cmd->buttons & IN_ATTACK) != 0) {
+    user_cmd->tick_count = local_prediction_time_to_ticks(
+      best_candidate.player->get_simulation_time() + local_prediction_interp_time());
   }
 
   const bool projectile_charge_release =
