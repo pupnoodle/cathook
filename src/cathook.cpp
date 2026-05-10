@@ -1088,53 +1088,48 @@ bool initialize_game_runtime() {
     print("Client::CreateMove hooked\n");
   }
   
-  const bool skip_rendering_hooks = nographics::should_skip_rendering_hooks();
-  if (skip_rendering_hooks) {
-    print("Skipping rendering hooks because nographics render stubs are active\n");
+  override_view_original = (void (*)(void*, view_setup*))client_mode_vtable[17];  
+  if (!write_to_table(client_mode_vtable, 17, (void*)override_view_hook)) {
+    print("OverrideView hook failed\n");
   } else {
-    override_view_original = (void (*)(void*, view_setup*))client_mode_vtable[17];
-    if (!write_to_table(client_mode_vtable, 17, (void*)override_view_hook)) {
-      print("OverrideView hook failed\n");
-    } else {
-      print("OverrideView hooked\n");
-    }
+    print("OverrideView hooked\n");
+  }
 
-    draw_view_model_original = (bool (*)(void*))client_mode_vtable[25];
-    if (!write_to_table(client_mode_vtable, 25, (void*)draw_view_model_hook)) {
-      print("ShouldDrawViewModel hook failed\n");
-    } else {
-      print("ShouldDrawViewModel hooked\n");
-    }
+  draw_view_model_original = (bool (*)(void*))client_mode_vtable[25];  
+  if (!write_to_table(client_mode_vtable, 25, (void*)draw_view_model_hook)) {
+    print("ShouldDrawViewModel hook failed\n");
+  } else {
+    print("ShouldDrawViewModel hooked\n");
+  }
 
-    do_post_screen_space_effects_original = (bool (*)(void*, view_setup*))client_mode_vtable[39];
-    if (!write_to_table(client_mode_vtable, 39, (void*)do_post_screen_space_effects_hook)) {
-      print("DoPostScreenSpaceEffects hook failed\n");
-    } else {
-      print("DoPostScreenSpaceEffects hooked\n");
-    }
+  do_post_screen_space_effects_original = (bool (*)(void*, view_setup*))client_mode_vtable[39];
+  if (!write_to_table(client_mode_vtable, 39, (void*)do_post_screen_space_effects_hook)) {
+    print("DoPostScreenSpaceEffects hook failed\n");
+  } else {
+    print("DoPostScreenSpaceEffects hooked\n");
+  }
+  
+  vgui_vtable = *(void ***)vgui;
+  paint_traverse_original = (void (*)(void*, void*, bool, bool))vgui_vtable[42];  
+  if (!write_to_table(vgui_vtable, 42, (void*)paint_traverse_hook)) {
+    print("PaintTraverse hook failed\n");
+  } else {
+    print("PaintTraverse hooked\n");
+  }
 
-    vgui_vtable = *(void ***)vgui;
-    paint_traverse_original = (void (*)(void*, void*, bool, bool))vgui_vtable[42];
-    if (!write_to_table(vgui_vtable, 42, (void*)paint_traverse_hook)) {
-      print("PaintTraverse hook failed\n");
-    } else {
-      print("PaintTraverse hooked\n");
-    }
+  model_render_vtable = *(void ***)model_render;    
+  forced_material_override_original = (void (*)(void*, Material*, OverrideType))model_render_vtable[1];
+  if (!write_to_table(model_render_vtable, 1, (void*)forced_material_override_hook)) {
+    print("ForcedMaterialOverride hook failed\n");
+  } else {
+    print("ForcedMaterialOverride hooked\n");
+  }
 
-    model_render_vtable = *(void ***)model_render;
-    forced_material_override_original = (void (*)(void*, Material*, OverrideType))model_render_vtable[1];
-    if (!write_to_table(model_render_vtable, 1, (void*)forced_material_override_hook)) {
-      print("ForcedMaterialOverride hook failed\n");
-    } else {
-      print("ForcedMaterialOverride hooked\n");
-    }
-
-    draw_model_execute_original = (void (*)(void*, void*, ModelRenderInfo*, VMatrix*))model_render_vtable[19];
-    if (!write_to_table(model_render_vtable, 19, (void*)draw_model_execute_hook)) {
-      print("DrawModelExecute hook failed\n");
-    } else {
-      print("DrawModelExecute hooked\n");
-    }
+  draw_model_execute_original = (void (*)(void*, void*, ModelRenderInfo*, VMatrix*))model_render_vtable[19];  
+  if (!write_to_table(model_render_vtable, 19, (void*)draw_model_execute_hook)) {
+    print("DrawModelExecute hook failed\n");
+  } else {
+    print("DrawModelExecute hooked\n");
   }
   
   game_event_manager_vtable = *(void***)game_event_manager;
@@ -1160,15 +1155,13 @@ bool initialize_game_runtime() {
     print("DispatchUserMessage hooked\n");
   }
 
-  if (!skip_rendering_hooks) {
-    render_view_vtable = *(void***)render_view;
+  render_view_vtable = *(void***)render_view;
 
-    scene_end_original = (void (*)(void*, void*))render_view_vtable[9];
-    if (!write_to_table(render_view_vtable, 9, (void*)scene_end_hook)) {
-      print("SceneEnd hook failed\n");
-    } else {
-      print("SceneEnd hooked\n");
-    }
+  scene_end_original = (void (*)(void*, void*))render_view_vtable[9];
+  if (!write_to_table(render_view_vtable, 9, (void*)scene_end_hook)) {
+    print("SceneEnd hook failed\n");
+  } else {
+    print("SceneEnd hooked\n");
   }  
   
   
