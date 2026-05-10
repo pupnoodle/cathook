@@ -248,13 +248,13 @@ void prune_prediction_fixes()
   }
 }
 
-void account_generated_command(bool force_send)
+void spend_shift_tick()
 {
-  if (force_send) {
-    g_state.processing_ticks = std::max(0, g_state.processing_ticks - 1);
-    return;
-  }
+  g_state.processing_ticks = std::max(0, g_state.processing_ticks - 1);
+}
 
+void recharge_shift_tick()
+{
   g_state.processing_ticks = std::min(max_processing_ticks(), g_state.processing_ticks + 1);
 }
 
@@ -281,7 +281,7 @@ void set_choked_command()
   ++client_state->chokedcommands;
 }
 
-auto send_move(bool account_processing_ticks) -> bool
+auto send_move() -> bool
 {
   auto* channel = client_state != nullptr ? client_state->m_NetChannel : nullptr;
   if (channel == nullptr || client == nullptr) {
@@ -322,10 +322,6 @@ auto send_move(bool account_processing_ticks) -> bool
 
   if (!channel->send_net_msg(message, false, false)) {
     return false;
-  }
-
-  if (account_processing_ticks) {
-    g_state.processing_ticks = std::max(0, g_state.processing_ticks - message.new_commands);
   }
 
   return true;
@@ -526,9 +522,12 @@ auto run_rebuilt_move(float accumulated_extra_samples, bool final_tick, bool for
   }
 
   if (client_state->m_nSignonState == signon_state_full) {
-    account_generated_command(force_send);
+    if (force_send) {
+      spend_shift_tick();
+    }
 
     if (!force_send && should_recharge() && client_state->chokedcommands == 0) {
+      recharge_shift_tick();
       g_state.recharging = true;
       g_state.send_packet = false;
       return true;
@@ -552,7 +551,7 @@ auto run_rebuilt_move(float accumulated_extra_samples, bool final_tick, bool for
     }
 
     if (g_state.send_packet) {
-      send_move(!force_send);
+      send_move();
     } else {
       set_choked_command();
     }

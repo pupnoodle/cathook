@@ -354,10 +354,10 @@ function updateUserData(bot, data) {
 	if (!row.length) return;
 	row.toggleClass('stopped', data.state != 5);
 	row.find('.client-state').text(STATE[data.state]);
+	row.find('.client-restarts').text(data.restarts);
 	if (data.state === 5 && data.ipc) {
 		row.attr('data-pid', data.ipc.pid);
 		row.find('.client-pid').text(data.ipc.pid);
-        row.find('.client-restarts').text(data.restarts);
 		const profile_url = data.profile_url || steam_id.profile_url_from_account_id32(data.ipc.friendid);
 		row.find('.client-steam').empty();
 		if (profile_url) {
@@ -366,7 +366,7 @@ function updateUserData(bot, data) {
 			row.find('.client-steam').text('N/A');
 		}
 	}
-	if (data.state != 5) {
+	if (data.state != 5 || !data.ipc) {
 		row.find('.active').text('N/A');
 	}
 	update_ban_tracker_data(row, data.ban_tracker);

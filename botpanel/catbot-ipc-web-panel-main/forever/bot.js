@@ -49,6 +49,8 @@ const steam_client_initialized_game_delay = (Number.isFinite(STEAM_CLIENT_INITIA
 const TIMEOUT_START_GAME = 10000;
 // Timeout for cathook to connect to the IPC server once injected
 const TIMEOUT_IPC_STATE = Number.parseInt(process.env.CAT_IPC_TIMEOUT_SECONDS || '90', 10) * 1000;
+const ipc_heartbeat_stale_timeout = Number.parseInt(process.env.CAT_IPC_STALE_SECONDS || '45', 10) * 1000;
+const runtime_kill_grace_time = Number.parseInt(process.env.CAT_RUNTIME_KILL_GRACE_SECONDS || '8', 10) * 1000;
 // Time to wait for Steam to log in is configured in ch-settings.json. 0 disables it.
 const TIMEOUT_STEAM_ASSUME_READY = Number.parseInt(process.env.CAT_STEAM_READY_SECONDS || '0', 10) * 1000;
 const STEAM_LOGGED_IN_GAME_DELAY_SECONDS_VALUE = Number.parseInt(process.env.CAT_STEAM_LOGGED_IN_GAME_DELAY_SECONDS || '10', 10);
@@ -402,10 +404,21 @@ function kill_process_tree(root_pid, signal) {
     if (!root_pid || root_pid <= 0)
         return 0;
 
+    const pids = collect_process_tree_pids(root_pid);
+    return kill_pids(pids, signal);
+}
+
+function collect_process_tree_pids(root_pid) {
+    if (!root_pid || root_pid <= 0)
+        return [];
+
     const processes = read_process_table();
     const pids = collect_descendant_pids(root_pid, processes).reverse();
     pids.push(root_pid);
+    return pids;
+}
 
+function kill_pids(pids, signal) {
     var killed_count = 0;
     for (const pid of pids) {
         try {
@@ -715,6 +728,8 @@ class Bot extends EventEmitter {
         this.steamwebhelper_cleanup_done = false;
         this.steamwebhelper_frozen_pid = -1;
         this.steamClientInitialized = false;
+        this.game_kill_generation = 0;
+        this.steam_kill_generation = 0;
 
         this.logSteam = null;
         this.logGame = null;
@@ -732,6 +747,8 @@ class Bot extends EventEmitter {
 
         this.on('ipc-data', function (obj) {
             if (!self.procFirejailGame)
+                return;
+            if (self.shouldRestart)
                 return;
             if (self.state != STATE.RUNNING && self.state != STATE.WAITING)
                 return;
@@ -1639,7 +1656,6 @@ class Bot extends EventEmitter {
 
     spawnGame() {
         var self = this;
-        this.restarts++;
 
         var filename = `/tmp/.gl${makeid(6)}`;
         const source_library = cathook_game_library();
@@ -1701,6 +1717,7 @@ class Bot extends EventEmitter {
         self.procFirejailGame.stdout.pipe(self.logGame);
         self.procFirejailGame.stderr.pipe(self.logGame);
         self.procFirejailGame.on('exit', self.handleGameExit.bind(self));
+        this.restarts++;
         return true;
     }
 
@@ -1754,9 +1771,7 @@ class Bot extends EventEmitter {
             this.runGdbCrashReport(game_pid, code, signal);
         else
             this.removeGamePreloadLibrary();
-        this.ipcState = null;
-        this.ipcID = -1;
-        this.ipcLastHeartbeat = 0;
+        this.clear_ipc_state();
         this.gameStarted = 0;
         this.gamePid = -1;
         this.time_steamLoggedIn = 0;
@@ -1771,9 +1786,31 @@ class Bot extends EventEmitter {
         delete this.procFirejailGame;
     }
 
+    clear_ipc_state() {
+        this.ipcState = null;
+        this.ipcID = -1;
+        this.ipcLastHeartbeat = 0;
+    }
+
+    ipc_heartbeat_stale(time) {
+        if (!this.ipcState || !this.ipcState.heartbeat || !ipc_heartbeat_stale_timeout)
+            return false;
+
+        return time - this.ipcState.heartbeat * 1000 > ipc_heartbeat_stale_timeout;
+    }
+
+    request_restart(reason) {
+        this.log(`Restart requested: ${reason}`);
+        this.clear_ipc_state();
+        if (this.shouldRun)
+            this.shouldRestart = true;
+        else
+            this.shouldRun = true;
+    }
+
     reset() {
         this.procFirejailSteam = null;
-        this.procFirejailSteam = null;
+        this.procFirejailGame = null;
         this.isSteamWorking = false;
         this.time_steamWorking = 0;
         this.time_steam_launch_started = 0;
@@ -1793,22 +1830,63 @@ class Bot extends EventEmitter {
         this.steamwebhelper_cleanup_done = false;
         this.steamwebhelper_frozen_pid = -1;
         this.gamePid = -1;
+        this.gameStarted = 0;
+        this.startTime = null;
         this.removeGamePreloadLibrary();
         // Needs to be reset here because resetting it in handleGameExit is not enough
-        this.ipcState = null;
+        this.clear_ipc_state();
+    }
+
+    schedule_forced_runtime_kill(kind, root_pid, generation) {
+        if (!root_pid || root_pid <= 0 || !runtime_kill_grace_time)
+            return;
+
+        const pid_starttimes = new Map();
+        for (const pid of collect_process_tree_pids(root_pid)) {
+            const info = read_proc_stat(pid);
+            if (info)
+                pid_starttimes.set(pid, info.starttime);
+        }
+        setTimeout(() => {
+            const current_generation = kind === 'game' ? this.game_kill_generation : this.steam_kill_generation;
+            if (current_generation === generation) {
+                const stale_pids = [];
+                for (const [pid, starttime] of pid_starttimes.entries()) {
+                    const info = read_proc_stat(pid);
+                    if (info && info.starttime === starttime)
+                        stale_pids.push(pid);
+                }
+
+                const killed_count = kill_pids(stale_pids, 'SIGKILL');
+                if (killed_count)
+                    this.log(`Force-killed stuck ${kind} process tree pid=${root_pid} count=${killed_count}`);
+            }
+        }, runtime_kill_grace_time);
     }
 
     killSteam() {
         this.log('Killing steam');
         this.resume_steamwebhelper();
         // Firejail will handle smooth termination
-        if (this.procFirejailSteam)
-            this.procFirejailSteam.kill("SIGINT");
+        if (this.procFirejailSteam) {
+            const pid = this.procFirejailSteam.pid;
+            const generation = ++this.steam_kill_generation;
+            try {
+                this.procFirejailSteam.kill("SIGINT");
+            } catch (error) { }
+            this.schedule_forced_runtime_kill('steam', pid, generation);
+        }
     }
     killGame() {
         this.log('Killing game');
-        if (this.procFirejailGame)
-            this.procFirejailGame.kill("SIGINT");
+        if (this.procFirejailGame) {
+            const pid = this.procFirejailGame.pid;
+            const generation = ++this.game_kill_generation;
+            try {
+                this.procFirejailGame.kill("SIGINT");
+            } catch (error) { }
+            this.schedule_forced_runtime_kill('game', pid, generation);
+        }
     }
 
     force_kill_runtime_processes(delay_ms) {
@@ -1833,9 +1911,7 @@ class Bot extends EventEmitter {
         this.shouldRun = true;
         this.shouldRestart = true;
         this.account = null;
-        this.ipcState = null;
-        this.ipcID = -1;
-        this.ipcLastHeartbeat = 0;
+        this.clear_ipc_state();
         this.killGame();
         this.killSteam();
         this.force_kill_runtime_processes(1000);
@@ -2055,20 +2131,23 @@ class Bot extends EventEmitter {
         if (!data)
             return 0;
 
+        if (this.shouldRestart || this.state == STATE.STOPPING || this.state == STATE.RESTARTING)
+            return 0;
+
         if (this.ipcID == id)
             return 120;
 
         if (this.ipcState)
             return 0;
 
-        if (data.name && data.name === this.name)
+        if (data.pid && this.owns_process_pid(data.pid))
             return 100;
 
         if (this.startTime && data.starttime && this.startTime == data.starttime)
             return 80;
 
-        if (!this.ipcState && this.owns_process_pid(data.pid))
-            return 60;
+        if (data.name && data.name === this.name)
+            return this.procFirejailGame && data.pid ? 0 : 60;
 
         return 0;
     }
@@ -2206,6 +2285,11 @@ class Bot extends EventEmitter {
                         }
                         else {
                             if (this.ipcState) {
+                                if (this.ipc_heartbeat_stale(time)) {
+                                    const stale_seconds = Math.floor((time - this.ipcState.heartbeat * 1000) / 1000);
+                                    this.request_restart(`IPC heartbeat stale for ${stale_seconds} seconds`);
+                                    return;
+                                }
                                 this.time_ipcState = 0;
                                 if (this.state != STATE.RUNNING) {
                                     this.state = STATE.RUNNING;
@@ -2265,10 +2349,7 @@ class Bot extends EventEmitter {
     }
 
     restart() {
-        if (this.shouldRun)
-            this.shouldRestart = true;
-        else
-            this.shouldRun = true;
+        this.request_restart('manual/API restart');
     }
     stop() {
         this.shouldRun = false;
