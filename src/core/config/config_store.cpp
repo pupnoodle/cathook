@@ -48,7 +48,13 @@ std::uint64_t parse_uint64(const std::string_view value, const std::uint64_t fal
 } // namespace
 
 config_store::config_store(std::filesystem::path root_directory)
-    : m_root_directory{ std::move(root_directory) }
+    : config_store{ std::move(root_directory), "configs" }
+{
+}
+
+config_store::config_store(std::filesystem::path root_directory, std::filesystem::path config_subdirectory)
+    : m_root_directory{ std::move(root_directory) },
+      m_config_subdirectory{ std::move(config_subdirectory) }
 {
     std::error_code error{};
     std::filesystem::create_directories(config_directory(), error);
@@ -163,8 +169,18 @@ const std::string& config_store::current_name() const
     return m_current_name;
 }
 
+config_store config_store::scoped_store(std::filesystem::path config_subdirectory) const
+{
+    return config_store{ m_root_directory, std::move(config_subdirectory) };
+}
+
 void config_store::import_config(const Config& config)
 {
+    erase_key("binds.count");
+    erase_prefix("binds.");
+    erase_key("button_binds.count");
+    erase_prefix("button_binds.");
+
     const bool spectator_indicator_enabled = (config.visuals.indicators.enabled_mask & Visuals::Indicators::spectators) != 0;
     const bool keybind_indicator_enabled = (config.visuals.indicators.enabled_mask & Visuals::Indicators::keybinds) != 0;
 
@@ -1100,6 +1116,25 @@ void config_store::set_color(std::string key, const RGBA_float& value)
     m_values[std::move(key)] = stream.str();
 }
 
+void config_store::erase_key(const std::string_view key)
+{
+    m_values.erase(std::string{ key });
+}
+
+void config_store::erase_prefix(const std::string_view prefix)
+{
+    for (auto it = m_values.begin(); it != m_values.end();)
+    {
+        if (it->first.starts_with(prefix))
+        {
+            it = m_values.erase(it);
+            continue;
+        }
+
+        ++it;
+    }
+}
+
 bool config_store::get_bool(const std::string_view key, const bool fallback) const
 {
     const auto found{ m_values.find(std::string{ key }) };
@@ -1166,7 +1201,7 @@ RGBA_float config_store::get_color(const std::string_view key, RGBA_float fallba
 
 std::filesystem::path config_store::config_directory() const
 {
-    return m_root_directory / "configs";
+    return m_root_directory / m_config_subdirectory;
 }
 
 std::filesystem::path config_store::config_path(const std::string_view name) const

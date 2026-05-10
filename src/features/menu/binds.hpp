@@ -21,6 +21,7 @@ V  o o  V  file: src/features/menu/binds.hpp
 #include <cstdio>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <variant>
@@ -705,12 +706,12 @@ inline void run() {
     }
 
     const bool bind_set = entry.trigger.button != SDLK_UNKNOWN;
-    if (!bind_set) {
+    if (!entry.enabled || !bind_set) {
       entry.active = false;
       continue;
     }
 
-    entry.active = entry.enabled && is_button_active(entry.trigger);
+    entry.active = is_button_active(entry.trigger);
     write_value(entry.target, entry.type, entry.active ? entry.override_value : entry.default_value);
   }
 }
@@ -928,7 +929,7 @@ inline std::vector<indicator_row> collect_indicator_rows() {
   return rows;
 }
 
-inline void save(cathook::core::config_store* store) {
+inline void save_to_store(cathook::core::config_store* store) {
   std::lock_guard lock{bind_mutex()};
 
   if (store == nullptr) {
@@ -970,7 +971,25 @@ inline void save(cathook::core::config_store* store) {
   }
 }
 
-inline void load(cathook::core::config_store* store) {
+inline bool save(cathook::core::config_store* store, const std::string_view name) {
+  if (store == nullptr) {
+    return false;
+  }
+
+  cathook::core::config_store bind_store = store->scoped_store("configs/binds");
+  save_to_store(&bind_store);
+  return bind_store.save_file(name);
+}
+
+inline bool save(cathook::core::config_store* store) {
+  if (store == nullptr) {
+    return false;
+  }
+
+  return save(store, store->current_name());
+}
+
+inline void load_from_store(cathook::core::config_store* store) {
   std::lock_guard lock{bind_mutex()};
 
   if (store == nullptr) {
@@ -1039,6 +1058,30 @@ inline void load(cathook::core::config_store* store) {
     entry->label = store->get_string(prefix + "label", entry->label);
     entry->show_in_indicator = store->get_bool(prefix + "show_in_indicator", entry->show_in_indicator);
   }
+}
+
+inline bool load(cathook::core::config_store* store) {
+  if (store == nullptr) {
+    return false;
+  }
+
+  cathook::core::config_store bind_store = store->scoped_store("configs/binds");
+  if (bind_store.load_file(store->current_name())) {
+    load_from_store(&bind_store);
+    return true;
+  }
+
+  load_from_store(store);
+  return false;
+}
+
+inline bool delete_file(cathook::core::config_store* store, const std::string_view name) {
+  if (store == nullptr) {
+    return false;
+  }
+
+  cathook::core::config_store bind_store = store->scoped_store("configs/binds");
+  return bind_store.delete_file(name);
 }
 
 } // namespace cat_bind

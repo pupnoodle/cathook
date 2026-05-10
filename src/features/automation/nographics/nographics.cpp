@@ -135,7 +135,13 @@ bool is_startup_patch_module(const char* library_path)
 
 bool should_apply_extra_render_patches()
 {
-  return textmode_build || config.misc.exploits.experimental_nographic_hooks;
+  return textmode_build || config.misc.exploits.null_graphics;
+}
+
+void sync_nographics_toggles()
+{
+  config.misc.exploits.null_graphics_render_stubs = textmode_build || config.misc.exploits.null_graphics;
+  config.misc.exploits.experimental_nographic_hooks = textmode_build || config.misc.exploits.null_graphics;
 }
 
 byte_patch dispatch_anim_events_patch{};
@@ -1013,6 +1019,7 @@ void initialize()
   {
     config.misc.exploits.null_graphics = true;
     config.misc.exploits.null_graphics_render_stubs = true;
+    config.misc.exploits.experimental_nographic_hooks = true;
   }
 
   resolve_game_file_system_interface();
@@ -1079,6 +1086,7 @@ void on_library_loaded(const char* library_path)
 
 void update()
 {
+  sync_nographics_toggles();
   initialize();
 
   const bool enabled = textmode_build || config.misc.exploits.null_graphics;

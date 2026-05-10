@@ -27,6 +27,7 @@ class config_store
 {
 public:
     explicit config_store(std::filesystem::path root_directory);
+    config_store(std::filesystem::path root_directory, std::filesystem::path config_subdirectory);
 
     bool load_file(std::string_view name);
     bool save_file(std::string_view name);
@@ -34,9 +35,13 @@ public:
 
     [[nodiscard]] std::vector<std::string> list_files() const;
     [[nodiscard]] const std::string& current_name() const;
+    [[nodiscard]] config_store scoped_store(std::filesystem::path config_subdirectory) const;
 
     void import_config(const Config& config);
     void export_config(Config& config) const;
+
+    void erase_key(std::string_view key);
+    void erase_prefix(std::string_view prefix);
 
     void set_bool(std::string key, bool value);
     void set_int(std::string key, int value);
@@ -57,6 +62,7 @@ private:
     [[nodiscard]] static std::optional<RGBA_float> parse_color(std::string_view value);
 
     std::filesystem::path m_root_directory{};
+    std::filesystem::path m_config_subdirectory{ "configs" };
     std::unordered_map<std::string, std::string> m_values{};
     std::string m_current_name{ "default" };
 };

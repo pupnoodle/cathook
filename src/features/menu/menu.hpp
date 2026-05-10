@@ -2198,9 +2198,10 @@ static void draw_exploits_content() {
     cat_menu::checkbox("VAC bypass", &config.misc.exploits.vac_bypass);
     cat_menu::checkbox("Network fix", &config.misc.exploits.network_fix);
     cat_menu::checkbox("No engine sleep", &config.misc.exploits.no_engine_sleep);
-    cat_menu::checkbox("Null graphics", &config.misc.exploits.null_graphics);
-    cat_menu::checkbox("Null render stubs", &config.misc.exploits.null_graphics_render_stubs);
-    cat_menu::checkbox("Experimental nographic hooks", &config.misc.exploits.experimental_nographic_hooks);
+    if (cat_menu::checkbox("Null graphics", &config.misc.exploits.null_graphics)) {
+      config.misc.exploits.null_graphics_render_stubs = config.misc.exploits.null_graphics;
+      config.misc.exploits.experimental_nographic_hooks = config.misc.exploits.null_graphics;
+    }
   });
   cat_menu::flow_panel("Tickbase", 1, 224.0f, [&]() {
     cat_menu::checkbox("Tickbase", &config.misc.exploits.tickbase);
@@ -2307,9 +2308,10 @@ static void draw_misc_content() {
       cat_menu::checkbox("Ping reducer", &config.misc.exploits.ping_reducer);
       cat_menu::slider_int("Ping target", &config.misc.exploits.ping_target, 1, 100);
       cat_menu::checkbox("No engine sleep", &config.misc.exploits.no_engine_sleep);
-      cat_menu::checkbox("Null graphics", &config.misc.exploits.null_graphics);
-      cat_menu::checkbox("Null render stubs", &config.misc.exploits.null_graphics_render_stubs);
-      cat_menu::checkbox("Experimental nographic hooks", &config.misc.exploits.experimental_nographic_hooks);
+      if (cat_menu::checkbox("Null graphics", &config.misc.exploits.null_graphics)) {
+        config.misc.exploits.null_graphics_render_stubs = config.misc.exploits.null_graphics;
+        config.misc.exploits.experimental_nographic_hooks = config.misc.exploits.null_graphics;
+      }
     });
     cat_menu::flow_panel("Anti-aim", 1, 286.0f, [&]() {
       cat_menu::checkbox("Enable", &config.misc.exploits.anti_aim);
@@ -2406,14 +2408,16 @@ static void draw_config_content() {
     ImGui::Dummy(ImVec2(0.0f, 6.0f));
     if (cat_menu::accent_button("Create", ImVec2((ImGui::GetContentRegionAvail().x - 6.0f) * 0.5f, 22.0f))) {
       config_store->import_config(config);
-      cat_bind::save(config_store);
-      config_store->save_file(config_name);
+      if (config_store->save_file(config_name)) {
+        cat_bind::save(config_store, config_name);
+      }
     }
     ImGui::SameLine(0.0f, 6.0f);
     if (cat_menu::accent_button("Save", ImVec2(0.0f, 22.0f))) {
       config_store->import_config(config);
-      cat_bind::save(config_store);
-      config_store->save_file(config_name);
+      if (config_store->save_file(config_name)) {
+        cat_bind::save(config_store, config_name);
+      }
     }
     if (cat_menu::accent_button("Load", ImVec2((ImGui::GetContentRegionAvail().x - 6.0f) * 0.5f, 22.0f))) {
       if (config_store->load_file(config_name)) {
@@ -2424,6 +2428,7 @@ static void draw_config_content() {
     ImGui::SameLine(0.0f, 6.0f);
     if (cat_menu::accent_button("Delete", ImVec2(0.0f, 22.0f), true)) {
       config_store->delete_file(config_name);
+      cat_bind::delete_file(config_store, config_name);
     }
     ImGui::Dummy(ImVec2(0.0f, 8.0f));
     ImGui::PushStyleColor(ImGuiCol_Text, cat_menu::k_text_soft);

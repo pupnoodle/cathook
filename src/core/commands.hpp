@@ -323,10 +323,15 @@ inline void command_save_callback(const command_args& args)
   }
 
   store->import_config(::config);
-  cat_bind::save(store);
   if (!store->save_file(name))
   {
     print("[cat_save] failed to save config '%s'\n", args.argv(1));
+    return;
+  }
+
+  if (!cat_bind::save(store, name))
+  {
+    print("[cat_save] saved config '%s' but failed to save binds\n", args.argv(1));
     return;
   }
 
