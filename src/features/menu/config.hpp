@@ -103,11 +103,16 @@ struct Aim {
   float projectile_splash_radius_scale = 1.0f;
   int projectile_path_steps = 16;
   int projectile_splash_samples = 18;
-  int projectile_prediction_ticks = 132;
+  int projectile_prediction_ticks = 360;
   bool projectile_strafe_prediction = true;
   float projectile_strafe_confidence = 55.0f;
   int projectile_trace_interval = 2;
   bool projectile_splash_debug = false;
+  float projectile_far_distance_begin = 2200.0f;
+  float projectile_far_distance_full = 4200.0f;
+  float projectile_far_error_cap_add = 120.0f;
+  int projectile_far_splash_budget_percent = 42;
+  int projectile_far_path_steps_percent = 55;
   
   bool auto_scope = false;
   bool auto_unscope = false;

@@ -215,6 +215,11 @@ void config_store::import_config(const Config& config)
     set_float("aimbot.projectile_strafe_confidence", config.aimbot.projectile_strafe_confidence);
     set_int("aimbot.projectile_trace_interval", config.aimbot.projectile_trace_interval);
     set_bool("aimbot.projectile_splash_debug", config.aimbot.projectile_splash_debug);
+    set_float("aimbot.projectile_far_distance_begin", config.aimbot.projectile_far_distance_begin);
+    set_float("aimbot.projectile_far_distance_full", config.aimbot.projectile_far_distance_full);
+    set_float("aimbot.projectile_far_error_cap_add", config.aimbot.projectile_far_error_cap_add);
+    set_int("aimbot.projectile_far_splash_budget_percent", config.aimbot.projectile_far_splash_budget_percent);
+    set_int("aimbot.projectile_far_path_steps_percent", config.aimbot.projectile_far_path_steps_percent);
     set_bool("aimbot.auto_scope", config.aimbot.auto_scope);
     set_bool("aimbot.auto_unscope", config.aimbot.auto_unscope);
     set_float("aimbot.auto_scope_threshold", config.aimbot.auto_scope_threshold);
@@ -567,7 +572,7 @@ void config_store::export_config(Config& config) const
     config.aimbot.projectile_prediction_ticks = std::clamp(
         get_int("aimbot.projectile_prediction_ticks", config.aimbot.projectile_prediction_ticks),
         8,
-        180);
+        420);
     config.aimbot.projectile_strafe_prediction = get_bool(
         "aimbot.projectile_strafe_prediction",
         config.aimbot.projectile_strafe_prediction);
@@ -582,6 +587,23 @@ void config_store::export_config(Config& config) const
     config.aimbot.projectile_splash_debug = get_bool(
         "aimbot.projectile_splash_debug",
         config.aimbot.projectile_splash_debug);
+    config.aimbot.projectile_far_distance_begin = std::max(
+        1.0f,
+        get_float("aimbot.projectile_far_distance_begin", config.aimbot.projectile_far_distance_begin));
+    config.aimbot.projectile_far_distance_full = std::max(
+        config.aimbot.projectile_far_distance_begin + 1.0f,
+        get_float("aimbot.projectile_far_distance_full", config.aimbot.projectile_far_distance_full));
+    config.aimbot.projectile_far_error_cap_add = std::max(
+        0.0f,
+        get_float("aimbot.projectile_far_error_cap_add", config.aimbot.projectile_far_error_cap_add));
+    config.aimbot.projectile_far_splash_budget_percent = std::clamp(
+        get_int("aimbot.projectile_far_splash_budget_percent", config.aimbot.projectile_far_splash_budget_percent),
+        8,
+        100);
+    config.aimbot.projectile_far_path_steps_percent = std::clamp(
+        get_int("aimbot.projectile_far_path_steps_percent", config.aimbot.projectile_far_path_steps_percent),
+        15,
+        100);
     config.aimbot.auto_scope = get_bool("aimbot.auto_scope", config.aimbot.auto_scope);
     config.aimbot.auto_unscope = get_bool("aimbot.auto_unscope", config.aimbot.auto_unscope);
     config.aimbot.auto_scope_threshold = get_float(

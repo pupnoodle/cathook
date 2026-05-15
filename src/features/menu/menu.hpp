@@ -1325,7 +1325,7 @@ static void draw_aimbot_content() {
     cat_menu::slider_float("Splash radius scale", &config.aimbot.projectile_splash_radius_scale, 0.50f, 1.50f, "%.2fx");
     cat_menu::slider_int("Path steps", &config.aimbot.projectile_path_steps, 2, 64);
     cat_menu::slider_int("Splash samples", &config.aimbot.projectile_splash_samples, 4, 64);
-    cat_menu::slider_int("Prediction ticks", &config.aimbot.projectile_prediction_ticks, 8, 180);
+    cat_menu::slider_int("Prediction ticks", &config.aimbot.projectile_prediction_ticks, 8, 420);
     cat_menu::slider_float("Strafe confidence", &config.aimbot.projectile_strafe_confidence, 0.0f, 100.0f, "%.0f%%");
     cat_menu::slider_int("Trace interval", &config.aimbot.projectile_trace_interval, 1, 8);
   });

@@ -36,6 +36,7 @@ struct ray_t
 struct trace_filter {
   void** vtable;
   void* skip;
+  int skip_team = -1;
 };
 
 struct cplane_t {
@@ -154,6 +155,8 @@ struct trace_t {
 #define MASK_VISIBLE_AND_NPCS		(MASK_OPAQUE_AND_NPCS|CONTENTS_IGNORE_NODRAW_OPAQUE)
 // bullets see these as solid
 #define	MASK_SHOT					(CONTENTS_SOLID|CONTENTS_MOVEABLE|CONTENTS_MONSTER|CONTENTS_WINDOW|CONTENTS_DEBRIS|CONTENTS_HITBOX)
+// radius damage traces use the bullet mask but ignore hitbox contents, matching TF2 radius damage visibility checks
+#define MASK_RADIUS_DAMAGE          (MASK_SHOT & ~(CONTENTS_HITBOX))
 
 
 
@@ -179,6 +182,121 @@ inline enum trace_type_t world_trace_get_type(struct trace_filter*) {
 }
 
 static void* trace_filter_world_vtable[2] = { (void*)world_trace_should_hit_entity, (void*)world_trace_get_type };
+
+inline bool projectile_trace_common_skip_entity(struct trace_filter* interface, Entity* entity) {
+  if (entity == nullptr) {
+    return true;
+  }
+  if (interface != nullptr && entity == interface->skip) {
+    return true;
+  }
+  const class_id cid = entity->get_class_id();
+  return cid == class_id::RESPAWN_ROOM_VISUALIZER ||
+    cid == class_id::ROCKET ||
+    cid == class_id::PILL_OR_STICKY ||
+    cid == class_id::FLARE ||
+    cid == class_id::CROSSBOW_BOLT ||
+    cid == class_id::ARROW ||
+    entity->is_wearable();
+}
+
+inline bool projectile_trace_same_skip_team(struct trace_filter* interface, Entity* entity) {
+  return interface != nullptr && interface->skip_team >= 0 && entity != nullptr && static_cast<int>(entity->get_team()) == interface->skip_team;
+}
+
+inline bool projectile_fire_setup_trace_should_hit_entity(struct trace_filter* interface, Entity* entity, int contents_mask) {
+  (void)contents_mask;
+  if (projectile_trace_common_skip_entity(interface, entity)) {
+    return false;
+  }
+  if (projectile_trace_same_skip_team(interface, entity) && (entity->get_class_id() == class_id::PLAYER || entity->is_building())) {
+    return false;
+  }
+  return true;
+}
+
+inline enum trace_type_t projectile_fire_setup_trace_get_type(struct trace_filter*) {
+  return TRACE_EVERYTHING;
+}
+
+static void* trace_filter_projectile_fire_setup_vtable[2] = {
+  (void*)projectile_fire_setup_trace_should_hit_entity,
+  (void*)projectile_fire_setup_trace_get_type
+};
+
+inline bool projectile_spawn_trace_should_hit_entity(struct trace_filter* interface, Entity* entity, int contents_mask) {
+  (void)contents_mask;
+  if (projectile_trace_common_skip_entity(interface, entity)) {
+    return false;
+  }
+  return entity->get_class_id() != class_id::PLAYER;
+}
+
+inline enum trace_type_t projectile_spawn_trace_get_type(struct trace_filter*) {
+  return TRACE_EVERYTHING;
+}
+
+static void* trace_filter_projectile_spawn_vtable[2] = {
+  (void*)projectile_spawn_trace_should_hit_entity,
+  (void*)projectile_spawn_trace_get_type
+};
+
+inline bool projectile_world_block_trace_should_hit_entity(struct trace_filter* interface, Entity* entity, int contents_mask) {
+  (void)contents_mask;
+  if (projectile_trace_common_skip_entity(interface, entity)) {
+    return false;
+  }
+  if (entity->get_class_id() == class_id::PLAYER) {
+    return false;
+  }
+  return true;
+}
+
+inline enum trace_type_t projectile_world_block_trace_get_type(struct trace_filter*) {
+  return TRACE_EVERYTHING;
+}
+
+static void* trace_filter_projectile_world_block_vtable[2] = {
+  (void*)projectile_world_block_trace_should_hit_entity,
+  (void*)projectile_world_block_trace_get_type
+};
+
+inline bool projectile_radius_damage_trace_should_hit_entity(struct trace_filter* interface, Entity* entity, int contents_mask) {
+  (void)contents_mask;
+  if (projectile_trace_common_skip_entity(interface, entity)) {
+    return false;
+  }
+  if (entity->get_class_id() == class_id::PLAYER) {
+    return false;
+  }
+  if (projectile_trace_same_skip_team(interface, entity) && entity->is_building()) {
+    return false;
+  }
+  return true;
+}
+
+inline enum trace_type_t projectile_radius_damage_trace_get_type(struct trace_filter*) {
+  return TRACE_EVERYTHING;
+}
+
+static void* trace_filter_projectile_radius_damage_vtable[2] = {
+  (void*)projectile_radius_damage_trace_should_hit_entity,
+  (void*)projectile_radius_damage_trace_get_type
+};
+
+// Compatibility wrapper for older projectile code. New code should use a named projectile_* filter.
+inline bool blocking_non_player_trace_should_hit_entity(struct trace_filter* interface, Entity* entity, int contents_mask) {
+  return projectile_world_block_trace_should_hit_entity(interface, entity, contents_mask);
+}
+
+inline enum trace_type_t blocking_non_player_trace_get_type(struct trace_filter*) {
+  return TRACE_EVERYTHING;
+}
+
+static void* trace_filter_blocking_non_player_vtable[2] = {
+  (void*)blocking_non_player_trace_should_hit_entity,
+  (void*)blocking_non_player_trace_get_type
+};
 
 class EngineTrace {
 public:
@@ -256,11 +374,43 @@ public:
   void init_trace_filter(struct trace_filter* filter, void* skip) {
     filter->vtable = trace_filter_vtable;
     filter->skip = skip;
+    filter->skip_team = -1;
   }
 
   void init_world_trace_filter(struct trace_filter* filter) {
     filter->vtable = trace_filter_world_vtable;
     filter->skip = nullptr;
+    filter->skip_team = -1;
+  }
+
+  void init_blocking_non_player_trace_filter(struct trace_filter* filter, void* also_skip_entity = nullptr) {
+    filter->vtable = trace_filter_blocking_non_player_vtable;
+    filter->skip = also_skip_entity;
+    filter->skip_team = -1;
+  }
+
+  void init_projectile_fire_setup_trace_filter(struct trace_filter* filter, Entity* skip_entity, int skip_team = -1) {
+    filter->vtable = trace_filter_projectile_fire_setup_vtable;
+    filter->skip = skip_entity;
+    filter->skip_team = skip_team;
+  }
+
+  void init_projectile_spawn_trace_filter(struct trace_filter* filter, Entity* skip_entity) {
+    filter->vtable = trace_filter_projectile_spawn_vtable;
+    filter->skip = skip_entity;
+    filter->skip_team = -1;
+  }
+
+  void init_projectile_world_block_trace_filter(struct trace_filter* filter, Entity* skip_entity) {
+    filter->vtable = trace_filter_projectile_world_block_vtable;
+    filter->skip = skip_entity;
+    filter->skip_team = -1;
+  }
+
+  void init_projectile_radius_damage_trace_filter(struct trace_filter* filter, Entity* skip_entity, int skip_team = -1) {
+    filter->vtable = trace_filter_projectile_radius_damage_vtable;
+    filter->skip = skip_entity;
+    filter->skip_team = skip_team;
   }
 
   void trace_ray(struct ray_t* ray, unsigned int f_mask, struct trace_filter* p_trace_filter, struct trace_t* p_trace) {

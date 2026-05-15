@@ -2075,8 +2075,9 @@ void draw_projectile_debug_imgui()
     std::snprintf(
       line,
       sizeof(line),
-      "path movsim=%d strafe=%d yaw=%.2f conf=%.1f target_vel=%.1f z=%.1f",
+      "path movsim=%d enginemv=%d strafe=%d yaw=%.2f conf=%.1f target_vel=%.1f z=%.1f",
       stats.used_movement_sim ? 1 : 0,
+      stats.used_game_engine_movement ? 1 : 0,
       stats.used_strafe_prediction ? 1 : 0,
       stats.average_yaw,
       stats.strafe_confidence,
@@ -2133,6 +2134,24 @@ void draw_projectile_debug_imgui()
       stats.splash_damage_rejects,
       stats.splash_candidates);
     draw_debug_line(line, y, IM_COL32(255, 190, 90, 235));
+    y += 15.0f;
+
+    std::snprintf(
+      line,
+      sizeof(line),
+      "budget trace=%d/%d sim=%d/%d splash=%d/%d rej=%d/%d/%d reuse=%d fallback=%d",
+      stats.trace_calls_per_frame,
+      proj_aim_budget().trace_call_cap,
+      stats.sim_calls_per_frame,
+      proj_aim_budget().sim_call_cap,
+      stats.splash_candidates_per_frame,
+      proj_aim_budget().splash_candidate_cap,
+      stats.trace_budget_rejects,
+      stats.sim_budget_rejects,
+      stats.splash_budget_rejects,
+      stats.reuse_trace_hits,
+      stats.fallback_sim_count);
+    draw_debug_line(line, y, IM_COL32(220, 190, 255, 235));
   }
 }
 

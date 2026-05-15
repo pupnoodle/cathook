@@ -763,6 +763,9 @@ public:
   static constexpr int weapon_data_bullets_per_shot_offset = 4;
   static constexpr int weapon_data_spread_offset = 12;
   static constexpr int weapon_data_fire_delay_offset = 24;
+  static constexpr int weapon_data_projectile_type_offset = 44;
+  static constexpr int weapon_data_ammo_per_shot_offset = 48;
+  static constexpr int weapon_data_projectile_speed_offset = 52;
   static constexpr int weapon_data_smack_delay_offset = 56;
   static constexpr int weapon_data_rapid_fire_offset = 60;
   static constexpr int base_weapon_info_offset_from_last_crit_check = -40;
@@ -1290,6 +1293,25 @@ public:
     }
 
     return *reinterpret_cast<float*>(weapon_data + weapon_data_fire_delay_offset);
+  }
+
+  int get_projectile_type() {
+    const uintptr_t weapon_data = get_weapon_data();
+    if (weapon_data == 0) {
+      return 0;
+    }
+
+    return *reinterpret_cast<int*>(weapon_data + weapon_data_projectile_type_offset);
+  }
+
+  float get_projectile_speed_from_data() {
+    const uintptr_t weapon_data = get_weapon_data();
+    if (weapon_data == 0) {
+      return 0.0f;
+    }
+
+    const float speed = *reinterpret_cast<float*>(weapon_data + weapon_data_projectile_speed_offset);
+    return std::isfinite(speed) ? std::clamp(speed, 0.0f, 5000.0f) : 0.0f;
   }
 
   float get_smack_delay() {

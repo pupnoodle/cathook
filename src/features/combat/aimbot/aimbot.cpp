@@ -702,6 +702,35 @@ struct aimbot_projectile_target_hint {
   bool current = false;
 };
 
+Vec3 aimbot_projectile_hint_position(Player* localplayer, Weapon* weapon, Player* player)
+{
+  if (player == nullptr) {
+    return Vec3{};
+  }
+
+  const Vec3 origin = player->get_origin();
+  const Vec3 mins = player->get_player_mins(player->is_ducking());
+  const Vec3 maxs = player->get_player_maxs(player->is_ducking());
+  if (proj_aim_is_direct_hit_weapon(weapon) && player->is_on_ground()) {
+    return origin + Vec3{0.0f, 0.0f, mins.z + 6.0f};
+  }
+
+  const uint32_t hitbox_mask = proj_aim_effective_hitbox_mask(localplayer, weapon, player);
+  const std::vector<proj_aim_hitbox_sample> hitbox_samples = proj_aim_hitbox_samples(player, hitbox_mask);
+  if (!hitbox_samples.empty()) {
+    const proj_aim_hitbox_sample* best_sample = &hitbox_samples.front();
+    for (const proj_aim_hitbox_sample& sample : hitbox_samples) {
+      if (sample.priority < best_sample->priority) {
+        best_sample = &sample;
+      }
+    }
+
+    return origin + best_sample->offset;
+  }
+
+  return origin + Vec3{0.0f, 0.0f, mins.z + ((maxs.z - mins.z) * 0.5f)};
+}
+
 float aimbot_actual_frame_time()
 {
   if (global_vars == nullptr) {
@@ -783,21 +812,21 @@ aimbot_candidate aimbot_find_best_projectile_candidate(Player* localplayer,
 {
   aimbot_candidate best_candidate{};
   std::vector<aimbot_projectile_target_hint> target_hints{};
-  target_hints.reserve(entity_cache[class_id::PLAYER].size());
+  target_hints.reserve(entity_cache_players().size());
 
   const projectile_sim_profile profile = projectile_sim_profile_for_weapon(localplayer, weapon);
   const float projectile_speed = profile.valid ? std::max(profile.params.speed, 1.0f) : 1.0f;
   const float projectile_horizon = profile.valid ? std::max(profile.params.max_time, static_cast<float>(TICK_INTERVAL)) : 1.0f;
   const Vec3 shoot_pos = localplayer->get_shoot_pos();
-  for (Entity* entity : entity_cache[class_id::PLAYER]) {
-    Player* player = static_cast<Player*>(entity);
+  for (const entity_cache_player_entry& entry : entity_cache_players()) {
+    Player* player = entry.player;
+    ++g_aimbot_scan_debug.candidates_total;
     if (aimbot_should_skip_player(localplayer, player)) {
+      ++g_aimbot_scan_debug.candidates_rejected;
       continue;
     }
 
-    const Vec3 mins = player->get_player_mins(player->is_ducking());
-    const Vec3 maxs = player->get_player_maxs(player->is_ducking());
-    const Vec3 aim_pos = player->get_origin() + Vec3{0.0f, 0.0f, mins.z + ((maxs.z - mins.z) * 0.5f)};
+    const Vec3 aim_pos = aimbot_projectile_hint_position(localplayer, weapon, player);
     Vec3 target_velocity = local_prediction_estimate_entity_velocity(player);
     if (local_prediction_vector_length(target_velocity) <= 0.001f) {
       target_velocity = player->get_velocity();
@@ -820,9 +849,11 @@ aimbot_candidate aimbot_find_best_projectile_candidate(Player* localplayer,
       current ? 90.0f : 64.0f,
       speed_lead_fov * 0.75f);
     if (!current && fov > fov_limit) {
+      ++g_aimbot_scan_debug.candidates_rejected;
       continue;
     }
 
+    ++g_aimbot_scan_debug.candidates_visible;
     target_hints.push_back({
       .player = player,
       .fov = fov,
@@ -862,10 +893,12 @@ aimbot_candidate aimbot_find_best_projectile_candidate(Player* localplayer,
     ++attempts;
     aimbot_candidate candidate = proj_aim_find_candidate(localplayer, weapon, hint.player, user_cmd, original_view_angles);
     if (candidate.player == nullptr) {
+      ++g_aimbot_scan_debug.candidates_rejected;
       continue;
     }
 
     if (!candidate.visible || !aimbot_fov_within_limit(candidate.fov, candidate.preferred ? 1.35f : 1.0f)) {
+      ++g_aimbot_scan_debug.candidates_rejected;
       continue;
     }
 

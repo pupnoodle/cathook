@@ -39,6 +39,10 @@ V  o o  V  file: src/features/movement/local_prediction/local_prediction.hpp
 #include "games/tf2/sdk/interfaces/prediction.hpp"
 
 #include "core/math/math.hpp"
+#include "features/combat/aimbot/projectile/projectile_types.hpp"
+#include "features/combat/aimbot/projectile/projectile_live_data.hpp"
+#include "features/combat/aimbot/projectile/projectile_trace.hpp"
+#include "features/combat/aimbot/proj_aim/proj_aim_budget.hpp"
 #include "features/menu/config.hpp"
 
 enum class LocalPredictionRunMode {
@@ -324,6 +328,7 @@ inline Vec3 local_prediction_estimate_entity_velocity(Entity* entity) {
 struct LocalPredictionEntityPath {
   bool valid = false;
   bool used_movement_sim = false;
+  bool used_game_engine_movement = false;
   bool used_strafe_prediction = false;
   float start_time = 0.0f;
   float time_step = TICK_INTERVAL;
@@ -467,7 +472,7 @@ inline int local_prediction_network_lead_ticks(Entity* entity) {
   return std::clamp(
     static_cast<int>(local_prediction_time_to_ticks(lead_time)),
     0,
-    std::clamp(config.aimbot.projectile_prediction_ticks, 8, 180) / 2);
+    std::clamp(config.aimbot.projectile_prediction_ticks, 8, 420) / 2);
 }
 
 inline float local_prediction_estimate_average_yaw_step(Player* player) {
@@ -570,7 +575,7 @@ inline local_prediction_strafe_estimate local_prediction_estimate_strafe(Player*
   const float current_speed = local_prediction_velocity_2d_length(history.samples[0].velocity);
   const int wanted_samples = current_air ? 10 : 8;
   const float straight_fuzzy_value = current_air ? 56.0f : 84.0f;
-  const int max_sign_changes = current_air ? 2 : 1;
+  const int max_sign_changes = current_air ? 3 : 1;
 
   float yaw_sum = 0.0f;
   int yaw_ticks = 0;
@@ -635,13 +640,13 @@ inline local_prediction_strafe_estimate local_prediction_estimate_strafe(Player*
   estimate.confidence = std::clamp((static_cast<float>(valid_pairs) / static_cast<float>(std::max(3, sample_limit - 1))) * 100.0f, 0.0f, 100.0f);
   float required_confidence = std::clamp(config.aimbot.projectile_strafe_confidence, 0.0f, 100.0f);
   if (current_air) {
-    required_confidence = std::max(required_confidence, 68.0f);
+    required_confidence = std::max(required_confidence, 58.0f);
   }
   if (current_speed > 700.0f) {
-    required_confidence = std::max(required_confidence, current_air ? 78.0f : 70.0f);
+    required_confidence = std::max(required_confidence, current_air ? 70.0f : 70.0f);
   }
   if (current_speed > 1100.0f) {
-    required_confidence = std::max(required_confidence, 88.0f);
+    required_confidence = std::max(required_confidence, current_air ? 80.0f : 88.0f);
   }
 
   if (current_air && current_speed > 650.0f) {
@@ -710,7 +715,7 @@ inline void local_prediction_fill_move_from_velocity(MoveData* move, const Vec3&
 }
 
 inline int local_prediction_configured_path_ticks() {
-  return std::clamp(config.aimbot.projectile_prediction_ticks, 8, 180);
+  return std::clamp(config.aimbot.projectile_prediction_ticks, 8, 420);
 }
 
 inline int local_prediction_path_tick_count(float horizon_seconds) {
@@ -729,6 +734,10 @@ inline bool local_prediction_simulate_player_path(Player* player,
     return false;
   }
 
+  if (entity_list == nullptr || player != entity_list->get_localplayer()) {
+    return false;
+  }
+
   if (horizon_seconds <= 0.0f || max_sim_ticks <= 0) {
     return false;
   }
@@ -744,21 +753,13 @@ inline bool local_prediction_simulate_player_path(Player* player,
   }
 
   Vec3 initial_velocity = snapshot.player.velocity;
-  const bool local_player = entity_list != nullptr && player == entity_list->get_localplayer();
-  if (!local_player) {
-    player->set_base_velocity({});
-    if (player->is_on_ground()) {
-      initial_velocity.z = std::min(initial_velocity.z, 0.0f);
-    } else {
-      player->set_ground_entity_handle(-1);
-    }
-  }
 
   movement_sim_active = true;
   *path_out = {};
   path_out->time_step = TICK_INTERVAL;
   path_out->start_time = local_prediction_ticks_to_time(lead_ticks);
   path_out->used_movement_sim = true;
+  path_out->used_game_engine_movement = true;
   const int requested_tick_count = local_prediction_path_tick_count(horizon_seconds);
   int tick_count = std::min(requested_tick_count, max_sim_ticks);
   tick_count = std::clamp(tick_count, 1, requested_tick_count);
@@ -870,6 +871,7 @@ struct local_prediction_lightweight_state {
   Vec3 maxs{};
   bool grounded = false;
   bool swimming = false;
+  bool has_move_input = false;
 };
 
 inline bool local_prediction_trace_hull(const Vec3& start,
@@ -894,7 +896,15 @@ inline bool local_prediction_find_ground(local_prediction_lightweight_state* sta
     return false;
   }
 
-  constexpr float ground_probe = 18.0f;
+  // do not snap a rising target back to the floor; jumping/rocket-jumping/airblasted players have
+  // upward z velocity and treating them as grounded zeros that velocity, ruining airborne prediction
+  constexpr float upward_velocity_epsilon = 16.0f;
+  if (state->velocity.z > upward_velocity_epsilon) {
+    return false;
+  }
+
+  // shorten the probe when the target is clearly mid-air; only snap when actually settling on a surface
+  const float ground_probe = state->grounded ? 18.0f : 4.0f;
   const Vec3 end = state->origin - Vec3{0.0f, 0.0f, ground_probe};
   trace_t trace{};
   if (!local_prediction_trace_hull(state->origin, end, state->mins, state->maxs, skip_entity, &trace)) {
@@ -905,24 +915,214 @@ inline bool local_prediction_find_ground(local_prediction_lightweight_state* sta
     return false;
   }
 
+  if (trace.fraction >= 1.0f) {
+    return false;
+  }
+
   state->origin = trace.endpos;
   state->velocity.z = 0.0f;
   return true;
 }
 
-inline void local_prediction_apply_lightweight_tick(local_prediction_lightweight_state* state,
-  Entity* skip_entity,
-  float dt,
-  float yaw_step) {
-  if (state == nullptr || dt <= 0.0f) {
+inline Vec3 local_prediction_client_mv_horizontal_wish_dir(const local_prediction_lightweight_state* state, float move_yaw_deg) {
+  if (state == nullptr) {
+    return Vec3{1.0f, 0.0f, 0.0f};
+  }
+
+  const float speed_2d = local_prediction_velocity_2d_length(state->velocity);
+  if (speed_2d > 8.0f) {
+    return Vec3{state->velocity.x / speed_2d, state->velocity.y / speed_2d, 0.0f};
+  }
+
+  return local_prediction_yaw_to_forward(move_yaw_deg);
+}
+
+inline float local_prediction_client_mv_sv_gravity() {
+  static Convar* sv_gravity = nullptr;
+  if (sv_gravity == nullptr && convar_system != nullptr) {
+    sv_gravity = convar_system->find_var("sv_gravity");
+  }
+  const float g = sv_gravity != nullptr ? sv_gravity->get_float() : 800.0f;
+  return std::clamp(g, 100.0f, 2000.0f);
+}
+
+inline float local_prediction_client_mv_sv_friction() {
+  static Convar* v = nullptr;
+  if (v == nullptr && convar_system != nullptr) {
+    v = convar_system->find_var("sv_friction");
+  }
+  return v != nullptr ? std::clamp(v->get_float(), 0.0f, 10.0f) : 1.0f;
+}
+
+inline float local_prediction_client_mv_sv_stopspeed() {
+  static Convar* v = nullptr;
+  if (v == nullptr && convar_system != nullptr) {
+    v = convar_system->find_var("sv_stopspeed");
+  }
+  return v != nullptr ? std::clamp(v->get_float(), 1.0f, 1000.0f) : 100.0f;
+}
+
+inline float local_prediction_client_mv_sv_airaccelerate() {
+  static Convar* v = nullptr;
+  if (v == nullptr && convar_system != nullptr) {
+    v = convar_system->find_var("sv_airaccelerate");
+  }
+  return v != nullptr ? std::clamp(v->get_float(), 0.0f, 150.0f) : 10.0f;
+}
+
+// i dont know tf2 says this in the source :thumbsup: white heart white heart
+inline float local_prediction_client_mv_get_air_speed_cap() {
+  return 30.0f;
+}
+
+inline float local_prediction_air_max_yaw_rate_per_tick(float horizontal_speed, float max_speed, float dt) {
+  if (horizontal_speed <= 1.0f || dt <= 0.0f) {
+    return 30.0f;
+  }
+  const float airaccel = local_prediction_client_mv_sv_airaccelerate();
+  const float air_cap = local_prediction_client_mv_get_air_speed_cap();
+  const float wish_for_accel = std::max(max_speed, 1.0f);
+  const float accel_speed = airaccel * wish_for_accel * dt;
+  const float max_perp = std::min(accel_speed, air_cap);
+  if (max_perp <= 0.0f) {
+    return 0.0f;
+  }
+  const float radians = std::atan2(max_perp, horizontal_speed);
+  return radians / pideg;
+}
+
+inline void local_prediction_client_mv_apply_friction(local_prediction_lightweight_state* state, float dt) {
+  if (state == nullptr || !state->grounded || state->swimming || dt <= 0.0f) {
     return;
   }
+
+  const float speed = local_prediction_velocity_2d_length(state->velocity);
+  if (speed < 0.1f) {
+    return;
+  }
+
+  constexpr float surface_friction = 1.0f;
+  const float friction = local_prediction_client_mv_sv_friction() * surface_friction;
+  const float stop_speed = local_prediction_client_mv_sv_stopspeed();
+  const float control = speed < stop_speed ? stop_speed : speed;
+  const float new_speed = speed - (dt * control * friction);
+  if (new_speed <= 0.0f) {
+    state->velocity.x = 0.0f;
+    state->velocity.y = 0.0f;
+    return;
+  }
+
+  const float scale = new_speed / speed;
+  state->velocity.x *= scale;
+  state->velocity.y *= scale;
+}
+
+inline float local_prediction_client_mv_sv_accelerate() {
+  static Convar* v = nullptr;
+  if (v == nullptr && convar_system != nullptr) {
+    v = convar_system->find_var("sv_accelerate");
+  }
+  return v != nullptr ? std::clamp(v->get_float(), 0.0f, 50.0f) : 10.0f;
+}
+
+inline void local_prediction_client_mv_accelerate_along_wish(
+  local_prediction_lightweight_state* state,
+  float dt,
+  float max_speed,
+  float accel_scale,
+  const Vec3& wish_dir,
+  float wish_speed_cap = 0.0f) {
+  if (state == nullptr || dt <= 0.0f || accel_scale <= 0.0f) {
+    return;
+  }
+
+  const float wish_speed = max_speed;
+  const float wish_speed_for_add = wish_speed_cap > 0.0f
+    ? std::min(wish_speed, wish_speed_cap)
+    : wish_speed;
+  const float current_speed = local_prediction_dot_2d(state->velocity, wish_dir);
+  const float add_speed = wish_speed_for_add - current_speed;
+  if (add_speed <= 0.0f) {
+    return;
+  }
+
+  float accel_speed = accel_scale * wish_speed * dt;
+  if (accel_speed > add_speed) {
+    accel_speed = add_speed;
+  }
+
+  state->velocity.x += wish_dir.x * accel_speed;
+  state->velocity.y += wish_dir.y * accel_speed;
+
+  if (wish_speed_cap > 0.0f) {
+    return;
+  }
+  const float new_2d = local_prediction_velocity_2d_length(state->velocity);
+  const float cap = max_speed * 1.15f;
+  if (new_2d > cap && new_2d > 0.001f) {
+    const float scale = cap / new_2d;
+    state->velocity.x *= scale;
+    state->velocity.y *= scale;
+  }
+}
+
+inline void local_prediction_player_path_tick(local_prediction_lightweight_state* state,
+  Entity* skip_entity,
+  float dt,
+  float yaw_step,
+  bool with_hull_trace,
+  float max_speed,
+  float* move_yaw_deg) {
+  if (state == nullptr || skip_entity == nullptr || dt <= 0.0f || move_yaw_deg == nullptr) {
+    return;
+  }
+
+  if (state->grounded && !state->swimming && state->velocity.z > 16.0f) {
+    state->grounded = false;
+  }
+
+  if (!state->grounded && !state->swimming) {
+    const float h_speed = local_prediction_velocity_2d_length(state->velocity);
+    const float max_air_yaw = local_prediction_air_max_yaw_rate_per_tick(h_speed, max_speed, dt);
+    if (max_air_yaw > 0.0f) {
+      if (yaw_step > max_air_yaw) yaw_step = max_air_yaw;
+      if (yaw_step < -max_air_yaw) yaw_step = -max_air_yaw;
+    }
+  }
+
+  local_prediction_client_mv_apply_friction(state, dt);
 
   if (std::fabs(yaw_step) > 0.01f && local_prediction_velocity_2d_length(state->velocity) > 20.0f) {
     state->velocity = local_prediction_rotate_2d(state->velocity, yaw_step);
   }
 
-  const float gravity = state->swimming ? 0.0f : local_prediction_projectile_gravity_scale() * 800.0f;
+  *move_yaw_deg = local_prediction_normalize_yaw(*move_yaw_deg + yaw_step);
+
+  const Vec3 wish_dir = local_prediction_client_mv_horizontal_wish_dir(state, *move_yaw_deg);
+
+  if (state->has_move_input && state->grounded && !state->swimming) {
+    local_prediction_client_mv_accelerate_along_wish(
+      state,
+      dt,
+      max_speed,
+      local_prediction_client_mv_sv_accelerate(),
+      wish_dir,
+      0.0f);
+  } else if (state->has_move_input && !state->grounded && !state->swimming) {
+    local_prediction_client_mv_accelerate_along_wish(
+      state,
+      dt,
+      max_speed,
+      local_prediction_client_mv_sv_airaccelerate(),
+      wish_dir,
+      local_prediction_client_mv_get_air_speed_cap());
+  }
+
+  const float gravity = state->swimming ? 0.0f : local_prediction_client_mv_sv_gravity();
+  if (!state->grounded && !state->swimming) {
+    state->velocity.z -= 0.5f * gravity * dt;  // StartGravity
+  }
+
   Vec3 end = state->origin;
   if (state->grounded || state->swimming) {
     end += Vec3{state->velocity.x * dt, state->velocity.y * dt, 0.0f};
@@ -930,12 +1130,26 @@ inline void local_prediction_apply_lightweight_tick(local_prediction_lightweight
     end += Vec3{
       state->velocity.x * dt,
       state->velocity.y * dt,
-      (state->velocity.z * dt) - (0.5f * gravity * dt * dt)
+      state->velocity.z * dt
     };
   }
 
+  if (!with_hull_trace) {
+    state->origin = end;
+    if (!state->grounded && !state->swimming) {
+      state->velocity.z -= 0.5f * gravity * dt;  // FinishGravity
+    }
+    return;
+  }
+
+  const Vec3 saved_origin = state->origin;
+  const Vec3 saved_velocity = state->velocity;
+  const bool was_grounded = state->grounded;
+
   trace_t move_trace{};
-  if (local_prediction_trace_hull(state->origin, end, state->mins, state->maxs, skip_entity, &move_trace)) {
+  const bool any_block = local_prediction_trace_hull(state->origin, end, state->mins, state->maxs, skip_entity, &move_trace);
+
+  if (any_block) {
     if (!move_trace.start_solid && !move_trace.all_solid) {
       state->origin = move_trace.endpos;
     }
@@ -946,8 +1160,8 @@ inline void local_prediction_apply_lightweight_tick(local_prediction_lightweight
       state->velocity.z = 0.0f;
     } else {
       state->velocity = local_prediction_clip_velocity(state->velocity, move_trace.plane.normal, 1.0f);
-      const Vec3 slide_end = state->origin + (state->velocity * (dt * remaining));
       if (remaining > 0.001f) {
+        const Vec3 slide_end = state->origin + (state->velocity * (dt * remaining));
         trace_t slide_trace{};
         if (!local_prediction_trace_hull(state->origin, slide_end, state->mins, state->maxs, skip_entity, &slide_trace)) {
           state->origin = slide_end;
@@ -959,14 +1173,188 @@ inline void local_prediction_apply_lightweight_tick(local_prediction_lightweight
     }
   } else {
     state->origin = end;
-    if (!state->grounded && !state->swimming) {
-      state->velocity.z -= gravity * dt;
+  }
+
+  // step-up (Source CGameMovement::StepMove style): only fires when we were grounded coming into
+  // the tick and the regular move was significantly blocked (saves 3 hull traces per tick when not
+  // needed). Use whichever (slide vs step-up) gets us further horizontally.
+  if (with_hull_trace && was_grounded && !state->swimming && any_block && move_trace.fraction < 0.85f) {
+    constexpr float step_size = 18.0f;  // TF2 m_flStepSize
+    constexpr float step_down_extra = 4.0f;
+    trace_t up_trace{};
+    const Vec3 up_end = saved_origin + Vec3{0.0f, 0.0f, step_size};
+    local_prediction_trace_hull(saved_origin, up_end, state->mins, state->maxs, skip_entity, &up_trace);
+    const Vec3 stepped = (up_trace.start_solid || up_trace.all_solid) ? saved_origin : up_trace.endpos;
+
+    const Vec3 horiz_step = Vec3{saved_velocity.x * dt, saved_velocity.y * dt, 0.0f};
+    const Vec3 forward_end = stepped + horiz_step;
+    trace_t fwd_trace{};
+    local_prediction_trace_hull(stepped, forward_end, state->mins, state->maxs, skip_entity, &fwd_trace);
+    const Vec3 after_forward = (fwd_trace.start_solid || fwd_trace.all_solid) ? stepped : fwd_trace.endpos;
+
+    trace_t down_trace{};
+    const Vec3 down_end = after_forward - Vec3{0.0f, 0.0f, step_size + step_down_extra};
+    if (local_prediction_trace_hull(after_forward, down_end, state->mins, state->maxs, skip_entity, &down_trace)) {
+      if (!down_trace.start_solid && !down_trace.all_solid && down_trace.plane.normal.z >= 0.65f) {
+        const float step_dx = down_trace.endpos.x - saved_origin.x;
+        const float step_dy = down_trace.endpos.y - saved_origin.y;
+        const float step_dist_2d_sq = (step_dx * step_dx) + (step_dy * step_dy);
+        const float slide_dx = state->origin.x - saved_origin.x;
+        const float slide_dy = state->origin.y - saved_origin.y;
+        const float slide_dist_2d_sq = (slide_dx * slide_dx) + (slide_dy * slide_dy);
+        if (step_dist_2d_sq > slide_dist_2d_sq + 1.0f) {
+          state->origin = down_trace.endpos;
+          state->velocity.x = saved_velocity.x;
+          state->velocity.y = saved_velocity.y;
+          state->velocity.z = 0.0f;
+          state->grounded = true;
+        }
+      }
     }
+  }
+
+  // FinishGravity: second half of gravity, applied after the move so post-collision vz=0 stays sane
+  if (!state->grounded && !state->swimming) {
+    state->velocity.z -= 0.5f * gravity * dt;
   }
 
   if (!state->swimming) {
     state->grounded = local_prediction_find_ground(state, skip_entity);
   }
+}
+
+inline Vec3 local_prediction_player_path_seed_velocity(Player* player) {
+  if (player == nullptr) {
+    return Vec3{};
+  }
+
+  const Vec3 current_velocity = player->get_velocity();
+  const float current_speed = local_prediction_velocity_2d_length(current_velocity);
+  const bool current_stationary =
+    player->is_on_ground() &&
+    current_speed < 8.0f &&
+    std::fabs(current_velocity.z) < 8.0f;
+  if (current_stationary) {
+    return Vec3{};
+  }
+
+  if (current_speed > 1.0f || std::fabs(current_velocity.z) > 1.0f) {
+    return current_velocity;
+  }
+
+  return local_prediction_estimate_entity_velocity(player);
+}
+
+inline LocalPredictionEntityPath local_prediction_build_player_path_client_sim(Player* player,
+  Entity* skip_entity,
+  int lead_ticks,
+  int step_count,
+  int hull_trace_stride) {
+  LocalPredictionEntityPath path{};
+  if (player == nullptr || skip_entity == nullptr || engine_trace == nullptr || step_count < 1) {
+    return path;
+  }
+
+  Vec3 origin = player->get_origin();
+  Vec3 velocity = local_prediction_player_path_seed_velocity(player);
+  bool target_grounded = false;
+  bool target_swimming = false;
+  if (std::sqrt((velocity.x * velocity.x) + (velocity.y * velocity.y) + (velocity.z * velocity.z)) <= 0.001f) {
+    target_grounded = player->is_on_ground();
+    target_swimming = player->get_water_level() > 1;
+  } else {
+    target_grounded = player->is_on_ground();
+    target_swimming = player->get_water_level() > 1;
+  }
+
+  const int lead_clamped = std::max(0, lead_ticks);
+  const float lead_time = local_prediction_ticks_to_time(lead_clamped);
+  path.time_step = TICK_INTERVAL;
+  path.start_time = lead_time;
+  path.positions.reserve(static_cast<size_t>(step_count) + 1);
+
+  local_prediction_lightweight_state state{};
+  state.origin = origin;
+  state.velocity = velocity;
+  state.mins = player->get_player_mins(player->is_ducking());
+  state.maxs = player->get_player_maxs(player->is_ducking());
+  state.grounded = target_grounded || target_swimming;
+  state.swimming = target_swimming;
+  state.has_move_input = local_prediction_velocity_2d_length(velocity) > 8.0f;
+
+// chinese z bump
+  if (state.grounded) {
+    constexpr float dist_epsilon_3 = 0.09375f;  // 0.03125f * 3
+    state.origin.z += dist_epsilon_3;
+  }
+
+  if (engine_trace != nullptr) {
+    const float seed_speed_2d = local_prediction_velocity_2d_length(state.velocity);
+    if (seed_speed_2d > 50.0f) {
+      const Vec3 probe_end = state.origin + (state.velocity * (static_cast<float>(TICK_INTERVAL) * 1.25f));
+      trace_t probe_trace{};
+      if (local_prediction_trace_hull(state.origin, probe_end, state.mins, state.maxs, skip_entity, &probe_trace) &&
+          !probe_trace.start_solid && !probe_trace.all_solid &&
+          probe_trace.fraction < 1.0f && probe_trace.plane.normal.z < 0.7f) {
+        state.velocity = local_prediction_clip_velocity(state.velocity, probe_trace.plane.normal, 1.0f);
+      }
+    }
+  }
+
+  const local_prediction_strafe_estimate strafe_estimate = local_prediction_estimate_strafe(player);
+  const float yaw_step = strafe_estimate.valid ? strafe_estimate.yaw_step : local_prediction_estimate_average_yaw_step(player);
+  path.average_yaw = yaw_step;
+  path.strafe_confidence = strafe_estimate.confidence;
+  path.used_strafe_prediction = std::fabs(yaw_step) > 0.01f;
+  path.used_movement_sim = true;
+  path.used_game_engine_movement = false;
+
+  const float max_speed_seed = local_prediction_estimated_max_speed(player, velocity);
+  const float speed_2d = local_prediction_velocity_2d_length(state.velocity);
+  if (speed_2d > max_speed_seed && speed_2d > 0.001f) {
+    const float speed_scale = max_speed_seed / speed_2d;
+    state.velocity.x *= speed_scale;
+    state.velocity.y *= speed_scale;
+  }
+
+  float move_yaw = local_prediction_normalize_yaw(
+    local_prediction_velocity_2d_length(velocity) > 8.0f ? local_prediction_vector_yaw(velocity) : player->get_eye_angles().y);
+
+  const int stride = std::max(1, hull_trace_stride);
+  int hull_step_counter = 0;
+  for (int lead = 0; lead < lead_clamped; ++lead) {
+    const bool hull_trace = (stride <= 1) || ((hull_step_counter % stride) == 0);
+    const float max_speed_tick = local_prediction_estimated_max_speed(player, state.velocity);
+    local_prediction_player_path_tick(
+      &state,
+      skip_entity,
+      static_cast<float>(TICK_INTERVAL),
+      yaw_step,
+      hull_trace,
+      max_speed_tick,
+      &move_yaw);
+    ++hull_step_counter;
+  }
+  path.positions.push_back(state.origin);
+
+  for (int step = 1; step <= step_count; ++step) {
+    const bool hull_trace = (stride <= 1) || ((hull_step_counter % stride) == 0);
+    const float max_speed_tick = local_prediction_estimated_max_speed(player, state.velocity);
+    local_prediction_player_path_tick(
+      &state,
+      skip_entity,
+      static_cast<float>(TICK_INTERVAL),
+      yaw_step,
+      hull_trace,
+      max_speed_tick,
+      &move_yaw);
+    ++hull_step_counter;
+    path.positions.push_back(state.origin);
+  }
+
+  path.final_velocity = state.velocity;
+  path.valid = path.positions.size() > 1;
+  return path;
 }
 
 inline void local_prediction_extend_player_path_lightweight(Player* player,
@@ -988,10 +1376,26 @@ inline void local_prediction_extend_player_path_lightweight(Player* player,
   state.maxs = player->get_player_maxs(player->is_ducking());
   state.swimming = player->get_water_level() > 1;
   state.grounded = state.swimming || (std::fabs(state.velocity.z) <= 1.0f && player->is_on_ground());
+  state.has_move_input = local_prediction_velocity_2d_length(state.velocity) > 8.0f;
 
   path->positions.reserve(static_cast<size_t>(requested_tick_count) + 1);
+  const int trace_stride = std::max(1, config.aimbot.projectile_trace_interval);
+  float move_yaw = local_prediction_normalize_yaw(
+    local_prediction_velocity_2d_length(state.velocity) > 8.0f
+      ? local_prediction_vector_yaw(state.velocity)
+      : player->get_eye_angles().y);
   for (int step = existing_tick_count + 1; step <= requested_tick_count; ++step) {
-    local_prediction_apply_lightweight_tick(&state, player, static_cast<float>(TICK_INTERVAL), path->average_yaw);
+    const int steps_since_extend = step - (existing_tick_count + 1);
+    const bool hull_trace = (trace_stride <= 1) || ((steps_since_extend % trace_stride) == 0);
+    const float max_speed_tick = local_prediction_estimated_max_speed(player, state.velocity);
+    local_prediction_player_path_tick(
+      &state,
+      player,
+      static_cast<float>(TICK_INTERVAL),
+      path->average_yaw,
+      hull_trace,
+      max_speed_tick,
+      &move_yaw);
     path->positions.push_back(state.origin);
   }
 
@@ -1012,76 +1416,38 @@ inline LocalPredictionEntityPath local_prediction_predict_entity_path(Entity* en
   const float lead_time = local_prediction_ticks_to_time(lead_ticks);
   const int step_count = local_prediction_path_tick_count(horizon_seconds);
 
-  const bool can_use_movement_sim =
+  Player* const entity_as_player = entity->get_class_id() == class_id::PLAYER ? static_cast<Player*>(entity) : nullptr;
+
+  const bool can_use_engine_movement_sim =
     use_movement_sim &&
-    entity->get_class_id() == class_id::PLAYER &&
+    entity_as_player != nullptr &&
     entity_list != nullptr &&
-    entity == entity_list->get_localplayer();
-  if (can_use_movement_sim) {
-    Player* player = static_cast<Player*>(entity);
-    if (local_prediction_simulate_player_path(player, horizon_seconds, &path, lead_ticks)) {
-      local_prediction_extend_player_path_lightweight(player, &path, step_count);
+    entity_as_player == entity_list->get_localplayer() &&
+    prediction != nullptr &&
+    game_movement != nullptr &&
+    move_helper != nullptr &&
+    global_vars != nullptr;
+  if (can_use_engine_movement_sim) {
+    if (local_prediction_simulate_player_path(entity_as_player, horizon_seconds, &path, lead_ticks)) {
+      local_prediction_extend_player_path_lightweight(entity_as_player, &path, step_count);
       return path;
     }
   }
 
-  Vec3 origin = entity->get_origin();
-  Vec3 velocity = local_prediction_estimate_entity_velocity(entity);
-  bool target_grounded = false;
-  bool target_swimming = false;
-  Player* player = entity->get_class_id() == class_id::PLAYER ? static_cast<Player*>(entity) : nullptr;
-  if (std::sqrt((velocity.x * velocity.x) + (velocity.y * velocity.y) + (velocity.z * velocity.z)) <= 0.001f &&
-      player != nullptr) {
-    velocity = player->get_velocity();
-    target_grounded = player->is_on_ground();
-    target_swimming = player->get_water_level() > 1;
-  } else if (player != nullptr) {
-    target_grounded = player->is_on_ground();
-    target_swimming = player->get_water_level() > 1;
+  if (entity_as_player != nullptr && engine_trace != nullptr) {
+    return local_prediction_build_player_path_client_sim(
+      entity_as_player,
+      entity,
+      lead_ticks,
+      step_count,
+      std::max(1, config.aimbot.projectile_trace_interval));
   }
 
+  Vec3 origin = entity->get_origin();
+  Vec3 velocity = local_prediction_estimate_entity_velocity(entity);
   path.time_step = TICK_INTERVAL;
   path.start_time = lead_time;
   path.positions.reserve(static_cast<size_t>(step_count) + 1);
-
-  if (player != nullptr) {
-    local_prediction_lightweight_state state{};
-    state.origin = origin;
-    state.velocity = velocity;
-    state.mins = player->get_player_mins(player->is_ducking());
-    state.maxs = player->get_player_maxs(player->is_ducking());
-    state.grounded = target_grounded || target_swimming;
-    state.swimming = target_swimming;
-
-    const local_prediction_strafe_estimate strafe_estimate = local_prediction_estimate_strafe(player);
-    const float yaw_step = strafe_estimate.valid ? strafe_estimate.yaw_step : local_prediction_estimate_average_yaw_step(player);
-    path.average_yaw = yaw_step;
-    path.strafe_confidence = strafe_estimate.confidence;
-    path.used_strafe_prediction = std::fabs(yaw_step) > 0.01f;
-    path.used_movement_sim = false;
-
-    const float max_speed = local_prediction_estimated_max_speed(player, velocity);
-    const float speed_2d = local_prediction_velocity_2d_length(state.velocity);
-    if (speed_2d > max_speed && speed_2d > 0.001f) {
-      const float speed_scale = max_speed / speed_2d;
-      state.velocity.x *= speed_scale;
-      state.velocity.y *= speed_scale;
-    }
-
-    for (int lead = 0; lead < lead_ticks; ++lead) {
-      local_prediction_apply_lightweight_tick(&state, entity, static_cast<float>(TICK_INTERVAL), yaw_step);
-    }
-    path.positions.push_back(state.origin);
-
-    for (int step = 1; step <= step_count; ++step) {
-      local_prediction_apply_lightweight_tick(&state, entity, static_cast<float>(TICK_INTERVAL), yaw_step);
-      path.positions.push_back(state.origin);
-    }
-
-    path.final_velocity = state.velocity;
-    path.valid = path.positions.size() > 1;
-    return path;
-  }
 
   origin += velocity * lead_time;
   path.positions.push_back(origin);
@@ -1106,139 +1472,6 @@ inline Vec3 local_prediction_predict_entity_origin(Entity* entity, float horizon
     static_cast<size_t>(std::ceil(horizon_seconds / std::max(path.time_step, 0.0001f))));
   return path.positions[index];
 }
-
-struct LocalPredictionProjectileParameters {
-  float speed = 0.0f;
-  float gravity = 0.0f;
-  float max_time = 1.5f;
-  float time_step = TICK_INTERVAL;
-};
-
-struct LocalPredictionLaunchState {
-  Vec3 origin{};
-  Vec3 direction{};
-  Vec3 view_angles{};
-  Vec3 inherited_velocity{};
-};
-
-struct LocalPredictionProjectileStep {
-  float time = 0.0f;
-  Vec3 position{};
-  Vec3 velocity{};
-};
-
-struct LocalPredictionProjectileTrace {
-  bool valid = false;
-  std::vector<LocalPredictionProjectileStep> steps{};
-};
-
-struct LocalPredictionInterceptResult {
-  bool valid = false;
-  bool has_target_base_origin = false;
-  float intercept_time = 0.0f;
-  float intercept_distance = FLT_MAX;
-  float miss_distance = FLT_MAX;
-  Vec3 aim_angles{};
-  Vec3 target_origin{};
-  Vec3 target_base_origin{};
-  Vec3 target_offset{};
-  Vec3 target_velocity{};
-  LocalPredictionProjectileTrace trace{};
-};
-
-enum class projectile_sim_trace_mode {
-  none,
-  world,
-  world_and_target
-};
-
-enum class projectile_sim_fire_setup_mode {
-  traced_forward,
-  pipe_style
-};
-
-enum class projectile_sim_spawn_trace_mode {
-  none,
-  line,
-  hull
-};
-
-enum class projectile_sim_velocity_mode {
-  forward,
-  pipe_lift,
-  cleaver
-};
-
-struct projectile_sim_profile {
-  LocalPredictionProjectileParameters params{};
-  Vec3 offset{};
-  Vec3 hull{};
-  Vec3 spawn_trace_mins{};
-  Vec3 spawn_trace_maxs{};
-  float lifetime = 0.0f;
-  float initial_lift = 0.0f;
-  float drag = 0.0f;
-  unsigned int trace_mask = MASK_SOLID;
-  projectile_sim_fire_setup_mode fire_setup_mode = projectile_sim_fire_setup_mode::traced_forward;
-  projectile_sim_spawn_trace_mode spawn_trace_mode = projectile_sim_spawn_trace_mode::none;
-  projectile_sim_velocity_mode velocity_mode = projectile_sim_velocity_mode::forward;
-  bool valid = false;
-  bool inherit_velocity = true;
-  bool hull_trace = false;
-  bool collide_world = true;
-};
-
-struct projectile_sim_launch {
-  Vec3 origin{};
-  Vec3 angles{};
-  Vec3 direction{};
-  Vec3 inherited_velocity{};
-  bool valid = false;
-};
-
-struct projectile_sim_step {
-  float time = 0.0f;
-  Vec3 position{};
-  Vec3 velocity{};
-  trace_t trace{};
-  bool hit = false;
-  bool hit_target = false;
-};
-
-struct projectile_sim_result {
-  bool valid = false;
-  bool hit = false;
-  bool hit_target = false;
-  float hit_time = 0.0f;
-  Vec3 hit_position{};
-  Vec3 hit_normal{};
-  void* hit_entity = nullptr;
-  std::vector<projectile_sim_step> steps{};
-};
-
-struct projectile_simulation {
-  projectile_sim_profile profile{};
-  projectile_sim_launch launch{};
-  Entity* skip_entity = nullptr;
-  Entity* target_entity = nullptr;
-  projectile_sim_trace_mode trace_mode = projectile_sim_trace_mode::none;
-  projectile_sim_result result{};
-  Vec3 position{};
-  Vec3 velocity{};
-  float time = 0.0f;
-  int tick = 0;
-  int max_ticks = 0;
-  bool initialized = false;
-  bool finished = false;
-
-  bool init(const projectile_sim_launch& launch_in,
-    const projectile_sim_profile& profile_in,
-    Entity* skip_entity_in = nullptr,
-    Entity* target_entity_in = nullptr,
-    projectile_sim_trace_mode trace_mode_in = projectile_sim_trace_mode::none);
-  bool step();
-  projectile_sim_result run();
-};
 
 inline float local_prediction_vector_length(Vec3 value) {
   return std::sqrt((value.x * value.x) + (value.y * value.y) + (value.z * value.z));
@@ -1431,31 +1664,18 @@ inline LocalPredictionProjectileParameters local_prediction_projectile_parameter
 
   const float gravity_scale = local_prediction_projectile_gravity_scale();
   const auto projectile_speed = [weapon](float base_speed) {
-    if (attribute_manager == nullptr) {
-      return base_speed;
-    }
-
-    return attribute_manager->attrib_hook_value(base_speed, "mult_projectile_speed", weapon->to_entity());
+    return projectile_speed_attr(weapon, projectile_weapon_data_speed_or(weapon, base_speed));
   };
-  const auto projectile_range_speed = [weapon, &projectile_speed](float base_speed) {
-    float speed = projectile_speed(base_speed);
-    if (attribute_manager != nullptr) {
-      speed = attribute_manager->attrib_hook_value(speed, "mult_projectile_range", weapon->to_entity());
-    }
-    return speed;
+  const auto projectile_range_speed = [weapon](float base_speed) {
+    return projectile_range_speed_attr(weapon, projectile_weapon_data_speed_or(weapon, base_speed));
   };
   const auto attribute_value = [weapon](float base_value, const char* attribute_name) {
-    if (attribute_manager == nullptr) {
-      return base_value;
-    }
-
-    return attribute_manager->attrib_hook_value(base_value, attribute_name, weapon->to_entity());
+    return projectile_attr_float(weapon, base_value, attribute_name);
   };
 
   switch (weapon->get_def_id()) {
   case Soldier_m_RocketLauncher:
   case Soldier_m_RocketLauncherR:
-  case Soldier_m_TheDirectHit:
   case Soldier_m_TheBlackBox:
   case Soldier_m_RocketJumper:
   case Soldier_m_TheLibertyLauncher:
@@ -1467,17 +1687,22 @@ inline LocalPredictionProjectileParameters local_prediction_projectile_parameter
   case Soldier_m_TheAirStrike:
     params.speed = projectile_speed(1100.0f);
     params.gravity = 0.0f;
-    params.max_time = 2.2f;
+    params.max_time = 6.0f;
+    break;
+  case Soldier_m_TheDirectHit:
+    params.speed = projectile_speed(3000.0f);
+    params.gravity = 0.0f;
+    params.max_time = 4.0f;
     break;
   case Soldier_s_TheRighteousBison:
     params.speed = projectile_speed(1200.0f);
     params.gravity = 0.0f;
-    params.max_time = 2.0f;
+    params.max_time = 5.0f;
     break;
   case Engi_m_ThePomson6000:
     params.speed = projectile_speed(1200.0f);
     params.gravity = 0.0f;
-    params.max_time = 2.0f;
+    params.max_time = 5.0f;
     break;
   case Pyro_m_DragonsFury:
     {
@@ -1509,7 +1734,7 @@ inline LocalPredictionProjectileParameters local_prediction_projectile_parameter
   case Engi_m_TheRescueRanger:
     params.speed = projectile_speed(2400.0f);
     params.gravity = 0.2f * gravity_scale * 800.0f;
-    params.max_time = 2.2f;
+    params.max_time = 4.0f;
     break;
   case Sniper_m_TheHuntsman:
   case Sniper_m_FestiveHuntsman:
@@ -1523,7 +1748,7 @@ inline LocalPredictionProjectileParameters local_prediction_projectile_parameter
       params.speed = 1800.0f + ((2600.0f - 1800.0f) * charge);
       params.gravity = (0.5f + ((0.1f - 0.5f) * charge)) * gravity_scale * 800.0f;
     }
-    params.max_time = 2.2f;
+    params.max_time = 4.0f;
     break;
   case Pyro_s_TheFlareGun:
   case Pyro_s_TheDetonator:
@@ -1604,7 +1829,14 @@ inline LocalPredictionProjectileParameters local_prediction_projectile_parameter
       const float charge = charge_rate > 0.0f ? std::clamp(held_time / charge_rate, 0.0f, 1.0f) : 0.0f;
       params.speed = projectile_range_speed(900.0f + ((2400.0f - 900.0f) * charge));
       params.gravity = gravity_scale * 800.0f;
-      params.max_time = 2.0f;
+      const int def = weapon->get_def_id();
+      if (def == Demoman_s_TheScottishResistance) {
+        params.max_time = 2.45f;
+      } else if (def == Demoman_s_TheQuickiebombLauncher) {
+        params.max_time = 1.7f;
+      } else {
+        params.max_time = 2.0f;
+      }
     }
     break;
   default:
@@ -1839,7 +2071,7 @@ inline projectile_sim_profile projectile_sim_profile_for_weapon(Player* localpla
     }
   }
 
-  const float configured_horizon = static_cast<float>(std::clamp(config.aimbot.projectile_prediction_ticks, 8, 180)) *
+  const float configured_horizon = static_cast<float>(std::clamp(config.aimbot.projectile_prediction_ticks, 8, 420)) *
     static_cast<float>(TICK_INTERVAL);
   profile.params.max_time = std::min(profile.params.max_time, configured_horizon);
   profile.params.time_step = std::max(profile.params.time_step, static_cast<float>(TICK_INTERVAL));
@@ -1899,13 +2131,17 @@ inline projectile_sim_launch projectile_sim_build_launch_from_angles(Player* loc
   Vec3 launch_direction{};
   if (profile.fire_setup_mode == projectile_sim_fire_setup_mode::traced_forward) {
     Vec3 end_pos = shoot_pos + (forward * 2000.0f);
-    ray_t ray = engine_trace->init_ray(const_cast<Vec3*>(&shoot_pos), &end_pos);
-    trace_filter filter{};
-    engine_trace->init_world_trace_filter(&filter);
-
     trace_t trace{};
-    engine_trace->trace_ray(&ray, MASK_SOLID, &filter, &trace);
-    if (trace.fraction > 0.1f && trace.fraction < 1.0f && !trace.start_solid) {
+    const bool traced = projectile_trace_ray(
+      shoot_pos,
+      end_pos,
+      nullptr,
+      nullptr,
+      projectile_trace_contract::fire_setup,
+      localplayer->to_entity(),
+      static_cast<int>(localplayer->get_team()),
+      &trace);
+    if (traced && trace.fraction > 0.1f && trace.fraction < 1.0f && !trace.start_solid) {
       end_pos = trace.endpos;
     }
 
@@ -1916,22 +2152,32 @@ inline projectile_sim_launch projectile_sim_build_launch_from_angles(Player* loc
 
   if (profile.spawn_trace_mode != projectile_sim_spawn_trace_mode::none) {
     trace_t spawn_trace{};
+    bool spawn_traced = false;
     if (profile.spawn_trace_mode == projectile_sim_spawn_trace_mode::hull) {
-      ray_t ray = engine_trace->init_ray(
-        const_cast<Vec3*>(&shoot_pos),
-        &muzzle_pos,
-        const_cast<Vec3*>(&profile.spawn_trace_mins),
-        const_cast<Vec3*>(&profile.spawn_trace_maxs));
-      trace_filter filter{};
-      engine_trace->init_world_trace_filter(&filter);
-      engine_trace->trace_ray(&ray, MASK_SOLID_BRUSHONLY, &filter, &spawn_trace);
+      spawn_traced = projectile_trace_ray(
+        shoot_pos,
+        muzzle_pos,
+        &profile.spawn_trace_mins,
+        &profile.spawn_trace_maxs,
+        projectile_trace_contract::spawn,
+        localplayer->to_entity(),
+        -1,
+        &spawn_trace);
     } else {
-      ray_t ray = engine_trace->init_ray(const_cast<Vec3*>(&shoot_pos), &muzzle_pos);
-      trace_filter filter{};
-      engine_trace->init_world_trace_filter(&filter);
-      engine_trace->trace_ray(&ray, MASK_SOLID_BRUSHONLY, &filter, &spawn_trace);
+      spawn_traced = projectile_trace_ray(
+        shoot_pos,
+        muzzle_pos,
+        nullptr,
+        nullptr,
+        projectile_trace_contract::spawn,
+        localplayer->to_entity(),
+        -1,
+        &spawn_trace);
     }
 
+    if (!spawn_traced) {
+      return {};
+    }
     if (spawn_trace.start_solid || spawn_trace.all_solid) {
       return {};
     }
@@ -2002,15 +2248,36 @@ inline bool projectile_sim_trace_step(const Vec3& start,
 
   Vec3 mins = profile.hull * -1.0f;
   Vec3 maxs = profile.hull;
-  ray_t ray = profile.hull_trace
-    ? engine_trace->init_ray(const_cast<Vec3*>(&start), const_cast<Vec3*>(&end), &mins, &maxs)
-    : engine_trace->init_ray(const_cast<Vec3*>(&start), const_cast<Vec3*>(&end));
-
-  trace_filter filter{};
   if (trace_mode == projectile_sim_trace_mode::world) {
+    if (!proj_aim_budget_try_trace_call()) {
+      return false;
+    }
+    ray_t ray = profile.hull_trace
+      ? engine_trace->init_ray(const_cast<Vec3*>(&start), const_cast<Vec3*>(&end), &mins, &maxs)
+      : engine_trace->init_ray(const_cast<Vec3*>(&start), const_cast<Vec3*>(&end));
+    trace_filter filter{};
     engine_trace->init_world_trace_filter(&filter);
     engine_trace->trace_ray(&ray, MASK_SOLID_BRUSHONLY, &filter, trace_out);
+  } else if (trace_mode == projectile_sim_trace_mode::blocking_non_player) {
+    if (!projectile_trace_ray(
+        start,
+        end,
+        profile.hull_trace ? &mins : nullptr,
+        profile.hull_trace ? &maxs : nullptr,
+        projectile_trace_contract::world_block,
+        skip_entity,
+        -1,
+        trace_out)) {
+      return false;
+    }
   } else {
+    if (!proj_aim_budget_try_trace_call()) {
+      return false;
+    }
+    ray_t ray = profile.hull_trace
+      ? engine_trace->init_ray(const_cast<Vec3*>(&start), const_cast<Vec3*>(&end), &mins, &maxs)
+      : engine_trace->init_ray(const_cast<Vec3*>(&start), const_cast<Vec3*>(&end));
+    trace_filter filter{};
     engine_trace->init_trace_filter(&filter, skip_entity);
     engine_trace->trace_ray(&ray, profile.trace_mask, &filter, trace_out);
   }
@@ -2018,7 +2285,7 @@ inline bool projectile_sim_trace_step(const Vec3& start,
     return false;
   }
 
-  if (trace_mode == projectile_sim_trace_mode::world) {
+  if (trace_mode == projectile_sim_trace_mode::world || trace_mode == projectile_sim_trace_mode::blocking_non_player) {
     return true;
   }
 
@@ -2045,7 +2312,7 @@ inline bool projectile_simulation::init(const projectile_sim_launch& launch_in,
   max_ticks = std::clamp(
     static_cast<int>(std::ceil(profile.lifetime / profile.params.time_step)),
     1,
-    std::clamp(config.aimbot.projectile_prediction_ticks, 8, 180));
+    std::clamp(config.aimbot.projectile_prediction_ticks, 8, 420));
 
   result.steps.reserve(static_cast<size_t>(max_ticks) + 1);
   result.steps.emplace_back(projectile_sim_step{
@@ -2131,6 +2398,11 @@ inline projectile_sim_result projectile_sim_run(const projectile_sim_launch& lau
   Entity* skip_entity = nullptr,
   Entity* target_entity = nullptr,
   projectile_sim_trace_mode trace_mode = projectile_sim_trace_mode::none) {
+  const bool traced_sim = trace_mode != projectile_sim_trace_mode::none && profile.collide_world;
+  if (traced_sim && !proj_aim_budget_try_sim_call()) {
+    return {};
+  }
+
   projectile_simulation sim{};
   if (!sim.init(launch, profile, skip_entity, target_entity, trace_mode)) {
     return {};
@@ -2196,40 +2468,47 @@ inline bool projectile_sim_calc_angle_to_point(const Vec3& from,
 
   if (profile.params.gravity > 0.0f) {
     const float gravity = profile.params.gravity;
-    if (profile.drag > 0.0f) {
-      const float base_root =
-        (speed * speed * speed * speed) -
-        gravity * ((gravity * dx * dx) + (2.0f * dy * speed * speed));
-      if (base_root > 0.0f) {
-        const float base_pitch = std::atan(((speed * speed) + (high_arc ? std::sqrt(base_root) : -std::sqrt(base_root))) / (gravity * dx));
-        const float base_time = dx / std::max(std::cos(base_pitch) * speed, 1.0f);
-        const float drag_reduction = std::clamp(base_time * profile.drag, 0.0f, 0.85f);
-        speed = std::max(speed - (speed * drag_reduction), 200.0f);
-        vertical_lift = std::max(vertical_lift - (vertical_lift * drag_reduction), 0.0f);
+    float work_speed = speed;
+    float work_lift = vertical_lift;
+    float pitch = 0.0f;
+    float horizontal_velocity = 1.0f;
+    flight_time = 0.1f;
+    constexpr int max_drag_iterations = 6;
+    for (int drag_iteration = 0; drag_iteration < max_drag_iterations; ++drag_iteration) {
+      const float speed2 = work_speed * work_speed;
+      const float lift2 = work_lift * work_lift;
+      const float dx2 = dx * dx;
+
+      const float a = (dy * lift2) + (dx * work_speed * work_lift) + (0.5f * gravity * dx2);
+      const float b = (-2.0f * dy * work_speed * work_lift) - (dx * (speed2 - lift2));
+      const float c = (dy * speed2) - (dx * work_speed * work_lift) + (0.5f * gravity * dx2);
+      const float root = (b * b) - (4.0f * a * c);
+      if (root < 0.0f || std::fabs(a) <= 0.0001f) {
+        return false;
+      }
+
+      const float z = (-b + (high_arc ? std::sqrt(root) : -std::sqrt(root))) / (2.0f * a);
+      pitch = std::atan(z);
+      horizontal_velocity = (work_speed * std::cos(pitch)) - (work_lift * std::sin(pitch));
+      if (horizontal_velocity <= 1.0f) {
+        return false;
+      }
+
+      flight_time = dx / horizontal_velocity;
+      if (profile.drag <= 0.0f) {
+        break;
+      }
+
+      const float drag_step = std::clamp(profile.drag * flight_time, 0.0f, 0.92f);
+      const float prev_speed = work_speed;
+      work_speed = std::max(work_speed * (1.0f - drag_step), 200.0f);
+      work_lift = std::max(work_lift * (1.0f - drag_step), 0.0f);
+      if (std::fabs(work_speed - prev_speed) < 0.35f) {
+        break;
       }
     }
 
-    const float speed2 = speed * speed;
-    const float lift2 = vertical_lift * vertical_lift;
-    const float dx2 = dx * dx;
-
-    const float a = (dy * lift2) + (dx * speed * vertical_lift) + (0.5f * gravity * dx2);
-    const float b = (-2.0f * dy * speed * vertical_lift) - (dx * (speed2 - lift2));
-    const float c = (dy * speed2) - (dx * speed * vertical_lift) + (0.5f * gravity * dx2);
-    const float root = (b * b) - (4.0f * a * c);
-    if (root < 0.0f || std::fabs(a) <= 0.0001f) {
-      return false;
-    }
-
-    const float z = (-b + (high_arc ? std::sqrt(root) : -std::sqrt(root))) / (2.0f * a);
-    const float pitch = std::atan(z);
-    const float horizontal_velocity = (speed * std::cos(pitch)) - (vertical_lift * std::sin(pitch));
-    if (horizontal_velocity <= 1.0f) {
-      return false;
-    }
-
     angle.x = -pitch * radpi;
-    flight_time = dx / horizontal_velocity;
   } else {
     angle = local_prediction_direction_to_angles(local_prediction_normalize(delta));
     flight_time = local_prediction_vector_length(delta) / speed;
@@ -2262,7 +2541,7 @@ inline bool projectile_sim_solve_launch_to_point(Player* localplayer,
   }
 
   projectile_sim_launch launch{};
-  for (int pass = 0; pass < 3; ++pass) {
+  for (int pass = 0; pass < 5; ++pass) {
     launch = projectile_sim_build_launch_from_angles(localplayer, weapon, shoot_angles, profile);
 
     Vec3 adjusted_target = target_position;
@@ -2307,7 +2586,7 @@ inline bool projectile_sim_solve_launch_for_time(Player* localplayer,
   Vec3 shoot_angles = local_prediction_direction_to_angles(local_prediction_normalize(target_position - localplayer->get_shoot_pos()));
   projectile_sim_launch launch = projectile_sim_build_launch_from_angles(localplayer, weapon, shoot_angles, profile);
 
-  for (int pass = 0; pass < 3; ++pass) {
+  for (int pass = 0; pass < 5; ++pass) {
     Vec3 direction = projectile_sim_direction_for_time(launch, profile, target_position, travel_time);
     if (local_prediction_vec3_is_zero(direction)) {
       return false;
@@ -2536,6 +2815,37 @@ inline LocalPredictionProjectileTrace local_prediction_trace_from_projectile_sim
   return trace;
 }
 
+inline int local_prediction_projectile_arc_branch_count(bool has_gravity) {
+  if (!has_gravity) {
+    return 1;
+  }
+
+  return 2;
+}
+
+inline bool local_prediction_projectile_arc_high_branch(bool has_gravity, int branch_index) {
+  return has_gravity && branch_index == 1;
+}
+
+inline float local_prediction_projectile_arc_score_bias(const projectile_sim_profile& profile,
+  bool high_arc,
+  float flight_time) {
+  if (!high_arc) {
+    return 0.0f;
+  }
+
+  // gentle preference for low-arc shots; must stay well below intercept_error_cap so high-arc
+  // intercepts are still accepted when the low-arc solver fails (long-range huntsman / grenades).
+  // intercept_error_cap is roughly max(320, speed*time_step*20), so cap the bias at ~25% of the
+  // expected speed-based component plus a small extra cost proportional to flight time.
+  const float speed_component = std::clamp(profile.params.speed * profile.params.time_step * 20.0f, 320.0f, 1200.0f);
+  const float base_cost = std::min(speed_component * 0.18f, 90.0f);
+  const float time_cost = std::min(
+    std::clamp(flight_time, 0.0f, profile.params.max_time) * profile.params.speed * 0.04f,
+    60.0f);
+  return base_cost + time_cost;
+}
+
 inline LocalPredictionInterceptResult local_prediction_find_projectile_intercept(Player* localplayer,
   Weapon* weapon,
   const LocalPredictionEntityPath& target_path,
@@ -2554,27 +2864,35 @@ inline LocalPredictionInterceptResult local_prediction_find_projectile_intercept
   float best_time = 0.0f;
   float best_distance = FLT_MAX;
   projectile_sim_launch best_launch{};
+  size_t best_path_index = 0;
 
   const size_t path_step_count = std::min(
     target_path.positions.size() - 1,
-    static_cast<size_t>(std::clamp(config.aimbot.projectile_prediction_ticks, 8, 180)));
-  const size_t path_stride = std::max<size_t>(1, (path_step_count + 47) / 48);
-  for (size_t path_index = 0; path_index <= path_step_count; path_index += path_stride) {
+    static_cast<size_t>(std::clamp(config.aimbot.projectile_prediction_ticks, 8, 420)));
+  size_t path_stride = std::max<size_t>(1, (path_step_count + 47) / 48);
+  if (proj_aim_budget().active) {
+    path_stride *= static_cast<size_t>(std::clamp(proj_aim_budget().intercept_path_stride_mul, 1, 8));
+  }
+
+  const auto score_path_index = [&](size_t path_index) {
     const float target_time = target_path.start_time + (static_cast<float>(path_index) * target_path.time_step);
     if (target_time <= 0.0001f) {
-      continue;
+      return;
     }
     if (target_time > profile.params.max_time) {
-      break;
+      return;
     }
-    Vec3 predicted_target = target_path.positions[path_index] + target_offset;
+    const Vec3 predicted_target = target_path.positions[path_index] + target_offset;
 
-    Vec3 to_target = predicted_target - localplayer->get_shoot_pos();
-    float straight_distance = local_prediction_vector_length(to_target);
-    if (straight_distance <= 1.0f) continue;
+    const Vec3 to_target = predicted_target - localplayer->get_shoot_pos();
+    const float straight_distance = local_prediction_vector_length(to_target);
+    if (straight_distance <= 1.0f) {
+      return;
+    }
 
-    const int arc_count = profile.params.gravity > 0.0f ? 2 : 1;
-    for (int arc_index = 0; arc_index < arc_count; ++arc_index) {
+    const int arc_branch_count = local_prediction_projectile_arc_branch_count(profile.params.gravity > 0.0f);
+    for (int arc_branch = 0; arc_branch < arc_branch_count; ++arc_branch) {
+      const bool high_arc = local_prediction_projectile_arc_high_branch(profile.params.gravity > 0.0f, arc_branch);
       projectile_sim_launch candidate_launch{};
       float flight_time = 0.0f;
       if (!projectile_sim_solve_launch_to_point(
@@ -2582,7 +2900,7 @@ inline LocalPredictionInterceptResult local_prediction_find_projectile_intercept
           weapon,
           profile,
           predicted_target,
-          arc_index == 1,
+          high_arc,
           &candidate_launch,
           &flight_time)) {
         continue;
@@ -2594,21 +2912,52 @@ inline LocalPredictionInterceptResult local_prediction_find_projectile_intercept
 
       const float spatial_error = distance_3d(projectile_sim_position_at_time(candidate_launch, profile, flight_time), predicted_target);
       const float time_error = std::fabs(flight_time - target_time);
-      const float score_error = spatial_error + (time_error * profile.params.speed) + (arc_index == 1 ? 48.0f : 0.0f);
+      const float arc_bias = local_prediction_projectile_arc_score_bias(profile, high_arc, flight_time);
+      const float score_error = spatial_error + (time_error * profile.params.speed) + arc_bias;
       if (score_error < best_error) {
         best_error = score_error;
         best_time = flight_time;
         best_distance = straight_distance;
         best_launch = candidate_launch;
+        best_path_index = path_index;
       }
     }
+  };
+
+  for (size_t path_index = 0; path_index <= path_step_count; path_index += path_stride) {
+    score_path_index(path_index);
 
     if (path_step_count - path_index < path_stride) {
       break;
     }
   }
 
-  if (best_error > 160.0f || local_prediction_vec3_is_zero(best_launch.direction)) {
+  if (path_stride > 1) {
+    const size_t back = std::min(path_stride * 5, best_path_index);
+    const size_t start_refine = best_path_index > back ? best_path_index - back : 0;
+    const size_t end_refine = std::min(path_step_count, best_path_index + (path_stride * 5));
+    for (size_t path_index = start_refine; path_index <= end_refine; ++path_index) {
+      if ((path_index % path_stride) == 0 && path_index != best_path_index) {
+        continue;
+      }
+      score_path_index(path_index);
+    }
+
+    const size_t fine_back = std::min<size_t>(2, best_path_index);
+    const size_t fine_start = best_path_index > fine_back ? best_path_index - fine_back : 0;
+    const size_t fine_end = std::min(path_step_count, best_path_index + 2);
+    for (size_t path_index = fine_start; path_index <= fine_end; ++path_index) {
+      if (path_index == best_path_index) {
+        continue;
+      }
+      score_path_index(path_index);
+    }
+  }
+
+  const float intercept_error_cap =
+    std::max(320.0f, profile.params.speed * profile.params.time_step * 20.0f) +
+    (proj_aim_budget().active ? proj_aim_budget().intercept_error_cap_add : 0.0f);
+  if (best_error > intercept_error_cap || local_prediction_vec3_is_zero(best_launch.direction)) {
     return {};
   }
 
@@ -2626,7 +2975,11 @@ inline LocalPredictionInterceptResult local_prediction_find_projectile_intercept
 
   const Vec3 final_base_origin = local_prediction_path_position_at_time(target_path, final_time);
   const Vec3 final_target = final_base_origin + target_offset;
-  if (final_miss > projectile_sim_direct_tolerance(profile)) {
+  // final-miss tolerance: the projectile_sim_direct_tolerance is point-to-point. proj_aim_trace
+  // does the precise hull-vs-path test downstream, so here we add the player-hull horizontal
+  // radius (~24) so we don't reject an intercept that proj_aim_trace would happily accept.
+  constexpr float player_hull_extra = 24.0f;
+  if (final_miss > projectile_sim_direct_tolerance(profile) + player_hull_extra) {
     return {};
   }
 
@@ -2663,8 +3016,9 @@ inline LocalPredictionInterceptResult local_prediction_find_static_projectile_in
   projectile_sim_launch best_launch{};
   projectile_sim_result best_sim_result{};
 
-  const int arc_count = profile.params.gravity > 0.0f ? 2 : 1;
-  for (int arc_index = 0; arc_index < arc_count; ++arc_index) {
+  const int arc_branch_count = local_prediction_projectile_arc_branch_count(profile.params.gravity > 0.0f);
+  for (int arc_branch = 0; arc_branch < arc_branch_count; ++arc_branch) {
+    const bool high_arc = local_prediction_projectile_arc_high_branch(profile.params.gravity > 0.0f, arc_branch);
     projectile_sim_launch candidate_launch{};
     float flight_time = 0.0f;
     if (!projectile_sim_solve_launch_to_point(
@@ -2672,7 +3026,7 @@ inline LocalPredictionInterceptResult local_prediction_find_static_projectile_in
         weapon,
         profile,
         target_origin,
-        arc_index == 1,
+        high_arc,
         &candidate_launch,
         &flight_time)) {
       continue;
@@ -2695,7 +3049,8 @@ inline LocalPredictionInterceptResult local_prediction_find_static_projectile_in
       continue;
     }
 
-    const float score = final_miss + (std::fabs(final_time - flight_time) * profile.params.speed) + (arc_index == 1 ? 48.0f : 0.0f);
+    const float arc_bias = local_prediction_projectile_arc_score_bias(profile, high_arc, flight_time);
+    const float score = final_miss + (std::fabs(final_time - flight_time) * profile.params.speed) + arc_bias;
     if (score < best_score) {
       best_score = score;
       best_time = final_time;
@@ -2738,7 +3093,12 @@ inline LocalPredictionInterceptResult local_prediction_find_projectile_intercept
   if (localplayer == nullptr || weapon == nullptr || user_cmd == nullptr) return result;
 
   if (local_prediction_vector_length(target_velocity) <= 0.001f) {
-    return local_prediction_find_static_projectile_intercept(localplayer, weapon, target_origin, user_cmd, horizon_seconds);
+    return local_prediction_find_static_projectile_intercept(
+      localplayer,
+      weapon,
+      target_origin,
+      user_cmd,
+      horizon_seconds);
   }
 
   projectile_sim_profile profile = projectile_sim_profile_for_weapon(localplayer, weapon);
@@ -2754,8 +3114,11 @@ inline LocalPredictionInterceptResult local_prediction_find_projectile_intercept
   const int step_count = std::clamp(
     static_cast<int>(std::ceil(profile.params.max_time / profile.params.time_step)),
     4,
-    std::clamp(config.aimbot.projectile_prediction_ticks, 8, 180));
-  const int step_stride = std::max(1, (step_count + 47) / 48);
+    std::clamp(config.aimbot.projectile_prediction_ticks, 8, 420));
+  int step_stride = std::max(1, (step_count + 47) / 48);
+  if (proj_aim_budget().active) {
+    step_stride *= std::clamp(proj_aim_budget().intercept_path_stride_mul, 1, 8);
+  }
   for (int step_index = 1; step_index <= step_count; step_index += step_stride) {
     const float target_time = std::min(profile.params.max_time, step_index * profile.params.time_step);
     Vec3 predicted_target = target_origin + (target_velocity * target_time);
@@ -2764,8 +3127,9 @@ inline LocalPredictionInterceptResult local_prediction_find_projectile_intercept
     float straight_distance = local_prediction_vector_length(to_target);
     if (straight_distance <= 1.0f) continue;
 
-    const int arc_count = profile.params.gravity > 0.0f ? 2 : 1;
-    for (int arc_index = 0; arc_index < arc_count; ++arc_index) {
+    const int arc_branch_count = local_prediction_projectile_arc_branch_count(profile.params.gravity > 0.0f);
+    for (int arc_branch = 0; arc_branch < arc_branch_count; ++arc_branch) {
+      const bool high_arc = local_prediction_projectile_arc_high_branch(profile.params.gravity > 0.0f, arc_branch);
       projectile_sim_launch candidate_launch{};
       float flight_time = 0.0f;
       if (!projectile_sim_solve_launch_to_point(
@@ -2773,7 +3137,7 @@ inline LocalPredictionInterceptResult local_prediction_find_projectile_intercept
           weapon,
           profile,
           predicted_target,
-          arc_index == 1,
+          high_arc,
           &candidate_launch,
           &flight_time)) {
         continue;
@@ -2785,7 +3149,8 @@ inline LocalPredictionInterceptResult local_prediction_find_projectile_intercept
 
       const float spatial_error = distance_3d(projectile_sim_position_at_time(candidate_launch, profile, flight_time), predicted_target);
       const float time_error = std::fabs(flight_time - target_time);
-      const float score_error = spatial_error + (time_error * profile.params.speed) + (arc_index == 1 ? 48.0f : 0.0f);
+      const float arc_bias = local_prediction_projectile_arc_score_bias(profile, high_arc, flight_time);
+      const float score_error = spatial_error + (time_error * profile.params.speed) + arc_bias;
       if (score_error < best_error) {
         best_error = score_error;
         best_time = flight_time;
@@ -2795,7 +3160,10 @@ inline LocalPredictionInterceptResult local_prediction_find_projectile_intercept
     }
   }
 
-  if (best_error > 160.0f || local_prediction_vec3_is_zero(best_launch.direction)) {
+  const float intercept_error_cap =
+    std::max(320.0f, profile.params.speed * profile.params.time_step * 20.0f) +
+    (proj_aim_budget().active ? proj_aim_budget().intercept_error_cap_add : 0.0f);
+  if (best_error > intercept_error_cap || local_prediction_vec3_is_zero(best_launch.direction)) {
     return {};
   }
 
@@ -2812,7 +3180,8 @@ inline LocalPredictionInterceptResult local_prediction_find_projectile_intercept
   }
 
   const Vec3 final_target = target_origin + (target_velocity * final_time);
-  if (final_miss > projectile_sim_direct_tolerance(profile)) {
+  constexpr float player_hull_extra = 24.0f;
+  if (final_miss > projectile_sim_direct_tolerance(profile) + player_hull_extra) {
     return {};
   }
 
