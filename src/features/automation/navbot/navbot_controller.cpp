@@ -887,6 +887,11 @@ bool navbot_controller::should_block_pathing(Player* localplayer) const
     return false;
   }
 
+  if (localplayer->in_cond(TF_COND_TAUNTING))
+  {
+    return true;
+  }
+
   auto map_name = mesh_.map_name().empty() ? loaded_map_name_ : mesh_.map_name();
   auto on_cp_or_pl_map = map_has_cp_or_pl_prefix(map_name);
   auto warmup_active = warmup_active_;
