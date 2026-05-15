@@ -894,4 +894,58 @@ bool is_local_ipc_friend(std::uint32_t friend_id)
   return local_ipc_friends.find(friend_id) != local_ipc_friends.end();
 }
 
+bool is_excess_ipc_bot_on_current_server(int max_bots)
+{
+  if (max_bots <= 0 || ipc_state == nullptr || !valid_local_peer_id())
+  {
+    return false;
+  }
+
+  try_scoped_lock lock{ipc_state};
+  if (!lock.locked() || !valid_local_peer_id())
+  {
+    return false;
+  }
+
+  const auto now = now_seconds();
+  const auto& local_peer = ipc_state->peer_data[local_peer_id];
+  const auto& local_data = ipc_state->peer_user_data[local_peer_id];
+  if (!peer_alive(local_peer, now) ||
+      !local_data.connected ||
+      !local_data.ingame.good ||
+      local_data.ingame.server[0] == '\0')
+  {
+    return false;
+  }
+
+  const auto local_connected_time = local_data.ts_connected != 0 ? local_data.ts_connected : local_peer.starttime;
+  int same_server_count = 0;
+  int earlier_peer_count = 0;
+
+  for (auto index = 0u; index < max_peers; ++index)
+  {
+    const auto& peer = ipc_state->peer_data[index];
+    const auto& data = ipc_state->peer_user_data[index];
+    if (!peer_alive(peer, now) ||
+        !data.connected ||
+        !data.ingame.good ||
+        data.ingame.server[0] == '\0' ||
+        std::strncmp(data.ingame.server, local_data.ingame.server, sizeof(data.ingame.server)) != 0)
+    {
+      continue;
+    }
+
+    ++same_server_count;
+
+    const auto connected_time = data.ts_connected != 0 ? data.ts_connected : peer.starttime;
+    if (connected_time < local_connected_time ||
+        (connected_time == local_connected_time && index < static_cast<unsigned int>(local_peer_id)))
+    {
+      ++earlier_peer_count;
+    }
+  }
+
+  return same_server_count > max_bots && earlier_peer_count >= max_bots;
+}
+
 } // namespace cat_ipc::client

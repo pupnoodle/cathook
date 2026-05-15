@@ -28,6 +28,7 @@ void shutdown();
 [[nodiscard]] bool connected();
 [[nodiscard]] int peer_id();
 [[nodiscard]] bool is_local_ipc_friend(std::uint32_t friend_id);
+[[nodiscard]] bool is_excess_ipc_bot_on_current_server(int max_bots);
 
 } // namespace cat_ipc::client
 

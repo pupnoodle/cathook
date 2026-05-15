@@ -589,6 +589,7 @@ struct Misc {
     int auto_queue_mode = 7;
     int rq_if_players_lte = 0;
     int rq_if_players_gte = 0;
+    int rq_if_ipc_bots_gt = 0;
     bool rq_ignore_friends = true;
     requeue_action_mode requeue_action = requeue_action_mode::QUEUE_ONLY;
     bool region_selector = false;
