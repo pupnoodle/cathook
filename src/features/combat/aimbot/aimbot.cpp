@@ -160,6 +160,18 @@ bool aimbot_fixed_weapon_spreads_enabled()
   return fixed_weapon_spreads != nullptr && fixed_weapon_spreads->get_int() != 0;
 }
 
+float aimbot_spread_rand_float_valve(int* stream_seed, float lo, float hi)
+{
+  if (stream_seed == nullptr) {
+    return lo;
+  }
+
+  *stream_seed = (*stream_seed) * 214013 + 2531011;
+  const int r = (*stream_seed >> 16) & 0x7fff;
+  const float t = static_cast<float>(r) * (1.0f / 32768.0f);
+  return lo + (hi - lo) * t;
+}
+
 bool aimbot_hitscan_spread_offset(user_cmd* user_cmd,
   int pellet_index,
   float spread,
@@ -174,15 +186,16 @@ bool aimbot_hitscan_spread_offset(user_cmd* user_cmd,
     return true;
   }
 
-  if (!aimbot_init_random()) {
-    return false;
-  }
-
-  const int command_seed = MD5_PseudoRandom(static_cast<unsigned int>(user_cmd->command_number)) & INT_MAX;
-  aimbot_random_seed(command_seed + std::max(0, pellet_index));
+  const int base_seed =
+    (MD5_PseudoRandom(static_cast<unsigned int>(user_cmd->command_number)) & INT_MAX) + std::max(0, pellet_index);
+  int stream = base_seed;
   constexpr float spread_scale = 0.5f;
-  offset_out->x = (aimbot_random_float(-spread_scale, spread_scale) + aimbot_random_float(-spread_scale, spread_scale)) * spread;
-  offset_out->y = (aimbot_random_float(-spread_scale, spread_scale) + aimbot_random_float(-spread_scale, spread_scale)) * spread;
+  offset_out->x = (aimbot_spread_rand_float_valve(&stream, -spread_scale, spread_scale) +
+    aimbot_spread_rand_float_valve(&stream, -spread_scale, spread_scale)) *
+    spread;
+  offset_out->y = (aimbot_spread_rand_float_valve(&stream, -spread_scale, spread_scale) +
+    aimbot_spread_rand_float_valve(&stream, -spread_scale, spread_scale)) *
+    spread;
   return true;
 }
 

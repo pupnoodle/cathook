@@ -18,6 +18,8 @@ V  o o  V  file: src/features/combat/random_crits/random_crits.cpp
 #include <cmath>
 #include <cstdint>
 
+#include <dlfcn.h>
+
 #include "MD5/MD5.hpp"
 #include "features/menu/config.hpp"
 #include "games/tf2/sdk/entities/player.hpp"
@@ -41,14 +43,6 @@ constexpr int bucket_attempts = 1000;
 constexpr int min_seed_scan = 256;
 constexpr int max_seed_scan = 8192;
 
-constexpr int random_table_size = 32;
-constexpr int random_ia = 16807;
-constexpr int random_im = 2147483647;
-constexpr int random_iq = 127773;
-constexpr int random_ir = 2836;
-constexpr int random_ndiv = 1 + ((random_im - 1) / random_table_size);
-constexpr unsigned int max_random_range = 0x7fffffffU;
-
 int selected_command_number = 0;
 Weapon* selected_weapon = nullptr;
 int selected_seed = 0;
@@ -63,6 +57,29 @@ enum class selected_mode {
 };
 
 selected_mode mode = selected_mode::none;
+
+using tier0_random_seed_fn = void (*)(int);
+using tier0_random_int_fn = int (*)(int, int);
+
+tier0_random_seed_fn g_tier0_random_seed = nullptr;
+tier0_random_int_fn g_tier0_random_int = nullptr;
+bool g_tier0_random_resolved = false;
+
+bool resolve_tier0_random()
+{
+  if (g_tier0_random_resolved) {
+    return g_tier0_random_seed != nullptr && g_tier0_random_int != nullptr;
+  }
+
+  g_tier0_random_resolved = true;
+  g_tier0_random_seed = reinterpret_cast<tier0_random_seed_fn>(dlsym(RTLD_DEFAULT, "RandomSeed"));
+  g_tier0_random_int = reinterpret_cast<tier0_random_int_fn>(dlsym(RTLD_DEFAULT, "RandomInt"));
+  if (g_tier0_random_seed == nullptr || g_tier0_random_int == nullptr) {
+    g_tier0_random_seed = reinterpret_cast<tier0_random_seed_fn>(dlsym(RTLD_DEFAULT, "_Z10RandomSeedi"));
+    g_tier0_random_int = reinterpret_cast<tier0_random_int_fn>(dlsym(RTLD_DEFAULT, "_Z10RandomIntii"));
+  }
+  return g_tier0_random_seed != nullptr && g_tier0_random_int != nullptr;
+}
 
 struct crit_bucket_info
 {
@@ -80,76 +97,6 @@ struct crit_bucket_info
   int available_crits = 0;
   int potential_crits = 0;
   int next_crit = 0;
-};
-
-struct valve_random_stream
-{
-  int idum = 0;
-  int iy = 0;
-  int iv[random_table_size]{};
-
-  void set_seed(int seed)
-  {
-    idum = seed < 0 ? seed : -seed;
-    iy = 0;
-  }
-
-  int generate_random_number()
-  {
-    int j = 0;
-    int k = 0;
-
-    if (idum <= 0 || iy == 0) {
-      if (-idum < 1) {
-        idum = 1;
-      } else {
-        idum = -idum;
-      }
-
-      for (j = random_table_size + 7; j >= 0; --j) {
-        k = idum / random_iq;
-        idum = (random_ia * (idum - (k * random_iq))) - (random_ir * k);
-        if (idum < 0) {
-          idum += random_im;
-        }
-        if (j < random_table_size) {
-          iv[j] = idum;
-        }
-      }
-      iy = iv[0];
-    }
-
-    k = idum / random_iq;
-    idum = (random_ia * (idum - (k * random_iq))) - (random_ir * k);
-    if (idum < 0) {
-      idum += random_im;
-    }
-
-    j = iy / random_ndiv;
-    if (j >= random_table_size || j < 0) {
-      j &= random_table_size - 1;
-    }
-
-    iy = iv[j];
-    iv[j] = idum;
-    return iy;
-  }
-
-  int random_int(int low, int high)
-  {
-    const auto range = static_cast<unsigned int>(high - low + 1);
-    if (range <= 1 || max_random_range < range - 1) {
-      return low;
-    }
-
-    const unsigned int max_acceptable = max_random_range - ((max_random_range + 1) % range);
-    unsigned int value = 0;
-    do {
-      value = static_cast<unsigned int>(generate_random_number());
-    } while (value > max_acceptable);
-
-    return low + static_cast<int>(value % range);
-  }
 };
 
 float remap_value(float value, float input_min, float input_max, float output_min, float output_max)
@@ -370,9 +317,16 @@ int masked_crit_seed(Player* localplayer, Weapon* weapon, int seed)
 
 int crit_roll(Player* localplayer, Weapon* weapon, int seed)
 {
-  auto random_stream = valve_random_stream{};
-  random_stream.set_seed(masked_crit_seed(localplayer, weapon, seed));
-  return random_stream.random_int(0, weapon_random_range - 1);
+  const int masked = masked_crit_seed(localplayer, weapon, seed);
+  if (resolve_tier0_random()) {
+    g_tier0_random_seed(masked);
+    return g_tier0_random_int(0, weapon_random_range - 1);
+  }
+
+  int stream = masked;
+  stream = stream * 214013 + 2531011;
+  const int r = (stream >> 16) & 0x7fff;
+  return r % weapon_random_range;
 }
 
 bool seed_matches(Player* localplayer, Weapon* weapon, int seed, bool want_crit, int roll)
