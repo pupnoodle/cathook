@@ -809,6 +809,11 @@ bool should_trigger_player_threshold_requeue(int human_players)
   return hit_lte || hit_gte;
 }
 
+bool should_trigger_ipc_bot_threshold_requeue()
+{
+  return cat_ipc::client::is_excess_ipc_bot_on_current_server(config.misc.automation.rq_if_ipc_bots_gt);
+}
+
 const char* class_name_for_join(tf_class selected_class)
 {
   switch (selected_class)
@@ -2026,9 +2031,18 @@ void automation_controller::run_queueing()
       queue_loading_start_time_ = global_vars->realtime;
     }
 
-    if (in_match_queue && !cancel_queue_requested)
+    const int loading_human_players = in_game ? count_requeue_players() : 0;
+    const bool loading_player_threshold_requeue = in_game && should_trigger_player_threshold_requeue(loading_human_players);
+    const bool loading_ipc_bot_threshold_requeue = in_game && should_trigger_ipc_bot_threshold_requeue();
+    const bool loading_requeue_conditions_met = loading_player_threshold_requeue || loading_ipc_bot_threshold_requeue;
+
+    if (in_match_queue && !cancel_queue_requested && !loading_requeue_conditions_met)
     {
-      log_queue_debug("loading screen active, leaving queued match group %u\n", queue_mode);
+      log_queue_debug(
+        "loading screen active and rq_if requirements not met, leaving queued match group %u humans=%d ipc_excess=%d\n",
+        queue_mode,
+        loading_human_players,
+        loading_ipc_bot_threshold_requeue ? 1 : 0);
       if (cancel_match_queue(party_client, queue_mode))
       {
         cancel_queue_requested = true;
@@ -2059,12 +2073,13 @@ void automation_controller::run_queueing()
     if (emit_debug_log)
     {
       log_queue_debug(
-        "skip loading attached=%d in_game=%d connected=%d net_channel=%d in_match_queue=%d next_action=%.2f realtime=%.2f\n",
+        "skip loading attached=%d in_game=%d connected=%d net_channel=%d in_match_queue=%d rq_if=%d next_action=%.2f realtime=%.2f\n",
         still_attached_to_server ? 1 : 0,
         in_game ? 1 : 0,
         is_connected ? 1 : 0,
         has_net_channel ? 1 : 0,
         in_match_queue ? 1 : 0,
+        loading_requeue_conditions_met ? 1 : 0,
         next_queue_action_time_,
         global_vars->realtime);
     }
@@ -2075,8 +2090,10 @@ void automation_controller::run_queueing()
 
   const int human_players = in_game ? count_requeue_players() : 0;
   const bool player_threshold_requeue = in_game && should_trigger_player_threshold_requeue(human_players);
+  const bool ipc_bot_threshold_requeue = in_game && should_trigger_ipc_bot_threshold_requeue();
+  const bool threshold_requeue = player_threshold_requeue || ipc_bot_threshold_requeue;
 
-  if (player_threshold_requeue)
+  if (threshold_requeue)
   {
     if (config.misc.automation.requeue_action == Misc::Automation::requeue_action_mode::LEAVE_AND_REQUEUE)
     {
@@ -2084,10 +2101,12 @@ void automation_controller::run_queueing()
       {
         const bool used_abandon = abandon_current_match();
         log_queue_debug(
-          "player threshold hit (%d humans), leave_and_requeue lte=%d gte=%d abandon=%d\n",
+          "rq_if hit (%d humans, ipc_excess=%d), leave_and_requeue lte=%d gte=%d ipc_gt=%d abandon=%d\n",
           human_players,
+          ipc_bot_threshold_requeue ? 1 : 0,
           config.misc.automation.rq_if_players_lte,
           config.misc.automation.rq_if_players_gte,
+          config.misc.automation.rq_if_ipc_bots_gt,
           used_abandon ? 1 : 0);
         if (!used_abandon)
         {
@@ -2120,14 +2139,14 @@ void automation_controller::run_queueing()
       config.misc.automation.auto_queue ? 1 : 0,
       config.misc.automation.auto_requeue ? 1 : 0,
       human_players,
-      player_threshold_requeue ? 1 : 0,
+      threshold_requeue ? 1 : 0,
       static_cast<int>(config.misc.automation.requeue_action),
       still_attached_to_server ? 1 : 0,
       queued_once ? 1 : 0,
       was_disconnected ? 1 : 0);
   }
 
-  if (in_match_queue && in_game && !player_threshold_requeue && !cancel_queue_requested)
+  if (in_match_queue && in_game && !threshold_requeue && !cancel_queue_requested)
   {
     if (cancel_match_queue(party_client, queue_mode))
     {
@@ -2143,13 +2162,14 @@ void automation_controller::run_queueing()
     return;
   }
 
-  if (player_threshold_requeue)
+  if (threshold_requeue)
   {
     if (!in_match_queue && global_vars->realtime >= next_queue_action_time_)
     {
       log_queue_debug(
-        "player threshold hit (%d humans), requesting rolling queue for match group %u\n",
+        "rq_if hit (%d humans, ipc_excess=%d), requesting rolling queue for match group %u\n",
         human_players,
+        ipc_bot_threshold_requeue ? 1 : 0,
         queue_mode);
       if (request_match_queue(party_client, queue_mode))
       {

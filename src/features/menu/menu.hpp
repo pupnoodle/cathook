@@ -1847,7 +1847,7 @@ static void draw_cat_bot_content() {
     cat_menu::slider_float("Taunt safety distance", &config.misc.automation.autotaunt_safety_distance, 0.0f, 5000.0f, "%.0f HU");
     cat_menu::slider_int("Taunt weapon slot", &config.misc.automation.autotaunt_weapon_slot, 0, 5);
   });
-  cat_menu::flow_panel("Autoqueue", 0, 198.0f, [&]() {
+  cat_menu::flow_panel("Autoqueue", 0, 216.0f, [&]() {
     cat_menu::checkbox("Auto queue", &config.misc.automation.auto_queue);
     cat_menu::checkbox("Auto requeue", &config.misc.automation.auto_requeue);
     cat_menu::checkbox("Requeue on kick", &config.misc.automation.requeue_on_kick);
@@ -1855,6 +1855,7 @@ static void draw_cat_bot_content() {
     cat_menu::combo("Queue mode", &config.misc.automation.auto_queue_mode, queue_mode_items, IM_ARRAYSIZE(queue_mode_items));
     cat_menu::slider_int("RQ if players <=", &config.misc.automation.rq_if_players_lte, 0, 32);
     cat_menu::slider_int("RQ if players >=", &config.misc.automation.rq_if_players_gte, 0, 32);
+    cat_menu::slider_int("RQ if IPC bots >", &config.misc.automation.rq_if_ipc_bots_gt, 0, 32);
     cat_menu::checkbox("RQ ignore friends", &config.misc.automation.rq_ignore_friends);
     cat_menu::combo("Requeue action", (int*)&config.misc.automation.requeue_action, requeue_action_items, IM_ARRAYSIZE(requeue_action_items));
   });
@@ -1952,7 +1953,7 @@ static void draw_queue_content() {
     cat_menu::checkbox("Auto class select", &config.misc.automation.auto_class_select);
     cat_menu::combo("Preferred class", (int*)&config.misc.automation.class_selected, class_items, IM_ARRAYSIZE(class_items));
   });
-  cat_menu::flow_panel("Queue", 1, 230.0f, [&]() {
+  cat_menu::flow_panel("Queue", 1, 248.0f, [&]() {
     cat_menu::checkbox("Auto queue", &config.misc.automation.auto_queue);
     cat_menu::checkbox("Auto requeue", &config.misc.automation.auto_requeue);
     cat_menu::checkbox("Requeue on kick", &config.misc.automation.requeue_on_kick);
@@ -1960,6 +1961,7 @@ static void draw_queue_content() {
     cat_menu::combo("Queue mode", &config.misc.automation.auto_queue_mode, queue_mode_items, IM_ARRAYSIZE(queue_mode_items));
     cat_menu::slider_int("RQ if players <=", &config.misc.automation.rq_if_players_lte, 0, 32);
     cat_menu::slider_int("RQ if players >=", &config.misc.automation.rq_if_players_gte, 0, 32);
+    cat_menu::slider_int("RQ if IPC bots >", &config.misc.automation.rq_if_ipc_bots_gt, 0, 32);
     cat_menu::checkbox("RQ ignore friends", &config.misc.automation.rq_ignore_friends);
     cat_menu::combo("Requeue action", (int*)&config.misc.automation.requeue_action, requeue_action_items, IM_ARRAYSIZE(requeue_action_items));
   });

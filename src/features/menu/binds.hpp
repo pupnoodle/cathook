@@ -465,6 +465,7 @@ inline void register_builtin_targets() {
   register_target("misc.automation.auto_casual_join", "Auto casual join", &config.misc.automation.auto_casual_join);
   register_target("misc.automation.rq_if_players_lte", "RQ if players <=", &config.misc.automation.rq_if_players_lte);
   register_target("misc.automation.rq_if_players_gte", "RQ if players >=", &config.misc.automation.rq_if_players_gte);
+  register_target("misc.automation.rq_if_ipc_bots_gt", "RQ if IPC bots >", &config.misc.automation.rq_if_ipc_bots_gt);
   register_target("misc.automation.rq_ignore_friends", "RQ ignore friends", &config.misc.automation.rq_ignore_friends);
   register_target("misc.automation.requeue_action", "Requeue action", reinterpret_cast<int*>(&config.misc.automation.requeue_action));
   register_target("misc.automation.anti_motd", "Auto-close MOTD", &config.misc.automation.anti_motd);
