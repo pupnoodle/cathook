@@ -131,6 +131,8 @@ constexpr const char* host_is_secure_server_allowed =
   "55 48 89 E5 E8 ? ? ? ? 48 8D 35 ? ? ? ? 48 89 C7 48 8B 00 FF 50 50 85 C0 74 ? 31 C0 5D C6 05 ? ? ? ? 00 C3 0F 1F 84 00 00 00 00 00 E8 ? ? ? ? 48 8D 35 ? ? ? ? 48 89 C7 48 8B 00 FF 50 50 85 C0 75 ? 0F B6 05 ? ? ? ? 5D C3";
 constexpr const char* launcher_source_lock =
   "55 48 89 E5 41 55 41 54 4C 8D AD ? ? ? ? 48 81 EC ? ? ? ? E8 ? ? ? ?";
+constexpr const char* startup_video =
+  "55 48 89 E5 41 57 41 56 41 55 41 54 53 48 81 EC ? ? ? ? 48 89 BD ? ? ? ? E8 ? ? ? ? 84 C0 0F 85 ? ? ? ? 41 89 C5";
 constexpr const char* video_mode_setup_startup_graphic =
   "55 31 C0 48 89 E5 41 57 41 56 4C 8D B5 ? ? ? ? 41 55 41 54 4C 8D A5 ? ? ? ? 53 48 89 FB 48 8D 3D ? ? ? ? 48 81 EC ? ? ? ? E8 ? ? ? ? 31 D2 BE ? ? ? ? 4C 89 F7";
 constexpr const char* client_file_system =

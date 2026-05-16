@@ -157,6 +157,7 @@ byte_patch mod_load_worldlights_patch{};
 byte_patch sprite_load_model_patch{};
 byte_patch overlay_mgr_load_overlays_patch{};
 byte_patch material_system_begin_frame_patch{};
+byte_patch startup_video_patch{};
 byte_patch video_mode_setup_startup_graphic_patch{};
 constexpr std::size_t replay_ui_nullcheck_patch_count = 9;
 constexpr std::size_t character_info_command_patch_count = 5;
@@ -587,6 +588,7 @@ void initialize_engine_render_patches()
   }
 
   engine_render_patches_initialized = true;
+  initialize_optional_patch(startup_video_patch, "engine.so", sigs::startup_video, 0, { 0x31, 0xC0, 0xC3 }, "startup_video");
   initialize_optional_patch(video_mode_setup_startup_graphic_patch, "engine.so", sigs::video_mode_setup_startup_graphic, 0, { 0xC3 }, "video_mode_setup_startup_graphic");
   initialize_optional_patch(cl_decay_lights_patch, "engine.so", sigs::cl_decay_lights, 0, { 0xC3 }, "cl_decay_lights");
   initialize_optional_patch(mod_load_lighting_patch, "engine.so", sigs::mod_load_lighting, 0, { 0x31, 0xC0, 0xC3 }, "mod_load_lighting");
@@ -614,6 +616,7 @@ void initialize_optional_render_patches()
 
 void restore_optional_render_patches()
 {
+  startup_video_patch.restore();
   video_mode_setup_startup_graphic_patch.restore();
   cl_decay_lights_patch.restore();
   mod_load_lighting_patch.restore();
@@ -645,6 +648,7 @@ bool apply_optional_render_patches()
   initialize_optional_render_patches();
 
   bool applied_any_patch = false;
+  applied_any_patch = apply_optional_patch(startup_video_patch, "startup_video") || applied_any_patch;
   applied_any_patch = apply_optional_patch(video_mode_setup_startup_graphic_patch, "video_mode_setup_startup_graphic") || applied_any_patch;
   applied_any_patch = apply_optional_patch(cl_decay_lights_patch, "cl_decay_lights") || applied_any_patch;
   applied_any_patch = apply_optional_patch(mod_load_lighting_patch, "mod_load_lighting") || applied_any_patch;
