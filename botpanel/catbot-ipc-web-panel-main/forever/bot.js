@@ -1284,8 +1284,8 @@ class Bot extends EventEmitter {
         return 'steam';
     }
 
-    steamLocalConfigPaths() {
-        const paths = [];
+    steamLocalConfigPaths(steamid32) {
+        const paths = this.steamInstallCandidates().map((steam_path) => steamid32 ? path.join(steam_path, 'userdata', String(steamid32), 'config/localconfig.vdf') : null);
         for (const steam_path of this.steamInstallCandidates()) {
             const userdata_path = path.join(steam_path, 'userdata');
             try {
@@ -1298,13 +1298,11 @@ class Bot extends EventEmitter {
         return unique_paths(paths);
     }
 
-    setSteamTf2LaunchOptions(launch_options) {
-        for (const config_path of this.steamLocalConfigPaths()) {
-            if (!fs.existsSync(config_path))
-                continue;
-
-            const root = parse_simple_vdf(fs.readFileSync(config_path, 'utf8'));
+    setSteamTf2LaunchOptions(steamid32, launch_options) {
+        for (const config_path of this.steamLocalConfigPaths(steamid32)) {
+            const root = fs.existsSync(config_path) ? parse_simple_vdf(fs.readFileSync(config_path, 'utf8')) : { UserLocalConfigStore: {} };
             set_vdf_path(root, ['UserLocalConfigStore', 'Software', 'Valve', 'Steam', 'apps', '440', 'LaunchOptions'], launch_options);
+            fs.mkdirSync(path.dirname(config_path), { recursive: true });
             fs.writeFileSync(config_path, stringify_simple_vdf(root));
             this.log(`Updated Steam TF2 launch options in ${config_path}`);
             return true;
@@ -2022,7 +2020,7 @@ class Bot extends EventEmitter {
                 `-steam -game tf ${GAME_WINDOW_OPTIONS} -novid -nojoy -noipx -nomessagebox -nominidumps -nohltv -nobreakpad -reuse -noquicktime -precachefontchars -particles 1 -snoforceformat -softparticlesdefaultoff ${GAME_MODE_OPTIONS} -forcenovsync -insecure +clientport 27006-27014`
             ].join(' ');
 
-            if (!self.setSteamTf2LaunchOptions(steam_tf2_launch_options)) {
+            if (!self.setSteamTf2LaunchOptions(steamid32, steam_tf2_launch_options)) {
                 self.removeGamePreloadLibrary();
                 return false;
             }
