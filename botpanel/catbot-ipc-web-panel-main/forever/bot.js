@@ -34,7 +34,7 @@ const TF2_LAUNCH_MODE = (process.env.CAT_TF2_LAUNCH_MODE || 'direct').toLowerCas
 const LAUNCH_OPTIONS_STEAM = `firejail --dns=1.1.1.1 %NETWORK% --noprofile --private="%HOME%" --private-tmp --name=%JAILNAME% --env=PULSE_SERVER="unix:/tmp/pulse.sock" --env=DISPLAY=%DISPLAY% --env=XAUTHORITY=%XAUTHORITY% --env=TMPDIR=/tmp --env=TMP=/tmp --env=TEMP=/tmp --env=XDG_RUNTIME_DIR=/tmp/xdg-runtime --env=LD_LIBRARY_PATH=%STEAM_LD_LIBRARY_PATH% --env=LD_PRELOAD=%LD_PRELOAD% sh -lc 'mkdir -p "$XDG_RUNTIME_DIR"; chmod 700 "$XDG_RUNTIME_DIR"; if command -v dbus-run-session >/dev/null 2>&1; then exec dbus-run-session -- "$@"; else exec "$@"; fi' steam-session %STEAM% ${steam_window_options} -login %LOGIN% %PASSWORD%`
 const LAUNCH_OPTIONS_STEAM_RESET = 'firejail --net=none --noprofile --private="%HOME%" --env=LD_LIBRARY_PATH=%STEAM_LD_LIBRARY_PATH% %STEAM% --reset'
 const LAUNCH_OPTIONS_GAME = `firejail --join=%JAILNAME% bash -c 'cd "%GAMEPATH%" && %RUNTIME_PREFIX% SteamAppId=440 SteamGameId=440 SteamOverlayGameId=440 SteamEnv=1 CATHOOK_ROOT="%CATHOOK_ROOT%" CATHOOK_ROOT_DIR="%CATHOOK_ROOT%" CATHOOK_AUTO_ATTACH=1 CATHOOK_ATTACH_DELAY_SECONDS=%CATHOOK_ATTACH_DELAY_SECONDS% CAT_BOT_ID="%BOT_ID%" CAT_BOT_NAME="%BOT_NAME%" CAT_STEAMID32=%STEAMID32% LD_PRELOAD=%LD_PRELOAD% DISPLAY=%DISPLAY% XAUTHORITY="%XAUTHORITY%" PULSE_SERVER="unix:/tmp/pulse.sock" %GAME_BINARY% -steam -game tf ${GAME_WINDOW_OPTIONS} -novid -nojoy -noipx -nomessagebox -nominidumps -nohltv -nobreakpad -reuse -noquicktime -precachefontchars -particles 1 -snoforceformat -softparticlesdefaultoff ${GAME_MODE_OPTIONS} -forcenovsync -insecure +clientport 27006-27014'`
-const LAUNCH_OPTIONS_GAME_STEAM = `firejail --join=%JAILNAME% bash -c 'CATHOOK_ROOT="%CATHOOK_ROOT%" CATHOOK_ROOT_DIR="%CATHOOK_ROOT%" CATHOOK_AUTO_ATTACH=1 CATHOOK_ATTACH_DELAY_SECONDS=%CATHOOK_ATTACH_DELAY_SECONDS% CAT_BOT_ID="%BOT_ID%" CAT_BOT_NAME="%BOT_NAME%" CAT_STEAMID32=%STEAMID32% LD_PRELOAD=%LD_PRELOAD% DISPLAY=%DISPLAY% XAUTHORITY="%XAUTHORITY%" PULSE_SERVER="unix:/tmp/pulse.sock" %STEAM% -applaunch 440 -steam -game tf ${GAME_WINDOW_OPTIONS} -novid -nojoy -noipx -nomessagebox -nominidumps -nohltv -nobreakpad -reuse -noquicktime -precachefontchars -particles 1 -snoforceformat -softparticlesdefaultoff ${GAME_MODE_OPTIONS} -forcenovsync -insecure +clientport 27006-27014'`
+const LAUNCH_OPTIONS_GAME_STEAM = `firejail --join=%JAILNAME% bash -c 'DISPLAY=%DISPLAY% XAUTHORITY="%XAUTHORITY%" PULSE_SERVER="unix:/tmp/pulse.sock" %STEAM% -applaunch 440'`
 const GAME_LIBRARY_PATH = './bin:./bin/linux64:./tf/bin:./tf/bin/linux64:./platform:./platform/bin:./platform/bin/linux64:.';
 
 // Adjust these values as needed to optimize catbot performance
@@ -295,6 +295,68 @@ function path_is_inside(child_path, parent_path) {
 
 function unique_paths(paths) {
     return [...new Set(paths.filter(Boolean))];
+}
+
+function vdf_escape(value) {
+    return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function set_vdf_path(root, keys, value) {
+    let object = root;
+    for (let index = 0; index < keys.length - 1; ++index) {
+        const key = keys[index];
+        if (!object[key] || typeof object[key] !== 'object')
+            object[key] = {};
+        object = object[key];
+    }
+    object[keys[keys.length - 1]] = value;
+}
+
+function parse_simple_vdf(text) {
+    const tokens = [];
+    const pattern = /"((?:\\.|[^"\\])*)"|[{}]/g;
+    let match = null;
+    while ((match = pattern.exec(text)) !== null)
+        tokens.push(match[0][0] === '"' ? match[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\') : match[0]);
+
+    let index = 0;
+    function parse_object() {
+        const object = {};
+        while (index < tokens.length && tokens[index] !== '}') {
+            const key = tokens[index++];
+            if (tokens[index] === '{') {
+                ++index;
+                object[key] = parse_object();
+                if (tokens[index] === '}')
+                    ++index;
+            } else {
+                object[key] = tokens[index++] || '';
+            }
+        }
+        return object;
+    }
+
+    return parse_object();
+}
+
+function write_simple_vdf_value(lines, key, value, depth) {
+    const indent = '\t'.repeat(depth);
+    if (value && typeof value === 'object') {
+        lines.push(`${indent}"${vdf_escape(key)}"`);
+        lines.push(`${indent}{`);
+        for (const entry_key of Object.keys(value))
+            write_simple_vdf_value(lines, entry_key, value[entry_key], depth + 1);
+        lines.push(`${indent}}`);
+    } else {
+        lines.push(`${indent}"${vdf_escape(key)}"\t\t"${vdf_escape(value)}"`);
+    }
+}
+
+function stringify_simple_vdf(root) {
+    const lines = [];
+    for (const key of Object.keys(root))
+        write_simple_vdf_value(lines, key, root[key], 0);
+    return lines.join('\n') + '\n';
 }
 
 function read_proc_stat(pid) {
@@ -1222,6 +1284,36 @@ class Bot extends EventEmitter {
         return 'steam';
     }
 
+    steamLocalConfigPaths() {
+        const paths = [];
+        for (const steam_path of this.steamInstallCandidates()) {
+            const userdata_path = path.join(steam_path, 'userdata');
+            try {
+                for (const user_id of fs.readdirSync(userdata_path)) {
+                    if (/^\d+$/.test(user_id))
+                        paths.push(path.join(userdata_path, user_id, 'config/localconfig.vdf'));
+                }
+            } catch (error) { }
+        }
+        return unique_paths(paths);
+    }
+
+    setSteamTf2LaunchOptions(launch_options) {
+        for (const config_path of this.steamLocalConfigPaths()) {
+            if (!fs.existsSync(config_path))
+                continue;
+
+            const root = parse_simple_vdf(fs.readFileSync(config_path, 'utf8'));
+            set_vdf_path(root, ['UserLocalConfigStore', 'Software', 'Valve', 'Steam', 'apps', '440', 'LaunchOptions'], launch_options);
+            fs.writeFileSync(config_path, stringify_simple_vdf(root));
+            this.log(`Updated Steam TF2 launch options in ${config_path}`);
+            return true;
+        }
+
+        this.log('[ERROR] Could not find Steam localconfig.vdf to set TF2 launch options.');
+        return false;
+    }
+
     ensureVisibleXauthority() {
         this.xauthorityPath = BOT_XAUTHORITY;
 
@@ -1912,6 +2004,29 @@ class Bot extends EventEmitter {
 
         self.log(`Resolved SteamID32 ${steamid32} for ${self.account.login}`);
         const game_launch_options = TF2_LAUNCH_MODE === 'steam' ? LAUNCH_OPTIONS_GAME_STEAM : LAUNCH_OPTIONS_GAME;
+        if (TF2_LAUNCH_MODE === 'steam') {
+            const steam_tf2_launch_options = [
+                `SteamAppId=440`,
+                `SteamGameId=440`,
+                `SteamOverlayGameId=440`,
+                `SteamEnv=1`,
+                `CATHOOK_ROOT="${bash_double_quote_escape(CATHOOK_ROOT)}"`,
+                `CATHOOK_ROOT_DIR="${bash_double_quote_escape(CATHOOK_ROOT)}"`,
+                `CATHOOK_AUTO_ATTACH=1`,
+                `CATHOOK_ATTACH_DELAY_SECONDS=${CATHOOK_ATTACH_DELAY_SECONDS}`,
+                `CAT_BOT_ID="${bash_double_quote_escape(String(self.botid))}"`,
+                `CAT_BOT_NAME="${bash_double_quote_escape(self.name)}"`,
+                `CAT_STEAMID32=${steamid32}`,
+                `LD_PRELOAD="${bash_double_quote_escape(game_preload)}"`,
+                `%command%`,
+                `-steam -game tf ${GAME_WINDOW_OPTIONS} -novid -nojoy -noipx -nomessagebox -nominidumps -nohltv -nobreakpad -reuse -noquicktime -precachefontchars -particles 1 -snoforceformat -softparticlesdefaultoff ${GAME_MODE_OPTIONS} -forcenovsync -insecure +clientport 27006-27014`
+            ].join(' ');
+
+            if (!self.setSteamTf2LaunchOptions(steam_tf2_launch_options)) {
+                self.removeGamePreloadLibrary();
+                return false;
+            }
+        }
         self.log(`Launching TF2 mode=${TF2_LAUNCH_MODE} from ${game_launch_path} binary=${game_binary} source_library=${source_library} attach_delay_seconds=${CATHOOK_ATTACH_DELAY_SECONDS} preload=${game_preload}`);
         self.procFirejailGame = child_process.spawn(game_launch_options.replace("%GAMEPATH%", bash_double_quote_escape(game_launch_path))
             .replace("%RUNTIME_PREFIX%", self.gameRuntimePrefix())
