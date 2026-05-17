@@ -42,9 +42,19 @@ enum nav_area_flags : uint32_t
   nav_area_flag_flag = 1 << 11
 };
 
+enum nav_direction : uint8_t
+{
+  nav_direction_north = 0,
+  nav_direction_east = 1,
+  nav_direction_south = 2,
+  nav_direction_west = 3,
+  nav_direction_count = 4
+};
+
 struct nav_connection
 {
   nav_area_id area_id{};
+  uint8_t direction = nav_direction_north;
 };
 
 struct nav_area_data

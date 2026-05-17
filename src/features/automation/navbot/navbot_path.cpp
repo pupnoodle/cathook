@@ -105,6 +105,58 @@ bool use_other_center(const Vec3& center_point, const Vec3& area_center, const V
     && center_point.y != next_center.y;
 }
 
+struct portal_info
+{
+  Vec3 center{};
+  float half_width = 0.0f;
+  uint8_t direction = nav_direction_north;
+  bool valid = false;
+};
+
+portal_info compute_portal(const nav_area_data& from_area, const nav_area_data& to_area, uint8_t direction)
+{
+  portal_info portal{};
+  portal.direction = direction;
+
+  if (direction == nav_direction_north || direction == nav_direction_south)
+  {
+    portal.center.y = (direction == nav_direction_north) ? from_area.nw_corner.y : from_area.se_corner.y;
+
+    auto left = std::max(from_area.nw_corner.x, to_area.nw_corner.x);
+    auto right = std::min(from_area.se_corner.x, to_area.se_corner.x);
+    left = std::clamp(left, from_area.nw_corner.x, from_area.se_corner.x);
+    right = std::clamp(right, from_area.nw_corner.x, from_area.se_corner.x);
+
+    if (right < left)
+    {
+      return portal;
+    }
+
+    portal.center.x = (left + right) * 0.5f;
+    portal.half_width = (right - left) * 0.5f;
+  }
+  else
+  {
+    portal.center.x = (direction == nav_direction_west) ? from_area.nw_corner.x : from_area.se_corner.x;
+
+    auto top = std::max(from_area.nw_corner.y, to_area.nw_corner.y);
+    auto bottom = std::min(from_area.se_corner.y, to_area.se_corner.y);
+    top = std::clamp(top, from_area.nw_corner.y, from_area.se_corner.y);
+    bottom = std::clamp(bottom, from_area.nw_corner.y, from_area.se_corner.y);
+
+    if (bottom < top)
+    {
+      return portal;
+    }
+
+    portal.center.y = (top + bottom) * 0.5f;
+    portal.half_width = (bottom - top) * 0.5f;
+  }
+
+  portal.valid = true;
+  return portal;
+}
+
 } // namespace
 
 bool nav_area_has_clearance(const nav_area_data& area)
@@ -177,22 +229,42 @@ transition_points build_transition_points(const navbot_mesh& mesh, nav_area_id c
 
   auto area_center = current->center;
   auto next_center = next->center;
-  auto area_closest = mesh.get_nearest_point(current_area, next_center);
-  auto next_closest = mesh.get_nearest_point(next_area, area_center);
 
-  auto center_point = area_closest;
-  if (use_other_center(center_point, area_center, next_center))
+  auto center_point = Vec3{};
+  auto center_next = Vec3{};
+  auto use_portal = false;
+
+  auto connection_index = mesh.find_connection_index(current_area, next_area);
+  if (connection_index.has_value() && *connection_index < current->connections.size())
   {
-    center_point = next_closest;
-    center_point.z = mesh.get_nearest_point(current_area, next_closest).z;
+    auto direction = current->connections[*connection_index].direction;
+    auto portal = compute_portal(*current, *next, direction);
+    if (portal.valid)
+    {
+      center_point = mesh.get_nearest_point(current_area, portal.center);
+      center_next = mesh.get_nearest_point(next_area, portal.center);
+      use_portal = true;
+    }
   }
 
-  auto center_next = mesh.get_nearest_point(next_area, center_point);
+  if (!use_portal)
+  {
+    auto area_closest = mesh.get_nearest_point(current_area, next_center);
+    auto next_closest = mesh.get_nearest_point(next_area, area_center);
+
+    center_point = area_closest;
+    if (use_other_center(center_point, area_center, next_center))
+    {
+      center_point = next_closest;
+      center_point.z = mesh.get_nearest_point(current_area, next_closest).z;
+    }
+    center_next = mesh.get_nearest_point(next_area, center_point);
+  }
 
   return transition_points{
     clamp_point_to_player_clearance(*current, area_center),
-    clamp_point_to_player_clearance(*current, center_point),
-    clamp_point_to_player_clearance(*next, center_next),
+    center_point,
+    center_next,
     clamp_point_to_player_clearance(*next, next_center)
   };
 }
@@ -236,7 +308,6 @@ std::vector<crumb> build_crumbs_from_area_path(const navbot_mesh& mesh, const st
       auto next_area = area_path[area_index + 1];
       auto points = build_transition_points(mesh, current_area, next_area);
       points.center = apply_dropdown_adjustment(points.center, points.next);
-      points.center = clamp_point_to_player_clearance(*current, points.center);
 
       crumbs.push_back(crumb{current_area, points.current, crumb_kind::area_center});
       crumbs.push_back(crumb{current_area, points.center, crumb_kind::transition_center});

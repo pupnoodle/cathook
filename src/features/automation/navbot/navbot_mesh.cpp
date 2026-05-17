@@ -596,7 +596,7 @@ bool parse_area(nav_file_reader& reader, uint32_t version, uint32_t sub_version,
         continue;
       }
 
-      area.connections.push_back(nav_connection{nav_area_id{connection_id}});
+      area.connections.push_back(nav_connection{nav_area_id{connection_id}, static_cast<uint8_t>(dir)});
     }
   }
 

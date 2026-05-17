@@ -134,26 +134,38 @@ bool trace_navigation_ray(Player* localplayer, const Vec3& start, const Vec3& en
 
   auto planar_distance = std::sqrt(length_sq);
   auto vertical_delta = end.z - start.z;
-  if (vertical_delta <= player_step_height)
-  {
-    return true;
-  }
-
-  if (vertical_delta <= walkable_ramp_height && planar_distance >= walkable_ramp_run)
-  {
-    return true;
-  }
-
-  auto lifted_start = start;
-  auto lifted_end = end;
-  lifted_start.z += player_jump_height;
-  lifted_end.z += player_jump_height;
 
   auto mins = localplayer->get_player_mins(localplayer->is_ducking());
   auto maxs = localplayer->get_player_maxs(localplayer->is_ducking());
-  auto trace = trace_t{};
-  engine_trace->trace_hull(&lifted_start, &lifted_end, &mins, &maxs, MASK_PLAYERSOLID, &trace);
-  return !did_hit_trace(trace);
+
+  const auto is_climbing = vertical_delta > player_step_height
+    && !(vertical_delta <= walkable_ramp_height && planar_distance >= walkable_ramp_run);
+
+  if (!is_climbing)
+  {
+    auto walk_start = Vec3{start.x, start.y, start.z + player_step_height};
+    auto walk_end = Vec3{end.x, end.y, end.z + player_step_height};
+    auto walk_trace = trace_t{};
+    engine_trace->trace_hull(&walk_start, &walk_end, &mins, &maxs, MASK_PLAYERSOLID, &walk_trace);
+    if (did_hit_trace(walk_trace))
+    {
+      return false;
+    }
+  }
+
+  if (is_climbing)
+  {
+    auto lifted_start = Vec3{start.x, start.y, start.z + player_jump_height};
+    auto lifted_end = Vec3{end.x, end.y, end.z + player_jump_height};
+    auto jump_trace = trace_t{};
+    engine_trace->trace_hull(&lifted_start, &lifted_end, &mins, &maxs, MASK_PLAYERSOLID, &jump_trace);
+    if (did_hit_trace(jump_trace))
+    {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 bool is_transition_passable(const path_result& path, size_t crumb_index, Player* localplayer)
@@ -623,7 +635,9 @@ follower_tick_result navbot_follow::tick(const navbot_mesh& mesh, Player* localp
   auto current_target = active_path_.crumbs[current_crumb_index_].world;
   auto current_distance_sq = distance_sq_2d_follow(local_origin, current_target);
 
-  if (current_time - last_vischeck_time_ >= 0.25f)
+  const auto near_target_distance = crumb_reach_distance * 2.0f;
+  const auto vischeck_interval = current_distance_sq <= near_target_distance * near_target_distance ? 0.05f : 0.15f;
+  if (current_time - last_vischeck_time_ >= vischeck_interval)
   {
     last_vischeck_time_ = current_time;
     if (!is_transition_passable(active_path_, current_crumb_index_, localplayer))
