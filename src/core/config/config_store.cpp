@@ -422,6 +422,11 @@ void config_store::import_config(const Config& config)
     set_bool("misc.exploits.ping_reducer", config.misc.exploits.ping_reducer);
     set_int("misc.exploits.ping_target", config.misc.exploits.ping_target);
     set_bool("misc.exploits.no_engine_sleep", config.misc.exploits.no_engine_sleep);
+    set_bool("misc.exploits.ban_message_bypass", config.misc.exploits.ban_message_bypass);
+    set_float("misc.exploits.ban_bypass_phase1_seconds", config.misc.exploits.ban_bypass_phase1_seconds);
+    set_int("misc.exploits.ban_bypass_phase2_pulses", config.misc.exploits.ban_bypass_phase2_pulses);
+    set_float("misc.exploits.ban_bypass_phase2_pulse_ms", config.misc.exploits.ban_bypass_phase2_pulse_ms);
+    set_float("misc.exploits.ban_bypass_phase2_gap_ms", config.misc.exploits.ban_bypass_phase2_gap_ms);
     set_bool("misc.exploits.null_graphics", config.misc.exploits.null_graphics);
     set_bool("misc.exploits.null_graphics_render_stubs", config.misc.exploits.null_graphics_render_stubs);
     set_bool("misc.exploits.experimental_nographic_hooks", config.misc.exploits.experimental_nographic_hooks);
@@ -953,6 +958,25 @@ void config_store::export_config(Config& config) const
         1,
         100);
     config.misc.exploits.no_engine_sleep = get_bool("misc.exploits.no_engine_sleep", config.misc.exploits.no_engine_sleep);
+    config.misc.exploits.ban_message_bypass = get_bool(
+        "misc.exploits.ban_message_bypass",
+        config.misc.exploits.ban_message_bypass);
+    config.misc.exploits.ban_bypass_phase1_seconds = std::clamp(
+        get_float("misc.exploits.ban_bypass_phase1_seconds", config.misc.exploits.ban_bypass_phase1_seconds),
+        4.0f,
+        10.0f);
+    config.misc.exploits.ban_bypass_phase2_pulses = std::clamp(
+        get_int("misc.exploits.ban_bypass_phase2_pulses", config.misc.exploits.ban_bypass_phase2_pulses),
+        0,
+        20);
+    config.misc.exploits.ban_bypass_phase2_pulse_ms = std::clamp(
+        get_float("misc.exploits.ban_bypass_phase2_pulse_ms", config.misc.exploits.ban_bypass_phase2_pulse_ms),
+        10.0f,
+        500.0f);
+    config.misc.exploits.ban_bypass_phase2_gap_ms = std::clamp(
+        get_float("misc.exploits.ban_bypass_phase2_gap_ms", config.misc.exploits.ban_bypass_phase2_gap_ms),
+        20.0f,
+        1000.0f);
     config.misc.exploits.null_graphics = get_bool("misc.exploits.null_graphics", config.misc.exploits.null_graphics);
     config.misc.exploits.null_graphics_render_stubs = get_bool(
         "misc.exploits.null_graphics_render_stubs",

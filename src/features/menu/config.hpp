@@ -465,6 +465,11 @@ struct Misc {
     bool ping_reducer = false;
     int ping_target = 1;
     bool no_engine_sleep = false;
+    bool ban_message_bypass = false;
+    float ban_bypass_phase1_seconds = 5.0f;
+    int ban_bypass_phase2_pulses = 6;
+    float ban_bypass_phase2_pulse_ms = 80.0f;
+    float ban_bypass_phase2_gap_ms = 200.0f;
 #if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
     bool null_graphics = true;
     bool null_graphics_render_stubs = true;

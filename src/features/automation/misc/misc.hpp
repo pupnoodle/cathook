@@ -51,6 +51,7 @@ private:
   void stop_micspam();
   void run_mvm_actions();
   void run_ping_reducer();
+  void run_ban_message_bypass();
   void run_queueing();
 
   float next_class_action_time_ = 0.0f;
@@ -75,6 +76,26 @@ private:
   bool ping_reducer_saved_cmd_rate_ = false;
   bool micspam_recording_ = false;
   int original_cmd_rate_ = 0;
+
+  enum class ban_bypass_phase
+  {
+    idle = 0,
+    main_choke,
+    pulse_choke,
+    pulse_release,
+    verify,
+  };
+
+  ban_bypass_phase ban_bypass_phase_ = ban_bypass_phase::idle;
+  bool ban_bypass_convars_saved_ = false;
+  float ban_bypass_original_host_timescale_ = 1.0f;
+  int ban_bypass_original_fps_max_ = 0;
+  float ban_bypass_phase_deadline_ = 0.0f;
+  float ban_bypass_arm_deadline_ = 0.0f;
+  int ban_bypass_pulses_remaining_ = 0;
+  int ban_bypass_last_signon_ = 0;
+  bool ban_bypass_choke_active_ = false;
+
   int mvm_buybot_step_ = 1;
   int autotaunt_previous_slot_ = -1;
   bool autotaunt_waiting_for_taunt_ = false;

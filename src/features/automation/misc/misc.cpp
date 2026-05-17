@@ -1112,6 +1112,9 @@ void automation_controller::on_paint()
     return;
   }
 
+  // Must run during loading screen too — on_frame_stage_notify doesn't fire
+  // until FRAME_NET_UPDATE_END, which only happens after signon completes.
+  run_ban_message_bypass();
   run_queueing();
 }
 
@@ -2000,6 +2003,248 @@ void automation_controller::run_ping_reducer()
   if (cl_cmdrate->get_int() != wanted_cmd_rate)
   {
     cl_cmdrate->set_int(wanted_cmd_rate);
+  }
+}
+
+void automation_controller::run_ban_message_bypass()
+{
+  if (convar_system == nullptr || global_vars == nullptr || client_state == nullptr)
+  {
+    return;
+  }
+
+  static Convar* host_timescale = convar_system->find_var("host_timescale");
+  static Convar* fps_max = convar_system->find_var("fps_max");
+  if (host_timescale == nullptr || fps_max == nullptr || engine == nullptr)
+  {
+    return;
+  }
+
+  // host_timescale: FCVAR_CHEAT but no change callback — engine reads the float
+  // field directly each frame, so a raw memory write bypasses the cheat gate.
+  //
+  // fps_max: flags=0 but the change callback latches the value into a separate
+  // global that the throttle code actually consults. A raw memory write keeps
+  // the convar getter consistent but does NOT throttle the loop, so we also
+  // issue an unrestricted client command to trigger the callback.
+  const auto apply_fps_max = [&](int value)
+  {
+    fps_max->set_int(value);
+    char buffer[32];
+    std::snprintf(buffer, sizeof(buffer), "fps_max %d", value);
+    engine->client_cmd_unrestricted(buffer);
+  };
+
+  const auto restore_convars = [&]()
+  {
+    if (!ban_bypass_convars_saved_)
+    {
+      return;
+    }
+    host_timescale->set_float(ban_bypass_original_host_timescale_);
+    apply_fps_max(ban_bypass_original_fps_max_);
+    ban_bypass_convars_saved_ = false;
+    ban_bypass_choke_active_ = false;
+  };
+
+  const auto save_convars = [&]()
+  {
+    if (ban_bypass_convars_saved_)
+    {
+      return;
+    }
+    ban_bypass_original_host_timescale_ = host_timescale->get_float();
+    ban_bypass_original_fps_max_ = fps_max->get_int();
+    ban_bypass_convars_saved_ = true;
+  };
+
+  // hard_choke=true: drop fps_max to 1 too (stalls engine, only safe for the
+  // long Phase 1 hold). For Phase 2 pulses we keep fps_max normal so the paint
+  // hook ticks fast enough to honor ms-scale pulse timing.
+  const auto apply_choke = [&](bool choke, bool hard_choke)
+  {
+    save_convars();
+    if (choke)
+    {
+      host_timescale->set_float(0.0001f);
+      if (hard_choke)
+      {
+        apply_fps_max(1);
+      }
+      else if (fps_max->get_int() != ban_bypass_original_fps_max_)
+      {
+        apply_fps_max(ban_bypass_original_fps_max_);
+      }
+      ban_bypass_choke_active_ = true;
+    }
+    else
+    {
+      host_timescale->set_float(ban_bypass_original_host_timescale_);
+      if (fps_max->get_int() != ban_bypass_original_fps_max_)
+      {
+        apply_fps_max(ban_bypass_original_fps_max_);
+      }
+      ban_bypass_choke_active_ = false;
+    }
+  };
+
+  const auto reset_state = [&]()
+  {
+    restore_convars();
+    ban_bypass_phase_ = ban_bypass_phase::idle;
+    ban_bypass_arm_deadline_ = 0.0f;
+    ban_bypass_phase_deadline_ = 0.0f;
+    ban_bypass_pulses_remaining_ = 0;
+  };
+
+  const int signon = client_state->m_nSignonState;
+  const int prev_signon = ban_bypass_last_signon_;
+  ban_bypass_last_signon_ = signon;
+
+  if (!config.misc.exploits.ban_message_bypass)
+  {
+    reset_state();
+    return;
+  }
+
+  if (engine != nullptr && engine->is_in_game())
+  {
+    reset_state();
+    return;
+  }
+
+  constexpr int signon_challenge = 1;
+  constexpr int signon_connected = 2;
+  constexpr int signon_new = 3;
+  constexpr int signon_prespawn = 4;
+  constexpr float arm_window_seconds = 25.0f;
+
+  if (ban_bypass_phase_ == ban_bypass_phase::idle)
+  {
+    if (prev_signon < signon_challenge && signon >= signon_challenge)
+    {
+      ban_bypass_arm_deadline_ = global_vars->realtime + arm_window_seconds;
+    }
+
+    if (signon == 0)
+    {
+      ban_bypass_arm_deadline_ = 0.0f;
+      return;
+    }
+
+    if (ban_bypass_arm_deadline_ <= 0.0f || global_vars->realtime > ban_bypass_arm_deadline_)
+    {
+      return;
+    }
+
+    if (signon >= signon_connected)
+    {
+      const float seconds = std::clamp(config.misc.exploits.ban_bypass_phase1_seconds, 4.0f, 10.0f);
+      ban_bypass_phase_ = ban_bypass_phase::main_choke;
+      ban_bypass_phase_deadline_ = global_vars->realtime + seconds;
+      ban_bypass_pulses_remaining_ = std::clamp(config.misc.exploits.ban_bypass_phase2_pulses, 0, 20);
+      apply_choke(true, true);
+    }
+    return;
+  }
+
+  if (signon == 0)
+  {
+    reset_state();
+    return;
+  }
+
+  if (signon >= signon_prespawn)
+  {
+    reset_state();
+    return;
+  }
+
+  switch (ban_bypass_phase_)
+  {
+    case ban_bypass_phase::main_choke:
+    {
+      if (global_vars->realtime < ban_bypass_phase_deadline_)
+      {
+        if (!ban_bypass_choke_active_)
+        {
+          apply_choke(true, true);
+        }
+        break;
+      }
+
+      if (ban_bypass_pulses_remaining_ <= 0 || signon >= signon_new)
+      {
+        ban_bypass_phase_ = ban_bypass_phase::verify;
+        apply_choke(false, false);
+        break;
+      }
+
+      ban_bypass_phase_ = ban_bypass_phase::pulse_release;
+      const float gap_ms = std::clamp(config.misc.exploits.ban_bypass_phase2_gap_ms, 20.0f, 1000.0f);
+      ban_bypass_phase_deadline_ = global_vars->realtime + gap_ms / 1000.0f;
+      apply_choke(false, false);
+      break;
+    }
+
+    case ban_bypass_phase::pulse_release:
+    {
+      if (global_vars->realtime < ban_bypass_phase_deadline_)
+      {
+        break;
+      }
+
+      if (ban_bypass_pulses_remaining_ <= 0 || signon >= signon_new)
+      {
+        ban_bypass_phase_ = ban_bypass_phase::verify;
+        apply_choke(false, false);
+        break;
+      }
+
+      const float pulse_ms = std::clamp(config.misc.exploits.ban_bypass_phase2_pulse_ms, 10.0f, 500.0f);
+      ban_bypass_phase_ = ban_bypass_phase::pulse_choke;
+      ban_bypass_phase_deadline_ = global_vars->realtime + pulse_ms / 1000.0f;
+      ban_bypass_pulses_remaining_--;
+      apply_choke(true, false);
+      break;
+    }
+
+    case ban_bypass_phase::pulse_choke:
+    {
+      if (global_vars->realtime < ban_bypass_phase_deadline_)
+      {
+        break;
+      }
+
+      if (ban_bypass_pulses_remaining_ <= 0 || signon >= signon_new)
+      {
+        ban_bypass_phase_ = ban_bypass_phase::verify;
+        apply_choke(false, false);
+        break;
+      }
+
+      const float gap_ms = std::clamp(config.misc.exploits.ban_bypass_phase2_gap_ms, 20.0f, 1000.0f);
+      ban_bypass_phase_ = ban_bypass_phase::pulse_release;
+      ban_bypass_phase_deadline_ = global_vars->realtime + gap_ms / 1000.0f;
+      apply_choke(false, false);
+      break;
+    }
+
+    case ban_bypass_phase::verify:
+    {
+      if (ban_bypass_choke_active_)
+      {
+        apply_choke(false, false);
+      }
+      if (ban_bypass_arm_deadline_ > 0.0f && global_vars->realtime > ban_bypass_arm_deadline_)
+      {
+        reset_state();
+      }
+      break;
+    }
+
+    case ban_bypass_phase::idle:
+      break;
   }
 }
 

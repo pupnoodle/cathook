@@ -46,6 +46,47 @@ inline static ImFont* menu_font_regular_large = nullptr;
 
 namespace cat_menu
 {
+enum class window_id
+{
+  settings = 0,
+  players,
+  count
+};
+
+struct window_state
+{
+  bool open;
+  bool minimized;
+  bool focus_request;
+};
+
+inline window_state& windows(window_id id) {
+  static window_state state[static_cast<int>(window_id::count)] = {
+    { true,  false, false },
+    { false, false, false }
+  };
+  return state[static_cast<int>(id)];
+}
+
+inline const char* window_title(window_id id) {
+  switch (id) {
+    case window_id::settings: return "Settings";
+    case window_id::players:  return "Player Manager";
+    default: return "";
+  }
+}
+
+inline const char* window_imgui_name(window_id id) {
+  switch (id) {
+    case window_id::settings: return "cathook##settings";
+    case window_id::players:  return "cathook##players";
+    default: return "";
+  }
+}
+} // namespace cat_menu
+
+namespace cat_menu
+{
 
 constexpr float k_ui_scale{ 1.18f };
 constexpr ImVec2 k_menu_size{ 708.0f, 555.0f };
@@ -302,6 +343,50 @@ inline void ensure_fonts() {
   io.FontDefault = menu_font_regular;
   loaded_custom_font = wants_custom_font;
   loaded_font_name = wanted_font_name;
+}
+
+enum class chrome_icon {
+  minimize,
+  close,
+};
+
+inline bool chrome_icon_button(const char* id_str, chrome_icon icon, const ImVec2& size = ImVec2(14.0f, 14.0f)) {
+  ImGuiWindow* window = ImGui::GetCurrentWindow();
+  if (window == nullptr || window->SkipItems || id_str == nullptr) return false;
+
+  const ImGuiID id = window->GetID(id_str);
+  const ImVec2 pos = window->DC.CursorPos;
+  const ImRect bb(pos, ImVec2(pos.x + size.x, pos.y + size.y));
+
+  ImGui::ItemSize(size, 0.0f);
+  if (!ImGui::ItemAdd(bb, id)) return false;
+
+  bool hovered = false, held = false;
+  const bool pressed = ImGui::ButtonBehavior(bb, id, &hovered, &held);
+
+  const bool danger = icon == chrome_icon::close;
+  const ImVec4 target = danger ? k_danger : k_accent;
+  const ImVec4 fill = held ? target : hovered ? with_alpha(target, 0.30f) : k_frame;
+  const ImVec4 border = hovered ? target : k_line;
+  const ImU32 glyph_color = ImGui::GetColorU32(hovered ? k_text : k_text_muted);
+
+  ImDrawList* dl = window->DrawList;
+  dl->AddRectFilled(bb.Min, bb.Max, ImGui::GetColorU32(fill), 0.0f);
+  dl->AddRect(bb.Min, bb.Max, ImGui::GetColorU32(border), 0.0f, 0, 1.0f);
+
+  const ImVec2 c = bb.GetCenter();
+  const float pad = 4.0f;
+  switch (icon) {
+    case chrome_icon::minimize:
+      dl->AddLine(ImVec2(bb.Min.x + pad, bb.Max.y - pad), ImVec2(bb.Max.x - pad, bb.Max.y - pad), glyph_color, 1.4f);
+      break;
+    case chrome_icon::close:
+      dl->AddLine(ImVec2(bb.Min.x + pad, bb.Min.y + pad), ImVec2(bb.Max.x - pad, bb.Max.y - pad), glyph_color, 1.4f);
+      dl->AddLine(ImVec2(bb.Max.x - pad, bb.Min.y + pad), ImVec2(bb.Min.x + pad, bb.Max.y - pad), glyph_color, 1.4f);
+      break;
+  }
+  (void)c;
+  return pressed;
 }
 
 inline bool accent_button(const char* label, const ImVec2& size = ImVec2(0.0f, 26.0f), const bool danger = false) {
@@ -2244,11 +2329,12 @@ static void draw_exploits_content() {
     });
   }
   
-  cat_menu::flow_panel("Bypasses", 1, 204.0f, [&]() {
+  cat_menu::flow_panel("Bypasses", 1, 224.0f, [&]() {
     cat_menu::checkbox("Bypass sv_pure", &config.misc.exploits.bypasspure);
     cat_menu::checkbox("Pure bypass", &config.misc.exploits.pure_bypass);
     cat_menu::checkbox("Cheats bypass", &config.misc.exploits.cheats_bypass);
     cat_menu::checkbox("VAC bypass", &config.misc.exploits.vac_bypass);
+    cat_menu::checkbox("Ban message bypass", &config.misc.exploits.ban_message_bypass);
     cat_menu::checkbox("Network fix", &config.misc.exploits.network_fix);
     cat_menu::checkbox("No engine sleep", &config.misc.exploits.no_engine_sleep);
     if (cat_menu::checkbox("Null graphics", &config.misc.exploits.null_graphics)) {
@@ -2341,11 +2427,16 @@ static void draw_misc_content() {
       "Sideways"
     };
 
-    cat_menu::flow_panel("Exploits", 0, 248.0f, [&]() {
+    cat_menu::flow_panel("Exploits", 0, 332.0f, [&]() {
       cat_menu::checkbox("Bypass sv_pure", &config.misc.exploits.bypasspure);
       cat_menu::checkbox("Pure bypass", &config.misc.exploits.pure_bypass);
       cat_menu::checkbox("Cheats bypass", &config.misc.exploits.cheats_bypass);
       cat_menu::checkbox("VAC bypass", &config.misc.exploits.vac_bypass);
+      cat_menu::checkbox("Ban message bypass", &config.misc.exploits.ban_message_bypass);
+      cat_menu::slider_float("Ban bypass phase 1 (s)", &config.misc.exploits.ban_bypass_phase1_seconds, 4.0f, 10.0f, "%.1f s");
+      cat_menu::slider_int("Ban bypass phase 2 pulses", &config.misc.exploits.ban_bypass_phase2_pulses, 0, 20);
+      cat_menu::slider_float("Ban bypass pulse (ms)", &config.misc.exploits.ban_bypass_phase2_pulse_ms, 10.0f, 500.0f, "%.0f ms");
+      cat_menu::slider_float("Ban bypass gap (ms)", &config.misc.exploits.ban_bypass_phase2_gap_ms, 20.0f, 1000.0f, "%.0f ms");
       cat_menu::checkbox("Network fix", &config.misc.exploits.network_fix);
       cat_menu::checkbox("Tickbase", &config.misc.exploits.tickbase);
       cat_menu::checkbox("Recharge", &config.misc.exploits.tickbase_recharge);
@@ -2549,42 +2640,102 @@ static void draw_system_tab() {
   }
 }
 
-static void draw_menu(void) {
-  cat_menu::ensure_fonts();
-  ImGui::SetNextWindowSize(cat_menu::k_menu_size, ImGuiCond_Always);
-  ImGui::SetNextWindowPos(ImVec2(80.0f, 70.0f), ImGuiCond_Once);
-  ImGui::SetNextWindowBgAlpha(0.0f);
+#include "player_window.hpp"
 
+namespace cat_menu
+{
+
+inline void push_window_style() {
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
   ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
   ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 0.0f);
   ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, 0.0f);
   ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
   ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6.0f, 3.0f));
-  ImGui::PushStyleColor(ImGuiCol_Text, cat_menu::k_text);
-  ImGui::PushStyleColor(ImGuiCol_CheckMark, cat_menu::k_text);
-  ImGui::PushStyleColor(ImGuiCol_FrameBg, cat_menu::k_frame);
-  ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, cat_menu::k_frame_hover);
-  ImGui::PushStyleColor(ImGuiCol_FrameBgActive, cat_menu::k_accent_soft);
-  ImGui::PushStyleColor(ImGuiCol_Border, cat_menu::k_line);
-  ImGui::PushStyleColor(ImGuiCol_Separator, cat_menu::with_alpha(cat_menu::k_line, 0.9f));
-  ImGui::PushStyleColor(ImGuiCol_Header, cat_menu::k_accent_soft);
-  ImGui::PushStyleColor(ImGuiCol_HeaderHovered, cat_menu::k_frame_hover);
-  ImGui::PushStyleColor(ImGuiCol_HeaderActive, cat_menu::k_accent_soft);
-  ImGui::PushStyleColor(ImGuiCol_Button, cat_menu::k_frame);
-  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, cat_menu::k_frame_hover);
-  ImGui::PushStyleColor(ImGuiCol_ButtonActive, cat_menu::k_accent_soft);
-  ImGui::PushStyleColor(ImGuiCol_ScrollbarBg, cat_menu::k_bg_panel);
-  ImGui::PushStyleColor(ImGuiCol_ScrollbarGrab, cat_menu::k_frame_hover);
-  ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabHovered, cat_menu::k_line);
-  ImGui::PushFont(cat_menu::font_regular());
+  ImGui::PushStyleColor(ImGuiCol_Text, k_text);
+  ImGui::PushStyleColor(ImGuiCol_CheckMark, k_text);
+  ImGui::PushStyleColor(ImGuiCol_FrameBg, k_frame);
+  ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, k_frame_hover);
+  ImGui::PushStyleColor(ImGuiCol_FrameBgActive, k_accent_soft);
+  ImGui::PushStyleColor(ImGuiCol_Border, k_line);
+  ImGui::PushStyleColor(ImGuiCol_Separator, with_alpha(k_line, 0.9f));
+  ImGui::PushStyleColor(ImGuiCol_Header, k_accent_soft);
+  ImGui::PushStyleColor(ImGuiCol_HeaderHovered, k_frame_hover);
+  ImGui::PushStyleColor(ImGuiCol_HeaderActive, k_accent_soft);
+  ImGui::PushStyleColor(ImGuiCol_Button, k_frame);
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, k_frame_hover);
+  ImGui::PushStyleColor(ImGuiCol_ButtonActive, k_accent_soft);
+  ImGui::PushStyleColor(ImGuiCol_ScrollbarBg, k_bg_panel);
+  ImGui::PushStyleColor(ImGuiCol_ScrollbarGrab, k_frame_hover);
+  ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabHovered, k_line);
+  ImGui::PushFont(font_regular());
+}
 
-  const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
-  if (!ImGui::Begin("cathook", nullptr, flags)) {
+inline void pop_window_style() {
+  ImGui::PopFont();
+  ImGui::PopStyleColor(16);
+  ImGui::PopStyleVar(6);
+}
+
+inline bool begin_chrome_window(window_id id, const ImVec2& default_size, const ImVec2& default_pos) {
+  window_state& state = windows(id);
+  if (!state.open || state.minimized) return false;
+
+  ImGui::SetNextWindowSize(default_size, ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowPos(default_pos, ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowBgAlpha(0.0f);
+  if (state.focus_request) {
+    ImGui::SetNextWindowFocus();
+    state.focus_request = false;
+  }
+
+  push_window_style();
+  const ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoCollapse;
+  if (!ImGui::Begin(window_imgui_name(id), nullptr, flags)) {
     ImGui::End();
-    ImGui::PopFont();
-    ImGui::PopStyleColor(16);
-    ImGui::PopStyleVar(6);
+    pop_window_style();
+    return false;
+  }
+
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  ImVec2 pos = ImGui::GetWindowPos();
+  ImVec2 size = ImGui::GetWindowSize();
+  ImVec2 max = ImVec2(pos.x + size.x, pos.y + size.y);
+  dl->AddRectFilled(pos, max, ImGui::GetColorU32(k_bg_outer), 0.0f);
+  dl->AddRect(pos, max, ImGui::GetColorU32(k_line), 0.0f, 0, 1.0f);
+  dl->AddLine(ImVec2(pos.x, pos.y + k_title_height), ImVec2(max.x, pos.y + k_title_height), ImGui::GetColorU32(k_line), 1.0f);
+
+  const char* title = window_title(id);
+  const ImVec2 title_size = font_regular()->CalcTextSizeA(font_regular()->LegacySize, FLT_MAX, 0.0f, title);
+  dl->AddText(font_regular(), font_regular()->LegacySize, ImVec2(pos.x + 6.0f, pos.y + ((k_title_height - title_size.y) * 0.5f)), ImGui::GetColorU32(k_text), title);
+
+  ImGui::SetCursorPos(ImVec2(size.x - 36.0f, (k_title_height - 14.0f) * 0.5f));
+  if (chrome_icon_button("##win_min", chrome_icon::minimize)) {
+    state.minimized = true;
+  }
+  ImGui::SetCursorPos(ImVec2(size.x - 18.0f, (k_title_height - 14.0f) * 0.5f));
+  if (chrome_icon_button("##win_close", chrome_icon::close)) {
+    state.open = false;
+  }
+
+  return true;
+}
+
+inline void end_chrome_window() {
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  ImVec2 pos = ImGui::GetWindowPos();
+  ImVec2 size = ImGui::GetWindowSize();
+  ImVec2 max = ImVec2(pos.x + size.x, pos.y + size.y);
+  dl->AddRect(pos, max, ImGui::GetColorU32(k_line), 0.0f, 0, 1.0f);
+  dl->AddLine(ImVec2(pos.x, pos.y + k_title_height), ImVec2(max.x, pos.y + k_title_height), ImGui::GetColorU32(k_line), 1.0f);
+  ImGui::End();
+  pop_window_style();
+}
+
+} // namespace cat_menu
+
+static void draw_settings_window(void) {
+  if (!cat_menu::begin_chrome_window(cat_menu::window_id::settings, cat_menu::k_menu_size, ImVec2(80.0f, 70.0f))) {
     return;
   }
 
@@ -2597,29 +2748,7 @@ static void draw_menu(void) {
     cathook_tab_exploits,
     cathook_tab_system
   };
-
   static int tab = cathook_tab_combat;
-
-  ImDrawList* draw_list = ImGui::GetWindowDrawList();
-  ImVec2 pos = ImGui::GetWindowPos();
-  ImVec2 size = ImGui::GetWindowSize();
-  ImVec2 max = ImVec2(pos.x + size.x, pos.y + size.y);
-
-  draw_list->AddRectFilled(pos, max, ImGui::GetColorU32(cat_menu::k_bg_outer), 0.0f);
-  draw_list->AddRect(pos, max, ImGui::GetColorU32(cat_menu::k_line), 0.0f, 0, 1.0f);
-  draw_list->AddLine(ImVec2(pos.x, pos.y + cat_menu::k_title_height), ImVec2(max.x, pos.y + cat_menu::k_title_height), ImGui::GetColorU32(cat_menu::k_line), 1.0f);
-
-  const char* title = "Main Window";
-  const ImVec2 title_size = cat_menu::font_regular()->CalcTextSizeA(cat_menu::font_regular()->LegacySize, FLT_MAX, 0.0f, title);
-  draw_list->AddText(cat_menu::font_regular(), cat_menu::font_regular()->LegacySize, ImVec2(pos.x + 6.0f, pos.y + ((cat_menu::k_title_height - title_size.y) * 0.5f)), ImGui::GetColorU32(cat_menu::k_text), title);
-
-  ImGui::SetCursorPos(ImVec2(size.x - 18.0f, (cat_menu::k_title_height - 14.0f) * 0.5f));
-  if (cat_menu::accent_button("X##menu_close", ImVec2(14.0f, 14.0f), true)) {
-    menu_focused = false;
-    if (surface != nullptr) {
-      surface->set_cursor_visible(false);
-    }
-  }
 
   draw_beta_notice();
 
@@ -2642,36 +2771,156 @@ static void draw_menu(void) {
   ImGui::BeginChild("##content", ImVec2(-cat_menu::k_strip_inset_x, 0.0f), false, ImGuiWindowFlags_NoBackground);
 
   switch (tab) {
-  case cathook_tab_combat:
-    draw_combat_tab();
-    break;
-  case cathook_tab_visuals:
-    draw_visuals_tab();
-    break;
-  case cathook_tab_movement:
-    draw_movement_content();
-    break;
-  case cathook_tab_automation:
-    draw_automation_tab();
-    break;
-  case cathook_tab_exploits:
-    draw_exploits_content();
-    break;
-  case cathook_tab_system:
-    draw_system_tab();
-    break;
+  case cathook_tab_combat:    draw_combat_tab(); break;
+  case cathook_tab_visuals:   draw_visuals_tab(); break;
+  case cathook_tab_movement:  draw_movement_content(); break;
+  case cathook_tab_automation: draw_automation_tab(); break;
+  case cathook_tab_exploits:  draw_exploits_content(); break;
+  case cathook_tab_system:    draw_system_tab(); break;
   }
 
   cat_bind::draw_popup();
   ImGui::EndChild();
 
-  draw_list->AddRect(pos, max, ImGui::GetColorU32(cat_menu::k_line), 0.0f, 0, 1.0f);
-  draw_list->AddLine(ImVec2(pos.x, pos.y + cat_menu::k_title_height), ImVec2(max.x, pos.y + cat_menu::k_title_height), ImGui::GetColorU32(cat_menu::k_line), 1.0f);
+  cat_menu::end_chrome_window();
+}
+
+static void draw_player_window(void) {
+  if (!cat_menu::begin_chrome_window(cat_menu::window_id::players, ImVec2(640.0f, 460.0f), ImVec2(120.0f, 110.0f))) {
+    return;
+  }
+
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.0f, 8.0f));
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(6.0f, 6.0f));
+  ImGui::SetCursorPos(ImVec2(0.0f, cat_menu::k_title_height));
+  ImGui::BeginChild("##player_content", ImVec2(0.0f, 0.0f), false, ImGuiWindowFlags_NoBackground);
+  cat_menu::draw_player_window_content();
+  ImGui::EndChild();
+  ImGui::PopStyleVar(2);
+
+  cat_menu::end_chrome_window();
+}
+
+static void draw_taskbar(void) {
+  using namespace cat_menu;
+  ImGuiIO& io = ImGui::GetIO();
+  const float bar_h = 24.0f;
+
+  ImGui::SetNextWindowPos(ImVec2(0.0f, io.DisplaySize.y - bar_h), ImGuiCond_Always);
+  ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x, bar_h), ImGuiCond_Always);
+  ImGui::SetNextWindowBgAlpha(0.0f);
+
+  push_window_style();
+  const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoBackground;
+  if (!ImGui::Begin("##taskbar", nullptr, flags)) {
+    ImGui::End();
+    pop_window_style();
+    return;
+  }
+
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  const ImVec2 pos = ImGui::GetWindowPos();
+  const ImVec2 size = ImGui::GetWindowSize();
+  const ImVec2 max(pos.x + size.x, pos.y + size.y);
+  dl->AddRectFilled(pos, max, ImGui::GetColorU32(k_bg_outer), 0.0f);
+  dl->AddLine(pos, ImVec2(max.x, pos.y), ImGui::GetColorU32(k_line), 1.0f);
+
+  ImGui::SetCursorPos(ImVec2(6.0f, 4.0f));
+
+  auto taskbar_button = [&](window_id wid) {
+    window_state& state = windows(wid);
+    const char* label = window_title(wid);
+    const ImVec2 text_size = ImGui::CalcTextSize(label);
+    const ImVec2 button_size(text_size.x + 22.0f, 16.0f);
+    const ImVec2 button_pos = ImGui::GetCursorScreenPos();
+    const ImRect bb(button_pos, ImVec2(button_pos.x + button_size.x, button_pos.y + button_size.y));
+
+    char id_buf[32]{};
+    std::snprintf(id_buf, sizeof(id_buf), "##tbb_%d", static_cast<int>(wid));
+    const ImGuiID id = ImGui::GetID(id_buf);
+    ImGui::ItemSize(button_size, 0.0f);
+    if (!ImGui::ItemAdd(bb, id)) return;
+
+    bool hovered = false, held = false;
+    const bool pressed = ImGui::ButtonBehavior(bb, id, &hovered, &held, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+
+    const bool active = state.open && !state.minimized;
+    ImVec4 fill = active ? k_accent_soft : (hovered ? with_alpha(k_frame_hover, 0.7f) : with_alpha(k_frame, 0.6f));
+    ImVec4 border = active ? k_accent : k_line;
+
+    dl->AddRectFilled(bb.Min, bb.Max, ImGui::GetColorU32(fill), 0.0f);
+    dl->AddRect(bb.Min, bb.Max, ImGui::GetColorU32(border), 0.0f, 0, 1.0f);
+    if (active) {
+      dl->AddRectFilled(ImVec2(bb.Min.x, bb.Max.y - 2.0f), bb.Max, ImGui::GetColorU32(k_accent), 0.0f);
+    }
+    dl->AddText(font_regular(), font_regular()->LegacySize,
+      ImVec2(bb.GetCenter().x - text_size.x * 0.5f, bb.GetCenter().y - text_size.y * 0.5f),
+      ImGui::GetColorU32(active ? k_text : k_text_muted), label);
+
+    if (pressed) {
+      if (!state.open) {
+        state.open = true;
+        state.minimized = false;
+        state.focus_request = true;
+      } else if (state.minimized) {
+        state.minimized = false;
+        state.focus_request = true;
+      } else {
+        state.minimized = true;
+      }
+    }
+
+    char popup_id[32]{};
+    std::snprintf(popup_id, sizeof(popup_id), "##tbctx_%d", static_cast<int>(wid));
+    if (hovered && ImGui::IsMouseReleased(ImGuiMouseButton_Right)) {
+      ImGui::OpenPopup(popup_id);
+    }
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, k_bg_panel);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6.0f, 6.0f));
+    if (ImGui::BeginPopup(popup_id)) {
+      if (ImGui::MenuItem(state.minimized ? "Restore" : "Minimize")) {
+        if (state.minimized) {
+          state.minimized = false;
+          state.focus_request = true;
+        } else {
+          state.minimized = true;
+        }
+      }
+      if (ImGui::MenuItem("Close")) {
+        state.open = false;
+        state.minimized = false;
+      }
+      ImGui::EndPopup();
+    }
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor();
+
+    ImGui::SameLine(0.0f, 4.0f);
+  };
+
+  taskbar_button(window_id::settings);
+  taskbar_button(window_id::players);
+
+  // exit button on the right
+  const char* exit_label = "Hide UI";
+  const ImVec2 exit_size = ImGui::CalcTextSize(exit_label);
+  ImGui::SetCursorScreenPos(ImVec2(max.x - exit_size.x - 16.0f, pos.y + 4.0f));
+  if (accent_button(exit_label, ImVec2(exit_size.x + 12.0f, 16.0f), true)) {
+    menu_focused = false;
+    if (surface != nullptr) {
+      surface->set_cursor_visible(false);
+    }
+  }
 
   ImGui::End();
-  ImGui::PopFont();
-  ImGui::PopStyleColor(16);
-  ImGui::PopStyleVar(6);
+  pop_window_style();
+}
+
+static void draw_menu(void) {
+  cat_menu::ensure_fonts();
+  draw_settings_window();
+  draw_player_window();
+  draw_taskbar();
 }
 
 #endif
