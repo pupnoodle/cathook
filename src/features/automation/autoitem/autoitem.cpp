@@ -356,14 +356,19 @@ bool has_achievement(const int achievement_id)
   return entry != nullptr && entry->is_achieved();
 }
 
-bool api_ready()
+bool inventory_api_resolved()
 {
-  initialize();
   return g_inventory_api.inventory_manager != nullptr &&
          g_inventory_api.get_first_item_of_item_def != nullptr &&
          g_inventory_api.equip_item_in_loadout != nullptr &&
          g_inventory_api.do_preview_item != nullptr &&
          g_inventory_api.craft_custom != nullptr;
+}
+
+bool api_ready()
+{
+  initialize();
+  return inventory_api_resolved();
 }
 
 bool inventory_schema_ready()
@@ -640,6 +645,124 @@ bool equip_item(const int class_id, const int slot, const int item_def_id, const
   return ok;
 }
 
+bool is_metal_item_def(const int item_def_id)
+{
+  return item_def_id == 5000 || item_def_id == 5001 || item_def_id == 5002;
+}
+
+void equip_weapon_list_spec(
+  std::string_view spec,
+  fallback_state& state,
+  const int class_id,
+  const int slot)
+{
+  const auto ids = parse_int_list(spec, '/');
+  if (ids.empty())
+  {
+    debug_log("invalid weapon spec '%.*s'\n", static_cast<int>(spec.size()), spec.data());
+    return;
+  }
+
+  if (ids.size() < 2)
+  {
+    equip_item(class_id, slot, ids.front(), true, true);
+    return;
+  }
+
+  if (has_item_def(ids[0]))
+  {
+    state.attempts = 0;
+    equip_item(class_id, slot, ids[0], false, false);
+    return;
+  }
+
+  if (state.attempts >= fallback_attempt_limit)
+  {
+    equip_item(class_id, slot, ids[1], true, true);
+    return;
+  }
+
+  ++state.attempts;
+  equip_item(class_id, slot, ids[0], true, true);
+}
+
+bool try_craft_group(const std::vector<int>& required_item_defs)
+{
+  for (const int required_item_def : required_item_defs)
+  {
+    if (is_metal_item_def(required_item_def) || has_item_def(required_item_def))
+    {
+      continue;
+    }
+
+    const auto* achievement_backed = find_achievement_item(required_item_def);
+    if (achievement_backed != nullptr)
+    {
+      if (has_achievement(achievement_backed->achievement_id))
+      {
+        debug_log("achievement-backed item def %d is already unlocked but missing\n", required_item_def);
+        continue;
+      }
+
+      get_item(required_item_def, false);
+      return false;
+    }
+
+    debug_log("missing crafting material item def %d\n", required_item_def);
+    return false;
+  }
+
+  if (craft_items(required_item_defs))
+  {
+    trigger_new_item_notification();
+  }
+  return true;
+}
+
+void equip_craft_spec(std::string_view spec, const int class_id, const int slot)
+{
+  const std::size_t result_separator = spec.find('-');
+  if (result_separator == std::string::npos)
+  {
+    debug_log("craft spec '%.*s' has no result item\n", static_cast<int>(spec.size()), spec.data());
+    return;
+  }
+
+  const auto result = parse_int(spec.substr(result_separator + 1));
+  if (!result)
+  {
+    debug_log("craft spec '%.*s' has invalid result item\n", static_cast<int>(spec.size()), spec.data());
+    return;
+  }
+
+  if (has_item_def(*result))
+  {
+    equip_item(class_id, slot, *result, false, false);
+    return;
+  }
+
+  const auto result_token = std::to_string(*result);
+  for (const auto& group : split_craft_groups(spec))
+  {
+    if (group == result_token)
+    {
+      continue;
+    }
+
+    const auto required_item_defs = parse_int_list(group, ',');
+    if (required_item_defs.empty())
+    {
+      debug_log("invalid crafting group '%s'\n", group.c_str());
+      return;
+    }
+
+    if (try_craft_group(required_item_defs))
+    {
+      return;
+    }
+  }
+}
+
 void equip_weapon_spec(std::string_view spec, const int class_id, const int slot)
 {
   const auto cleaned_spec = trim(spec);
@@ -661,113 +784,15 @@ void equip_weapon_spec(std::string_view spec, const int class_id, const int slot
     return;
   }
 
-  if (cleaned_spec.find(',') == std::string::npos && cleaned_spec.find(';') == std::string::npos)
+  const bool is_craft_spec =
+    cleaned_spec.find(',') != std::string::npos || cleaned_spec.find(';') != std::string::npos;
+  if (is_craft_spec)
   {
-    const auto ids = parse_int_list(cleaned_spec, '/');
-    if (ids.empty())
-    {
-      debug_log("invalid weapon spec '%s'\n", cleaned_spec.c_str());
-      return;
-    }
-
-    if (ids.size() < 2)
-    {
-      equip_item(class_id, slot, ids.front(), true, true);
-      return;
-    }
-
-    if (has_item_def(ids[0]))
-    {
-      state.attempts = 0;
-      equip_item(class_id, slot, ids[0], false, false);
-      return;
-    }
-
-    if (state.attempts >= fallback_attempt_limit)
-    {
-      equip_item(class_id, slot, ids[1], true, true);
-      return;
-    }
-
-    ++state.attempts;
-    equip_item(class_id, slot, ids[0], true, true);
-    return;
+    equip_craft_spec(cleaned_spec, class_id, slot);
   }
-
-  const std::size_t result_separator = cleaned_spec.find('-');
-  if (result_separator == std::string::npos)
+  else
   {
-    debug_log("craft spec '%s' has no result item\n", cleaned_spec.c_str());
-    return;
-  }
-
-  const auto result = parse_int(std::string_view{ cleaned_spec }.substr(result_separator + 1));
-  if (!result)
-  {
-    debug_log("craft spec '%s' has invalid result item\n", cleaned_spec.c_str());
-    return;
-  }
-
-  if (has_item_def(*result))
-  {
-    equip_item(class_id, slot, *result, false, false);
-    return;
-  }
-
-  const auto groups = split_craft_groups(cleaned_spec);
-  for (const auto& group : groups)
-  {
-    if (group == std::to_string(*result))
-    {
-      continue;
-    }
-
-    const auto required_item_defs = parse_int_list(group, ',');
-    if (required_item_defs.empty())
-    {
-      debug_log("invalid crafting group '%s'\n", group.c_str());
-      return;
-    }
-
-    bool can_craft_group = true;
-    for (const int required_item_def : required_item_defs)
-    {
-      if (required_item_def == 5000 || required_item_def == 5001 || required_item_def == 5002)
-      {
-        continue;
-      }
-
-      if (has_item_def(required_item_def))
-      {
-        continue;
-      }
-
-      const auto* achievement_backed = find_achievement_item(required_item_def);
-      if (achievement_backed != nullptr)
-      {
-        if (has_achievement(achievement_backed->achievement_id))
-        {
-          debug_log("achievement-backed item def %d is already unlocked but missing\n", required_item_def);
-          continue;
-        }
-
-        get_item(required_item_def, false);
-        return;
-      }
-
-      debug_log("missing crafting material item def %d\n", required_item_def);
-      can_craft_group = false;
-      break;
-    }
-
-    if (can_craft_group)
-    {
-      if (craft_items(required_item_defs))
-      {
-        trigger_new_item_notification();
-      }
-      return;
-    }
+    equip_weapon_list_spec(cleaned_spec, state, class_id, slot);
   }
 }
 
@@ -808,17 +833,30 @@ int seasonal_noisemaker_item_def()
   return birthday_noisemaker_def;
 }
 
+template <typename function_type>
+void resolve_signature(function_type& target, const char* signature)
+{
+  if (target != nullptr) return;
+  target = reinterpret_cast<function_type>(sigscan_module("client.so", signature));
+}
+
+void log_resolution_status(const char* tag)
+{
+  print("[autoitem] %s after %d attempt(s) manager=%p first=%p equip=%p rent=%p craft=%p\n",
+    tag,
+    g_initialize_retry_count,
+    g_inventory_api.inventory_manager,
+    reinterpret_cast<void*>(g_inventory_api.get_first_item_of_item_def),
+    reinterpret_cast<void*>(g_inventory_api.equip_item_in_loadout),
+    reinterpret_cast<void*>(g_inventory_api.do_preview_item),
+    reinterpret_cast<void*>(g_inventory_api.craft_custom));
+}
+
 } // namespace
 
 void initialize()
 {
-  const bool fully_ready =
-    g_inventory_api.inventory_manager != nullptr &&
-    g_inventory_api.get_first_item_of_item_def != nullptr &&
-    g_inventory_api.equip_item_in_loadout != nullptr &&
-    g_inventory_api.do_preview_item != nullptr &&
-    g_inventory_api.craft_custom != nullptr;
-  if (fully_ready) return;
+  if (inventory_api_resolved()) return;
 
   if (global_vars != nullptr && global_vars->realtime < g_next_initialize_retry_time)
   {
@@ -838,37 +876,16 @@ void initialize()
     }
   }
 
-  if (g_inventory_api.get_first_item_of_item_def == nullptr)
-    g_inventory_api.get_first_item_of_item_def =
-      reinterpret_cast<get_first_item_of_item_def_fn>(sigscan_module("client.so", sigs::tf_inventory_get_first_item_of_item_def));
-  if (g_inventory_api.equip_item_in_loadout == nullptr)
-    g_inventory_api.equip_item_in_loadout =
-      reinterpret_cast<equip_item_in_loadout_fn>(sigscan_module("client.so", sigs::tf_inventory_equip_item_in_loadout));
-  if (g_inventory_api.do_preview_item == nullptr)
-    g_inventory_api.do_preview_item =
-      reinterpret_cast<do_preview_item_fn>(sigscan_module("client.so", sigs::tf_inventory_do_preview_item));
-  if (g_inventory_api.craft_custom == nullptr)
-    g_inventory_api.craft_custom =
-      reinterpret_cast<craft_custom_fn>(sigscan_module("client.so", sigs::tf_inventory_craft_custom));
+  resolve_signature(g_inventory_api.get_first_item_of_item_def, sigs::tf_inventory_get_first_item_of_item_def);
+  resolve_signature(g_inventory_api.equip_item_in_loadout, sigs::tf_inventory_equip_item_in_loadout);
+  resolve_signature(g_inventory_api.do_preview_item, sigs::tf_inventory_do_preview_item);
+  resolve_signature(g_inventory_api.craft_custom, sigs::tf_inventory_craft_custom);
 
-  const bool now_ready =
-    g_inventory_api.inventory_manager != nullptr &&
-    g_inventory_api.get_first_item_of_item_def != nullptr &&
-    g_inventory_api.equip_item_in_loadout != nullptr &&
-    g_inventory_api.do_preview_item != nullptr &&
-    g_inventory_api.craft_custom != nullptr;
-
-  if (!now_ready)
+  if (!inventory_api_resolved())
   {
     if (g_initialize_retry_count == 1 || g_initialize_retry_count % 30 == 0)
     {
-      error_log("signature scan incomplete (attempt %d) manager=%p first=%p equip=%p rent=%p craft=%p\n",
-        g_initialize_retry_count,
-        g_inventory_api.inventory_manager,
-        reinterpret_cast<void*>(g_inventory_api.get_first_item_of_item_def),
-        reinterpret_cast<void*>(g_inventory_api.equip_item_in_loadout),
-        reinterpret_cast<void*>(g_inventory_api.do_preview_item),
-        reinterpret_cast<void*>(g_inventory_api.craft_custom));
+      log_resolution_status("signature scan incomplete");
     }
     return;
   }
@@ -876,13 +893,7 @@ void initialize()
   if (!g_initialize_diagnostics_emitted)
   {
     g_initialize_diagnostics_emitted = true;
-    print("[autoitem] resolved after %d attempt(s) manager=%p first=%p equip=%p rent=%p craft=%p\n",
-      g_initialize_retry_count,
-      g_inventory_api.inventory_manager,
-      reinterpret_cast<void*>(g_inventory_api.get_first_item_of_item_def),
-      reinterpret_cast<void*>(g_inventory_api.equip_item_in_loadout),
-      reinterpret_cast<void*>(g_inventory_api.do_preview_item),
-      reinterpret_cast<void*>(g_inventory_api.craft_custom));
+    log_resolution_status("resolved");
   }
 }
 
