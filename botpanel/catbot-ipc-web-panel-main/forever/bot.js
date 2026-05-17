@@ -1902,17 +1902,20 @@ class Bot extends EventEmitter {
     }
 
     kill_stale_bot_runtime_processes() {
-        const patterns = [
-            `--name=${this.name}`,
-            `user_instances/${this.name}`,
-            `catbotns${this.botid}`
+        const bot_name = escape_regex(this.name);
+        const bot_namespace = escape_regex(`catbotns${this.botid}`);
+        const matchers = [
+            new RegExp(`(^|\\s)--name=${bot_name}(\\s|$)`),
+            new RegExp(`(^|\\s)--netns=${bot_namespace}(\\s|$)`),
+            new RegExp(`(^|\\s)--join=${bot_name}(\\s|$)`),
+            new RegExp(`user_instances/${bot_name}(/|\\s|$)`)
         ];
         const stale_pids = [];
         for (const info of read_process_table().values()) {
             if (info.pid === process.pid)
                 continue;
             const command = info.cmdline || '';
-            if (patterns.some((pattern) => command.includes(pattern)))
+            if (matchers.some((matcher) => matcher.test(command)))
                 stale_pids.push(info.pid);
         }
 
