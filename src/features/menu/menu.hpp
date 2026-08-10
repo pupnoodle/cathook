@@ -1817,6 +1817,28 @@ static void draw_visuals_ui_content() {
     cat_menu::checkbox("Change displayed rank", &config.visuals.casual_medal.changer);
     cat_menu::slider_int("Displayed rank", &config.visuals.casual_medal.rank, 1, 1200);
   });
+  cat_menu::flow_panel("Radar", 1, 356.0f, [&]() {
+    cat_menu::checkbox("Enable radar", &config.visuals.radar.enabled);
+    cat_menu::slider_float("Radar X", &config.visuals.radar.x, 0.0f, 1920.0f, "%.0f px");
+    cat_menu::slider_float("Radar Y", &config.visuals.radar.y, 0.0f, 1080.0f, "%.0f px");
+    cat_menu::slider_int("Radar size", &config.visuals.radar.size, 100, 600);
+    cat_menu::slider_float("Radar zoom", &config.visuals.radar.zoom, 5.0f, 50.0f, "%.1f");
+    cat_menu::slider_int("Icon size", &config.visuals.radar.icon_size, 10, 40);
+    cat_menu::checkbox("Class icons", &config.visuals.radar.use_icons);
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("Draw class icons from assets/textures/atlas.png.\nFalls back to plain dots when the class is unknown.");
+    }
+    cat_menu::checkbox("Axis lines", &config.visuals.radar.axis_lines);
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("Full-span horizontal and vertical lines through the centre.\nThe short centre cross is always drawn.");
+    }
+    cat_menu::slider_int("Range rings", &config.visuals.radar.range_rings, 0, 8);
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("Evenly spaced distance rings, 0 to turn them off.\nSpacing is in radar pixels, so the rings stay put while zoom\nchanges what distance they represent.");
+    }
+    cat_menu::checkbox("Show teammates", &config.visuals.radar.show_teammates);
+    cat_menu::checkbox("Show enemies", &config.visuals.radar.show_enemies);
+  });
   cat_menu::end_flow_layout();
 }
 

@@ -26,6 +26,7 @@ V  o o  V  file: src/core/hooks/vulkan.cpp
 #include "games/tf2/sdk/interfaces/surface.hpp"
 #include "features/combat/backtrack/backtrack.hpp"
 #include "features/visuals/esp/esp.cpp"
+#include "features/visuals/radar/radar.hpp"
 #include "features/visuals/hitmarker.hpp"
 #include "features/visuals/spectator_list.hpp"
 #include "core/print.hpp"
@@ -714,6 +715,7 @@ static bool draw_imgui_overlay()
   }
 
   draw_game_indicators();
+  radar::draw_radar();
   ImGui::End();
 
   mono_ui_end_frame();

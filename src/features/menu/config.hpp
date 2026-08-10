@@ -531,6 +531,26 @@ struct Visuals {
     RGBA_float firstperson_color = {.r = 0.95f, .g = 0.82f, .b = 0.24f, .a = 1.0f};
   } spectator_list;
 
+  struct Radar {
+    bool enabled = false;
+
+    float x = 100.0f;
+    float y = 100.0f;
+
+    int size = 300;
+
+    float zoom = 10.0f;
+    int icon_size = 20;
+    bool show_teammates = true;
+    bool show_enemies = true;
+
+    bool use_icons = true;
+
+    bool axis_lines = true;
+
+    int range_rings = 2;
+  } radar;
+
   bool override_fov = false;
   float custom_fov = 90;
 

@@ -430,6 +430,17 @@ void config_store::import_config(const Config& config)
     set_float("visuals.spectator_list.x", config.visuals.spectator_list.x);
     set_float("visuals.spectator_list.y", config.visuals.spectator_list.y);
     set_color("visuals.spectator_list.firstperson_color", config.visuals.spectator_list.firstperson_color);
+    set_bool("visuals.radar.enabled", config.visuals.radar.enabled);
+    set_float("visuals.radar.x", config.visuals.radar.x);
+    set_float("visuals.radar.y", config.visuals.radar.y);
+    set_int("visuals.radar.size", config.visuals.radar.size);
+    set_float("visuals.radar.zoom", config.visuals.radar.zoom);
+    set_int("visuals.radar.icon_size", config.visuals.radar.icon_size);
+    set_bool("visuals.radar.show_teammates", config.visuals.radar.show_teammates);
+    set_bool("visuals.radar.show_enemies", config.visuals.radar.show_enemies);
+    set_bool("visuals.radar.use_icons", config.visuals.radar.use_icons);
+    set_bool("visuals.radar.axis_lines", config.visuals.radar.axis_lines);
+    set_int("visuals.radar.range_rings", config.visuals.radar.range_rings);
     set_bool("visuals.override_fov", config.visuals.override_fov);
     set_float("visuals.custom_fov", config.visuals.custom_fov);
     set_bool("visuals.override_zoom_fov", config.visuals.override_zoom_fov);
@@ -1014,6 +1025,18 @@ void config_store::export_config(Config& config) const
     config.visuals.spectator_list.firstperson_color = get_color(
         "visuals.spectator_list.firstperson_color",
         config.visuals.spectator_list.firstperson_color);
+    config.visuals.radar.enabled = get_bool("visuals.radar.enabled", config.visuals.radar.enabled);
+    config.visuals.radar.x = get_float("visuals.radar.x", config.visuals.radar.x);
+    config.visuals.radar.y = get_float("visuals.radar.y", config.visuals.radar.y);
+    config.visuals.radar.size = get_int("visuals.radar.size", config.visuals.radar.size);
+    config.visuals.radar.zoom = get_float("visuals.radar.zoom", config.visuals.radar.zoom);
+    config.visuals.radar.icon_size = get_int("visuals.radar.icon_size", config.visuals.radar.icon_size);
+    config.visuals.radar.show_teammates = get_bool("visuals.radar.show_teammates", config.visuals.radar.show_teammates);
+    config.visuals.radar.show_enemies = get_bool("visuals.radar.show_enemies", config.visuals.radar.show_enemies);
+    config.visuals.radar.use_icons = get_bool("visuals.radar.use_icons", config.visuals.radar.use_icons);
+    config.visuals.radar.axis_lines = get_bool("visuals.radar.axis_lines", config.visuals.radar.axis_lines);
+    config.visuals.radar.range_rings = std::clamp(
+        get_int("visuals.radar.range_rings", config.visuals.radar.range_rings), 0, 8);
     config.visuals.override_fov = get_bool("visuals.override_fov", config.visuals.override_fov);
     config.visuals.custom_fov = get_float("visuals.custom_fov", config.visuals.custom_fov);
     config.visuals.override_zoom_fov = get_bool("visuals.override_zoom_fov", config.visuals.override_zoom_fov);

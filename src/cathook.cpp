@@ -134,6 +134,7 @@ bool (*in_cond_original)(void*, int) = nullptr;
 #include "features/visuals/hitmarker.cpp"
 #include "features/visuals/spectator_list.cpp"
 #include "features/visuals/thirdperson.cpp"
+#include "features/visuals/radar/radar.cpp"
 
 void** client_mode_vtable;
 void** model_render_vtable;

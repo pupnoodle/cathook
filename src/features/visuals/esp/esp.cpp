@@ -1833,7 +1833,8 @@ void draw_atlas_tile(
   int tile_column,
   int tile_row,
   const ImVec2& center,
-  float size)
+  float size,
+  ImU32 tint = IM_COL32_WHITE)
 {
   if (draw_list == nullptr || tile_column < 0 || tile_row < 0 || size <= 0.0f) {
     return;
@@ -1862,8 +1863,17 @@ void draw_atlas_tile(
         const int pixel_x = source_x + std::clamp((x * tile_size) / samples, 0, tile_size - 1);
         const int pixel_y = source_y + std::clamp((y * tile_size) / samples, 0, tile_size - 1);
         const size_t pixel_offset = (static_cast<size_t>(pixel_y) * static_cast<size_t>(g_head_emoji_atlas.width) + static_cast<size_t>(pixel_x)) * 4u;
-        const uint8_t alpha = g_head_emoji_atlas.pixels[pixel_offset + 3u];
-        if (alpha < 24) {
+        const uint8_t source_alpha = g_head_emoji_atlas.pixels[pixel_offset + 3u];
+        if (source_alpha < 24) {
+          continue;
+        }
+
+        // Scale the sampled alpha by the tint's alpha so a faded caller fades here
+        // too. The GPU path gets this for free from AddImage; this path does not.
+        const uint32_t tint_alpha = (tint >> IM_COL32_A_SHIFT) & 0xFFu;
+        const auto alpha = static_cast<uint8_t>(
+          (static_cast<uint32_t>(source_alpha) * tint_alpha) / 255u);
+        if (alpha == 0) {
           continue;
         }
 
@@ -1896,7 +1906,7 @@ void draw_atlas_tile(
     ImVec2(center.x + (size * 0.5f), center.y + (size * 0.5f)),
     uv_min,
     uv_max,
-    IM_COL32_WHITE);
+    tint);
 }
 
 [[nodiscard]] bool get_entity_screen_bounds(Entity* entity, esp_bounds* bounds,
@@ -3633,4 +3643,30 @@ void draw_aimbot_fov_imgui()
 void draw_thirdperson_crosshair_imgui()
 {
   thirdperson::draw_crosshair_imgui();
+}
+
+bool atlas_texture_ready()
+{
+  if (get_head_emoji_texture() != nullptr) {
+    return true;
+  }
+
+  // The GPU upload may still be in flight. The CPU blit path can draw from the
+  // decoded pixels in the meantime, so gating on the texture alone would suppress
+  // icons during that window.
+  return ensure_head_emoji_atlas_loaded() &&
+    !g_head_emoji_atlas.pixels.empty() &&
+    g_head_emoji_atlas.width > 0 &&
+    g_head_emoji_atlas.height > 0;
+}
+
+void draw_shared_atlas_tile(
+  ImDrawList* draw_list,
+  const int tile_column,
+  const int tile_row,
+  const ImVec2& center,
+  const float size,
+  const ImU32 tint)
+{
+  draw_atlas_tile(draw_list, get_head_emoji_texture(), tile_column, tile_row, center, size, tint);
 }

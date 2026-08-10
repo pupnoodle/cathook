@@ -17,7 +17,7 @@ CPPFLAGS += -I. -Isrc -Isrc/external
 CPPFLAGS += -DMONO_IMGUI_HEADER=\"imgui/imgui.h\"
 CPPFLAGS += -DGIT_COMMIT_HASH=\"$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)\"
 CPPFLAGS += -DGIT_COMMITTER_DATE=\"$(shell git log -1 --format=%cd --date=short 2>/dev/null || date +%Y-%m-%d)\"
-CXXFLAGS ?= -std=c++23 -g --no-gnu-unique -pthread -fPIC
+CXXFLAGS ?= -std=c++23 -O3 -g --no-gnu-unique -pthread -fPIC
 DEPFLAGS = -MMD -MP
 CATHOOK_DEBUG_SYMBOLS ?= 0
 

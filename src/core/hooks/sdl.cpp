@@ -31,6 +31,7 @@ V  o o  V  file: src/core/hooks/sdl.cpp
 #include "features/menu/indicators.hpp"
 #include "features/combat/backtrack/backtrack.hpp"
 #include "features/visuals/esp/esp.hpp"
+#include "features/visuals/radar/radar.hpp"
 #include "features/visuals/hitmarker.hpp"
 #include "features/visuals/spectator_list.hpp"
 #include "features/automation/navbot/navbot_controller.hpp"
@@ -533,6 +534,7 @@ bool mono_ui_build_opengl_frame() {
   }
 
   draw_game_indicators();
+  radar::draw_radar();
   ImGui::End();
 
   mono_ui_end_frame();
