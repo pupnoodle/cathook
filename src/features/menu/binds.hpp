@@ -79,6 +79,7 @@ struct target_entry
   bind_value last_effective{ false };
   bool baseline_initialized{};
   bool overridden{};
+  bool changed_in_menu{};
   int int_min{};
   int int_max{};
   float float_min{};
@@ -544,6 +545,7 @@ inline void register_target_metadata(value_t* target, const char* label, const w
     entry->last_effective = entry->baseline;
     entry->baseline_initialized = true;
     entry->overridden = false;
+    entry->changed_in_menu = true;
   }
 }
 
@@ -648,11 +650,20 @@ inline const bind_value* override_value(const bind_entry& entry, const std::stri
   return iterator == entry.overrides.end() ? nullptr : &iterator->second;
 }
 
+inline bool target_has_active_override(const target_entry& target)
+{
+  for (const bind_entry& entry : entries()) {
+    if (!entry.active || !entry.enabled) continue;
+    if (entry.overrides.contains(target.target_key)) return true;
+  }
+  return false;
+}
+
 inline void restore_active_overrides()
 {
   for (target_entry& target : targets()) {
     if (target.target == nullptr || !target.baseline_initialized) continue;
-    if (target.overridden) write_value(target, target.baseline);
+    if (target.overridden || target_has_active_override(target)) write_value(target, target.baseline);
     target.overridden = false;
     target.last_effective = read_value(target);
   }
@@ -662,8 +673,19 @@ inline void capture_menu_changes()
 {
   for (target_entry& target : targets()) {
     if (target.target == nullptr || !target.baseline_initialized) continue;
+
+    // A render/menu transition can happen between two create-move calls. In
+    // that case the target may still be marked as overridden when the menu is
+    // closed. Never promote the runtime override to the user baseline.
+    const bool changed_in_menu = target.changed_in_menu;
+    if (!changed_in_menu && (target.overridden || target_has_active_override(target))) {
+      write_value(target, target.baseline);
+      target.overridden = false;
+    }
+
     const bind_value current = read_value(target);
-    if (!values_equal(current, target.last_effective)) target.baseline = current;
+    if (changed_in_menu || !values_equal(current, target.last_effective)) target.baseline = current;
+    target.changed_in_menu = false;
     target.last_effective = current;
   }
 }
@@ -676,6 +698,7 @@ inline void recapture_baselines()
     target.last_effective = target.baseline;
     target.baseline_initialized = true;
     target.overridden = false;
+    target.changed_in_menu = false;
   }
 }
 
@@ -852,12 +875,7 @@ inline void run()
 
   for (target_entry& target : targets()) {
     if (target.target == nullptr || !target.baseline_initialized) continue;
-    if (target.overridden) {
-      write_value(target, target.baseline);
-    } else {
-      const bind_value current = read_value(target);
-      if (!values_equal(current, target.baseline)) target.baseline = current;
-    }
+    if (target.overridden || target_has_active_override(target)) write_value(target, target.baseline);
     target.overridden = false;
   }
   for (bind_entry& entry : entries()) entry.active = false;

@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include "core/math/math.hpp"
 #include "core/player_manager.hpp"
 #include "features/combat/anti_aim/anti_aim.hpp"
 #include "features/combat/aimbot/aimbot.hpp"
@@ -23,6 +24,7 @@ namespace
 {
 
 constexpr std::size_t visual_group_not_found = static_cast<std::size_t>(-1);
+constexpr float dormant_esp_min_distance_hu = 600.0f;
 
 }
 
@@ -64,6 +66,18 @@ thread_local bool g_viewmodel_model = false;
   return std::search(text.begin(), text.end(), needle.begin(), needle.end(), [](char left, char right) {
     return std::tolower(static_cast<unsigned char>(left)) == std::tolower(static_cast<unsigned char>(right));
   }) != text.end();
+}
+
+[[nodiscard]] bool text_equals(std::string_view left, std::string_view right)
+{
+  return left.size() == right.size() && std::equal(left.begin(), left.end(), right.begin(), [](char lhs, char rhs) {
+    return std::tolower(static_cast<unsigned char>(lhs)) == std::tolower(static_cast<unsigned char>(rhs));
+  });
+}
+
+[[nodiscard]] bool text_starts_with(std::string_view text, std::string_view prefix)
+{
+  return text.size() >= prefix.size() && text_equals(text.substr(0, prefix.size()), prefix);
 }
 
 [[nodiscard]] std::string_view safe_text(const char* value)
@@ -365,36 +379,11 @@ thread_local bool g_viewmodel_model = false;
   }
 
   const std::string_view network_name = safe_text(entity->get_network_name());
-  const std::string_view model_name = safe_text(entity->get_model_name());
-  return text_contains(network_name, "projectile") ||
-    text_contains(network_name, "grenade") ||
-    text_contains(network_name, "rocket") ||
-    text_contains(network_name, "arrow") ||
-    text_contains(network_name, "pipebomb") ||
-    text_contains(network_name, "healingbolt") ||
-    text_contains(network_name, "flare") ||
-    text_contains(network_name, "balloffire") ||
-    text_contains(network_name, "cleaver") ||
-    text_contains(network_name, "jarmilk") ||
-    text_contains(network_name, "jargas") ||
-    text_contains(network_name, "jar") ||
-    text_contains(network_name, "stunball") ||
-    text_contains(network_name, "energy") ||
-    text_contains(network_name, "mechanicalarm") ||
-    text_contains(network_name, "meteorshower") ||
-    text_contains(network_name, "lightning") ||
-    text_contains(network_name, "fireball") ||
-    text_contains(network_name, "merasmusgrenade") ||
-    text_contains(network_name, "spellbats") ||
-    text_contains(network_name, "spawnboss") ||
-    text_contains(network_name, "spawnhorde") ||
-    text_contains(network_name, "spawnzombie") ||
-    text_contains(network_name, "ornament") ||
-    text_contains(model_name, "pipebomb") ||
-    text_contains(model_name, "sticky") ||
-    text_contains(model_name, "rocket") ||
-    text_contains(model_name, "arrow") ||
-    text_contains(model_name, "projectile");
+  return text_starts_with(network_name, "CTFProjectile_") ||
+    text_equals(network_name, "CTFGrenadePipebombProjectile") ||
+    text_equals(network_name, "CTFGrenadeCaltropProjectile") ||
+    text_equals(network_name, "CTFStunBall") ||
+    text_equals(network_name, "CTFBall_Ornament");
 }
 
 [[nodiscard]] std::string recv_table_for_entity(Entity* entity)
@@ -722,6 +711,9 @@ thread_local bool g_viewmodel_model = false;
 
   const bool dormant = entity->is_dormant();
   if (dormant && !config.visuals.dormant_esp) {
+    return false;
+  }
+  if (!models && dormant && distance_3d(entity->get_collision_origin(), localplayer->get_collision_origin()) < dormant_esp_min_distance_hu) {
     return false;
   }
   if ((group.conditions & visual_group::condition_dormant) != 0) {

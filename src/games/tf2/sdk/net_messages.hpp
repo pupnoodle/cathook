@@ -13,6 +13,7 @@ V  o o  V  file: src/games/tf2/sdk/net_messages.hpp
 #define NET_MESSAGES_HPP
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstring>
 
@@ -44,6 +45,8 @@ public:
   virtual auto get_name() const -> const char* = 0;
   virtual auto get_net_channel() const -> net_channel_info* = 0;
   virtual auto to_string() const -> const char* = 0;
+  virtual auto incoming_message_for_processing(double net_time, int num_bytes) -> bool = 0;
+  virtual auto get_size() const -> std::size_t = 0;
 };
 
 class net_message_base : public net_message {
@@ -72,6 +75,16 @@ public:
 
   auto get_net_channel() const -> net_channel_info* override {
     return channel_;
+  }
+
+  auto incoming_message_for_processing(double net_time, int num_bytes) -> bool override {
+    (void)net_time;
+    (void)num_bytes;
+    return false;
+  }
+
+  auto get_size() const -> std::size_t override {
+    return sizeof(net_message_base);
   }
 
 protected:
@@ -103,6 +116,10 @@ public:
     return clc_move;
   }
 
+  auto get_size() const -> std::size_t override {
+    return sizeof(*this);
+  }
+
   auto get_group() const -> int override {
     return net_channel_info::move;
   }
@@ -121,7 +138,10 @@ public:
   int length = 0;
   bf_read data_in{};
   bf_write data_out{};
+  std::array<std::uint8_t, 8> reserved{};
 };
+
+static_assert(sizeof(clc_move_message) == 0x78, "clc_move_message size mismatch");
 
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -155,6 +175,10 @@ public:
 
   auto get_type() const -> int override {
     return net_tick;
+  }
+
+  auto get_size() const -> std::size_t override {
+    return sizeof(*this);
   }
 
   auto get_name() const -> const char* override {

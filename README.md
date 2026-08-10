@@ -137,7 +137,7 @@ Keep code simple, direct, and consistent with the existing style:
 
 ## Community
 
-Discord: https://discord.gg/sARNsbvBps
+Discord: [https://discord.gg/VP8JRguD83](https://discord.gg/VP8JRguD83)
 
 ## Credits
 

@@ -28,6 +28,8 @@ Material* mat_blur_y = nullptr;
 MaterialVar* bloom_amount = nullptr;
 Texture* render_buffer_0 = nullptr;
 Texture* render_buffer_1 = nullptr;
+std::vector<Material*> retired_materials{};
+std::vector<Texture*> retired_textures{};
 int resource_width = 0;
 int resource_height = 0;
 bool resources_ready = false;
@@ -110,14 +112,8 @@ bool bind_base_texture(Material* material, Texture* texture)
   return true;
 }
 
-void release_resources()
+void reset_resource_handles()
 {
-  if (mat_glow_color != nullptr) mat_glow_color->decrement_reference_count();
-  if (mat_halo != nullptr) mat_halo->decrement_reference_count();
-  if (mat_blur_x != nullptr) mat_blur_x->decrement_reference_count();
-  if (mat_blur_y != nullptr) mat_blur_y->decrement_reference_count();
-  if (render_buffer_0 != nullptr) render_buffer_0->decrement_reference_count();
-  if (render_buffer_1 != nullptr) render_buffer_1->decrement_reference_count();
   mat_glow_color = nullptr;
   mat_halo = nullptr;
   mat_blur_x = nullptr;
@@ -130,19 +126,46 @@ void release_resources()
   resources_ready = false;
 }
 
+void release_resources()
+{
+  if (mat_glow_color != nullptr) mat_glow_color->decrement_reference_count();
+  if (mat_halo != nullptr) mat_halo->decrement_reference_count();
+  if (mat_blur_x != nullptr) mat_blur_x->decrement_reference_count();
+  if (mat_blur_y != nullptr) mat_blur_y->decrement_reference_count();
+  if (render_buffer_0 != nullptr) render_buffer_0->decrement_reference_count();
+  if (render_buffer_1 != nullptr) render_buffer_1->decrement_reference_count();
+  for (Material* material : retired_materials) {
+    if (material != nullptr) material->decrement_reference_count();
+  }
+  for (Texture* texture : retired_textures) {
+    if (texture != nullptr) texture->decrement_reference_count();
+  }
+  retired_materials.clear();
+  retired_textures.clear();
+  reset_resource_handles();
+}
+
+void retire_resources()
+{
+  if (mat_glow_color != nullptr) retired_materials.emplace_back(mat_glow_color);
+  if (mat_halo != nullptr) retired_materials.emplace_back(mat_halo);
+  if (mat_blur_x != nullptr) retired_materials.emplace_back(mat_blur_x);
+  if (mat_blur_y != nullptr) retired_materials.emplace_back(mat_blur_y);
+  if (render_buffer_0 != nullptr) retired_textures.emplace_back(render_buffer_0);
+  if (render_buffer_1 != nullptr) retired_textures.emplace_back(render_buffer_1);
+  reset_resource_handles();
+}
+
 bool ensure_resources()
 {
-  if (engine == nullptr || material_system == nullptr || !engine->is_in_game()) {
-    if (resources_ready) release_resources();
-    return false;
-  }
+  if (engine == nullptr || material_system == nullptr || !engine->is_in_game() || engine->is_drawing_loading_image()) return false;
   const Vec2 screen = engine->get_screen_size();
   if (screen.x <= 0 || screen.y <= 0) {
-    if (resources_ready) release_resources();
+    if (resources_ready) retire_resources();
     return false;
   }
   if (resources_ready && (resource_width != static_cast<int>(screen.x) || resource_height != static_cast<int>(screen.y))) {
-    release_resources();
+    retire_resources();
   }
   if (resources_ready) {
     if (!materials.loaded()) materials.load();
@@ -176,7 +199,7 @@ bool ensure_resources()
     resource_width = static_cast<int>(screen.x);
     resource_height = static_cast<int>(screen.y);
   } else {
-    release_resources();
+    retire_resources();
   }
   return resources_ready;
 }
@@ -378,7 +401,8 @@ void on_render_end()
 void on_draw_model_execute(void* instance, const DrawModelState& state, const ModelRenderInfo& info, matrix_3x4* bones)
 {
   if (draw_model_execute_original == nullptr) return;
-  if (rendering_effect || model_render == nullptr || !materials.loaded() || entity_list == nullptr) {
+  if (rendering_effect || model_render == nullptr || !materials.loaded() || entity_list == nullptr ||
+      engine == nullptr || engine->is_drawing_loading_image()) {
     call_original(instance, state, info, bones);
     return;
   }
@@ -398,11 +422,16 @@ void on_draw_model_execute(void* instance, const DrawModelState& state, const Mo
   }
 }
 
-void on_shutdown()
+void on_shutdown(const bool release_graphics_resources)
 {
   glow_batches.clear();
-  release_resources();
-  materials.shutdown();
+  if (release_graphics_resources) {
+    release_resources();
+    materials.shutdown();
+  } else {
+    reset_resource_handles();
+    materials.abandon();
+  }
 }
 
 }

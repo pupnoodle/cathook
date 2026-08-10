@@ -792,6 +792,8 @@ bool unload_module_runtime() {
   }
 
   print("Uninjecting...\n");
+  const bool release_graphics_resources = process_exiting.load(std::memory_order_acquire)
+      || is_environment_enabled("CATHOOK_DETACH_RELEASE_GRAPHICS");
 
   print("Unhooking VMT functions\n");
   backtrack::restore_net_channel_hook();
@@ -900,7 +902,7 @@ bool unload_module_runtime() {
   surface_runtime::reset_ready();
   restore_client_crashfix_patches();
   backtrack::clear();
-  entity_visuals::on_shutdown();
+  entity_visuals::on_shutdown(release_graphics_resources);
   followbot::controller().shutdown();
   navbot::controller().shutdown();
   automation::shutdown();
@@ -923,8 +925,6 @@ bool unload_module_runtime() {
   get_window_WM_info_target = nullptr;
   get_window_size_target = nullptr;
 
-  const bool release_graphics_resources = process_exiting.load(std::memory_order_acquire)
-      || is_environment_enabled("CATHOOK_DETACH_RELEASE_GRAPHICS");
   if (!release_graphics_resources) {
     print("Skipping graphics resource release during detach\n");
   }
@@ -1544,11 +1544,13 @@ bool initialize_game_runtime() {
   rv = funchook_prepare(funchook, (void**)&item_definition_lookup_original, (void*)item_definition_lookup_hook);
   error_assert(rv != 0, "Failed to prepare item definition lookup hook\n");
 
-  rv = funchook_prepare(
-    funchook,
-    (void**)&attribute_hook_value_float_original,
-    (void*)inventory_changer::attribute_hook_value_float_hook);
-  error_assert(rv != 0, "Failed to prepare float attribute hook\n");
+  if (config.misc.inventory_changer.enabled) {
+    rv = funchook_prepare(
+      funchook,
+      (void**)&attribute_hook_value_float_original,
+      (void*)inventory_changer::attribute_hook_value_float_hook);
+    error_assert(rv != 0, "Failed to prepare float attribute hook\n");
+  }
 
   rv = funchook_prepare(funchook, (void**)&inspect_target_check_original, (void*)inspect_target_check_hook);
   error_assert(rv != 0, "Failed to prepare inspect target check hook\n");

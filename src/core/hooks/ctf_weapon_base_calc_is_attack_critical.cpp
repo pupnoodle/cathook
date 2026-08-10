@@ -45,9 +45,6 @@ struct crit_prediction_state
   float last_rapid_fire_crit_check_time = 0.0f;
   float crit_time = 0.0f;
   int current_seed = 0;
-  bool current_attack_is_crit = false;
-  bool current_crit_is_random = false;
-  bool current_attack_is_during_demo_charge = false;
 };
 
 struct framecount_guard
@@ -91,10 +88,7 @@ crit_prediction_state read_crit_prediction_state(Weapon* weapon)
     weapon->last_crit_check_time(),
     weapon->last_rapid_fire_crit_check_time(),
     weapon->crit_time(),
-    weapon->current_seed(),
-    weapon->current_attack_is_crit(),
-    weapon->current_crit_is_random(),
-    weapon->current_attack_is_during_demo_charge()
+    weapon->current_seed()
   };
 }
 
@@ -108,9 +102,6 @@ void restore_crit_prediction_state(Weapon* weapon, const crit_prediction_state& 
   weapon->last_rapid_fire_crit_check_time() = state.last_rapid_fire_crit_check_time;
   weapon->crit_time() = state.crit_time;
   weapon->current_seed() = state.current_seed;
-  weapon->current_attack_is_crit() = state.current_attack_is_crit;
-  weapon->current_crit_is_random() = state.current_crit_is_random;
-  weapon->current_attack_is_during_demo_charge() = state.current_attack_is_during_demo_charge;
 }
 
 bool run_calc_is_attack_critical_hook(

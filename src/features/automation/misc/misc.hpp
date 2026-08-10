@@ -41,6 +41,7 @@ private:
   void run_auto_vote_map(GameEvent* event);
   void run_autotaunt(GameEvent* event);
   void run_chatspam();
+  void run_startup_sound();
   void run_custom_announcer(GameEvent* event);
   void run_killsay(GameEvent* event);
   void process_killsay();
@@ -73,6 +74,7 @@ private:
   float boost_match_start_time_ = 0.0f;
   float last_active_input_time_ = 0.0f;
   bool was_in_game_ = false;
+  bool startup_sound_played_ = false;
   bool warmup_active_ = false;
   bool cheats_bypass_applied_ = false;
   int original_sv_cheats_value_ = 0;

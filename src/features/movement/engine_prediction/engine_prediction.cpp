@@ -80,19 +80,21 @@ engine_prediction_state prediction_state{};
 
 int engine_prediction_tickbase(user_cmd* current_user_cmd, Player* localplayer) {
   static int predicted_tickbase = 0;
-  static struct user_cmd* last_user_cmd = nullptr;
+  static int last_command_number = 0;
+  static bool last_command_was_predicted = false;
 
   if (current_user_cmd == nullptr || localplayer == nullptr) {
     return predicted_tickbase;
   }
 
-  if (last_user_cmd == nullptr || last_user_cmd->has_been_predicted) {
+  if (last_command_number <= 0 || last_command_was_predicted) {
     predicted_tickbase = localplayer->get_tickbase();
   } else {
     ++predicted_tickbase;
   }
 
-  last_user_cmd = current_user_cmd;
+  last_command_number = current_user_cmd->command_number;
+  last_command_was_predicted = current_user_cmd->has_been_predicted;
   return predicted_tickbase;
 }
 
@@ -231,13 +233,19 @@ void start_engine_prediction(user_cmd* user_cmd) {
 
   prediction_state.active = true;
 
-  user_cmd->has_been_predicted = false;
-  int predicted_tickbase = engine_prediction_tickbase(user_cmd, localplayer);
+  struct user_cmd predicted_command = *user_cmd;
+  predicted_command.buttons &= ~(IN_ATTACK | IN_ATTACK2 | IN_ATTACK3);
+  predicted_command.impulse = 0;
+  predicted_command.weapon_select = 0;
+  predicted_command.weapon_subtype = 0;
+  predicted_command.has_been_predicted = false;
+
+  int predicted_tickbase = engine_prediction_tickbase(&predicted_command, localplayer);
   localplayer->set_tickbase(predicted_tickbase);
-  localplayer->set_current_cmd(user_cmd);
+  localplayer->set_current_cmd(&predicted_command);
 
   if (random_seed != nullptr) {
-    *random_seed = MD5_PseudoRandom(static_cast<unsigned int>(user_cmd->command_number)) & INT_MAX;
+    *random_seed = MD5_PseudoRandom(static_cast<unsigned int>(predicted_command.command_number)) & INT_MAX;
   }
 
   float interval_per_tick = global_vars->interval_per_tick > 0.0f ? global_vars->interval_per_tick : TICK_INTERVAL;
@@ -247,10 +255,10 @@ void start_engine_prediction(user_cmd* user_cmd) {
 
   prediction->first_time_predicted = false;
   prediction->in_prediction = true;
-  prediction->set_local_view_angles(user_cmd->view_angles);
+  prediction->set_local_view_angles(predicted_command.view_angles);
 
   move_helper->set_host(localplayer);
-  prediction->run_command(localplayer, user_cmd, move_helper);
+  prediction->run_command(localplayer, &predicted_command, move_helper);
   move_helper->set_host(nullptr);
 }
 

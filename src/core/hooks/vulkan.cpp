@@ -670,6 +670,10 @@ static bool draw_imgui_overlay()
     return false;
   }
 
+  cat_menu::ensure_fonts();
+  update_imgui_overlay_size();
+  warmup_bind_targets();
+
   if (ImGui::IsKeyPressed(ImGuiKey_Insert, false) || ImGui::IsKeyPressed(ImGuiKey_F11, false)) {
     menu_focused = !menu_focused;
     player_manager_window_open = menu_focused;
@@ -686,10 +690,6 @@ static bool draw_imgui_overlay()
       surface->set_cursor_visible(menu_focused || player_manager_window_open);
     }
   }
-
-  cat_menu::ensure_fonts();
-  update_imgui_overlay_size();
-  warmup_bind_targets();
 
   ImGui::SetNextWindowPos({0.0f, 0.0f}, ImGuiCond_Always);
   ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize, ImGuiCond_Always);

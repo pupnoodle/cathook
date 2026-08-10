@@ -41,10 +41,10 @@ auto resolve_cl_move_lea(void* cl_move, int offset) -> std::uint8_t*
 
 }
 
-void cl_move_hook(float accumulated_extra_samples, bool final_tick)
+void cl_move_hook(bool final_tick, float accumulated_extra_samples)
 {
   CATHOOK_HOOK_GUARD();
-  tickbase::move(accumulated_extra_samples, final_tick, cl_move_original);
+  tickbase::move(final_tick, accumulated_extra_samples, cl_move_original);
 }
 
 void prediction_run_simulation_hook(void* prediction_instance, int current_command, user_cmd* cmd, Player* localplayer,

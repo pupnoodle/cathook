@@ -20,6 +20,7 @@ V  o o  V  file: src/features/automation/misc/misc.cpp
 #include <system_error>
 #include <fstream>
 #include <limits>
+#include <random>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -79,6 +80,7 @@ constexpr float party_client_scan_interval = 0.25f;
 constexpr const char* auto_balance_pending_token = "#TF_Autobalance_TeamChangePending";
 constexpr float autotaunt_step_interval = 0.12f;
 constexpr int max_chat_command_length = 220;
+constexpr const char* startup_sound_list_name = "startup_sounds.txt";
 constexpr float announcer_combo_window = 5.0f;
 constexpr int gr_state_preround = 3;
 constexpr int gr_state_between_rounds = 10;
@@ -1322,6 +1324,7 @@ void automation_controller::on_paint()
   }
 
   nographics::update();
+  run_startup_sound();
   process_killsay();
 
   if (engine == nullptr || global_vars == nullptr)
@@ -1331,6 +1334,63 @@ void automation_controller::on_paint()
 
   autoitem::on_tick();
   run_queueing();
+}
+
+void automation_controller::run_startup_sound()
+{
+  if (startup_sound_played_ || engine == nullptr)
+  {
+    return;
+  }
+
+  startup_sound_played_ = true;
+
+  const auto list_path = cathook::core::root_directory() / "assets" / startup_sound_list_name;
+  std::ifstream sound_file{ list_path };
+  if (!sound_file.is_open())
+  {
+    print("[startup_sound] list not found: %s\n", list_path.c_str());
+    return;
+  }
+
+  std::vector<std::string> sounds{};
+  std::string sound_name{};
+  while (std::getline(sound_file, sound_name))
+  {
+    if (!sound_name.empty() && sound_name.back() == '\r')
+    {
+      sound_name.pop_back();
+    }
+
+    if (sound_name.empty() || sound_name.front() == '#')
+    {
+      continue;
+    }
+
+    const bool safe_name = std::all_of(sound_name.begin(), sound_name.end(), [](const char character)
+    {
+      return std::isalnum(static_cast<unsigned char>(character)) ||
+        character == '/' || character == '_' || character == '-' || character == '.';
+    });
+    if (safe_name)
+    {
+      sounds.push_back(sound_name);
+    }
+  }
+
+  if (sounds.empty())
+  {
+    print("[startup_sound] list is empty: %s\n", list_path.c_str());
+    return;
+  }
+
+  std::random_device random_device{};
+  std::mt19937 generator{ random_device() };
+  std::uniform_int_distribution<std::size_t> distribution{ 0, sounds.size() - 1 };
+  const std::string& selected_sound = sounds[distribution(generator)];
+  const std::string command = "play " + selected_sound;
+  engine->client_cmd_unrestricted(command.c_str());
+  print("[startup_sound] playing %s\n", selected_sound.c_str());
 }
 
 void automation_controller::on_menu_tick()

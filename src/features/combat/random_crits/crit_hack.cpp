@@ -123,6 +123,12 @@ bool is_melee_weapon = false;
 float crit_chance = 0.0f;
 float mult_crit_chance = 1.0f;
 
+Weapon* cached_weapon = nullptr;
+float cached_bucket = 0.0f;
+int cached_crit_checks = 0;
+int cached_crit_seed_requests = 0;
+bool weapon_info_cache_valid = false;
+
 constexpr int max_safe_choked_commands = 21;
 
 enum class crit_request {
@@ -153,6 +159,11 @@ void reset_weapon_info() {
   is_melee_weapon = false;
   crit_chance = 0.0f;
   mult_crit_chance = 1.0f;
+  cached_weapon = nullptr;
+  cached_bucket = 0.0f;
+  cached_crit_checks = 0;
+  cached_crit_seed_requests = 0;
+  weapon_info_cache_valid = false;
 }
 
 inline Entity* get_player_resource_entity() {
@@ -375,23 +386,22 @@ void update_weapon_info(Player* local, Weapon* weapon) {
   mult_crit_chance = attribute_manager->attrib_hook_value(1.0f, "mult_crit_chance", weapon->to_entity());
   crit_chance *= mult_crit_chance;
 
-  static Weapon* old_weapon = nullptr;
-  Weapon* old_weapon_prev = old_weapon;
-  old_weapon = weapon;
+  const float bucket = weapon->crit_token_bucket();
+  const int crit_checks_val = weapon->crit_checks();
+  const int crit_seed_requests_val = weapon->crit_seed_requests();
+  const bool unchanged = weapon_info_cache_valid &&
+    weapon == cached_weapon &&
+    bucket == cached_bucket &&
+    crit_checks_val == cached_crit_checks &&
+    crit_seed_requests_val == cached_crit_seed_requests;
 
-  static float old_bucket = 0.0f;
-  const float last_bucket = old_bucket;
-  const float bucket = old_bucket = weapon->crit_token_bucket();
+  cached_weapon = weapon;
+  cached_bucket = bucket;
+  cached_crit_checks = crit_checks_val;
+  cached_crit_seed_requests = crit_seed_requests_val;
+  weapon_info_cache_valid = true;
 
-  static int old_crit_checks = 0;
-  const int last_crit_checks = old_crit_checks;
-  const int crit_checks_val = old_crit_checks = weapon->crit_checks();
-
-  static int old_crit_seed_requests = 0;
-  const int last_crit_seed_requests = old_crit_seed_requests;
-  const int crit_seed_requests_val = old_crit_seed_requests = weapon->crit_seed_requests();
-
-  if (weapon == old_weapon_prev && bucket == last_bucket && crit_checks_val == last_crit_checks && crit_seed_requests_val == last_crit_seed_requests)
+  if (unchanged)
     return;
 
   const float bucket_cap = get_crit_bucket_cap();

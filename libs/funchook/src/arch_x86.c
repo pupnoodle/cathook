@@ -85,11 +85,18 @@ int funchook_make_trampoline(funchook_t *funchook, ip_displacement_t *disp, cons
 
     memset(disp, 0, sizeof(*disp));
     memset(trampoline, NOP_INSTRUCTION, TRAMPOLINE_SIZE);
+#if TRAMPOLINE_PREFIX_SIZE == 4
+    trampoline[0] = 0xf3;
+    trampoline[1] = 0x0f;
+    trampoline[2] = 0x1e;
+    trampoline[3] = 0xfa;
+#endif
     *trampoline_size = 0;
     ctx.funchook = funchook;
     ctx.rip_disp = disp;
     ctx.src = func;
-    ctx.dst_base = ctx.dst = trampoline;
+    ctx.dst_base = trampoline;
+    ctx.dst = trampoline + TRAMPOLINE_PREFIX_SIZE;
 
     rv = funchook_disasm_init(&disasm, funchook, func, MAX_INSN_CHECK_SIZE, (size_t)func);
     if (rv != 0) {

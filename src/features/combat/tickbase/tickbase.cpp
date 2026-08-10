@@ -35,7 +35,6 @@ namespace tickbase
 namespace
 {
 
-constexpr int signon_state_connected = 2;
 constexpr int signon_state_full = 6;
 constexpr int max_shift_history = 64;
 constexpr int max_choked_commands = max_new_commands + max_backup_commands - 1;
@@ -80,10 +79,47 @@ struct state
   bool recharging = false;
   bool in_shift_rebuild = false;
   bool should_antiwarp = false;
+  net_channel* session_channel = nullptr;
+  int session_signon_state = 0;
+  int session_server_count = 0;
   shift_mode mode = shift_mode::none;
 };
 
 state g_state{};
+
+void reset_runtime_state()
+{
+  const auto net_time = g_state.net_time;
+  const auto host_frametime_unbounded = g_state.host_frametime_unbounded;
+  const auto host_frametime_std_deviation = g_state.host_frametime_std_deviation;
+  const auto host_should_run = g_state.host_should_run;
+
+  g_state = {};
+  g_state.net_time = net_time;
+  g_state.host_frametime_unbounded = host_frametime_unbounded;
+  g_state.host_frametime_std_deviation = host_frametime_std_deviation;
+  g_state.host_should_run = host_should_run;
+}
+
+void synchronize_session()
+{
+  if (client_state == nullptr) {
+    return;
+  }
+
+  auto* channel = client_state->m_NetChannel;
+  const int signon_state = client_state->m_nSignonState;
+  const int server_count = client_state->m_nServerCount;
+  if (g_state.session_channel != channel
+      || (g_state.session_signon_state == signon_state_full && signon_state != signon_state_full)
+      || (g_state.session_server_count != 0 && server_count != 0 && g_state.session_server_count != server_count)) {
+    reset_runtime_state();
+  }
+
+  g_state.session_channel = channel;
+  g_state.session_signon_state = signon_state;
+  g_state.session_server_count = server_count;
+}
 
 auto interval_per_tick() -> float
 {
@@ -401,7 +437,7 @@ auto should_recharge() -> bool
 void set_choked_command()
 {
   auto* channel = client_state != nullptr ? client_state->m_NetChannel : nullptr;
-  if (channel == nullptr) {
+  if (channel == nullptr || client_state->chokedcommands >= max_choked_commands) {
     return;
   }
 
@@ -424,7 +460,7 @@ auto send_move() -> bool
   message.new_commands = std::clamp(command_count, 0, max_new_commands);
 
   const int extra_commands = std::max(0, command_count - message.new_commands);
-  message.backup_commands = std::clamp(extra_commands, 2, max_backup_commands);
+  message.backup_commands = std::clamp(extra_commands, 0, max_backup_commands);
 
   const int command_total = message.new_commands + message.backup_commands;
   const int next_command = client_state->lastoutgoingcommand + command_count;
@@ -557,7 +593,12 @@ auto flush_packet() -> bool
     send_tick();
   }
 
-  client_state->lastoutgoingcommand = channel->send_datagram(nullptr);
+  const int outgoing_command = channel->send_datagram(nullptr);
+  if (outgoing_command < 0) {
+    return false;
+  }
+
+  client_state->lastoutgoingcommand = outgoing_command;
   client_state->chokedcommands = 0;
   update_next_command_time();
   return true;
@@ -746,8 +787,8 @@ auto run_rebuilt_move(float accumulated_extra_samples, bool final_tick, bool for
     return false;
   }
 
-  if (client_state->m_nSignonState < signon_state_connected || !g_state.host_should_run()) {
-    return true;
+  if (client_state->m_nSignonState != signon_state_full || !g_state.host_should_run()) {
+    return false;
   }
 
   prune_prediction_fixes();
@@ -846,8 +887,13 @@ auto run_rebuilt_move(float accumulated_extra_samples, bool final_tick, bool for
       set_choked_command();
     } else if (g_state.send_packet) {
       const int command_count = 1 + client_state->chokedcommands;
-      if (send_move() && !g_state.in_shift_rebuild && g_state.mode == shift_mode::none) {
-        g_state.processing_ticks = std::max(0, g_state.processing_ticks - command_count);
+      if (send_move()) {
+        if (!g_state.in_shift_rebuild && g_state.mode == shift_mode::none) {
+          g_state.processing_ticks = std::max(0, g_state.processing_ticks - command_count);
+        }
+      } else {
+        g_state.send_packet = false;
+        set_choked_command();
       }
     } else {
       set_choked_command();
@@ -916,16 +962,7 @@ void finish_shift(float accumulated_extra_samples)
 
 void reset()
 {
-  const auto net_time = g_state.net_time;
-  const auto host_frametime_unbounded = g_state.host_frametime_unbounded;
-  const auto host_frametime_std_deviation = g_state.host_frametime_std_deviation;
-  const auto host_should_run = g_state.host_should_run;
-
-  g_state = {};
-  g_state.net_time = net_time;
-  g_state.host_frametime_unbounded = host_frametime_unbounded;
-  g_state.host_frametime_std_deviation = host_frametime_std_deviation;
-  g_state.host_should_run = host_should_run;
+  reset_runtime_state();
 }
 
 void initialize_engine_globals(double* net_time, float* host_frametime_unbounded, float* host_frametime_std_deviation,
@@ -937,19 +974,21 @@ void initialize_engine_globals(double* net_time, float* host_frametime_unbounded
   g_state.host_should_run = host_should_run;
 }
 
-void move(float accumulated_extra_samples, bool final_tick, cl_move_fn original)
+void move(bool final_tick, float accumulated_extra_samples, cl_move_fn original)
 {
+  synchronize_session();
+
   if (!should_rebuild_cl_move()) {
     if (original != nullptr) {
       run_network_fix_before_move(final_tick);
-      original(accumulated_extra_samples, final_tick);
+      original(final_tick, accumulated_extra_samples);
     }
     return;
   }
 
   if (!run_rebuilt_move(accumulated_extra_samples, final_tick, false)) {
     if (original != nullptr) {
-      original(accumulated_extra_samples, final_tick);
+      original(final_tick, accumulated_extra_samples);
     }
     return;
   }
@@ -959,6 +998,8 @@ void move(float accumulated_extra_samples, bool final_tick, cl_move_fn original)
 
 void on_create_move(user_cmd* cmd)
 {
+  synchronize_session();
+
   if (cmd == nullptr || !can_rebuild_packets()) {
     return;
   }

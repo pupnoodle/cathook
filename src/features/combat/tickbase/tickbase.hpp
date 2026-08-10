@@ -16,7 +16,7 @@ V  o o  V  file: src/features/combat/tickbase/tickbase.hpp
 namespace tickbase
 {
 
-using cl_move_fn = void (*)(float, bool);
+using cl_move_fn = void (*)(bool, float);
 using host_should_run_fn = bool (*)();
 
 struct indicator_state
@@ -35,7 +35,7 @@ struct indicator_state
 void reset();
 void initialize_engine_globals(double* net_time, float* host_frametime_unbounded, float* host_frametime_std_deviation,
   host_should_run_fn host_should_run);
-void move(float accumulated_extra_samples, bool final_tick, cl_move_fn original);
+void move(bool final_tick, float accumulated_extra_samples, cl_move_fn original);
 void on_create_move(user_cmd* cmd);
 void apply_prediction_fix(int command_number, user_cmd* cmd, Player* player, float* curtime);
 auto should_rebuild_cl_move() -> bool;
