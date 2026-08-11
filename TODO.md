@@ -1,0 +1,3 @@
+- fix bugs
+- add missing features from original cathook
+- https://github.com/pupnoodle/cathook/issues/7#issuecomment-5246571645

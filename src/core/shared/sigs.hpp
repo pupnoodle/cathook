@@ -195,5 +195,18 @@ constexpr const char* client_objective_flag_countdown_update =
 constexpr const char* load_named_skys =
   "48 8D 05 ? ? ? ? 55 48 8D 15 ? ? ? ? 66 48 0F 6E C8 48 89 E5 41 57 48 8D 05 ? ? ? ? 41 56 66 48 0F 6E C2 41 55";
 
+constexpr const char* steamworks_gamestats_get_interface =
+  "55 48 89 E5 41 55 41 54 53 48 83 EC 08 4C 8D 25 ? ? ? ? 49 8B 04 24 48 85 C0 74";
+constexpr const char* steamworks_gamestats_write_perf_data =
+  "55 48 89 E5 41 55 41 54 49 89 F4 53 48 89 FB 48 83 EC 28 E8 ? ? ? ? 48 85 C0";
+constexpr const char* steamworks_gamestats_submit_row =
+  "48 85 F6 B8 02 00 00 00 0F 84 ? ? ? ? 55 84 D2 48 89 E5 41 56 41 55 49 89 F5 41 54 49 89 FC 53";
+constexpr const char* steamworks_gamestats_drain_rows =
+  "55 48 89 E5 41 57 41 56 4C 8D 3D ? ? ? ? 41 55 41 54 45 31 E4";
+constexpr const char* steamworks_gamestats_end_session =
+  "55 48 89 E5 41 54 49 89 FC 48 83 EC 18 48 8D 05 ? ? ? ? 48 8B 00 48 85 C0";
+constexpr const char* steamworks_gamestats_reset_session =
+  "55 31 F6 48 89 E5 41 54 53 48 89 FB 48 C7 87";
+
 }
 #endif

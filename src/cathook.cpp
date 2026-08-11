@@ -137,6 +137,7 @@ bool (*in_cond_original)(void*, int) = nullptr;
 #include "features/visuals/thirdperson.cpp"
 #include "features/visuals/radar/radar.cpp"
 #include "features/visuals/skybox_changer.cpp"
+#include "features/automation/telemetry_blocker/telemetry_blocker.cpp"
 
 void** client_mode_vtable;
 void** model_render_vtable;
@@ -905,6 +906,7 @@ bool unload_module_runtime() {
     return false;
   }
 
+  telemetry_blocker::restore();
   cathook::core::unregister_commands();
   cathook::core::identify::stop();
   cat_ipc::client::shutdown();
@@ -923,6 +925,7 @@ bool unload_module_runtime() {
     funchook = nullptr;
   }
   in_cond_original = nullptr;
+  telemetry_blocker::clear_hook_pointers();
   tickbase::reset();
 
   poll_event_original = nullptr;
@@ -1375,6 +1378,8 @@ bool initialize_game_runtime() {
   in_cond_original = (bool (*)(void*, int))sigscan_module("client.so", sigs::in_cond);
   error_assert(in_cond_original == nullptr, "Failed to find InCond");
 
+  telemetry_blocker::resolve_hooks();
+
   client_mode_vtable = *(void***)client_mode_interface;
 
   model_render_vtable = *(void***)model_render;
@@ -1569,6 +1574,32 @@ bool initialize_game_runtime() {
 
   rv = funchook_prepare(funchook, (void**)&in_cond_original, (void*)in_cond_hook);
   error_assert(rv != 0, "Failed to prepare InCond hook\n");
+
+  if (steamworks_gamestats_get_interface_original != nullptr &&
+      funchook_prepare(funchook, (void**)&steamworks_gamestats_get_interface_original,
+                       (void*)steamworks_gamestats_get_interface_hook) != 0) {
+    print("Failed to prepare gamestats GetInterface hook\n");
+  }
+  if (steamworks_gamestats_write_perf_data_original != nullptr &&
+      funchook_prepare(funchook, (void**)&steamworks_gamestats_write_perf_data_original,
+                       (void*)steamworks_gamestats_write_perf_data_hook) != 0) {
+    print("Failed to prepare gamestats WritePerfData hook\n");
+  }
+  if (steamworks_gamestats_submit_row_original != nullptr &&
+      funchook_prepare(funchook, (void**)&steamworks_gamestats_submit_row_original,
+                       (void*)steamworks_gamestats_submit_row_hook) != 0) {
+    print("Failed to prepare gamestats SubmitRow hook\n");
+  }
+  if (steamworks_gamestats_drain_rows_original != nullptr &&
+      funchook_prepare(funchook, (void**)&steamworks_gamestats_drain_rows_original,
+                       (void*)steamworks_gamestats_drain_rows_hook) != 0) {
+    print("Failed to prepare gamestats DrainRows hook\n");
+  }
+  if (steamworks_gamestats_end_session_original != nullptr &&
+      funchook_prepare(funchook, (void**)&steamworks_gamestats_end_session_original,
+                       (void*)steamworks_gamestats_end_session_hook) != 0) {
+    print("Failed to prepare gamestats EndSession hook\n");
+  }
 #if !defined(CATHOOK_TEXTMODE) || !CATHOOK_TEXTMODE
 
   rv = funchook_prepare(funchook, (void**)&load_white_list_original, (void*)load_white_list_hook);

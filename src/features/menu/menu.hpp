@@ -2544,7 +2544,7 @@ static void draw_exploits_content() {
     cat_menu::slider_int("Ticks", &config.backtrack.visualizer_ticks, 1, 80);
   });
 
-  cat_menu::flow_panel("Bypasses", 1, 224.0f, [&]() {
+  cat_menu::flow_panel("Bypasses", 1, 272.0f, [&]() {
     cat_menu::checkbox("Bypass sv_pure", &config.misc.exploits.bypasspure);
     cat_menu::checkbox("Pure bypass", &config.misc.exploits.pure_bypass);
     cat_menu::checkbox("Cheats bypass", &config.misc.exploits.cheats_bypass);
@@ -2552,6 +2552,8 @@ static void draw_exploits_content() {
     cat_menu::checkbox("Network fix", &config.misc.exploits.network_fix);
     cat_menu::checkbox("No engine sleep", &config.misc.exploits.no_engine_sleep);
     cat_menu::checkbox("Null graphics", &config.misc.exploits.null_graphics);
+    cat_menu::checkbox("Telemetry blocker", &config.misc.telemetry_blocker);
+    cat_menu::checkbox("Telemetry aggressive", &config.misc.telemetry_blocker_aggressive);
   });
   cat_menu::flow_panel("Tickbase", 1, 224.0f, [&]() {
     cat_menu::checkbox("Tickbase", &config.misc.exploits.tickbase);

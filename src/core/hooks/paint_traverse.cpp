@@ -17,6 +17,7 @@ V  o o  V  file: src/core/hooks/paint_traverse.cpp
 #include "games/tf2/sdk/interfaces/engine.hpp"
 #include "games/tf2/sdk/interfaces/surface.hpp"
 #include "features/automation/misc/misc.hpp"
+#include "features/automation/telemetry_blocker/telemetry_blocker.hpp"
 #include <chrono>
 
 void (*paint_traverse_original)(void*, void*, bool, bool) = NULL;
@@ -52,6 +53,7 @@ void paint_traverse_hook(void* me, void* panel, bool force_repaint, bool allow_f
   }
 
   surface_runtime::mark_ready();
+  telemetry_blocker::update();
 
   const bool view_matrix_updated = overlay_projection::update_view_matrix();
   (void)view_matrix_updated;

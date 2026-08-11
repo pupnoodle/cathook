@@ -562,6 +562,9 @@ struct Visuals {
 
 struct Misc {
 
+  bool telemetry_blocker = false;
+  bool telemetry_blocker_aggressive = false;
+
 #if 0 // Inventory changer temporarily disabled.
   struct InventorySlot {
     int item = 0;

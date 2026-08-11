@@ -29,6 +29,7 @@ V  o o  V  file: src/core/hooks/frame_stage_notify.cpp
 #include "features/automation/navbot/navbot_controller.hpp"
 #include "features/visuals/thirdperson.hpp"
 #include "features/visuals/skybox_changer.hpp"
+#include "features/automation/telemetry_blocker/telemetry_blocker.hpp"
 #include "features/visuals/groups/visual_groups.hpp"
 #include "core/print.hpp"
 
@@ -308,6 +309,7 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
   if (current_stage == FRAME_NET_UPDATE_END) {
     run_match_exec_on_level_change();
     run_skybox_changer();
+    telemetry_blocker::update();
     cat_ipc::client::tick();
     cathook::core::identify::tick();
     cathook::core::players::tick();

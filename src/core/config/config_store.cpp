@@ -470,6 +470,8 @@ void config_store::import_config(const Config& config)
     set_bool("visuals.esp_lerp", config.visuals.esp_lerp);
     set_bool("visuals.dormant_esp", config.visuals.dormant_esp);
 
+    set_bool("misc.telemetry_blocker", config.misc.telemetry_blocker);
+    set_bool("misc.telemetry_blocker_aggressive", config.misc.telemetry_blocker_aggressive);
     set_bool("misc.movement.bhop", config.misc.movement.bhop);
     set_int("misc.movement.auto_strafe", static_cast<int>(config.misc.movement.auto_strafe));
     set_float("misc.movement.auto_strafe_turn_scale", config.misc.movement.auto_strafe_turn_scale);
@@ -1071,6 +1073,8 @@ void config_store::export_config(Config& config) const
     config.visuals.esp_lerp = get_bool("visuals.esp_lerp", config.visuals.esp_lerp);
     config.visuals.dormant_esp = get_bool("visuals.dormant_esp", config.visuals.dormant_esp);
 
+    config.misc.telemetry_blocker = get_bool("misc.telemetry_blocker", config.misc.telemetry_blocker);
+    config.misc.telemetry_blocker_aggressive = get_bool("misc.telemetry_blocker_aggressive", config.misc.telemetry_blocker_aggressive);
     config.misc.movement.bhop = get_bool("misc.movement.bhop", config.misc.movement.bhop);
     config.misc.movement.auto_strafe = static_cast<Misc::Movement::auto_strafe_mode>(std::clamp(
         get_int("misc.movement.auto_strafe", static_cast<int>(config.misc.movement.auto_strafe)),
