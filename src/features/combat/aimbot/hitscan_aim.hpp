@@ -237,18 +237,6 @@ inline bool hitscan_aim_world_clear(const Vec3& start_pos, const Vec3& end_pos) 
   return !trace.all_solid && !trace.start_solid && trace.fraction >= 0.999f;
 }
 
-inline bool hitscan_aim_current_player_visible(const Vec3& start_pos, Player* target) {
-  if (target == nullptr) {
-    return false;
-  }
-
-  const Vec3 origin = target->get_collision_origin();
-  const Vec3 mins = target->get_collideable_mins() + origin;
-  const Vec3 maxs = target->get_collideable_maxs() + origin;
-  const Vec3 center = (mins + maxs) * 0.5f;
-  return aimbot_vec3_is_finite(center) && hitscan_aim_world_clear(start_pos, center);
-}
-
 inline hitscan_trace_result hitscan_aim_trace_line(Player* localplayer,
   const Vec3& start_pos,
   const Vec3& end_pos,
@@ -664,9 +652,6 @@ inline bool hitscan_aim_trace_geometry(const aimbot_candidate& candidate,
   }
 
   if (candidate.player != nullptr) {
-    if (!hitscan_aim_current_player_visible(start_pos, candidate.player)) {
-      return false;
-    }
     const Vec3 pose_offset = candidate.pose_timing_valid ? candidate.pose_offset : Vec3{};
     if (candidate.hitbox >= 0) {
       const int studio_hitbox = candidate.studio_hitbox >= 0
@@ -720,9 +705,7 @@ inline hitscan_point hitscan_aim_make_point(Player* localplayer,
   hitscan_trace_result trace{};
   const bool trace_reaches_target = hitscan_aim_trace_point(localplayer, target, position, &trace);
   const bool trace_hit_target = hitscan_aim_same_entity(trace.entity, target);
-  if (target->get_class_id() == class_id::PLAYER &&
-      (!hitscan_aim_current_player_visible(start_pos, target) ||
-       (!trace_hit_target && !hitscan_aim_world_clear(start_pos, position)))) {
+  if (target->get_class_id() == class_id::PLAYER && !trace_hit_target) {
     point.reject_debug = hitscan_aim_make_reject_debug(
       target,
       aimbot_reject_reason::trace_blocked,
@@ -922,6 +905,10 @@ inline hitscan_point hitscan_aim_find_point(Player* localplayer,
         best = point;
       }
     }
+
+    if (best.valid && best.priority == 0) {
+      break;
+    }
   }
 
   if (!best.valid && best.reject_debug.reason == aimbot_reject_reason::none) {
@@ -1056,6 +1043,10 @@ inline aimbot_candidate hitscan_aim_find_non_player_candidate(Player* localplaye
 
     if (!best.valid || point.priority < best.priority || (point.priority == best.priority && point.fov < best.fov)) {
       best = point;
+    }
+
+    if (best.valid && best.priority == 0) {
+      break;
     }
   }
 

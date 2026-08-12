@@ -1285,6 +1285,12 @@ void install_net_channel_hook()
     return;
   }
 
+  if (g_hooked_net_channel_vtable == vtable &&
+      g_send_datagram_original != nullptr &&
+      vtable[net_channel_send_datagram_index] == reinterpret_cast<void*>(send_datagram_hook)) {
+    return;
+  }
+
   void* const entry = read_vtable_entry(vtable, net_channel_send_datagram_index, "INetChannel::SendDatagram");
   if (entry == nullptr) {
     return;

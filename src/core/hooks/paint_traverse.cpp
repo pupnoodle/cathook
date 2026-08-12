@@ -18,41 +18,33 @@ V  o o  V  file: src/core/hooks/paint_traverse.cpp
 #include "games/tf2/sdk/interfaces/surface.hpp"
 #include "features/automation/misc/misc.hpp"
 #include <chrono>
+#include <string_view>
 
 void (*paint_traverse_original)(void*, void*, bool, bool) = NULL;
 const char* (*get_panel_name_original)(void*, void*) = NULL;
-bool write_to_table_quiet(void** vtable, int index, void* func);
-extern void** vgui_vtable;
 
 void paint_traverse_hook(void* me, void* panel, bool force_repaint, bool allow_force);
 
 namespace {
 
-constexpr int paint_traverse_vtable_index = 42;
+thread_local bool paint_traverse_original_active = false;
 
 class paint_traverse_original_scope final {
 public:
-  paint_traverse_original_scope() {
-    if (vgui_vtable == nullptr || paint_traverse_original == nullptr) return;
-
-    if (vgui_vtable[paint_traverse_vtable_index] == reinterpret_cast<void*>(paint_traverse_hook)) {
-      restored_ = write_to_table_quiet(
-        vgui_vtable, paint_traverse_vtable_index, reinterpret_cast<void*>(paint_traverse_original));
-    }
+  paint_traverse_original_scope()
+    : previous_(paint_traverse_original_active) {
+    paint_traverse_original_active = true;
   }
 
   paint_traverse_original_scope(const paint_traverse_original_scope&) = delete;
   paint_traverse_original_scope& operator=(const paint_traverse_original_scope&) = delete;
 
   ~paint_traverse_original_scope() {
-    if (restored_) {
-      (void)write_to_table_quiet(
-        vgui_vtable, paint_traverse_vtable_index, reinterpret_cast<void*>(paint_traverse_hook));
-    }
+    paint_traverse_original_active = previous_;
   }
 
 private:
-  bool restored_ = false;
+  bool previous_ = false;
 };
 
 void call_paint_traverse_original(void* me, void* panel, const bool force_repaint, const bool allow_force) {
@@ -74,13 +66,20 @@ const char* get_panel_name(void* panel) {
 
 void paint_traverse_hook(void* me, void* panel, bool force_repaint, bool allow_force) {
   CATHOOK_HOOK_GUARD();
+  if (paint_traverse_original_active) {
+    if (paint_traverse_original != nullptr) {
+      paint_traverse_original(me, panel, force_repaint, allow_force);
+    }
+    return;
+  }
+
   if (cathook::core::is_detach_pending()) {
     call_paint_traverse_original(me, panel, force_repaint, allow_force);
     cathook::core::service_detach_request();
     return;
   }
 
-  std::string panel_name = get_panel_name(panel);
+  const std::string_view panel_name = get_panel_name(panel);
 
   if (config.visuals.removals.scope == true && panel_name == "HudScope") {
     return;

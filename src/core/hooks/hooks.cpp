@@ -28,6 +28,12 @@ struct memory_page_permissions
   int protection = PROT_NONE;
 };
 
+long cached_page_size()
+{
+  static const long page_size = sysconf(_SC_PAGESIZE);
+  return page_size;
+}
+
 int protection_from_maps_permissions(const char* permissions)
 {
   int protection = PROT_NONE;
@@ -47,7 +53,7 @@ int protection_from_maps_permissions(const char* permissions)
 
 bool query_page_permissions(void* address, memory_page_permissions& page_permissions)
 {
-  const long page_size_value = sysconf(_SC_PAGESIZE);
+  const long page_size_value = cached_page_size();
   if (page_size_value <= 0) {
     print("failed to query page size\n");
     return false;
@@ -80,7 +86,7 @@ bool query_page_permissions(void* address, memory_page_permissions& page_permiss
 
 bool set_memory_page_protection(const memory_page_permissions& page_permissions, int protection)
 {
-  const long page_size_value = sysconf(_SC_PAGESIZE);
+  const long page_size_value = cached_page_size();
   if (page_size_value <= 0) {
     print("failed to query page size\n");
     return false;
@@ -232,7 +238,56 @@ void* read_vtable_entry(void** vtable, int index, const char* hook_name)
 
 namespace {
 
+struct cached_vtable_write
+{
+  void** vtable = nullptr;
+  int index = -1;
+  void* func = nullptr;
+};
+
+constexpr std::size_t max_cached_vtable_writes = 64;
+cached_vtable_write cached_vtable_writes[max_cached_vtable_writes]{};
+std::size_t cached_vtable_write_count = 0;
+
+bool is_cached_vtable_write(void** vtable, const int index, void* func)
+{
+  for (std::size_t i = 0; i < cached_vtable_write_count; ++i) {
+    const auto& cached = cached_vtable_writes[i];
+    if (cached.vtable == vtable && cached.index == index && cached.func == func) {
+      return vtable[index] == func;
+    }
+  }
+
+  return false;
+}
+
+void cache_vtable_write(void** vtable, const int index, void* func)
+{
+  for (std::size_t i = 0; i < cached_vtable_write_count; ++i) {
+    auto& cached = cached_vtable_writes[i];
+    if (cached.vtable == vtable && cached.index == index) {
+      cached.func = func;
+      return;
+    }
+  }
+
+  if (cached_vtable_write_count >= max_cached_vtable_writes) {
+    return;
+  }
+
+  cached_vtable_writes[cached_vtable_write_count++] = { vtable, index, func };
+}
+
 bool write_to_table_impl(void** vtable, int index, void* func, const bool verbose) {
+  if (vtable == nullptr || index < 0 || func == nullptr) {
+    print("refusing to install an invalid vtable target\n");
+    return false;
+  }
+
+  if (is_cached_vtable_write(vtable, index, func)) {
+    return true;
+  }
+
   if (func == nullptr || !is_executable_memory_address(func)) {
     print("refusing to install non-executable vtable target %p\n", func);
     return false;
@@ -262,6 +317,7 @@ bool write_to_table_impl(void** vtable, int index, void* func, const bool verbos
     return false;
   }
 
+  cache_vtable_write(vtable, index, func);
   return true;
 }
 
