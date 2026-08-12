@@ -261,6 +261,42 @@ inline bool tf_player_shared_in_cond(void* shared, int condition)
   const auto flags = *reinterpret_cast<const uint32_t*>(shared_address + static_cast<uintptr_t>(condition_offsets[bucket]));
   return (flags & (1u << bit)) != 0;
 }
+inline void tf_player_shared_clear_cond(void* shared, int condition)
+{
+  constexpr int max_networked_conditions = 128;
+  if (shared == nullptr || condition < 0 || condition >= TF_COND_LAST || condition >= max_networked_conditions) {
+    return;
+  }
+
+  static const int player_cond_offset = tf2_netvars::find_offset("DT_TFPlayerShared", {"m_nPlayerCond"});
+  static const int player_cond_ex_offset = tf2_netvars::find_offset("DT_TFPlayerShared", {"m_nPlayerCondEx"});
+  static const int player_cond_ex2_offset = tf2_netvars::find_offset("DT_TFPlayerShared", {"m_nPlayerCondEx2"});
+  static const int player_cond_ex3_offset = tf2_netvars::find_offset("DT_TFPlayerShared", {"m_nPlayerCondEx3"});
+
+  const auto shared_address = reinterpret_cast<uintptr_t>(shared);
+
+  if (condition < 32) {
+    constexpr uintptr_t condition_list_bits_offset = 0x128;
+    auto* condition_list_bits = reinterpret_cast<uint32_t*>(shared_address + condition_list_bits_offset);
+    *condition_list_bits &= ~(1u << static_cast<uint32_t>(condition));
+  }
+
+  const int condition_offsets[] = {
+    player_cond_offset,
+    player_cond_ex_offset,
+    player_cond_ex2_offset,
+    player_cond_ex3_offset
+  };
+
+  const auto bucket = static_cast<size_t>(condition / 32);
+  if (bucket >= std::size(condition_offsets) || condition_offsets[bucket] <= 0) {
+    return;
+  }
+
+  const auto bit = static_cast<uint32_t>(condition % 32);
+  auto* flags = reinterpret_cast<uint32_t*>(shared_address + static_cast<uintptr_t>(condition_offsets[bucket]));
+  *flags &= ~(1u << bit);
+}
 
 class Player : public Entity {
 public:
@@ -732,6 +768,22 @@ public:
     }
 
     return tf_player_shared_in_cond(get_shared(), static_cast<int>(condition));
+  }
+  void clear_condition(tf_cond condition) {
+    if (cathook::core::is_detach_pending()) {
+      return;
+    }
+
+    tf_player_shared_clear_cond(get_shared(), static_cast<int>(condition));
+  }
+
+  bool* viewing_contracker() {
+    static const int offset = tf2_netvars::find_offset("DT_TFPlayer", { "m_bViewingCYOAPDA" });
+    if (offset <= 0) {
+      return nullptr;
+    }
+
+    return reinterpret_cast<bool*>(reinterpret_cast<uintptr_t>(this) + offset);
   }
 
   bool is_cloaked(void) {

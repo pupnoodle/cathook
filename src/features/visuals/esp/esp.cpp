@@ -18,6 +18,7 @@ V  o o  V  file: src/features/visuals/esp/esp.cpp
 #include <cstdint>
 #include <cctype>
 #include <cstring>
+#include <chrono>
 #include <cwchar>
 #include <filesystem>
 #include <fstream>
@@ -649,16 +650,33 @@ void smooth_projected_box(Entity* entity, projected_box* box)
   };
 }
 
-[[nodiscard]] std::filesystem::path resolve_head_emoji_atlas_path()
+[[nodiscard]] const std::filesystem::path& resolve_head_emoji_atlas_path()
 {
+  static std::filesystem::path cached_path{};
+  static bool resolved = false;
+  static std::chrono::steady_clock::time_point next_retry{};
+
+  if (resolved) {
+    return cached_path;
+  }
+
+  const auto now = std::chrono::steady_clock::now();
+  if (next_retry.time_since_epoch().count() != 0 && now < next_retry) {
+    return cached_path;
+  }
+
   for (const auto& candidate : head_emoji_atlas_candidates()) {
     std::error_code error{};
     if (std::filesystem::exists(candidate, error)) {
-      return candidate;
+      cached_path = candidate;
+      resolved = true;
+      return cached_path;
     }
   }
 
-  return {};
+  cached_path.clear();
+  next_retry = now + std::chrono::seconds(5);
+  return cached_path;
 }
 
 void reset_head_emoji_texture()
@@ -682,15 +700,16 @@ void reset_head_emoji_atlas()
 
 [[nodiscard]] bool ensure_head_emoji_atlas_loaded()
 {
-  const auto atlas_path = resolve_head_emoji_atlas_path();
+  if (!g_head_emoji_atlas.pixels.empty() &&
+      g_head_emoji_atlas.width > 0 &&
+      g_head_emoji_atlas.height > 0) {
+    return true;
+  }
+
+  const auto& atlas_path = resolve_head_emoji_atlas_path();
   if (atlas_path.empty()) {
     reset_head_emoji_atlas();
     return false;
-  }
-
-  if (!g_head_emoji_atlas.pixels.empty() && g_head_emoji_atlas.loaded_path == atlas_path &&
-      g_head_emoji_atlas.width > 0 && g_head_emoji_atlas.height > 0) {
-    return true;
   }
 
   reset_head_emoji_atlas();
@@ -1707,22 +1726,7 @@ void draw_entity_trajectory(ImDrawList* draw_list, Entity* entity, const visual_
 
 [[nodiscard]] Entity* get_player_resource_entity()
 {
-  if (entity_list == nullptr) {
-    return nullptr;
-  }
-
-  for (unsigned int index = 1; index <= static_cast<unsigned int>(entity_list->get_max_entities()); ++index) {
-    auto* entity = entity_list->entity_from_index(index);
-    if (entity == nullptr) {
-      continue;
-    }
-
-    if (entity->get_class_id() == class_id::PLAYER_RESOURCE) {
-      return entity;
-    }
-  }
-
-  return nullptr;
+  return player_resource_entity();
 }
 
 template <typename value_type>
@@ -3697,14 +3701,13 @@ void draw_thirdperson_crosshair_imgui()
 
 bool atlas_texture_ready()
 {
-  if (get_head_emoji_texture() != nullptr) {
+  if (!g_head_emoji_atlas.pixels.empty() &&
+      g_head_emoji_atlas.width > 0 &&
+      g_head_emoji_atlas.height > 0) {
     return true;
   }
 
-  return ensure_head_emoji_atlas_loaded() &&
-    !g_head_emoji_atlas.pixels.empty() &&
-    g_head_emoji_atlas.width > 0 &&
-    g_head_emoji_atlas.height > 0;
+  return ensure_head_emoji_atlas_loaded();
 }
 
 void draw_shared_atlas_tile(

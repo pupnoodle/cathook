@@ -131,6 +131,7 @@ bool (*in_cond_original)(void*, int) = nullptr;
 #include "features/automation/region_selector/region_selector.cpp"
 #include "features/automation/autoitem/autoitem.cpp"
 #include "features/automation/misc/misc.cpp"
+#include "features/misc/removals.cpp"
 #include "features/automation/navbot/navbot_controller.cpp"
 #include "features/visuals/hitmarker.cpp"
 #include "features/visuals/spectator_list.cpp"

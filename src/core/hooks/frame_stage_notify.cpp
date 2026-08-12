@@ -187,31 +187,6 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
 	Entity* entity = entity_list->entity_from_index(i);
 	if (entity == nullptr) continue;
 
-        const char* network_name = entity->get_network_name();
-        if (network_name != nullptr &&
-            (std::strstr(network_name, "Boss") != nullptr ||
-             std::strstr(network_name, "Merasmus") != nullptr ||
-             std::strstr(network_name, "Eyeball") != nullptr ||
-             std::strstr(network_name, "Headless") != nullptr ||
-             std::strstr(network_name, "Zombie") != nullptr ||
-             std::strstr(network_name, "Tank") != nullptr)) {
-          g_entity_cache_npcs.push_back(entity);
-        }
-
-        if (entity->is_network_class("CTFPumpkinBomb")) {
-          entity_cache[class_id::PUMPKIN].push_back(entity);
-        }
-
-        if (entity->is_network_class("CCurrencyPack")) {
-          entity_cache[class_id::MVM_CURRENCY].push_back(entity);
-        }
-
-        if (entity->is_network_class("CFuncUpgrades")
-          || entity->is_network_class("CUpgrades")
-          || entity->is_network_class("CFuncUpgradeStation")) {
-          entity_cache[class_id::MVM_UPGRADE_STATION].push_back(entity);
-        }
-
 	switch (entity->get_class_id()) {
 	case class_id::PLAYER:
 	  {
@@ -283,7 +258,39 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
         case class_id::ARROW:
         case class_id::CROSSBOW_BOLT:
           entity_cache[entity->get_class_id()].push_back(entity);
+          break;
 
+        default:
+          {
+            const char* network_name = entity->get_network_name();
+            if (network_name != nullptr &&
+                (std::strstr(network_name, "Boss") != nullptr ||
+                 std::strstr(network_name, "Merasmus") != nullptr ||
+                 std::strstr(network_name, "Eyeball") != nullptr ||
+                 std::strstr(network_name, "Headless") != nullptr ||
+                 std::strstr(network_name, "Zombie") != nullptr ||
+                 std::strstr(network_name, "Tank") != nullptr)) {
+              g_entity_cache_npcs.push_back(entity);
+            }
+
+            if (entity->is_network_class("CTFPumpkinBomb")) {
+              entity_cache[class_id::PUMPKIN].push_back(entity);
+              break;
+            }
+
+            if (entity->is_network_class("CCurrencyPack")) {
+              entity_cache[class_id::MVM_CURRENCY].push_back(entity);
+              break;
+            }
+
+            if (entity->is_network_class("CFuncUpgrades")
+              || entity->is_network_class("CUpgrades")
+              || entity->is_network_class("CFuncUpgradeStation")) {
+              entity_cache[class_id::MVM_UPGRADE_STATION].push_back(entity);
+            }
+
+            break;
+          }
 	}
 
       }

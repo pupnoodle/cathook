@@ -53,22 +53,7 @@ namespace
 
 inline Entity* get_player_resource_entity()
 {
-  if (entity_list == nullptr)
-  {
-    return nullptr;
-  }
-
-  const int max_entities = entity_list->get_max_entities();
-  for (int index = 1; index <= max_entities; ++index)
-  {
-    auto* entity = entity_list->entity_from_index(index);
-    if (entity != nullptr && entity->get_class_id() == class_id::PLAYER_RESOURCE)
-    {
-      return entity;
-    }
-  }
-
-  return nullptr;
+  return player_resource_entity();
 }
 
 template <typename value_type>

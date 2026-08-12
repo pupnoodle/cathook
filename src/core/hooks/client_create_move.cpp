@@ -18,6 +18,7 @@ V  o o  V  file: src/core/hooks/client_create_move.cpp
 #include "games/tf2/sdk/entities/player.hpp"
 #include "core/entity_cache.hpp"
 #include "core/detach.hpp"
+#include "features/misc/removals.hpp"
 #include "features/automation/medic_automation/medic_automation.hpp"
 #include "features/combat/anti_aim/anti_aim.hpp"
 #include "features/combat/tickbase/tickbase.hpp"
@@ -130,6 +131,7 @@ void client_create_move_hook(void* me, int sequence_number, float input_sample_f
   refresh_prediction_state();
   cat_bind::run();
   automation::controller().on_create_move(user_cmd);
+  removals::on_create_move();
 
   move_features_result move_result{};
   bool taunt_slide = false;

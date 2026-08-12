@@ -1772,10 +1772,31 @@ static void draw_visuals_world_content() {
     cat_menu::checkbox("ESP lerp", &config.visuals.esp_lerp);
     cat_menu::checkbox("Dormant ESP", &config.visuals.dormant_esp);
   });
-  cat_menu::flow_panel("Removals", 1, 112.0f, [&]() {
+  cat_menu::flow_panel("Removals", 1, 292.0f, [&]() {
     cat_menu::checkbox("Remove scope", &config.visuals.removals.scope);
     cat_menu::checkbox("Remove zoom", &config.visuals.removals.zoom);
     cat_menu::checkbox("Flat scoped sensitivity", &config.visuals.flat_zoom_sensitivity);
+    cat_menu::checkbox("Remove arms", &config.visuals.removals.arms);
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("Drops the draw call for viewmodel arm models.\nThe Yeti cosmetic is excluded - it has \"arms\" in its\npath but is worn in the world, not held.");
+    }
+    cat_menu::checkbox("Remove hats", &config.visuals.removals.hats);
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("Drops the draw call for anything under models/player/items/.\nWeapons and player models are left alone.");
+    }
+    cat_menu::checkbox("Remove cloak", &config.visuals.removals.cloak);
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("Clears the cloak condition on other players, including the\nuncloak blink. Client-side only and never applied to you.");
+    }
+    cat_menu::checkbox("Remove disguise", &config.visuals.removals.disguise);
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("Clears both the disguise and the four-second wind-up,\nso a spy cannot fade into a disguise in front of you.");
+    }
+    cat_menu::checkbox("Remove taunts", &config.visuals.removals.taunts);
+    cat_menu::checkbox("Remove contracker", &config.visuals.removals.contracker);
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("Stops other players playing the ConTracker inspect animation,\nwhich otherwise freezes their pose and ruins hitbox tracking.");
+    }
   });
   cat_menu::end_flow_layout();
 }

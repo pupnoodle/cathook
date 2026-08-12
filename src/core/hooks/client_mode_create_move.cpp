@@ -25,6 +25,7 @@ V  o o  V  file: src/core/hooks/client_mode_create_move.cpp
 #include "features/movement/engine_prediction/engine_prediction.cpp"
 #include "features/automation/medic_automation/medic_automation.hpp"
 #include "features/automation/misc/misc.hpp"
+#include "features/misc/removals.hpp"
 #include "features/automation/navbot/navbot_controller.hpp"
 #include "features/visuals/esp/esp.hpp"
 #include "core/detach.hpp"
@@ -233,6 +234,7 @@ bool client_mode_create_move_hook(void* me, float sample_time, user_cmd* user_cm
 
   cat_bind::run();
   automation::controller().on_create_move(user_cmd);
+  removals::on_create_move();
 
   const bool can_run_features = can_run_move_features(user_cmd);
   Player* localplayer = entity_list != nullptr ? entity_list->get_localplayer() : nullptr;

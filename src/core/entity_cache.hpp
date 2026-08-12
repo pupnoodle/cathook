@@ -20,8 +20,37 @@ V  o o  V  file: src/core/entity_cache.hpp
 #include "types.hpp"
 
 #include "games/tf2/sdk/entities/entity.hpp"
+#include "games/tf2/sdk/interfaces/entity_list.hpp"
 
 class Player;
+
+inline int g_player_resource_index = 0;
+
+inline Entity* player_resource_entity() {
+  if (entity_list == nullptr) {
+    return nullptr;
+  }
+
+  if (g_player_resource_index > 0) {
+    Entity* cached = entity_list->entity_from_index(static_cast<unsigned int>(g_player_resource_index));
+    if (cached != nullptr && cached->get_class_id() == class_id::PLAYER_RESOURCE) {
+      return cached;
+    }
+
+    g_player_resource_index = 0;
+  }
+
+  const int max_entities = entity_list->get_max_entities();
+  for (int index = 1; index <= max_entities; ++index) {
+    Entity* entity = entity_list->entity_from_index(static_cast<unsigned int>(index));
+    if (entity != nullptr && entity->get_class_id() == class_id::PLAYER_RESOURCE) {
+      g_player_resource_index = index;
+      return entity;
+    }
+  }
+
+  return nullptr;
+}
 
 struct entity_cache_player_entry {
   Player* player = nullptr;

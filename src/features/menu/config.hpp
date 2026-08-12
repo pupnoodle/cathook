@@ -495,6 +495,12 @@ struct Visuals {
   struct Removals {
     bool scope = false;
     bool zoom = false;
+    bool arms = false;
+    bool hats = false;
+    bool cloak = false;
+    bool disguise = false;
+    bool taunts = false;
+    bool contracker = false;
   } removals;
 
   struct Thirdperson {

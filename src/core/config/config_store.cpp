@@ -413,6 +413,12 @@ void config_store::import_config(const Config& config)
 
     set_bool("visuals.removals.scope", config.visuals.removals.scope);
     set_bool("visuals.removals.zoom", config.visuals.removals.zoom);
+    set_bool("visuals.removals.arms", config.visuals.removals.arms);
+    set_bool("visuals.removals.hats", config.visuals.removals.hats);
+    set_bool("visuals.removals.cloak", config.visuals.removals.cloak);
+    set_bool("visuals.removals.disguise", config.visuals.removals.disguise);
+    set_bool("visuals.removals.taunts", config.visuals.removals.taunts);
+    set_bool("visuals.removals.contracker", config.visuals.removals.contracker);
     set_bool("visuals.casual_medal.guaranteed_flip", config.visuals.casual_medal.guaranteed_flip);
     set_bool("visuals.casual_medal.changer", config.visuals.casual_medal.changer);
     set_int("visuals.casual_medal.rank", config.visuals.casual_medal.rank);
@@ -1003,6 +1009,12 @@ void config_store::export_config(Config& config) const
 
     config.visuals.removals.scope = get_bool("visuals.removals.scope", config.visuals.removals.scope);
     config.visuals.removals.zoom = get_bool("visuals.removals.zoom", config.visuals.removals.zoom);
+    config.visuals.removals.arms = get_bool("visuals.removals.arms", config.visuals.removals.arms);
+    config.visuals.removals.hats = get_bool("visuals.removals.hats", config.visuals.removals.hats);
+    config.visuals.removals.cloak = get_bool("visuals.removals.cloak", config.visuals.removals.cloak);
+    config.visuals.removals.disguise = get_bool("visuals.removals.disguise", config.visuals.removals.disguise);
+    config.visuals.removals.taunts = get_bool("visuals.removals.taunts", config.visuals.removals.taunts);
+    config.visuals.removals.contracker = get_bool("visuals.removals.contracker", config.visuals.removals.contracker);
     config.visuals.casual_medal.guaranteed_flip = get_bool(
         "visuals.casual_medal.guaranteed_flip", config.visuals.casual_medal.guaranteed_flip);
     config.visuals.casual_medal.changer = get_bool(
