@@ -60,6 +60,7 @@ namespace
 constexpr float cathook_corner_scale = 0.10f;
 constexpr float cathook_healthbar_width = 7.0f;
 constexpr float cathook_healthbar_fill_width = 5.0f;
+constexpr float cathook_healthbar_border = 1.0f;
 constexpr float cathook_text_padding = 4.0f;
 constexpr int cathook_surface_font_tall = 12;
 constexpr int cathook_surface_font_weight = 400;
@@ -2370,18 +2371,18 @@ void draw_vertical_health_bar(ImDrawList* draw_list, const esp_bounds& bounds, i
   const auto border = black_with_alpha(alpha_scale);
   const auto fill_color = with_alpha(get_health_color(health, max_health), alpha_scale);
   const auto clamped_ratio = std::clamp(static_cast<float>(health) / static_cast<float>(max_health), 0.0f, 1.0f);
-  const auto fill_height = (bounds.height() - 2.0f) * clamped_ratio;
 
-  const auto outer_min = ImVec2(bounds.min_x - cathook_healthbar_width, bounds.min_y);
-  const auto outer_max = ImVec2(bounds.min_x, bounds.max_y);
+  const auto outer_min = ImVec2(bounds.min_x - cathook_healthbar_width, bounds.min_y - cathook_healthbar_border);
+  const auto outer_max = ImVec2(bounds.min_x, bounds.max_y + cathook_healthbar_border);
+  const auto fill_height = (outer_max.y - outer_min.y - 2.0f) * clamped_ratio;
   draw_list->AddRect(outer_min, outer_max, border, 0.0f, 0, 1.0f);
 
   if (fill_height <= 0.0f) {
     return;
   }
 
-  const auto fill_min = ImVec2(bounds.min_x - cathook_healthbar_width + 1.0f, bounds.max_y - fill_height - 1.0f);
-  const auto fill_max = ImVec2(bounds.min_x - cathook_healthbar_width + 1.0f + cathook_healthbar_fill_width, bounds.max_y - 1.0f);
+  const auto fill_min = ImVec2(outer_min.x + cathook_healthbar_border, outer_max.y - fill_height - cathook_healthbar_border);
+  const auto fill_max = ImVec2(outer_min.x + cathook_healthbar_border + cathook_healthbar_fill_width, outer_max.y - cathook_healthbar_border);
   draw_list->AddRectFilled(fill_min, fill_max, fill_color);
 }
 
@@ -2714,14 +2715,17 @@ void surface_vertical_health_bar(const esp_bounds& bounds, int health, int max_h
   const auto border = color_with_alpha(RGBA{0, 0, 0, 255}, alpha_scale);
   const auto fill_color = color_with_alpha(get_health_color(health, max_health), alpha_scale);
   const auto clamped_ratio = std::clamp(static_cast<float>(health) / static_cast<float>(max_health), 0.0f, 1.0f);
-  const auto fill_height = (bounds.height() - 2.0f) * clamped_ratio;
+  const auto outer_min_y = bounds.min_y - cathook_healthbar_border;
+  const auto outer_max_y = bounds.max_y + cathook_healthbar_border;
+  const auto fill_height = (outer_max_y - outer_min_y - 2.0f) * clamped_ratio;
   surface_set_color(border);
   if (surface != nullptr) {
-    surface->draw_outlined_rect(surface_round(bounds.min_x - cathook_healthbar_width), surface_round(bounds.min_y), surface_round(bounds.min_x), surface_round(bounds.max_y));
+    surface->draw_outlined_rect(surface_round(bounds.min_x - cathook_healthbar_width), surface_round(outer_min_y), surface_round(bounds.min_x), surface_round(outer_max_y));
   }
 
   if (fill_height > 0.0f) {
-    surface_filled_rect(bounds.min_x - cathook_healthbar_width + 1.0f, bounds.max_y - fill_height - 1.0f, bounds.min_x - cathook_healthbar_width + 1.0f + cathook_healthbar_fill_width, bounds.max_y - 1.0f, fill_color);
+    surface_filled_rect(bounds.min_x - cathook_healthbar_width + cathook_healthbar_border, outer_max_y - fill_height - cathook_healthbar_border,
+      bounds.min_x - cathook_healthbar_width + cathook_healthbar_border + cathook_healthbar_fill_width, outer_max_y - cathook_healthbar_border, fill_color);
   }
 }
 
