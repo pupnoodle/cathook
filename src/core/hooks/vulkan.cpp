@@ -702,6 +702,7 @@ static bool draw_imgui_overlay()
   ImGui::Begin("##cathook_overlay_canvas", nullptr, overlay_flags);
 
   draw_aimbot_fov_imgui();
+  draw_anti_aim_indicator_imgui();
   draw_thirdperson_crosshair_imgui();
   draw_players_imgui();
   draw_backtrack_visualizer_imgui();

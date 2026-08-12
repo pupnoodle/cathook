@@ -16,6 +16,7 @@ V  o o  V  file: src/features/visuals/esp/esp.hpp
 void draw_players_imgui();
 void draw_backtrack_visualizer_imgui();
 void draw_aimbot_fov_imgui();
+void draw_anti_aim_indicator_imgui();
 void draw_thirdperson_crosshair_imgui();
 void update_player_head_emoji_cache();
 void reset_esp_runtime_state();

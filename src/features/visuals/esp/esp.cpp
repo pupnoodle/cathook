@@ -36,6 +36,7 @@ V  o o  V  file: src/features/visuals/esp/esp.cpp
 #include "features/menu/config.hpp"
 #include "features/visuals/thirdperson.hpp"
 #include "features/visuals/overlay_projection.hpp"
+#include "features/combat/anti_aim/anti_aim.hpp"
 #include "features/visuals/groups/visual_groups.hpp"
 #include "games/tf2/sdk/entities/building.hpp"
 #include "games/tf2/sdk/entities/capture_flag.hpp"
@@ -3688,6 +3689,73 @@ void draw_aimbot_fov_imgui()
   auto center = ImVec2(static_cast<float>(screen_size.x) * 0.5f, static_cast<float>(screen_size.y) * 0.5f);
   draw_list->AddCircle(center, smoothed_radius, IM_COL32(0, 0, 0, 180), 64, 3.0f);
   draw_list->AddCircle(center, smoothed_radius, IM_COL32(255, 255, 255, 255), 64, 1.5f);
+}
+
+void draw_anti_aim_indicator_imgui()
+{
+  if (!config.misc.exploits.anti_aim_indicator) {
+    return;
+  }
+
+  if (engine == nullptr || entity_list == nullptr || !engine->is_in_game()) {
+    return;
+  }
+
+  if (!anti_aim::settings_enabled()) {
+    return;
+  }
+
+  const float alpha_scale = anti_aim::has_visual_angles() ? 1.0f : 0.45f;
+
+  auto* localplayer = entity_list->get_localplayer();
+  if (localplayer == nullptr || !localplayer->is_alive()) {
+    return;
+  }
+
+  if (!overlay_projection::begin_frame()) {
+    return;
+  }
+
+  auto* draw_list = ImGui::GetBackgroundDrawList();
+  if (draw_list == nullptr) {
+    return;
+  }
+
+  const Vec3 origin = localplayer->get_origin();
+
+  Vec3 origin_screen{};
+  const bool origin_on_screen = overlay_projection::world_to_screen(origin, &origin_screen);
+
+  const float distance = std::clamp(config.misc.exploits.anti_aim_indicator_distance, 8.0f, 512.0f);
+
+  const auto draw_marker = [&](float yaw, RGBA_float color, const char* label) {
+    const float radians = yaw * pideg;
+    const Vec3 end{
+      origin.x + std::cos(radians) * distance,
+      origin.y + std::sin(radians) * distance,
+      origin.z
+    };
+
+    Vec3 end_screen{};
+    if (!overlay_projection::world_to_screen(end, &end_screen)) {
+      return;
+    }
+
+    color.a *= alpha_scale;
+    const ImU32 imgui_color = to_imgui_color(color.to_RGBA());
+    if (config.misc.exploits.anti_aim_indicator_lines && origin_on_screen) {
+      draw_list->AddLine(
+        ImVec2(origin_screen.x, origin_screen.y),
+        ImVec2(end_screen.x, end_screen.y),
+        imgui_color,
+        1.5f);
+    }
+
+    draw_text_centered(draw_list, ImVec2(end_screen.x, end_screen.y), imgui_color, label);
+  };
+  
+  draw_marker(anti_aim::fake_angles().y, config.misc.exploits.anti_aim_indicator_fake_color, "FAKE");
+  draw_marker(anti_aim::real_angles().y, config.misc.exploits.anti_aim_indicator_real_color, "REAL");
 }
 
 void draw_thirdperson_crosshair_imgui()

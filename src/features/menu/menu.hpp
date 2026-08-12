@@ -2584,6 +2584,14 @@ static void draw_exploits_content() {
     cat_menu::slider_float("Fake offset", &config.misc.exploits.anti_aim_fake_yaw_offset, -180.0f, 180.0f, "%.0f deg");
     cat_menu::slider_float("Spin speed", &config.misc.exploits.anti_aim_spin_speed, -180.0f, 180.0f, "%.0f deg");
     cat_menu::checkbox("Anti-overlap", &config.misc.exploits.anti_aim_anti_overlap);
+    cat_menu::checkbox("Real/fake indicator", &config.misc.exploits.anti_aim_indicator);
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("Draws markers at your feet showing where the real and fake\nyaws point. A readout only - it changes nothing.");
+    }
+    cat_menu::checkbox("Indicator lines", &config.misc.exploits.anti_aim_indicator_lines);
+    cat_menu::slider_float("Indicator distance", &config.misc.exploits.anti_aim_indicator_distance, 8.0f, 512.0f, "%.0f HU");
+    cat_menu::color_picker("Real color", &config.misc.exploits.anti_aim_indicator_real_color);
+    cat_menu::color_picker("Fake color", &config.misc.exploits.anti_aim_indicator_fake_color);
   });
   cat_menu::end_flow_layout();
 }
@@ -2654,6 +2662,14 @@ static void draw_misc_content(const int misc_subtab) {
       cat_menu::slider_float("Fake offset", &config.misc.exploits.anti_aim_fake_yaw_offset, -180.0f, 180.0f, "%.0f deg");
       cat_menu::slider_float("Spin speed", &config.misc.exploits.anti_aim_spin_speed, -180.0f, 180.0f, "%.0f deg");
       cat_menu::checkbox("Anti-overlap", &config.misc.exploits.anti_aim_anti_overlap);
+      cat_menu::checkbox("Real/fake indicator", &config.misc.exploits.anti_aim_indicator);
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Draws markers at your feet showing where the real and fake\nyaws point. A readout only - it changes nothing.");
+      }
+      cat_menu::checkbox("Indicator lines", &config.misc.exploits.anti_aim_indicator_lines);
+      cat_menu::slider_float("Indicator distance", &config.misc.exploits.anti_aim_indicator_distance, 8.0f, 512.0f, "%.0f HU");
+      cat_menu::color_picker("Real color", &config.misc.exploits.anti_aim_indicator_real_color);
+      cat_menu::color_picker("Fake color", &config.misc.exploits.anti_aim_indicator_fake_color);
     });
   }
   cat_menu::end_flow_layout();

@@ -684,6 +684,11 @@ struct Misc {
     float anti_aim_fake_yaw_offset = 0.0f;
     float anti_aim_spin_speed = 30.0f;
     bool anti_aim_anti_overlap = true;
+    bool anti_aim_indicator = false;
+    bool anti_aim_indicator_lines = true;
+    float anti_aim_indicator_distance = 64.0f;
+    RGBA_float anti_aim_indicator_real_color = {.r = 0.2f, .g = 1.0f, .b = 0.2f, .a = 1.0f};
+    RGBA_float anti_aim_indicator_fake_color = {.r = 1.0f, .g = 0.2f, .b = 0.2f, .a = 1.0f};
     bool antiwarp = true;
     bool equip_region_unlock = false;
     bool ping_reducer = false;

@@ -513,6 +513,11 @@ void config_store::import_config(const Config& config)
     set_float("misc.exploits.anti_aim_fake_yaw_offset", config.misc.exploits.anti_aim_fake_yaw_offset);
     set_float("misc.exploits.anti_aim_spin_speed", config.misc.exploits.anti_aim_spin_speed);
     set_bool("misc.exploits.anti_aim_anti_overlap", config.misc.exploits.anti_aim_anti_overlap);
+    set_bool("misc.exploits.anti_aim_indicator", config.misc.exploits.anti_aim_indicator);
+    set_bool("misc.exploits.anti_aim_indicator_lines", config.misc.exploits.anti_aim_indicator_lines);
+    set_float("misc.exploits.anti_aim_indicator_distance", config.misc.exploits.anti_aim_indicator_distance);
+    set_color("misc.exploits.anti_aim_indicator_real_color", config.misc.exploits.anti_aim_indicator_real_color);
+    set_color("misc.exploits.anti_aim_indicator_fake_color", config.misc.exploits.anti_aim_indicator_fake_color);
     set_bool("misc.exploits.antiwarp", config.misc.exploits.antiwarp);
     set_bool("misc.exploits.equip_region_unlock", config.misc.exploits.equip_region_unlock);
     set_bool("misc.exploits.ping_reducer", config.misc.exploits.ping_reducer);
@@ -1174,6 +1179,18 @@ void config_store::export_config(Config& config) const
     config.misc.exploits.anti_aim_anti_overlap = get_bool(
         "misc.exploits.anti_aim_anti_overlap",
         config.misc.exploits.anti_aim_anti_overlap);
+    config.misc.exploits.anti_aim_indicator = get_bool(
+        "misc.exploits.anti_aim_indicator", config.misc.exploits.anti_aim_indicator);
+    config.misc.exploits.anti_aim_indicator_lines = get_bool(
+        "misc.exploits.anti_aim_indicator_lines", config.misc.exploits.anti_aim_indicator_lines);
+    config.misc.exploits.anti_aim_indicator_distance = std::clamp(
+        get_float("misc.exploits.anti_aim_indicator_distance", config.misc.exploits.anti_aim_indicator_distance),
+        8.0f,
+        512.0f);
+    config.misc.exploits.anti_aim_indicator_real_color = get_color(
+        "misc.exploits.anti_aim_indicator_real_color", config.misc.exploits.anti_aim_indicator_real_color);
+    config.misc.exploits.anti_aim_indicator_fake_color = get_color(
+        "misc.exploits.anti_aim_indicator_fake_color", config.misc.exploits.anti_aim_indicator_fake_color);
     config.misc.exploits.antiwarp = get_bool("misc.exploits.antiwarp", config.misc.exploits.antiwarp);
     config.misc.exploits.equip_region_unlock = get_bool(
         "misc.exploits.equip_region_unlock",

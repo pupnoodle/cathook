@@ -384,6 +384,11 @@ bool is_active()
   return g_state.active;
 }
 
+bool settings_enabled()
+{
+  return should_run_settings();
+}
+
 bool has_visual_angles()
 {
   return g_state.visual_angles && should_run_settings();
