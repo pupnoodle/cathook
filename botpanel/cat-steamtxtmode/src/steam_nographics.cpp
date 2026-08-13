@@ -154,7 +154,7 @@ bool is_webhelper_child(char* const argv[])
 
 void initialize()
 {
-  if (!is_enabled() || !process_is_steam_ui_host())
+  if (!is_enabled() || (!process_is_steam_ui_host() && !should_synthesize_hardware()))
   {
     return;
   }

@@ -42,6 +42,25 @@ make -C botpanel/cat-steamtxtmode ARCH=64 verify
 
 The 32-bit build needs C++ multilib support (`g++ -m32`).
 
+The standalone supervisor is built alongside the library:
+
+```sh
+make -C botpanel/cat-steamtxtmode ARCH=64 standalone
+bin/libx64/catsteamtxtmode --config catsteamtxtmode.cfg
+```
+
+The repository includes `catsteamtxtmode.cfg`; copy or edit it (or start with
+`catsteamtxtmode.cfg.example`) and change its `key=value` options. The
+supervisor watches Steam and TF2 process names, logs their arrival and exit,
+and can launch configured `steam_command`/`tf2_command` commands with the
+matching preload and text-mode environment when `launch_missing=1`.
+Commands are executed directly, not through a shell. If no preload path is
+specified, it uses the library beside the supervisor executable.
+
+An already-running process cannot be retroactively given `LD_PRELOAD` hooks by
+this supervisor. For those processes, start Steam/TF2 through the supervisor
+or the normal botpanel launcher; the watcher can still observe them.
+
 ## Runtime controls
 
 - `CAT_STEAM_TXTMODE=1` enables interception.
@@ -51,5 +70,27 @@ The 32-bit build needs C++ multilib support (`g++ -m32`).
   after validation. It is disabled by default.
 - `CAT_STEAM_TXTMODE_FRAME_INTERVAL_US=100000` sets the per-thread present
   interval; `0` disables pacing.
+- `CAT_STEAM_TXTMODE_SYNTHETIC_HARDWARE=1` enables deterministic, per-session
+  synthetic Linux machine, adapter, disk, CPU-info, udev, OpenGL, Vulkan, and
+  NetworkManager identity values. The catalog contains the original profiles
+  plus 7,934 additional distinct records built from 201 named Intel/AMD CPU
+  variants and 79 NVIDIA/AMD/Intel adapter variants. It includes a broad
+  workstation, server, desktop, laptop, and embedded board catalog, 35 SSD/HDD
+  identities, and a deterministic pool of locally administered NIC prefixes.
+  The selected profile, GUIDs, disk serials, and per-interface MACs remain
+  stable within a session. It is disabled by default and does not rewrite
+  Steam auth messages or persisted account state.
+- This is an OS/API identity shim. It cannot replace inline `CPUID` instructions
+  executed directly by TF2 or Steam; those require VM/container CPU masking.
+- This target is the Linux `.so` build. Windows `MachineGuid`, Windows registry
+  reads, and Windows kernel/device queries are not intercepted by it; that
+  requires a separate Windows DLL implementation.
+- `CAT_STEAM_TXTMODE_HARDWARE_SEED=value` overrides the default `CAT_BOT_ID`
+  seed. Keep the seed stable for a bot if its synthetic identity must persist.
+- `CAT_STEAM_TXTMODE_HARDWARE_RANDOMIZE=1` creates a fresh per-process seed
+  when no explicit seed is supplied. The botpanel launcher instead generates
+  one session seed and passes it to both Steam and TF2, so they see the same
+  synthetic machine rather than contradictory values. Change the seed between
+  sessions to select another CPU/GPU/MAC/GUID profile.
 
 Use `CAT_STEAM_TXTMODE=0` to return to the untouched Steam rendering path.

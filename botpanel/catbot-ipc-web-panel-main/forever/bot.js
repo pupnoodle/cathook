@@ -1,5 +1,6 @@
 const EventEmitter = require('events');
 const child_process = require('child_process');
+const crypto = require('crypto');
 
 const timestamp = require('time-stamp');
 const fs = require('fs');
@@ -38,6 +39,13 @@ const STEAM_TXTMODE_ENABLED = process.env.CAT_STEAM_TXTMODE === '1'
 const STEAM_TXTMODE_HIDE_WINDOWS = process.env.CAT_STEAM_TXTMODE_HIDE_WINDOWS === '0' ? '0' : '1';
 const STEAM_TXTMODE_DROP_DRAWS = process.env.CAT_STEAM_TXTMODE_DROP_DRAWS === '0' ? '0' : '1';
 const STEAM_TXTMODE_TRIM_WEBHELPER = process.env.CAT_STEAM_TXTMODE_TRIM_WEBHELPER === '1' ? '1' : '0';
+const STEAM_TXTMODE_SYNTHETIC_HARDWARE = process.env.CAT_STEAM_TXTMODE_SYNTHETIC_HARDWARE === '0'
+    ? '0' : (STEAM_TXTMODE_ENABLED ? '1' : '0');
+const STEAM_TXTMODE_HARDWARE_RANDOMIZE = process.env.CAT_STEAM_TXTMODE_HARDWARE_RANDOMIZE === '1'
+    || (process.env.CAT_STEAM_TXTMODE_HARDWARE_RANDOMIZE !== '0' && STEAM_TXTMODE_SYNTHETIC_HARDWARE === '1');
+const STEAM_TXTMODE_HARDWARE_SEED = process.env.CAT_STEAM_TXTMODE_HARDWARE_SEED
+    || (STEAM_TXTMODE_HARDWARE_RANDOMIZE
+        ? `session-${crypto.randomBytes(16).toString('hex')}` : '');
 const steam_txtmode_frame_interval_value = Number.parseInt(process.env.CAT_STEAM_TXTMODE_FRAME_INTERVAL_US || '100000', 10);
 const STEAM_TXTMODE_FRAME_INTERVAL_US = Number.isSafeInteger(steam_txtmode_frame_interval_value)
     && steam_txtmode_frame_interval_value >= 0
@@ -113,9 +121,17 @@ function game_port_options(botid) {
     return `-tv_port ${tv_port} +tv_port ${tv_port} -port ${bot_port_base} +port ${bot_port_base} +clientport ${client_port_min}-${client_port_max}`;
 }
 
-const LAUNCH_OPTIONS_STEAM = `firejail --dns=1.1.1.1 %NETWORK% --noprofile --private="%HOME%" --private-tmp --private-dev --read-write=/opt/cathook/ipc --name=%JAILNAME% --env=PULSE_SERVER="unix:/tmp/pulse.sock" --env=DISPLAY=%DISPLAY% --env=XAUTHORITY=%XAUTHORITY% --env=TMPDIR=/tmp --env=TMP=/tmp --env=TEMP=/tmp --env=XDG_RUNTIME_DIR=/tmp/xdg-runtime --env=CAT_SKIP_DBUS_RUN_SESSION=${SKIP_DBUS_RUN_SESSION ? '1' : '0'} --env=CAT_STEAM_TXTMODE=${STEAM_TXTMODE_ENABLED ? '1' : '0'} --env=CAT_STEAM_TXTMODE_HIDE_WINDOWS=${STEAM_TXTMODE_HIDE_WINDOWS} --env=CAT_STEAM_TXTMODE_DROP_DRAWS=${STEAM_TXTMODE_DROP_DRAWS} --env=CAT_STEAM_TXTMODE_TRIM_WEBHELPER=${STEAM_TXTMODE_TRIM_WEBHELPER} --env=CAT_STEAM_TXTMODE_FRAME_INTERVAL_US=${STEAM_TXTMODE_FRAME_INTERVAL_US} ${HEADLESS_STEAM_GRAPHICS_FIREJAIL_ENV} ${STEAM_NOGRAPHICS_RENDERER_ENV} --env=LD_LIBRARY_PATH=%STEAM_LD_LIBRARY_PATH% --env=LD_PRELOAD= --env=CAT_STEAM_TXTMODE_PRELOAD=%LD_PRELOAD% --env=CAT_STM_LOOP_SLEEP=%CAT_STM_LOOP_SLEEP% --env=CAT_STM_LOOP_SLEEP_US=%CAT_STM_LOOP_SLEEP_US% sh -lc 'mkdir -p "$XDG_RUNTIME_DIR"; chmod 700 "$XDG_RUNTIME_DIR"; if [ "$CAT_SKIP_DBUS_RUN_SESSION" = 1 ]; then exec "$@"; elif command -v dbus-run-session >/dev/null 2>&1; then exec dbus-run-session -- "$@"; else exec "$@"; fi' steam-session %STEAM% %STEAM_VGUI_ARG% ${steam_window_options} -login %LOGIN% %PASSWORD%`
+const LAUNCH_OPTIONS_STEAM = `firejail --dns=1.1.1.1 %NETWORK% --noprofile --private="%HOME%" --private-tmp --private-dev --read-write=/opt/cathook/ipc --name=%JAILNAME% --env=PULSE_SERVER="unix:/tmp/pulse.sock" --env=DISPLAY=%DISPLAY% --env=XAUTHORITY=%XAUTHORITY% --env=TMPDIR=/tmp --env=TMP=/tmp --env=TEMP=/tmp --env=XDG_RUNTIME_DIR=/tmp/xdg-runtime --env=CAT_SKIP_DBUS_RUN_SESSION=${SKIP_DBUS_RUN_SESSION ? '1' : '0'} --env=CAT_STEAM_TXTMODE=${STEAM_TXTMODE_ENABLED ? '1' : '0'} --env=CAT_STEAM_TXTMODE_HIDE_WINDOWS=${STEAM_TXTMODE_HIDE_WINDOWS} --env=CAT_STEAM_TXTMODE_DROP_DRAWS=${STEAM_TXTMODE_DROP_DRAWS} --env=CAT_STEAM_TXTMODE_TRIM_WEBHELPER=${STEAM_TXTMODE_TRIM_WEBHELPER} --env=CAT_STEAM_TXTMODE_FRAME_INTERVAL_US=${STEAM_TXTMODE_FRAME_INTERVAL_US} --env=CAT_STEAM_TXTMODE_HARDWARE_SEED=%HARDWARE_SEED% ${HEADLESS_STEAM_GRAPHICS_FIREJAIL_ENV} ${STEAM_NOGRAPHICS_RENDERER_ENV} --env=LD_LIBRARY_PATH=%STEAM_LD_LIBRARY_PATH% --env=LD_PRELOAD= --env=CAT_STEAM_TXTMODE_PRELOAD=%LD_PRELOAD% --env=CAT_STM_LOOP_SLEEP=%CAT_STM_LOOP_SLEEP% --env=CAT_STM_LOOP_SLEEP_US=%CAT_STM_LOOP_SLEEP_US% sh -lc 'mkdir -p "$XDG_RUNTIME_DIR"; chmod 700 "$XDG_RUNTIME_DIR"; if [ "$CAT_SKIP_DBUS_RUN_SESSION" = 1 ]; then exec "$@"; elif command -v dbus-run-session >/dev/null 2>&1; then exec dbus-run-session -- "$@"; else exec "$@"; fi' steam-session %STEAM% %STEAM_VGUI_ARG% ${steam_window_options} -login %LOGIN% %PASSWORD%`
 const LAUNCH_OPTIONS_STEAM_RESET = 'firejail --net=none --noprofile --private="%HOME%" --private-dev --read-write=/opt/cathook/ipc --env=LD_LIBRARY_PATH=%STEAM_LD_LIBRARY_PATH% %STEAM% --reset'
-const LAUNCH_OPTIONS_GAME = `firejail --join=%JAILNAME% bash -c 'cd "%GAMEPATH%" && %RUNTIME_PREFIX% ${HEADLESS_STEAM_GRAPHICS_ASSIGNMENTS} ${textmode_allocator_assignments} SteamAppId=440 SteamGameId=440 SteamOverlayGameId=440 SteamEnv=1 CATHOOK_ROOT="%CATHOOK_ROOT%" CATHOOK_ROOT_DIR="%CATHOOK_ROOT%" CATHOOK_AUTO_ATTACH=1 CATHOOK_ATTACH_DELAY_SECONDS=%CATHOOK_ATTACH_DELAY_SECONDS% CAT_BOT_ID="%BOT_ID%" CAT_BOT_NAME="%BOT_NAME%" CAT_STEAMID32=%STEAMID32% DBUS_SESSION_BUS_ADDRESS="unix:path=/tmp/cat-disabled-dbus" LD_PRELOAD=%LD_PRELOAD% DISPLAY=%DISPLAY% XAUTHORITY="%XAUTHORITY%" PULSE_SERVER="unix:/tmp/pulse.sock" %GAME_BINARY% -steam -game tf ${GAME_WINDOW_OPTIONS} -novid -nojoy -nomessagebox -nominidumps -nohltv -nobreakpad -noquicktime -precachefontchars -particles 1 -snoforceformat -softparticlesdefaultoff ${GAME_MODE_OPTIONS} -forcenovsync +volume 0 -noqueuedpacketprocessing -limitvsconst -nocrashdialog -noipx -threads 1 %GAME_PORT_OPTIONS% -nosteamcontroller -low +fps_max 30'`
+const LAUNCH_OPTIONS_STEAM_WITH_HARDWARE = LAUNCH_OPTIONS_STEAM.replace(
+    '--env=CAT_STEAM_TXTMODE_FRAME_INTERVAL_US=',
+    `--env=CAT_STEAM_TXTMODE_SYNTHETIC_HARDWARE=${STEAM_TXTMODE_SYNTHETIC_HARDWARE} --env=CAT_STEAM_TXTMODE_FRAME_INTERVAL_US=`,
+);
+const LAUNCH_OPTIONS_GAME = `firejail --join=%JAILNAME% bash -c 'cd "%GAMEPATH%" && %RUNTIME_PREFIX% ${HEADLESS_STEAM_GRAPHICS_ASSIGNMENTS} ${textmode_allocator_assignments} SteamAppId=440 SteamGameId=440 SteamOverlayGameId=440 SteamEnv=1 CATHOOK_ROOT="%CATHOOK_ROOT%" CATHOOK_ROOT_DIR="%CATHOOK_ROOT%" CATHOOK_AUTO_ATTACH=1 CATHOOK_ATTACH_DELAY_SECONDS=%CATHOOK_ATTACH_DELAY_SECONDS% CAT_BOT_ID="%BOT_ID%" CAT_BOT_NAME="%BOT_NAME%" CAT_STEAM_TXTMODE_HARDWARE_SEED="%HARDWARE_SEED%" CAT_STEAMID32=%STEAMID32% DBUS_SESSION_BUS_ADDRESS="unix:path=/tmp/cat-disabled-dbus" LD_PRELOAD=%LD_PRELOAD% DISPLAY=%DISPLAY% XAUTHORITY="%XAUTHORITY%" PULSE_SERVER="unix:/tmp/pulse.sock" %GAME_BINARY% -steam -game tf ${GAME_WINDOW_OPTIONS} -novid -nojoy -nomessagebox -nominidumps -nohltv -nobreakpad -noquicktime -precachefontchars -particles 1 -snoforceformat -softparticlesdefaultoff ${GAME_MODE_OPTIONS} -forcenovsync +volume 0 -noqueuedpacketprocessing -limitvsconst -nocrashdialog -noipx -threads 1 %GAME_PORT_OPTIONS% -nosteamcontroller -low +fps_max 30'`
+const LAUNCH_OPTIONS_GAME_WITH_HARDWARE = LAUNCH_OPTIONS_GAME.replace(
+    'CAT_BOT_ID="%BOT_ID%"',
+    `CAT_BOT_ID="%BOT_ID%" CAT_STEAM_TXTMODE_SYNTHETIC_HARDWARE=${STEAM_TXTMODE_SYNTHETIC_HARDWARE}`,
+);
 const LAUNCH_OPTIONS_GAME_STEAM = `firejail --join=%JAILNAME% bash -c '${HEADLESS_STEAM_GRAPHICS_ASSIGNMENTS} ${textmode_allocator_assignments} DISPLAY=%DISPLAY% XAUTHORITY="%XAUTHORITY%" PULSE_SERVER="unix:/tmp/pulse.sock" %STEAM% -applaunch 440'`
 const GAME_LIBRARY_PATH = './bin:./bin/linux64:./tf/bin:./tf/bin/linux64:./platform:./platform/bin:./platform/bin/linux64:.';
 
@@ -1495,6 +1511,77 @@ function ensure_exact_symlink(link_path, target_path) {
     fs.symlinkSync(target_path, link_path);
 }
 
+function ensure_shared_symlink(shared_path, source_path, log_fn) {
+    const resolved_source_path = fs.realpathSync(source_path);
+    if (resolved_source_path === shared_path)
+        return true;
+
+    if (command_succeeds('mountpoint', ['-q', shared_path])) {
+        child_process.execFileSync('umount', [shared_path]);
+        if (log_fn)
+            log_fn(`Unmounted bind-mounted shared path ${shared_path}`);
+    }
+
+    try {
+        const status = fs.lstatSync(shared_path);
+        if (status.isSymbolicLink()) {
+            const current_target = fs.realpathSync(shared_path);
+            if (current_target === resolved_source_path)
+                return true;
+            fs.unlinkSync(shared_path);
+        } else {
+            rm_path_sync(shared_path, { recursive: true, force: true });
+            if (log_fn)
+                log_fn(`Removed stale generated shared path ${shared_path}`);
+        }
+    } catch (error) {
+        if (error.code !== 'ENOENT')
+            throw error;
+    }
+
+    fs.mkdirSync(path.dirname(shared_path), { recursive: true });
+    fs.symlinkSync(resolved_source_path, shared_path);
+    if (fs.realpathSync(shared_path) !== resolved_source_path)
+        throw new Error(`shared symlink verification failed: ${shared_path} -> ${resolved_source_path}`);
+    if (log_fn)
+        log_fn(`Shared path ready, source=${resolved_source_path}, target=${shared_path}, mode=symlink`);
+    return true;
+}
+
+function ensure_shared_steam_copy(source_path, shared_path, log_fn) {
+    const resolved_source_path = fs.realpathSync(source_path);
+    if (resolved_source_path === shared_path)
+        return true;
+
+    if (command_succeeds('mountpoint', ['-q', shared_path])) {
+        child_process.execFileSync('umount', [shared_path]);
+        if (log_fn)
+            log_fn(`Unmounted bind-mounted Steam root ${shared_path}`);
+    }
+
+    try {
+        const status = fs.lstatSync(shared_path);
+        if (status.isSymbolicLink())
+            fs.unlinkSync(shared_path);
+        else if (!status.isDirectory())
+            fs.unlinkSync(shared_path);
+    } catch (error) {
+        if (error.code !== 'ENOENT')
+            throw error;
+    }
+
+    fs.mkdirSync(shared_path, { recursive: true });
+    // This copies the Steam runtime/client files only. copy_steam_seed skips
+    // steamapps, userdata, config, caches, and logs, so TF2 is never copied.
+    copy_steam_seed(resolved_source_path, shared_path);
+    ensure_exact_symlink(path.join(shared_path, 'steamapps'), path.join(resolved_source_path, 'steamapps'));
+    if (!steam_root_ready(shared_path))
+        throw new Error(`shared Steam client copy is incomplete at ${shared_path}`);
+    if (log_fn)
+        log_fn(`Shared Steam client ready, copied=${shared_path}, TF2 library=${resolved_source_path}/steamapps`);
+    return true;
+}
+
 function ensure_local_directory(directory_path, uid, gid) {
     try {
         const status = fs.lstatSync(directory_path);
@@ -1852,10 +1939,9 @@ class Bot extends EventEmitter {
             if (status.isSymbolicLink()) {
                 fs.unlinkSync(this.steamApps);
             } else {
-                let backup_path = path.resolve(this.steamApps, '..', 'steamapps_old');
-                if (fs.existsSync(backup_path))
-                    backup_path = path.resolve(this.steamApps, '..', `steamapps_old_${Date.now()}`);
-                fs.renameSync(this.steamApps, backup_path);
+                // This is a generated per-bot Steam library. Never rename a
+                // copied TF2 tree to steamapps_old: that multiplies disk use.
+                rm_path_sync(this.steamApps, { recursive: true, force: true });
             }
         } catch (error) {
             if (error.code !== 'ENOENT')
@@ -1959,39 +2045,7 @@ class Bot extends EventEmitter {
             real_source_path = fs.realpathSync(source_path);
         } catch (error) { }
 
-        if (real_source_path === SHARED_STEAMAPPS)
-            return true;
-
-        if (command_succeeds('mountpoint', ['-q', SHARED_STEAMAPPS])) {
-            if (steamapps_tf2_ready(SHARED_STEAMAPPS))
-                return true;
-
-            child_process.execFileSync('umount', [SHARED_STEAMAPPS]);
-            this.log(`Unmounted incomplete ${SHARED_STEAMAPPS}`);
-        }
-
-        try {
-            const status = fs.lstatSync(SHARED_STEAMAPPS);
-            if (status.isSymbolicLink()) {
-                const current_target = fs.readlinkSync(SHARED_STEAMAPPS);
-                rm_path_sync(SHARED_STEAMAPPS, { force: true });
-                this.log(`Replacing ${SHARED_STEAMAPPS} symlink (${current_target}) with a bind mount to ${real_source_path}`);
-            } else if (steamapps_tf2_ready(SHARED_STEAMAPPS)) {
-                return true;
-            } else {
-                const backup_path = `${SHARED_STEAMAPPS}.backup.${Math.floor(Date.now() / 1000)}`;
-                fs.renameSync(SHARED_STEAMAPPS, backup_path);
-                this.log(`Moved incomplete ${SHARED_STEAMAPPS} to ${backup_path}`);
-            }
-        } catch (error) {
-            if (error.code !== 'ENOENT')
-                throw error;
-        }
-
-        fs.mkdirSync(SHARED_STEAMAPPS, { recursive: true });
-        child_process.execFileSync('mount', ['--bind', real_source_path, SHARED_STEAMAPPS]);
-        this.log(`Shared steamapps ready, source=${real_source_path}, target=${SHARED_STEAMAPPS}, mode=bind`);
-        return true;
+        return ensure_shared_symlink(SHARED_STEAMAPPS, real_source_path, this.log.bind(this));
     }
 
     ensureSharedSteamRoot(source_path) {
@@ -2003,37 +2057,7 @@ class Bot extends EventEmitter {
             real_source_path = fs.realpathSync(source_path);
         } catch (error) { }
 
-        if (real_source_path === SHARED_STEAM_ROOT)
-            return true;
-
-        if (command_succeeds('mountpoint', ['-q', SHARED_STEAM_ROOT])) {
-            if (steam_root_ready(SHARED_STEAM_ROOT))
-                return true;
-
-            child_process.execFileSync('umount', [SHARED_STEAM_ROOT]);
-            this.log(`Unmounted incomplete ${SHARED_STEAM_ROOT}`);
-        }
-
-        try {
-            const status = fs.lstatSync(SHARED_STEAM_ROOT);
-            if (status.isSymbolicLink()) {
-                rm_path_sync(SHARED_STEAM_ROOT, { force: true });
-            } else if (steam_root_ready(SHARED_STEAM_ROOT)) {
-                return true;
-            } else {
-                const backup_path = `${SHARED_STEAM_ROOT}.backup.${Math.floor(Date.now() / 1000)}`;
-                fs.renameSync(SHARED_STEAM_ROOT, backup_path);
-                this.log(`Moved incomplete ${SHARED_STEAM_ROOT} to ${backup_path}`);
-            }
-        } catch (error) {
-            if (error.code !== 'ENOENT')
-                throw error;
-        }
-
-        fs.mkdirSync(SHARED_STEAM_ROOT, { recursive: true });
-        child_process.execFileSync('mount', ['--bind', real_source_path, SHARED_STEAM_ROOT]);
-        this.log(`Shared Steam root ready, source=${real_source_path}, target=${SHARED_STEAM_ROOT}, mode=bind`);
-        return true;
+        return ensure_shared_steam_copy(real_source_path, SHARED_STEAM_ROOT, this.log.bind(this));
     }
 
     tf2InstallCandidates() {
@@ -3224,7 +3248,9 @@ class Bot extends EventEmitter {
         if (!STEAM_TXTMODE_ENABLED)
             self.log('cat-steamtxtmode preload disabled (set CAT_STEAM_TXTMODE=1 to re-enable)');
 
-        self.procFirejailSteam = child_process.spawn(([this.shouldResetSteam, this.shouldResetSteam = 0][0] ? LAUNCH_OPTIONS_STEAM_RESET : LAUNCH_OPTIONS_STEAM)
+        self.procFirejailSteam = child_process.spawn(([this.shouldResetSteam, this.shouldResetSteam = 0][0]
+            ? LAUNCH_OPTIONS_STEAM_RESET
+            : LAUNCH_OPTIONS_STEAM_WITH_HARDWARE)
             // Username
             .replace("%LOGIN%", shell_quote(self.account.login))
             // Password
@@ -3233,6 +3259,7 @@ class Bot extends EventEmitter {
             .replace("%JAILNAME%", shell_quote(self.name))
             .replace("%STEAM_LD_LIBRARY_PATH%", shell_quote(process.env.LD_LIBRARY_PATH || ''))
             .replace("%LD_PRELOAD%", shell_quote(steam_preload))
+            .replace("%HARDWARE_SEED%", shell_quote(STEAM_TXTMODE_HARDWARE_SEED))
             .replace("%CAT_STM_LOOP_SLEEP%", shell_quote(steam_shim_loop_sleep))
             .replace("%CAT_STM_LOOP_SLEEP_US%", shell_quote(String(steam_shim_loop_sleep_us)))
             .replace("%STEAM_VGUI_ARG%", STEAM_VGUI_REQUIRED ? '-vgui' : '')
@@ -3420,7 +3447,9 @@ class Bot extends EventEmitter {
         }
 
         self.log(`Resolved SteamID32 ${steamid32} for ${self.account.login}`);
-        const game_launch_options = TF2_LAUNCH_MODE === 'steam' ? LAUNCH_OPTIONS_GAME_STEAM : LAUNCH_OPTIONS_GAME;
+        const game_launch_options = TF2_LAUNCH_MODE === 'steam'
+            ? LAUNCH_OPTIONS_GAME_STEAM
+            : LAUNCH_OPTIONS_GAME_WITH_HARDWARE;
         const game_port_launch_options = game_port_options(self.botid);
         if (TF2_LAUNCH_MODE === 'steam') {
             const steam_tf2_launch_options = [
@@ -3434,6 +3463,7 @@ class Bot extends EventEmitter {
                 `CATHOOK_ATTACH_DELAY_SECONDS=${CATHOOK_ATTACH_DELAY_SECONDS}`,
                 `CAT_BOT_ID="${bash_double_quote_escape(String(self.botid))}"`,
                 `CAT_BOT_NAME="${bash_double_quote_escape(self.name)}"`,
+                `CAT_STEAM_TXTMODE_HARDWARE_SEED="${bash_double_quote_escape(STEAM_TXTMODE_HARDWARE_SEED)}"`,
                 `CAT_STEAMID32=${steamid32}`,
                 `LD_PRELOAD="${bash_double_quote_escape(game_preload)}"`,
                 textmode_allocator_assignments,
@@ -3456,6 +3486,7 @@ class Bot extends EventEmitter {
             .replace("%BOT_ID%", bash_double_quote_escape(String(self.botid)))
             .replace("%BOT_NAME%", bash_double_quote_escape(self.name))
             .replace("%STEAMID32%", steamid32)
+            .replace("%HARDWARE_SEED%", bash_double_quote_escape(STEAM_TXTMODE_HARDWARE_SEED))
             .replace("%GAME_PORT_OPTIONS%", game_port_launch_options)
             // Firejail jail name used by this users steam
             .replace("%JAILNAME%", self.name)

@@ -41,12 +41,13 @@ matching xpra display first.
 - Override chunking: `CAT_CHUNKED_X_DISPLAY_BOTS_PER_DISPLAY=25 CAT_CHUNKED_X_DISPLAY_MAX_DISPLAYS=12 ./botpanel/start`
 - Disable chunking: `CAT_CHUNKED_X_DISPLAY=0 ./botpanel/start`
 - Override hidden TF2 window flags: `CAT_GAME_WINDOW_OPTIONS="-gl -silent -sw -w 800 -h 600" ./botpanel/start`
+- Synthetic hardware anti-fingerprinting is enabled by default for headless text-mode bots; disable it with `CAT_STEAM_TXTMODE_SYNTHETIC_HARDWARE=0 ./botpanel/start`.
 - Use an existing desktop display instead: `CAT_VISIBLE_WINDOWS=1 ./botpanel/start`
 - After game IPC has stayed connected for 10 seconds, the panel freezes the main `steamwebhelper` in that bot's Steam process tree and kills its child helper processes.
 - Disable helper cleanup: `CAT_STEAMWEBHELPER_CLEANUP=0 ./botpanel/start`
 - Override helper cleanup delay: `CAT_STEAMWEBHELPER_CLEANUP_SECONDS=15 ./botpanel/start`
 - Optional ban tracker API key: `CAT_STEAM_WEB_API_KEY=... ./botpanel/start`; without it, the panel falls back to Steam Community profile HTML checks.
-- Host Steam content is shared at `/opt/steamapps`. Botpanel bind-mounts that path to the detected host Steam `steamapps` directory, then bot instances symlink their own `steamapps` directory to it. Debian/Ubuntu and Arch Steam layouts are checked.
+- Host Steam content is shared at `/opt/steamapps` as a symlink to the detected host Steam `steamapps` directory, then bot instances symlink their own `steamapps` directory to it. `/opt/catbot-shared-steam` contains copied Steam client/runtime files but its `steamapps` entry points to the existing host library, so TF2 is never copied into the shared client tree. Debian/Ubuntu and Arch Steam layouts are checked.
 - The host Steam path is detected automatically. If detection fails, the launcher prints and writes `/tmp/cat-steamapps-detect.log` with every checked path.
 
 `./botpanel/stop` stops the matching headless display unless `CAT_VISIBLE_WINDOWS=1` is set.

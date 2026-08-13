@@ -180,7 +180,6 @@ path_has_entries() {
 
 ensure_shared_steamapps() {
     local host_steamapps="$1"
-    local backup_path
     local host_real
 
     if [ -z "$host_steamapps" ] || [ ! -d "$host_steamapps" ]; then
@@ -194,33 +193,23 @@ ensure_shared_steamapps() {
     fi
 
     if mountpoint -q "$shared_steamapps" 2>/dev/null; then
-        if tf2_install_ready_from_steamapps "$shared_steamapps"; then
-            return 0
-        fi
-
-        echo "$shared_steamapps is mounted but does not expose a runnable TF2 install; unmounting it."
+        echo "$shared_steamapps is a bind mount; unmounting it before creating the shared symlink."
         run_as_root umount "$shared_steamapps"
     fi
 
     if [ -L "$shared_steamapps" ]; then
-        echo "Replacing $shared_steamapps symlink with a bind mount to $host_real."
-        run_as_root rm -f "$shared_steamapps"
-    elif [ -e "$shared_steamapps" ]; then
-        if tf2_install_ready_from_steamapps "$shared_steamapps"; then
+        if [ "$(readlink -f "$shared_steamapps" 2>/dev/null || true)" = "$host_real" ]; then
             return 0
         fi
-
-        backup_path="$shared_steamapps.backup.$(date +%s)"
-        if path_has_entries "$shared_steamapps"; then
-            echo "$shared_steamapps exists but does not contain a runnable TF2 install; moving it to $backup_path."
-            run_as_root mv "$shared_steamapps" "$backup_path"
-        else
-            run_as_root rmdir "$shared_steamapps" 2>/dev/null || run_as_root mv "$shared_steamapps" "$backup_path"
-        fi
+        run_as_root rm -f "$shared_steamapps"
+    elif [ -e "$shared_steamapps" ]; then
+        echo "$shared_steamapps is a stale generated directory; removing it before linking the existing install."
+        run_as_root rm -rf -- "$shared_steamapps"
     fi
 
-    run_as_root mkdir -p "$shared_steamapps"
-    run_as_root mount --bind "$host_real" "$shared_steamapps"
+    run_as_root mkdir -p "$(dirname "$shared_steamapps")"
+    run_as_root ln -s "$host_real" "$shared_steamapps"
+    [ "$(readlink -f "$shared_steamapps" 2>/dev/null || true)" = "$host_real" ]
 }
 
 update_origin_url() {

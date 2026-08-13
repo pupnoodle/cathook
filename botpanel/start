@@ -70,6 +70,15 @@ steam_txtmode_hide_windows="${CAT_STEAM_TXTMODE_HIDE_WINDOWS:-1}"
 steam_txtmode_drop_draws="${CAT_STEAM_TXTMODE_DROP_DRAWS:-1}"
 steam_txtmode_trim_webhelper="${CAT_STEAM_TXTMODE_TRIM_WEBHELPER:-0}"
 steam_txtmode_frame_interval_us="${CAT_STEAM_TXTMODE_FRAME_INTERVAL_US:-100000}"
+if [ -n "${CAT_STEAM_TXTMODE_SYNTHETIC_HARDWARE:-}" ]; then
+    steam_txtmode_synthetic_hardware="$CAT_STEAM_TXTMODE_SYNTHETIC_HARDWARE"
+elif [ "$steam_txtmode" = "1" ]; then
+    steam_txtmode_synthetic_hardware=1
+else
+    steam_txtmode_synthetic_hardware=0
+fi
+steam_txtmode_hardware_seed="${CAT_STEAM_TXTMODE_HARDWARE_SEED:-}"
+steam_txtmode_hardware_randomize="${CAT_STEAM_TXTMODE_HARDWARE_RANDOMIZE:-}"
 steam_loop_sleep="${CAT_STM_LOOP_SLEEP:-1}"
 steam_loop_sleep_us="${CAT_STM_LOOP_SLEEP_US:-5000}"
 skip_dbus_run_session="${CAT_SKIP_DBUS_RUN_SESSION:-1}"
@@ -1355,6 +1364,9 @@ start_panel() {
             CAT_STEAM_TXTMODE_DROP_DRAWS="$steam_txtmode_drop_draws" \
             CAT_STEAM_TXTMODE_TRIM_WEBHELPER="$steam_txtmode_trim_webhelper" \
             CAT_STEAM_TXTMODE_FRAME_INTERVAL_US="$steam_txtmode_frame_interval_us" \
+            CAT_STEAM_TXTMODE_SYNTHETIC_HARDWARE="$steam_txtmode_synthetic_hardware" \
+            CAT_STEAM_TXTMODE_HARDWARE_SEED="$steam_txtmode_hardware_seed" \
+            CAT_STEAM_TXTMODE_HARDWARE_RANDOMIZE="$steam_txtmode_hardware_randomize" \
             CAT_STM_LOOP_SLEEP="$steam_loop_sleep" \
             CAT_STM_LOOP_SLEEP_US="$steam_loop_sleep_us" \
             CAT_SKIP_DBUS_RUN_SESSION="$skip_dbus_run_session" \
@@ -1398,6 +1410,9 @@ start_panel() {
         CAT_STEAM_TXTMODE_DROP_DRAWS="$steam_txtmode_drop_draws" \
         CAT_STEAM_TXTMODE_TRIM_WEBHELPER="$steam_txtmode_trim_webhelper" \
         CAT_STEAM_TXTMODE_FRAME_INTERVAL_US="$steam_txtmode_frame_interval_us" \
+        CAT_STEAM_TXTMODE_SYNTHETIC_HARDWARE="$steam_txtmode_synthetic_hardware" \
+        CAT_STEAM_TXTMODE_HARDWARE_SEED="$steam_txtmode_hardware_seed" \
+        CAT_STEAM_TXTMODE_HARDWARE_RANDOMIZE="$steam_txtmode_hardware_randomize" \
         CAT_STM_LOOP_SLEEP="$steam_loop_sleep" \
         CAT_STM_LOOP_SLEEP_US="$steam_loop_sleep_us" \
         CAT_SKIP_DBUS_RUN_SESSION="$skip_dbus_run_session" \

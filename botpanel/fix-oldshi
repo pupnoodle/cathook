@@ -14,8 +14,8 @@ Usage: ./fix-oldshi
 
 Repairs old botpanel Steam/navmesh path layouts:
   - preserves any .nav files from old partial Steam paths into /opt/cathook/navmeshes
-  - replaces broken /opt/steamapps symlinks with a bind mount to the real host steamapps
-  - moves incomplete /opt/steamapps directories to /opt/steamapps.backup.TIMESTAMP
+  - replaces broken /opt/steamapps mounts/directories with a symlink to the real host steamapps
+  - removes stale generated /opt/steamapps data instead of creating large backups
   - points bot user instance steamapps directories at /opt/steamapps
   - copies preserved navmeshes back into the real TF2 maps directory
 
@@ -257,7 +257,6 @@ preserve_legacy_navmeshes() {
 ensure_shared_steamapps() {
     local host_steamapps="$1"
     local host_real
-    local backup_path
 
     if [ -z "$host_steamapps" ] || [ ! -d "$host_steamapps" ]; then
         echo "Host steamapps path is unavailable; cannot prepare $shared_steamapps." >&2
@@ -276,48 +275,34 @@ ensure_shared_steamapps() {
     fi
 
     if mountpoint -q "$shared_steamapps" 2>/dev/null; then
-        if tf2_install_ready_from_steamapps "$shared_steamapps"; then
-            log "$shared_steamapps is already a working mount"
-            return 0
-        fi
-
-        log "$shared_steamapps is mounted but incomplete; unmounting it"
+        log "$shared_steamapps is a bind mount; unmounting it before creating the shared symlink"
         run_as_root umount "$shared_steamapps"
     fi
 
     if [ -L "$shared_steamapps" ]; then
-        log "replacing $shared_steamapps symlink with a bind mount to $host_real"
-        run_as_root rm -f "$shared_steamapps"
-    elif [ -e "$shared_steamapps" ]; then
-        if tf2_install_ready_from_steamapps "$shared_steamapps"; then
-            log "$shared_steamapps is already a runnable Steam library"
+        if [ "$(resolved_path "$shared_steamapps")" = "$host_real" ]; then
+            log "$shared_steamapps already points to $host_real"
             return 0
         fi
-
-        preserve_navmeshes_from "$shared_steamapps/common/Team Fortress 2/tf/maps" "$shared_steamapps legacy maps"
-        backup_path="$shared_steamapps.backup.$(date +%s)"
-        if path_has_entries "$shared_steamapps"; then
-            log "moving incomplete $shared_steamapps to $backup_path"
-            run_as_root mv "$shared_steamapps" "$backup_path"
-        else
-            run_as_root rmdir "$shared_steamapps" 2>/dev/null || run_as_root mv "$shared_steamapps" "$backup_path"
-        fi
+        run_as_root rm -f "$shared_steamapps"
+    elif [ -e "$shared_steamapps" ]; then
+        log "removing stale generated shared directory before linking the existing install"
+        run_as_root rm -rf -- "$shared_steamapps"
     fi
 
-    run_as_root mkdir -p "$shared_steamapps"
-    run_as_root mount --bind "$host_real" "$shared_steamapps"
+    run_as_root mkdir -p "$(dirname "$shared_steamapps")"
+    run_as_root ln -s "$host_real" "$shared_steamapps"
 
     if ! tf2_install_ready_from_steamapps "$shared_steamapps"; then
-        echo "Bind mount was created, but TF2 is still not runnable through $shared_steamapps." >&2
+        echo "Shared symlink was created, but TF2 is still not runnable through $shared_steamapps." >&2
         return 1
     fi
 
-    log "shared steamapps ready: $shared_steamapps -> $host_real"
+    log "shared steamapps ready: $shared_steamapps -> $host_real (symlink)"
 }
 
 repair_bot_steamapps_link() {
     local steamapps_path="$1"
-    local backup_path
     local link_target
     local target_uid
     local target_gid
@@ -335,10 +320,8 @@ repair_bot_steamapps_link() {
         log "replacing bot steamapps symlink $steamapps_path ($link_target)"
         run_as_root rm -f "$steamapps_path"
     else
-        preserve_navmeshes_from "$steamapps_path/common/Team Fortress 2/tf/maps" "$steamapps_path legacy maps"
-        backup_path="$steamapps_path.old-panel-backup.$(date +%s)"
-        log "moving bot steamapps directory $steamapps_path to $backup_path"
-        run_as_root mv "$steamapps_path" "$backup_path"
+        log "removing generated bot steamapps directory $steamapps_path before linking the shared library"
+        run_as_root rm -rf -- "$steamapps_path"
     fi
 
     run_as_root mkdir -p "$(dirname "$steamapps_path")"

@@ -1,0 +1,29 @@
+# catsteamtxtmode standalone supervisor configuration.
+# Empty preload paths resolve to libcatsteamtxtmode.so beside the executable.
+
+poll_interval_ms=1000
+log_processes=1
+
+# Watch only. Set to 1 to launch the commands below when no matching process exists.
+launch_missing=0
+stop_children=0
+
+textmode=1
+synthetic_hardware=1
+hide_windows=1
+drop_draws=1
+trim_webhelper=0
+frame_interval_us=100000
+randomize_hardware=1
+hardware_seed=
+
+steam_preload=
+tf2_preload=
+
+# Commands are whitespace-separated and support single/double quotes.
+# They are executed directly, without a shell.
+# steam_command=/usr/bin/steam -silent
+# tf2_command=/opt/steamapps/common/Team Fortress 2/tf/bin/linux64/tf_linux64 -steam -game tf
+
+steam_names=steam,steamwebhelper,gameoverlayui
+tf2_names=tf_linux64,tf_linux,hl2_linux
