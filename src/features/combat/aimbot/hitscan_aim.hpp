@@ -6,6 +6,7 @@
 #include <cstdint>
 #include "aimbot.hpp"
 #include "aim_utils.hpp"
+#include "resolver.hpp"
 #include "features/combat/backtrack/backtrack.hpp"
 
 struct hitscan_settings_view {
@@ -151,9 +152,22 @@ inline void hitscan_aim_keep_reject(hitscan_point* point, const aimbot_reject_de
 
 inline bool hitscan_aim_get_bones(Player* target,
   matrix_3x4* bone_to_world,
-  int* bone_count_out = nullptr) {
+  int* bone_count_out = nullptr,
+  Player* localplayer = nullptr) {
   if (target == nullptr || bone_to_world == nullptr) {
     return false;
+  }
+
+  resolver::hitscan_pose_guard resolver_pose{};
+  if (resolver::begin_hitscan_pose(localplayer, target, &resolver_pose)) {
+    aimbot_clear_network_pose(target);
+    aimbot_capture_latest_network_pose(target, false);
+    const bool copied = aimbot_copy_network_pose_bones(target, bone_to_world, bone_count_out);
+    resolver_pose.restore();
+    aimbot_bone_failure = copied
+      ? aimbot_reject_reason::none
+      : aimbot_reject_reason::bone_reconstruction;
+    return copied;
   }
 
   return aimbot_get_bones(target, bone_to_world, bone_count_out);
@@ -829,7 +843,7 @@ inline hitscan_point hitscan_aim_find_point(Player* localplayer,
 
   matrix_3x4 bone_to_world[hitscan_aim_max_bones]{};
   int bone_count = 0;
-  if (!hitscan_aim_get_bones(target, bone_to_world, &bone_count)) {
+  if (!hitscan_aim_get_bones(target, bone_to_world, &bone_count, localplayer)) {
     const aimbot_reject_reason failure = aimbot_last_bone_failure();
     best.reject_debug = hitscan_aim_make_reject_debug(
       target,
@@ -870,8 +884,7 @@ inline hitscan_point hitscan_aim_find_point(Player* localplayer,
     constexpr int max_local_points = 21;
     Vec3 local_points[max_local_points]{};
     const bool use_multipoint = entry.hitbox == priority_hitbox &&
-      entry.hitbox != aim_hitbox_head &&
-      settings.multipoint_scale > 0.0f;
+      (entry.hitbox == aim_hitbox_head || settings.multipoint_scale > 0.0f);
     const int point_count = aimbot_build_local_hitbox_points(
       *hitbox,
       bone_to_world[hitbox->bone],

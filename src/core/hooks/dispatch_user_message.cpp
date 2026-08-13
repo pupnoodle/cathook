@@ -20,6 +20,14 @@ namespace
 {
 
 constexpr int vgui_menu_user_message_type = 12;
+constexpr int shake_user_message_type = 10;
+constexpr int fade_user_message_type = 11;
+constexpr int rumble_user_message_type = 13;
+constexpr int spawn_flying_bird_user_message_type = 52;
+constexpr int player_god_ray_effect_user_message_type = 53;
+constexpr int player_taunt_sound_loop_start_user_message_type = 70;
+constexpr int player_taunt_sound_loop_end_user_message_type = 71;
+constexpr int force_player_view_angles_user_message_type = 72;
 
 [[nodiscard]] bool is_vgui_info_menu(const bf_read* message_data)
 {
@@ -49,6 +57,23 @@ bool dispatch_user_message_hook(void* me, int message_type, bf_read* message_dat
       config.misc.automation.anti_motd_dont_close_during_warmup && automation::controller().is_setup_time();
   if (config.misc.automation.anti_motd && !dont_close_motd && message_type == vgui_menu_user_message_type && is_vgui_info_menu(message_data)) {
     close_welcome_menu();
+    return true;
+  }
+
+  if (config.visuals.removals.angle_forcing && message_type == force_player_view_angles_user_message_type) {
+    return true;
+  }
+
+  if (config.visuals.effects.remove_screen_effects &&
+      (message_type == shake_user_message_type || message_type == fade_user_message_type ||
+       message_type == rumble_user_message_type)) {
+    return true;
+  }
+
+  if (config.visuals.removals.taunts &&
+      (message_type == spawn_flying_bird_user_message_type || message_type == player_god_ray_effect_user_message_type ||
+       message_type == player_taunt_sound_loop_start_user_message_type ||
+       message_type == player_taunt_sound_loop_end_user_message_type)) {
     return true;
   }
 

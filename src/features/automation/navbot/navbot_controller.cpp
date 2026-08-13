@@ -19,6 +19,7 @@ V  o o  V  file: src/features/automation/navbot/navbot_controller.cpp
 #include "imgui/imgui.h"
 #include "core/entity_cache.hpp"
 #include "core/math/math.hpp"
+#include "core/print.hpp"
 #include "features/automation/medic_automation/medic_automation.hpp"
 #include "features/combat/aimbot/aimbot.hpp"
 #include "features/menu/config.hpp"
@@ -65,6 +66,7 @@ constexpr float hazard_refresh_interval = 0.25f;
 #endif
 
 static float g_navbot_throwable_look_suppress_until = -1.0e9f;
+static float g_navbot_create_move_log_until = -1.0e9f;
 
 bool navbot_weapon_is_arc_throwable(Weapon* weapon)
 {
@@ -114,6 +116,21 @@ enum class navbot_weapon_slot
   secondary = 2,
   melee = 3
 };
+
+const char* weapon_slot_command(navbot_weapon_slot slot)
+{
+  switch (slot)
+  {
+    case navbot_weapon_slot::primary:
+      return "slot1";
+    case navbot_weapon_slot::secondary:
+      return "slot2";
+    case navbot_weapon_slot::melee:
+      return "slot3";
+    default:
+      return nullptr;
+  }
+}
 
 bool goal_is_supply(goal_type type)
 {
@@ -645,6 +662,23 @@ navbot_weapon_slot choose_navbot_weapon_slot(Player* localplayer, const navbot_g
     return navbot_weapon_slot::none;
   }
 
+  const auto weapon_mode = config.misc.automation.navbot_weapon_selection;
+  if (weapon_mode != Misc::Automation::navbot_weapon_mode::AUTO)
+  {
+    switch (weapon_mode)
+    {
+      case Misc::Automation::navbot_weapon_mode::PRIMARY:
+        return navbot_weapon_slot::primary;
+      case Misc::Automation::navbot_weapon_mode::SECONDARY:
+        return navbot_weapon_slot::secondary;
+      case Misc::Automation::navbot_weapon_mode::MELEE:
+        return navbot_weapon_slot::melee;
+      case Misc::Automation::navbot_weapon_mode::OFF:
+      default:
+        return navbot_weapon_slot::none;
+    }
+  }
+
   auto goal = goal_state.valid ? goal_state.goal.type : goal_type::roam;
   if (goal == goal_type::engineer_build || goal == goal_type::engineer_maintain)
   {
@@ -667,25 +701,6 @@ navbot_weapon_slot choose_navbot_weapon_slot(Player* localplayer, const navbot_g
   }
 
   auto* enemy = choose_navbot_enemy(localplayer);
-  const auto weapon_mode = config.misc.automation.navbot_weapon_selection;
-  if (weapon_mode != Misc::Automation::navbot_weapon_mode::AUTO)
-  {
-    switch (weapon_mode)
-    {
-      case Misc::Automation::navbot_weapon_mode::PRIMARY:
-        return weapon_slot_available(localplayer, navbot_weapon_slot::primary)
-          ? navbot_weapon_slot::primary : navbot_weapon_slot::none;
-      case Misc::Automation::navbot_weapon_mode::SECONDARY:
-        return weapon_slot_available(localplayer, navbot_weapon_slot::secondary)
-          ? navbot_weapon_slot::secondary : navbot_weapon_slot::none;
-      case Misc::Automation::navbot_weapon_mode::MELEE:
-        return weapon_slot_available(localplayer, navbot_weapon_slot::melee)
-          ? navbot_weapon_slot::melee : navbot_weapon_slot::none;
-      case Misc::Automation::navbot_weapon_mode::OFF:
-      default:
-        return navbot_weapon_slot::none;
-    }
-  }
 
   auto desired_slot = goal_is_combat(goal)
     ? choose_combat_slot(localplayer, goal, enemy)
@@ -716,23 +731,7 @@ navbot_weapon_slot choose_navbot_weapon_slot(Player* localplayer, const navbot_g
     }
   }
 
-  return navbot_weapon_slot::none;
-}
-
-const char* weapon_slot_command(navbot_weapon_slot slot)
-{
-  switch (slot)
-  {
-    case navbot_weapon_slot::primary:
-      return "slot1";
-    case navbot_weapon_slot::secondary:
-      return "slot2";
-    case navbot_weapon_slot::melee:
-      return "slot3";
-    case navbot_weapon_slot::none:
-    default:
-      return nullptr;
-  }
+  return desired_slot;
 }
 
 std::string sanitize_level_name(const char* raw_name)
@@ -1214,10 +1213,6 @@ void navbot_controller::clear_runtime_state()
   pending_job_submitted_at_ = 0.0f;
   next_goal_retry_time_ = 0.0f;
   next_hazard_update_time_ = 0.0f;
-  next_weapon_switch_time_ = 0.0f;
-  last_requested_weapon_slot_ = 0;
-  pending_desired_weapon_slot_ = 0;
-  pending_desired_since_ = 0.0f;
   crumb_failure_ = {};
   suppress_aimbot_for_reload_ = false;
   silent_path_look_ = false;
@@ -1635,6 +1630,15 @@ void navbot_controller::on_create_move(user_cmd* user_cmd)
 
   ensure_started();
 
+  if (config.misc.automation.navbot_debug_text
+    && global_vars != nullptr
+    && global_vars->curtime >= g_navbot_create_move_log_until)
+  {
+    print("[navbot] CreateMove active weapon_mode=%d\n",
+      static_cast<int>(config.misc.automation.navbot_weapon_selection));
+    g_navbot_create_move_log_until = global_vars->curtime + 5.0f;
+  }
+
   if (engine == nullptr || !engine->is_in_game())
   {
     clear_runtime_state();
@@ -1667,6 +1671,7 @@ void navbot_controller::on_create_move(user_cmd* user_cmd)
   {
     invalidate_active_path(true);
     clear_runtime_state();
+    update_weapon_choice(localplayer, user_cmd);
     debug_state_.path_request_message = "round blocked";
     debug_state_.runtime_state = "round blocked";
     return;
@@ -1686,6 +1691,7 @@ void navbot_controller::on_create_move(user_cmd* user_cmd)
   refresh_goal(localplayer, current_time);
   update_runtime_debug();
   request_path_if_needed();
+  update_weapon_choice(localplayer, user_cmd);
   debug_state_.runtime_state = follower_.has_path()
     ? "following"
     : pending_job_.id != 0 && pending_job_.generation_id == current_generation_id_
@@ -1695,10 +1701,6 @@ void navbot_controller::on_create_move(user_cmd* user_cmd)
   {
     suppress_aimbot_for_reload_ = true;
     apply_reload_controls(user_cmd);
-  }
-  else
-  {
-    update_weapon_choice(localplayer);
   }
 
   auto follow_result = follower_.tick(localplayer, user_cmd, current_time);
@@ -1794,10 +1796,10 @@ Vec3 navbot_controller::silent_path_look_angles() const
   return silent_path_look_angles_;
 }
 
-void navbot_controller::update_weapon_choice(Player* localplayer)
+void navbot_controller::update_weapon_choice(Player* localplayer, user_cmd* user_cmd)
 {
   if (config.misc.automation.navbot_weapon_selection == Misc::Automation::navbot_weapon_mode::OFF
-    || localplayer == nullptr || engine == nullptr)
+    || localplayer == nullptr || engine == nullptr || user_cmd == nullptr)
   {
     return;
   }
@@ -1813,7 +1815,17 @@ void navbot_controller::update_weapon_choice(Player* localplayer)
   const bool urgent_melee = desired_slot == navbot_weapon_slot::melee
     && enemy != nullptr
     && distance_to_enemy(localplayer, enemy) <= 160.0f;
-  if (current_time < next_weapon_switch_time_ && !urgent_melee)
+  const auto weapon_mode = static_cast<int>(config.misc.automation.navbot_weapon_selection);
+  const bool mode_changed = last_weapon_selection_mode_ != weapon_mode;
+  if (mode_changed)
+  {
+    last_weapon_selection_mode_ = weapon_mode;
+    pending_desired_weapon_slot_ = 0;
+    pending_desired_since_ = current_time;
+    next_weapon_switch_time_ = 0.0f;
+  }
+
+  if (current_time < next_weapon_switch_time_ && !urgent_melee && !mode_changed)
   {
     return;
   }
@@ -1821,22 +1833,12 @@ void navbot_controller::update_weapon_choice(Player* localplayer)
   auto* active_weapon = localplayer->get_weapon();
   if (active_weapon != nullptr)
   {
-    if ((active_weapon->is_sniper_rifle() && localplayer->is_scoped())
-      || (active_weapon->is_minigun() && localplayer->is_heavy_revved()))
-    {
-      return;
-    }
-
-    auto next_primary = active_weapon->get_next_primary_attack();
-    if (next_primary > current_time && (next_primary - current_time) < 0.15f && !urgent_melee)
-    {
-      return;
-    }
+    (void)active_weapon;
   }
 
   auto current_slot = weapon_slot_for(active_weapon, localplayer->get_tf_class());
   auto desired_slot_value = static_cast<int>(desired_slot);
-  if (current_slot == desired_slot)
+  if (current_slot == desired_slot && !mode_changed)
   {
     last_requested_weapon_slot_ = desired_slot_value;
     pending_desired_weapon_slot_ = desired_slot_value;
@@ -1844,25 +1846,30 @@ void navbot_controller::update_weapon_choice(Player* localplayer)
     return;
   }
 
-  constexpr float weapon_switch_stick_time = 0.4f;
-  if (pending_desired_weapon_slot_ != desired_slot_value)
-  {
-    pending_desired_weapon_slot_ = desired_slot_value;
-    pending_desired_since_ = current_time;
-    return;
-  }
-  if ((current_time - pending_desired_since_) < weapon_switch_stick_time && !urgent_melee)
+  const auto command = weapon_slot_command(desired_slot);
+  if (command == nullptr)
   {
     return;
   }
 
-  auto* slot_command = weapon_slot_command(desired_slot);
-  if (slot_command == nullptr)
+  if (config.misc.automation.navbot_debug_text
+    && last_requested_weapon_slot_ != desired_slot_value)
   {
-    return;
+    print("[navbot] weapon selection requesting %s (mode=%d)\n",
+      command,
+      weapon_mode);
   }
-
-  engine->client_cmd_unrestricted(slot_command);
+  if (auto* desired_weapon = weapon_for_slot(localplayer, desired_slot);
+      desired_weapon != nullptr)
+  {
+    const auto weapon_index = reinterpret_cast<Entity*>(desired_weapon)->get_index();
+    if (weapon_index > 0)
+    {
+      user_cmd->weapon_select = weapon_index;
+      user_cmd->weapon_subtype = 0;
+    }
+  }
+  engine->client_cmd_unrestricted(command);
   last_requested_weapon_slot_ = desired_slot_value;
   next_weapon_switch_time_ = current_time + weapon_switch_interval;
 }

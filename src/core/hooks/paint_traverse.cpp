@@ -85,6 +85,12 @@ void paint_traverse_hook(void* me, void* panel, bool force_repaint, bool allow_f
     return;
   }
 
+  if (config.visuals.effects.remove_screen_overlays &&
+      (panel_name == "HudUnderwaterOverlay" || panel_name == "HudDamageIndicator" ||
+       panel_name == "HudZoom")) {
+    return;
+  }
+
   call_paint_traverse_original(me, panel, force_repaint, allow_force);
 
   if (panel_name != "MatSystemTopPanel") {

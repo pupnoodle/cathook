@@ -97,6 +97,7 @@ void clear();
 [[nodiscard]] bool command_tick_for_record(const backtrack_record& record, Player* player, int* tick_count);
 [[nodiscard]] const backtrack_history* records_for_player(Player* player);
 [[nodiscard]] backtrack_record_view valid_records(Player* player);
+[[nodiscard]] backtrack_record_view visual_records(Player* player);
 [[nodiscard]] bool is_record_valid(const backtrack_record& record, Player* player);
 [[nodiscard]] bool selected_position(Vec3* position);
 void backtrack_to_crosshair(user_cmd* user_cmd, Player* localplayer, Weapon* weapon);

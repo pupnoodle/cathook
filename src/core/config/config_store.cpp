@@ -244,6 +244,19 @@ void config_store::import_config(const Config& config)
     const bool spectator_indicator_enabled = (config.visuals.indicators.enabled_mask & Visuals::Indicators::spectators) != 0;
     const bool keybind_indicator_enabled = (config.visuals.indicators.enabled_mask & Visuals::Indicators::keybinds) != 0;
 
+    set_int("visuals.world.modulation_mask", static_cast<int>(config.visuals.world.modulation_mask));
+    set_color("visuals.world.world_color", config.visuals.world.world_color);
+    set_color("visuals.world.sky_color", config.visuals.world.sky_color);
+    set_color("visuals.world.prop_color", config.visuals.world.prop_color);
+    set_color("visuals.world.particle_color", config.visuals.world.particle_color);
+    set_color("visuals.world.fog_color", config.visuals.world.fog_color);
+    set_int("visuals.world.world_texture", config.visuals.world.world_texture);
+    set_string("visuals.effects.projectile_trail", config.visuals.effects.projectile_trail);
+    set_string("visuals.effects.medigun_beam", config.visuals.effects.medigun_beam);
+    set_string("visuals.effects.medigun_charge", config.visuals.effects.medigun_charge);
+    set_bool("visuals.effects.remove_screen_overlays", config.visuals.effects.remove_screen_overlays);
+    set_bool("visuals.effects.remove_screen_effects", config.visuals.effects.remove_screen_effects);
+
     set_bool("aimbot.master", config.aimbot.master);
     set_bool("aimbot.auto_shoot", config.aimbot.auto_shoot);
     set_int("aimbot.target_type", static_cast<int>(config.aimbot.target_type));
@@ -411,8 +424,17 @@ void config_store::import_config(const Config& config)
         set_int(prefix + "sightlines", static_cast<int>(group.sightlines));
     }
 
+    set_bool("visuals.removals.interpolation", config.visuals.removals.interpolation);
+    set_bool("visuals.removals.lerp", config.visuals.removals.lerp);
     set_bool("visuals.removals.scope", config.visuals.removals.scope);
     set_bool("visuals.removals.zoom", config.visuals.removals.zoom);
+    set_bool("visuals.removals.disguises", config.visuals.removals.disguises);
+    set_bool("visuals.removals.taunts", config.visuals.removals.taunts);
+    set_bool("visuals.removals.post_processing", config.visuals.removals.post_processing);
+    set_bool("visuals.removals.view_punch", config.visuals.removals.view_punch);
+    set_bool("visuals.removals.angle_forcing", config.visuals.removals.angle_forcing);
+    set_bool("visuals.removals.ragdolls", config.visuals.removals.ragdolls);
+    set_bool("visuals.removals.gibs", config.visuals.removals.gibs);
     set_bool("visuals.casual_medal.guaranteed_flip", config.visuals.casual_medal.guaranteed_flip);
     set_bool("visuals.casual_medal.changer", config.visuals.casual_medal.changer);
     set_int("visuals.casual_medal.rank", config.visuals.casual_medal.rank);
@@ -880,7 +902,7 @@ void config_store::export_config(Config& config) const
     config.backtrack.visualizer_mode = static_cast<backtrack_config::visualizer_style>(std::clamp(
         get_int("backtrack.visualizer_mode", static_cast<int>(config.backtrack.visualizer_mode)),
         0,
-        4));
+        5));
     config.ipc.enabled = get_bool("ipc.enabled", config.ipc.enabled);
     config.ipc.auto_connect = get_bool("ipc.auto_connect", config.ipc.auto_connect);
     config.ipc.auto_ignore_local_bots = get_bool("ipc.auto_ignore_local_bots", config.ipc.auto_ignore_local_bots);
@@ -1001,8 +1023,40 @@ void config_store::export_config(Config& config) const
         config.visual_groups.active_group_mask &= valid_mask;
     }
 
+    config.visuals.world.modulation_mask = static_cast<uint32_t>(std::max(0, get_int(
+        "visuals.world.modulation_mask", static_cast<int>(config.visuals.world.modulation_mask)))) &
+        (Visuals::modulation_world | Visuals::modulation_sky | Visuals::modulation_prop |
+         Visuals::modulation_particle | Visuals::modulation_fog);
+    config.visuals.world.world_color = get_color("visuals.world.world_color", config.visuals.world.world_color);
+    config.visuals.world.sky_color = get_color("visuals.world.sky_color", config.visuals.world.sky_color);
+    config.visuals.world.prop_color = get_color("visuals.world.prop_color", config.visuals.world.prop_color);
+    config.visuals.world.particle_color = get_color("visuals.world.particle_color", config.visuals.world.particle_color);
+    config.visuals.world.fog_color = get_color("visuals.world.fog_color", config.visuals.world.fog_color);
+    config.visuals.world.world_texture = std::clamp(get_int(
+        "visuals.world.world_texture", config.visuals.world.world_texture), 0, 5);
+    config.visuals.effects.projectile_trail = get_string(
+        "visuals.effects.projectile_trail", config.visuals.effects.projectile_trail);
+    config.visuals.effects.medigun_beam = get_string(
+        "visuals.effects.medigun_beam", config.visuals.effects.medigun_beam);
+    config.visuals.effects.medigun_charge = get_string(
+        "visuals.effects.medigun_charge", config.visuals.effects.medigun_charge);
+    config.visuals.effects.remove_screen_overlays = get_bool(
+        "visuals.effects.remove_screen_overlays", config.visuals.effects.remove_screen_overlays);
+    config.visuals.effects.remove_screen_effects = get_bool(
+        "visuals.effects.remove_screen_effects", config.visuals.effects.remove_screen_effects);
+
+    config.visuals.removals.interpolation = get_bool(
+        "visuals.removals.interpolation", config.visuals.removals.interpolation);
+    config.visuals.removals.lerp = get_bool("visuals.removals.lerp", config.visuals.removals.lerp);
     config.visuals.removals.scope = get_bool("visuals.removals.scope", config.visuals.removals.scope);
     config.visuals.removals.zoom = get_bool("visuals.removals.zoom", config.visuals.removals.zoom);
+    config.visuals.removals.disguises = get_bool("visuals.removals.disguises", config.visuals.removals.disguises);
+    config.visuals.removals.taunts = get_bool("visuals.removals.taunts", config.visuals.removals.taunts);
+    config.visuals.removals.post_processing = get_bool("visuals.removals.post_processing", config.visuals.removals.post_processing);
+    config.visuals.removals.view_punch = get_bool("visuals.removals.view_punch", config.visuals.removals.view_punch);
+    config.visuals.removals.angle_forcing = get_bool("visuals.removals.angle_forcing", config.visuals.removals.angle_forcing);
+    config.visuals.removals.ragdolls = get_bool("visuals.removals.ragdolls", config.visuals.removals.ragdolls);
+    config.visuals.removals.gibs = get_bool("visuals.removals.gibs", config.visuals.removals.gibs);
     config.visuals.casual_medal.guaranteed_flip = get_bool(
         "visuals.casual_medal.guaranteed_flip", config.visuals.casual_medal.guaranteed_flip);
     config.visuals.casual_medal.changer = get_bool(

@@ -247,7 +247,7 @@ send_datagram_fn g_send_datagram_original = nullptr;
   }
 
   timing.correct = std::clamp(
-    timing.outgoing_latency + round_to_tick_seconds(timing.fake_interp),
+    timing.outgoing_latency + timing.incoming_latency - timing.fake_latency + round_to_tick_seconds(timing.fake_interp),
     0.0f,
     timing.max_unlag);
   const float frame_excess = std::max(0.0f, timing.frame_gap - tick_interval());
@@ -308,7 +308,9 @@ send_datagram_fn g_send_datagram_original = nullptr;
   const int command_tick = target_tick + timing.lerp_ticks;
   const float server_time = ticks_to_time(timing.server_tick);
   const float age = server_time - record.sim_time;
-  const float max_window = std::min(timing.window, timing.max_unlag);
+  const float max_window = std::min(
+    timing.max_unlag,
+    std::max(timing.window, lag_compensation_delta_limit));
   if (!std::isfinite(age) || age < -tick_interval() || age > max_window + tick_interval()) {
     return false;
   }
@@ -820,7 +822,7 @@ bool command_tick_for_current_pose(float simulation_time, int* tick_count)
   }
 
   const float current_correct = std::clamp(
-    timing.outgoing_latency + timing.incoming_latency + ticks_to_time(timing.lerp_ticks),
+    timing.outgoing_latency + timing.incoming_latency - timing.fake_latency + ticks_to_time(timing.lerp_ticks),
     0.0f,
     timing.max_unlag);
   const float delta = std::fabs(current_correct - age);
@@ -904,7 +906,7 @@ void record_player(Player* player)
 
   if (history.record_count > 0) {
     const backtrack_record& last = history.records[0];
-    if (last.valid && std::fabs(last.sim_time - record.sim_time) <= 0.0001f) {
+    if (std::isfinite(last.sim_time) && record.sim_time <= last.sim_time + 0.0001f) {
       return;
     }
 
@@ -922,8 +924,11 @@ void record_player(Player* player)
     const Vec3 delta = record.origin - last.origin;
     const float delta_sqr = (delta.x * delta.x) + (delta.y * delta.y);
     if (delta_sqr > teleport_distance_sqr()) {
-      history.record_count = 0;
-      record.teleport = true;
+      for (int index = 0; index < history.record_count; ++index) {
+        history.records[index].invalid = true;
+        history.records[index].teleport = true;
+      }
+      record.teleport = false;
     }
   }
 
@@ -934,6 +939,12 @@ void record_player(Player* player)
 
   history.records[0] = record;
   history.record_count = std::min(history.record_count + 1, max_records);
+
+  const float retention = max_unlag_seconds() + (tick_interval() * 2.0f);
+  while (history.record_count > 1 &&
+         history.records[0].sim_time - history.records[history.record_count - 1].sim_time > retention) {
+    --history.record_count;
+  }
   g_did_shoot[record.ent_index] = false;
 }
 
@@ -1001,6 +1012,28 @@ backtrack_record_view valid_records(Player* player)
     }
     return record_timing_score(timing, *left) < record_timing_score(timing, *right);
   });
+  return view;
+}
+
+backtrack_record_view visual_records(Player* player)
+{
+  backtrack_record_view view{};
+  const backtrack_history* history = records_for_player(player);
+  if (history == nullptr || history->record_count <= 0 || player == nullptr) {
+    return view;
+  }
+
+  const backtrack_timing timing = build_timing();
+  const float current_sim_time = player->get_simulation_time();
+  for (int index = 0; index < history->record_count && view.count < max_records; ++index) {
+    const backtrack_record& record = history->records[index];
+    if (!record_valid_for_timing(record, player, timing) ||
+        std::fabs(record.sim_time - current_sim_time) <= 0.0001f) {
+      continue;
+    }
+
+    view.records[view.count++] = &record;
+  }
   return view;
 }
 
@@ -1206,9 +1239,8 @@ aimbot_candidate find_hitscan_candidate(Player* localplayer,
       constexpr int max_local_points = 21;
       Vec3 local_points[max_local_points]{};
       const bool use_multipoint =
-        hitbox.hitbox != aim_hitbox_head &&
         priority == 0 &&
-        config.aimbot.multipoint_scale > 0.0f;
+        (hitbox.hitbox == aim_hitbox_head || config.aimbot.multipoint_scale > 0.0f);
       const int point_count = aimbot_build_local_hitbox_points(
         box,
         record->bones[hitbox.bone],

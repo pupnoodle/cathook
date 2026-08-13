@@ -19,6 +19,16 @@ V  o o  V  file: src/games/tf2/sdk/materials/material.hpp
 class Material {
 public:
 
+  const char* get_name() const {
+    void** vtable = *(void***)const_cast<Material*>(this);
+    return ((const char* (*)(const void*))vtable[0])(this);
+  }
+
+  const char* get_texture_group_name() const {
+    void** vtable = *(void***)const_cast<Material*>(this);
+    return ((const char* (*)(const void*))vtable[1])(this);
+  }
+
   MaterialVar* find_var(const char* var_name, bool* found = nullptr, bool complain = false) {
     void** vtable = *(void***)this;
 
@@ -49,6 +59,16 @@ public:
     void (*alpha_modulate_fn)(void*, float) = (void (*)(void*, float))vtable[27];
 
     alpha_modulate_fn(this, alpha);
+  }
+
+  float get_alpha_modulation() const {
+    void** vtable = *(void***)const_cast<Material*>(this);
+    return ((float (*)(void*))vtable[43])(const_cast<Material*>(this));
+  }
+
+  void get_color_modulation(float* r, float* g, float* b) const {
+    void** vtable = *(void***)const_cast<Material*>(this);
+    ((void (*)(void*, float*, float*, float*))vtable[44])(const_cast<Material*>(this), r, g, b);
   }
 
   void color_modulate(RGBA_float color) {

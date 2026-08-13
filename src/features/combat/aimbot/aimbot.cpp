@@ -704,24 +704,13 @@ void capture_latest_network_pose(Player* player, bool animation_already_updated)
 }
 
 void update_local_client_side_animation() {
-  if (!nographics::should_skip_rendering_hooks() || entity_list == nullptr) {
+  if (!nographics::is_enabled() || entity_list == nullptr) {
     return;
   }
 
   Player* localplayer = entity_list->get_localplayer();
   if (localplayer == nullptr || !localplayer->is_alive()) {
     return;
-  }
-
-  static int last_animation_frame = -1;
-  static float last_animation_realtime = -1.0f;
-  if (global_vars != nullptr && global_vars->framecount == last_animation_frame &&
-      global_vars->realtime == last_animation_realtime) {
-    return;
-  }
-  if (global_vars != nullptr) {
-    last_animation_frame = global_vars->framecount;
-    last_animation_realtime = global_vars->realtime;
   }
 
   void** vtable = *reinterpret_cast<void***>(localplayer);

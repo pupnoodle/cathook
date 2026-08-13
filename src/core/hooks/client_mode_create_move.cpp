@@ -31,7 +31,6 @@ V  o o  V  file: src/core/hooks/client_mode_create_move.cpp
 
 bool (*client_mode_create_move_original)(void*, float, user_cmd*);
 bool g_client_create_move_owns_features = false;
-thread_local bool g_taunt_create_move_override = false;
 
 static void movement_fix(user_cmd* user_cmd, Vec3 original_view_angle, float original_forward_move, float original_side_move) {
   if (user_cmd == nullptr) {
@@ -128,11 +127,17 @@ static void apply_taunt_slide(Player* localplayer, user_cmd* user_cmd) {
   }
 }
 
-static bool call_client_mode_create_move(void* me, float sample_time, user_cmd* user_cmd, bool taunt_slide) {
-  const bool previous_override = g_taunt_create_move_override;
-  g_taunt_create_move_override = taunt_slide;
+static bool call_client_mode_create_move(void* me, float sample_time, user_cmd* user_cmd,
+                                         Player* localplayer) {
+  const bool taunting = localplayer != nullptr && localplayer->is_alive() && localplayer->is_taunting();
+  const int taunt_buttons = taunting && user_cmd != nullptr
+    ? user_cmd->buttons & (IN_ATTACK | IN_ATTACK2 | IN_FORWARD | IN_BACK)
+    : 0;
+
   const bool result = client_mode_create_move_original(me, sample_time, user_cmd);
-  g_taunt_create_move_override = previous_override;
+  if (taunt_buttons != 0 && user_cmd != nullptr) {
+    user_cmd->buttons |= taunt_buttons;
+  }
   return result;
 }
 
@@ -228,7 +233,7 @@ bool client_mode_create_move_hook(void* me, float sample_time, user_cmd* user_cm
 
   if (g_client_create_move_owns_features) {
     Player* localplayer = entity_list != nullptr ? entity_list->get_localplayer() : nullptr;
-    return call_client_mode_create_move(me, sample_time, user_cmd, should_run_taunt_slide(localplayer));
+    return call_client_mode_create_move(me, sample_time, user_cmd, localplayer);
   }
 
   cat_bind::run();
@@ -236,9 +241,14 @@ bool client_mode_create_move_hook(void* me, float sample_time, user_cmd* user_cm
 
   const bool can_run_features = can_run_move_features(user_cmd);
   Player* localplayer = entity_list != nullptr ? entity_list->get_localplayer() : nullptr;
-  const bool rc = call_client_mode_create_move(me, sample_time, user_cmd, should_run_taunt_slide(localplayer));
+  const bool rc = call_client_mode_create_move(me, sample_time, user_cmd, localplayer);
+  const bool taunting = localplayer != nullptr && localplayer->is_taunting();
+  const bool taunt_slide = should_run_taunt_slide(localplayer);
 
-  if (!can_run_features) {
+  if (!can_run_features || taunting) {
+    if (taunt_slide) {
+      apply_taunt_slide(localplayer, user_cmd);
+    }
     return rc;
   }
 

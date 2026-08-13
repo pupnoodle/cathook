@@ -19,6 +19,7 @@ V  o o  V  file: src/features/visuals/thirdperson.cpp
 #include "games/tf2/sdk/interfaces/convar_system.hpp"
 #include "games/tf2/sdk/interfaces/engine_trace.hpp"
 #include "games/tf2/sdk/interfaces/entity_list.hpp"
+#include "games/tf2/sdk/interfaces/input.hpp"
 
 namespace
 {
@@ -117,30 +118,31 @@ namespace thirdperson
 
 bool should_draw_local_player()
 {
-  return is_enabled_for(get_localplayer());
+  auto* localplayer = get_localplayer();
+  return is_enabled_for(localplayer) || should_keep_game_taunt_camera(localplayer);
 }
 
 void update_taunt_camera()
 {
   auto* localplayer = get_localplayer();
-  const bool enabled = is_enabled_for(localplayer);
+  const bool force_thirdperson = is_enabled_for(localplayer) || should_keep_game_taunt_camera(localplayer);
 
   if (localplayer == nullptr) {
     was_forcing_taunt_camera = false;
     return;
   }
 
-  if (enabled) {
-    localplayer->set_taunt_cam(true);
-    was_forcing_taunt_camera = true;
-    return;
+  if (input != nullptr) {
+    if (force_thirdperson) {
+      input->to_thirdperson();
+    } else {
+      input->to_firstperson();
+    }
   }
 
-  if (was_forcing_taunt_camera && !should_keep_game_taunt_camera(localplayer)) {
-    localplayer->set_taunt_cam(false);
-  }
+  localplayer->set_taunt_cam(force_thirdperson);
 
-  was_forcing_taunt_camera = false;
+  was_forcing_taunt_camera = force_thirdperson;
 }
 
 void update_camera(view_setup* setup)
@@ -150,7 +152,7 @@ void update_camera(view_setup* setup)
   }
 
   auto* localplayer = get_localplayer();
-  if (!is_enabled_for(localplayer)) {
+  if (!is_enabled_for(localplayer) && !should_keep_game_taunt_camera(localplayer)) {
     return;
   }
 

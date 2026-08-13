@@ -2135,12 +2135,14 @@ void draw_atlas_tile(
   float min_y = std::numeric_limits<float>::max();
   float max_x = std::numeric_limits<float>::lowest();
   float max_y = std::numeric_limits<float>::lowest();
+  std::size_t projected_count = 0;
   for (const auto& point : world_points) {
     auto projected = Vec3{};
     if (!overlay_projection::world_to_screen(point, &projected)) {
-      return false;
+      continue;
     }
 
+    ++projected_count;
     min_x = std::min(min_x, projected.x);
     min_y = std::min(min_y, projected.y);
     max_x = std::max(max_x, projected.x);
@@ -2153,7 +2155,7 @@ void draw_atlas_tile(
     .max_x = max_x,
     .max_y = max_y
   };
-  if (!is_reasonable_screen_bounds(current_bounds)) {
+  if (projected_count < esp_bounds_min_projected_points || !is_reasonable_screen_bounds(current_bounds)) {
     return false;
   }
 
@@ -2184,12 +2186,14 @@ void draw_atlas_tile(
   float min_y = std::numeric_limits<float>::max();
   float max_x = std::numeric_limits<float>::lowest();
   float max_y = std::numeric_limits<float>::lowest();
+  std::size_t projected_count = 0;
   for (size_t index = 0; index < world_points.size(); ++index) {
     auto projected = Vec3{};
     if (!overlay_projection::world_to_screen(world_points[index], &projected)) {
-      return false;
+      continue;
     }
 
+    ++projected_count;
     box->screen_points[index] = projected;
     min_x = std::min(min_x, projected.x);
     min_y = std::min(min_y, projected.y);
@@ -2203,10 +2207,22 @@ void draw_atlas_tile(
     .max_x = max_x,
     .max_y = max_y
   };
-  if (!is_reasonable_screen_bounds(current_bounds)) {
+  if (projected_count < esp_bounds_min_projected_points || !is_reasonable_screen_bounds(current_bounds)) {
     return false;
   }
 
+  if (projected_count < world_points.size()) {
+    box->screen_points = {
+      Vec3{current_bounds.min_x, current_bounds.min_y, 0.0f},
+      Vec3{current_bounds.max_x, current_bounds.min_y, 0.0f},
+      Vec3{current_bounds.max_x, current_bounds.max_y, 0.0f},
+      Vec3{current_bounds.min_x, current_bounds.max_y, 0.0f},
+      Vec3{current_bounds.min_x, current_bounds.min_y, 0.0f},
+      Vec3{current_bounds.max_x, current_bounds.min_y, 0.0f},
+      Vec3{current_bounds.max_x, current_bounds.max_y, 0.0f},
+      Vec3{current_bounds.min_x, current_bounds.max_y, 0.0f},
+    };
+  }
   box->bounds = current_bounds;
   return true;
 }
@@ -3456,14 +3472,36 @@ void draw_players_imgui()
   cleanup_esp_bounds_cache();
 }
 
+[[nodiscard]] Vec3 backtrack_visual_anchor(const backtrack::backtrack_record& record)
+{
+  constexpr std::array<int, 5> preferred_hitboxes = {
+    aim_hitbox_head, aim_hitbox_spine_2, aim_hitbox_spine_1, aim_hitbox_pelvis, aim_hitbox_spine_0
+  };
+  for (const int preferred : preferred_hitboxes) {
+    for (int index = 0; index < record.hitbox_count; ++index) {
+      const auto& hitbox = record.hitboxes[index];
+      if (hitbox.valid && hitbox.hitbox == preferred && aimbot_vec3_is_finite(hitbox.center)) {
+        return hitbox.center;
+      }
+    }
+  }
+
+  for (int index = 0; index < record.hitbox_count; ++index) {
+    const auto& hitbox = record.hitboxes[index];
+    if (hitbox.valid && aimbot_vec3_is_finite(hitbox.center)) {
+      return hitbox.center;
+    }
+  }
+
+  return record.origin + ((record.mins + record.maxs) * 0.5f);
+}
+
 void draw_backtrack_visualizer_imgui()
 {
   const bool group_backtrack_enabled = any_backtrack_group_enabled();
   if (!backtrack::is_enabled() ||
       (!config.backtrack.visualizer && !group_backtrack_enabled) ||
-      engine == nullptr ||
-      entity_list == nullptr ||
-      !engine->is_in_game() ||
+      engine == nullptr || entity_list == nullptr || !engine->is_in_game() ||
       !overlay_projection::begin_frame()) {
     return;
   }
@@ -3477,23 +3515,15 @@ void draw_backtrack_visualizer_imgui()
   const int max_draw_ticks = std::clamp(config.backtrack.visualizer_ticks, 1, backtrack::max_records);
   for (unsigned int index = 1; index <= entity_list->get_max_entities(); ++index) {
     auto* player = entity_list->player_from_index(index);
-    if (player == nullptr || player == localplayer) {
-      continue;
-    }
+    if (player == nullptr || player == localplayer) continue;
 
-    const visual_groups::visual_group_match group = visual_groups::group_for_entity(player->to_entity(), false);
+    const auto group = visual_groups::group_for_entity(player->to_entity(), false);
     const bool group_draws_backtrack = group && (group->backtrack & visual_group::backtrack_enabled) != 0;
-    if (!config.backtrack.visualizer && !group_draws_backtrack) {
-      continue;
-    }
-    if (!group_draws_backtrack && (player->is_friend() || player->is_ignored())) {
-      continue;
-    }
+    if (!config.backtrack.visualizer && !group_draws_backtrack) continue;
+    if (!group_draws_backtrack && (player->is_friend() || player->is_ignored())) continue;
 
-    const auto* history = backtrack::records_for_player(player);
-    if (history == nullptr) {
-      continue;
-    }
+    const auto records = backtrack::visual_records(player);
+    if (records.count <= 0) continue;
 
     RGBA base_color{255, 128, 0, 255};
     uint32_t backtrack_flags = visual_group::backtrack_enabled | visual_group::backtrack_always;
@@ -3502,85 +3532,68 @@ void draw_backtrack_visualizer_imgui()
       backtrack_flags = group->backtrack;
     }
 
-    int newest_valid_record = -1;
-    int oldest_valid_record = -1;
-    for (int record_index = 0; record_index < history->record_count; ++record_index) {
-      const auto& record = history->records[record_index];
-      if (!backtrack::is_record_valid(record, player) || record.hitbox_count <= 0 || !record.hitboxes[0].valid) {
-        continue;
-      }
-
-      if (newest_valid_record < 0) {
-        newest_valid_record = record_index;
-      }
-      oldest_valid_record = record_index;
-    }
+    const auto timing_records = config.backtrack.visualizer_mode == backtrack_config::visualizer_style::unified
+      ? backtrack::valid_records(player) : backtrack::backtrack_record_view{};
+    const backtrack::backtrack_record* unified_record = timing_records.count > 0 ? timing_records.records[0] : nullptr;
+    const bool draw_first = (backtrack_flags & visual_group::backtrack_first) != 0;
+    const bool draw_last = (backtrack_flags & visual_group::backtrack_last) != 0;
+    const bool draw_all = (backtrack_flags & visual_group::backtrack_always) != 0 || (!draw_first && !draw_last);
 
     Vec3 previous_screen{};
     bool previous_valid = false;
     int drawn_records = 0;
-    const bool draw_always = (backtrack_flags & visual_group::backtrack_always) != 0 ||
-      (backtrack_flags & (visual_group::backtrack_last | visual_group::backtrack_first)) ==
-        (visual_group::backtrack_last | visual_group::backtrack_first);
+    for (int record_index = 0; record_index < records.count && drawn_records < max_draw_ticks; ++record_index) {
+      const auto* record = records.records[record_index];
+      if (record == nullptr || record->bone_count <= 0) continue;
+      if (unified_record != nullptr && record != unified_record) continue;
 
-    for (int record_index = 0; record_index < history->record_count && drawn_records < max_draw_ticks; ++record_index) {
-      const auto& record = history->records[record_index];
-      if (!backtrack::is_record_valid(record, player) || record.hitbox_count <= 0 || !record.hitboxes[0].valid) {
-        previous_valid = false;
-        continue;
-      }
-      if (!draw_always) {
-        const bool draw_first = (backtrack_flags & visual_group::backtrack_first) != 0;
-        const bool draw_newest = !draw_first || (backtrack_flags & visual_group::backtrack_last) != 0
-          ? record_index == newest_valid_record
-          : false;
-        const bool draw_oldest = draw_first && (backtrack_flags & visual_group::backtrack_last) == 0 && record_index == oldest_valid_record;
-        if (!draw_newest && !draw_oldest) {
-          continue;
-        }
-      }
+      const bool selected = draw_all ||
+        (draw_first && record_index == 0) ||
+        (draw_last && record_index == records.count - 1);
+      if (!selected) continue;
 
       const float age_fraction = static_cast<float>(drawn_records) / static_cast<float>(std::max(max_draw_ticks, 1));
       const int alpha_byte = std::clamp(static_cast<int>((1.0f - age_fraction) * 220.0f), 35, 220);
       const ImU32 color = IM_COL32(base_color.r, base_color.g, base_color.b, alpha_byte);
+      const float alpha_scale = static_cast<float>(alpha_byte) / 255.0f;
       ++drawn_records;
 
-      auto bounds = esp_bounds{};
+      const Vec3 anchor = backtrack_visual_anchor(*record);
       switch (config.backtrack.visualizer_mode) {
-      case backtrack_config::visualizer_style::boxes:
-        if (get_backtrack_record_screen_bounds(record, &bounds)) {
-          draw_corner_box(draw_list, bounds, color, static_cast<float>(alpha_byte) / 255.0f);
+      case backtrack_config::visualizer_style::boxes: {
+        esp_bounds bounds{};
+        if (get_backtrack_record_screen_bounds(*record, &bounds)) {
+          draw_corner_box(draw_list, bounds, color, alpha_scale);
         }
         break;
+      }
       case backtrack_config::visualizer_style::projected_boxes: {
-        auto box = projected_box{};
-        if (get_backtrack_record_projected_box(record, &box)) {
-          draw_projected_box(draw_list, box, color, static_cast<float>(alpha_byte) / 255.0f);
+        projected_box box{};
+        if (get_backtrack_record_projected_box(*record, &box)) {
+          draw_projected_box(draw_list, box, color, alpha_scale);
+        } else {
+          esp_bounds bounds{};
+          if (get_backtrack_record_screen_bounds(*record, &bounds)) draw_corner_box(draw_list, bounds, color, alpha_scale);
         }
         break;
       }
       case backtrack_config::visualizer_style::trail: {
         Vec3 screen{};
-        if (overlay_projection::world_to_screen(record.hitboxes[0].center, &screen)) {
+        if (overlay_projection::world_to_screen(anchor, &screen)) {
           if (previous_valid) {
-            draw_list->AddLine(
-              ImVec2(previous_screen.x + 1.0f, previous_screen.y + 1.0f),
-              ImVec2(screen.x + 1.0f, screen.y + 1.0f),
-              IM_COL32(0, 0, 0, alpha_byte),
-              4.0f);
+            draw_list->AddLine(ImVec2(previous_screen.x + 1.0f, previous_screen.y + 1.0f),
+              ImVec2(screen.x + 1.0f, screen.y + 1.0f), IM_COL32(0, 0, 0, alpha_byte), 4.0f);
             draw_list->AddLine(ImVec2(previous_screen.x, previous_screen.y), ImVec2(screen.x, screen.y), color, 2.0f);
           }
           draw_list->AddCircleFilled(ImVec2(screen.x, screen.y), 2.5f, color, 12);
           previous_screen = screen;
           previous_valid = true;
-        } else {
-          previous_valid = false;
         }
         break;
       }
       case backtrack_config::visualizer_style::pulse: {
         Vec3 screen{};
-        if (overlay_projection::world_to_screen(record.hitboxes[0].center, &screen)) {
+        if (overlay_projection::world_to_screen(anchor, &screen)) {
           const float realtime = global_vars != nullptr ? global_vars->realtime : ImGui::GetTime();
           const float pulse = 0.5f + (0.5f * std::sin((realtime * 7.0f) + (age_fraction * 5.0f)));
           const float radius = 4.0f + (pulse * 7.0f);
@@ -3590,25 +3603,34 @@ void draw_backtrack_visualizer_imgui()
         }
         break;
       }
+      case backtrack_config::visualizer_style::unified: {
+        projected_box box{};
+        if (get_backtrack_record_projected_box(*record, &box)) {
+          draw_projected_box(draw_list, box, color, alpha_scale);
+        } else {
+          esp_bounds bounds{};
+          if (get_backtrack_record_screen_bounds(*record, &bounds)) draw_corner_box(draw_list, bounds, color, alpha_scale);
+        }
+        Vec3 screen{};
+        if (overlay_projection::world_to_screen(anchor, &screen)) {
+          draw_list->AddCircleFilled(ImVec2(screen.x, screen.y), 3.0f, color, 12);
+        }
+        break;
+      }
       case backtrack_config::visualizer_style::points:
       default: {
         Vec3 screen{};
-        if (overlay_projection::world_to_screen(record.hitboxes[0].center, &screen)) {
-          draw_list->AddRectFilled(
-            ImVec2(screen.x - 3.0f, screen.y - 3.0f),
-            ImVec2(screen.x + 3.0f, screen.y + 3.0f),
-            IM_COL32(0, 0, 0, alpha_byte));
-          draw_list->AddRectFilled(
-            ImVec2(screen.x - 2.0f, screen.y - 2.0f),
-            ImVec2(screen.x + 2.0f, screen.y + 2.0f),
-            color);
+        if (overlay_projection::world_to_screen(anchor, &screen)) {
+          draw_list->AddRectFilled(ImVec2(screen.x - 3.0f, screen.y - 3.0f),
+            ImVec2(screen.x + 3.0f, screen.y + 3.0f), IM_COL32(0, 0, 0, alpha_byte));
+          draw_list->AddRectFilled(ImVec2(screen.x - 2.0f, screen.y - 2.0f),
+            ImVec2(screen.x + 2.0f, screen.y + 2.0f), color);
         }
         break;
       }
       }
     }
   }
-
 }
 
 void draw_aimbot_fov_imgui()

@@ -448,15 +448,19 @@ void draw_backtrack_effects(void* instance, const DrawModelState& state, const M
   Player* player, const visual_group_backtrack_settings& settings, const float distance)
 {
   if (player == nullptr || !settings.active() || !backtrack::is_enabled()) return;
-  const backtrack::backtrack_record_view records = backtrack::valid_records(player);
+  const backtrack::backtrack_record_view records = backtrack::visual_records(player);
   if (records.count <= 0) return;
 
   int first = 0;
   int last = 1;
-  if (settings.record_mode == 1) {
+  if (settings.record_mode == 0) {
     first = records.count - 1;
     last = records.count;
+  } else if (settings.record_mode == 1) {
+    first = 0;
+    last = 1;
   } else if (settings.record_mode == 2) {
+    first = 0;
     last = records.count;
   }
 

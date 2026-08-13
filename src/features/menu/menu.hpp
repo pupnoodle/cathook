@@ -144,7 +144,7 @@ enum visuals_subtab_id
 {
   visuals_subtab_entity_profiles,
   visuals_subtab_indicators,
-  visuals_subtab_map,
+  visuals_subtab_radar,
   visuals_subtab_other
 };
 
@@ -1006,7 +1006,6 @@ static void draw_aimbot_content() {
     cat_menu::checkbox("Shoot through glass", &config.aimbot.shoot_through_glass);
     cat_menu::checkbox("Spread compensation", &config.aimbot.spread_compensation);
     cat_menu::checkbox("Auto resolver", &config.aimbot.resolver);
-    cat_menu::checkbox("Debug overlay", &config.aimbot.debug_overlay);
     cat_menu::combo("Aim mode", (int*)&config.aimbot.aim_mode, aim_mode_items, IM_ARRAYSIZE(aim_mode_items));
     cat_menu::slider_float("Aim FOV", &config.aimbot.fov, 0.0f, 180.0f, "%.0f deg");
     cat_menu::slider_float("Assist strength", &config.aimbot.assist_strength, 0.0f, 100.0f, "%.0f%%");
@@ -1752,6 +1751,33 @@ static void draw_visual_groups_content_tfwin() {
 }
 
 static void draw_visuals_world_content() {
+  static const char* modulation_items[] = {"World", "Sky", "Props", "Particles", "Fog"};
+  static const uint32_t modulation_bits[] = {
+    Visuals::modulation_world, Visuals::modulation_sky, Visuals::modulation_prop,
+    Visuals::modulation_particle, Visuals::modulation_fog
+  };
+  static const char* world_texture_items[] = {"Default", "Dev", "Camo", "Black", "White", "Gray"};
+  static const char* projectile_trail_items[] = {
+    "Default", "None", "Rocket", "Critical", "Energy", "Charged", "Fireball", "Teleport", "Fire", "Flame",
+    "Sparks", "Flare", "Trail", "Health", "Smoke", "Bubbles", "Halloween", "Monoculus", "Rainbow"
+  };
+  static const char* beam_items[] = {"Default", "None", "Uber", "Dispenser", "Passtime", "Bombonomicon", "White", "Orange"};
+  static const char* charge_items[] = {
+    "Default", "None", "Electrocuted", "Halloween", "Fireball", "Teleport", "Burning", "Scorching",
+    "Purple energy", "Green energy", "Nebula", "Purple stars", "Green stars", "Sunbeams", "Spellbound",
+    "Purple sparks", "Yellow sparks", "Green zap", "Yellow zap", "Plasma", "Frostbite", "Purple souls",
+    "Green souls", "Bubbles", "Hearts"
+  };
+  const auto string_combo = [](const char* label, std::string& value, const char* const* items, const int count) {
+    int selected = 0;
+    for (int index = 0; index < count; ++index) {
+      if (value == items[index]) {
+        selected = index;
+        break;
+      }
+    }
+    if (cat_menu::combo(label, &selected, items, count)) value = items[selected];
+  };
   cat_menu::begin_flow_layout("visuals_world_layout", 2);
   cat_menu::flow_panel("World", 0, 324.0f, [&]() {
     cat_menu::combo("Skybox", &config.visuals.skybox_changer_index,
@@ -1772,10 +1798,38 @@ static void draw_visuals_world_content() {
     cat_menu::checkbox("ESP lerp", &config.visuals.esp_lerp);
     cat_menu::checkbox("Dormant ESP", &config.visuals.dormant_esp);
   });
-  cat_menu::flow_panel("Removals", 1, 112.0f, [&]() {
+  cat_menu::flow_panel("Color modulation", 1, 270.0f, [&]() {
+    cat_menu::multi_select_combo("Modulations", &config.visuals.world.modulation_mask,
+                                 modulation_items, modulation_bits, IM_ARRAYSIZE(modulation_items));
+    cat_menu::color_picker("World color", &config.visuals.world.world_color);
+    cat_menu::color_picker("Sky color", &config.visuals.world.sky_color);
+    cat_menu::color_picker("Prop color", &config.visuals.world.prop_color);
+    cat_menu::color_picker("Particle color", &config.visuals.world.particle_color);
+    cat_menu::color_picker("Fog color", &config.visuals.world.fog_color);
+    cat_menu::combo("World texture", &config.visuals.world.world_texture,
+                    world_texture_items, IM_ARRAYSIZE(world_texture_items));
+  });
+  cat_menu::flow_panel("Effects", 0, 228.0f, [&]() {
+    string_combo("Projectile trail", config.visuals.effects.projectile_trail, projectile_trail_items,
+                 IM_ARRAYSIZE(projectile_trail_items));
+    string_combo("Medigun beam", config.visuals.effects.medigun_beam, beam_items, IM_ARRAYSIZE(beam_items));
+    string_combo("Medigun charge", config.visuals.effects.medigun_charge, charge_items, IM_ARRAYSIZE(charge_items));
+    cat_menu::checkbox("Remove screen overlays", &config.visuals.effects.remove_screen_overlays);
+    cat_menu::checkbox("Remove screen effects", &config.visuals.effects.remove_screen_effects);
+  });
+  cat_menu::flow_panel("Removals", 1, 250.0f, [&]() {
+    cat_menu::checkbox("Remove interpolation", &config.visuals.removals.interpolation);
+    cat_menu::checkbox("Remove lerp", &config.visuals.removals.lerp);
     cat_menu::checkbox("Remove scope", &config.visuals.removals.scope);
     cat_menu::checkbox("Remove zoom", &config.visuals.removals.zoom);
     cat_menu::checkbox("Flat scoped sensitivity", &config.visuals.flat_zoom_sensitivity);
+    cat_menu::checkbox("Remove disguises", &config.visuals.removals.disguises);
+    cat_menu::checkbox("Remove taunts", &config.visuals.removals.taunts);
+    cat_menu::checkbox("Remove post-processing", &config.visuals.removals.post_processing);
+    cat_menu::checkbox("Remove view punch", &config.visuals.removals.view_punch);
+    cat_menu::checkbox("Remove angle forcing", &config.visuals.removals.angle_forcing);
+    cat_menu::checkbox("Remove ragdolls", &config.visuals.removals.ragdolls);
+    cat_menu::checkbox("Remove gibs", &config.visuals.removals.gibs);
   });
   cat_menu::end_flow_layout();
 }
@@ -1820,7 +1874,12 @@ static void draw_visuals_ui_content() {
     cat_menu::checkbox("Change displayed rank", &config.visuals.casual_medal.changer);
     cat_menu::slider_int("Displayed rank", &config.visuals.casual_medal.rank, 1, 1200);
   });
-  cat_menu::flow_panel("Radar", 1, 356.0f, [&]() {
+  cat_menu::end_flow_layout();
+}
+
+static void draw_radar_content() {
+  cat_menu::begin_flow_layout("radar_layout", 2);
+  cat_menu::flow_panel("Radar settings", 0, 356.0f, [&]() {
     cat_menu::checkbox("Enable radar", &config.visuals.radar.enabled);
     cat_menu::slider_float("Radar X", &config.visuals.radar.x, 0.0f, 1920.0f, "%.0f px");
     cat_menu::slider_float("Radar Y", &config.visuals.radar.y, 0.0f, 1080.0f, "%.0f px");
@@ -1855,8 +1914,8 @@ static void draw_visuals_tab(const int visuals_subtab) {
     case cat_menu::visuals_subtab_indicators:
       draw_visuals_ui_content();
       break;
-    case cat_menu::visuals_subtab_map:
-      draw_navbot_content();
+    case cat_menu::visuals_subtab_radar:
+      draw_radar_content();
       break;
     case cat_menu::visuals_subtab_other:
       draw_visuals_world_content();
@@ -1888,6 +1947,8 @@ static void draw_movement_content() {
     cat_menu::checkbox("Duck jump", &config.misc.movement.duck_jump);
     cat_menu::checkbox("Break jump", &config.misc.movement.break_jump);
     cat_menu::checkbox("Auto reverse jump", &config.misc.movement.auto_reverse_jump);
+  });
+  cat_menu::flow_panel("Movement extras", 1, 220.0f, [&]() {
     cat_menu::checkbox("Fast stop", &config.misc.movement.fast_stop);
     cat_menu::checkbox("Fast accelerate", &config.misc.movement.fast_accelerate);
     cat_menu::combo("Auto edgebug", (int*)&config.misc.movement.auto_edgebug, auto_edgebug_items, IM_ARRAYSIZE(auto_edgebug_items));
@@ -2500,7 +2561,8 @@ static void draw_exploits_content() {
     "Boxes",
     "Projected boxes",
     "Trail",
-    "Pulse"
+    "Pulse",
+    "Unified (best record)"
   };
 
   static const char* anti_aim_pitch_items[] = {
@@ -2585,77 +2647,6 @@ static void draw_exploits_content() {
     cat_menu::slider_float("Spin speed", &config.misc.exploits.anti_aim_spin_speed, -180.0f, 180.0f, "%.0f deg");
     cat_menu::checkbox("Anti-overlap", &config.misc.exploits.anti_aim_anti_overlap);
   });
-  cat_menu::end_flow_layout();
-}
-
-static void draw_misc_content(const int misc_subtab) {
-  cat_menu::begin_flow_layout("misc_layout", 2);
-  if (misc_subtab == 0) {
-    cat_menu::flow_panel("Collective", 0, 96.0f, [&]() {
-      cat_menu::checkbox("Custom announcer", &config.misc.automation.custom_announcer);
-    });
-  } else {
-    static const char* anti_aim_pitch_items[] = {
-      "Off",
-      "Up",
-      "Down",
-      "Zero",
-      "Half up",
-      "Half down",
-      "Jitter",
-      "Random"
-    };
-    static const char* anti_aim_yaw_base_items[] = {
-      "View",
-      "Target"
-    };
-    static const char* anti_aim_yaw_items[] = {
-      "Off",
-      "Forward",
-      "Left",
-      "Right",
-      "Backwards",
-      "Jitter",
-      "Spin",
-      "Random",
-      "Sideways"
-    };
-
-    cat_menu::flow_panel("Exploits", 0, 332.0f, [&]() {
-      cat_menu::checkbox("Bypass sv_pure", &config.misc.exploits.bypasspure);
-      cat_menu::checkbox("Pure bypass", &config.misc.exploits.pure_bypass);
-      cat_menu::checkbox("Cheats bypass", &config.misc.exploits.cheats_bypass);
-      cat_menu::checkbox("VAC bypass", &config.misc.exploits.vac_bypass);
-      cat_menu::checkbox("Network fix", &config.misc.exploits.network_fix);
-      cat_menu::checkbox("Tickbase", &config.misc.exploits.tickbase);
-      cat_menu::checkbox("Recharge", &config.misc.exploits.tickbase_recharge);
-      cat_menu::checkbox("Doubletap", &config.misc.exploits.doubletap);
-      cat_menu::slider_int("Doubletap ticks", &config.misc.exploits.doubletap_ticks, 1, 21);
-      cat_menu::checkbox("Warp", &config.misc.exploits.warp);
-      cat_menu::slider_int("Warp ticks", &config.misc.exploits.warp_ticks, 1, 21);
-      cat_menu::checkbox("Fakelag", &config.misc.exploits.fakelag);
-      cat_menu::slider_int("Fakelag ticks", &config.misc.exploits.fakelag_ticks, 1, 21);
-      cat_menu::checkbox("Antiwarp", &config.misc.exploits.antiwarp);
-      cat_menu::checkbox("Equip region unlock", &config.misc.exploits.equip_region_unlock);
-      cat_menu::checkbox("Ping reducer", &config.misc.exploits.ping_reducer);
-      cat_menu::slider_int("Ping target", &config.misc.exploits.ping_target, 1, 100);
-      cat_menu::checkbox("No engine sleep", &config.misc.exploits.no_engine_sleep);
-      cat_menu::checkbox("Null graphics", &config.misc.exploits.null_graphics);
-    });
-    cat_menu::flow_panel("Anti-aim", 1, 286.0f, [&]() {
-      cat_menu::checkbox("Enable", &config.misc.exploits.anti_aim);
-      cat_menu::combo("Real pitch", (int*)&config.misc.exploits.anti_aim_real_pitch, anti_aim_pitch_items, IM_ARRAYSIZE(anti_aim_pitch_items));
-      cat_menu::combo("Fake pitch", (int*)&config.misc.exploits.anti_aim_fake_pitch, anti_aim_pitch_items, IM_ARRAYSIZE(anti_aim_pitch_items));
-      cat_menu::combo("Real base", (int*)&config.misc.exploits.anti_aim_real_yaw_base, anti_aim_yaw_base_items, IM_ARRAYSIZE(anti_aim_yaw_base_items));
-      cat_menu::combo("Fake base", (int*)&config.misc.exploits.anti_aim_fake_yaw_base, anti_aim_yaw_base_items, IM_ARRAYSIZE(anti_aim_yaw_base_items));
-      cat_menu::combo("Real yaw", (int*)&config.misc.exploits.anti_aim_real_yaw, anti_aim_yaw_items, IM_ARRAYSIZE(anti_aim_yaw_items));
-      cat_menu::combo("Fake yaw", (int*)&config.misc.exploits.anti_aim_fake_yaw, anti_aim_yaw_items, IM_ARRAYSIZE(anti_aim_yaw_items));
-      cat_menu::slider_float("Real offset", &config.misc.exploits.anti_aim_real_yaw_offset, -180.0f, 180.0f, "%.0f deg");
-      cat_menu::slider_float("Fake offset", &config.misc.exploits.anti_aim_fake_yaw_offset, -180.0f, 180.0f, "%.0f deg");
-      cat_menu::slider_float("Spin speed", &config.misc.exploits.anti_aim_spin_speed, -180.0f, 180.0f, "%.0f deg");
-      cat_menu::checkbox("Anti-overlap", &config.misc.exploits.anti_aim_anti_overlap);
-    });
-  }
   cat_menu::end_flow_layout();
 }
 
@@ -3064,8 +3055,7 @@ static void draw_settings_content(const cathook_tab_id tab, const int section, c
   case cathook_tab_exploits:  draw_exploits_content(); break;
   case cathook_tab_visuals:   draw_visuals_tab(section); break;
   case cathook_tab_misc:
-    if (section == 0) draw_misc_content(0);
-    else draw_movement_content();
+    draw_movement_content();
     break;
   case cathook_tab_binds:     draw_binds_content(); break;
   case cathook_tab_settings:  draw_system_tab(settings_section); break;
@@ -3105,10 +3095,9 @@ static void warmup_bind_targets()
   draw_automation_tab(cat_menu::automation_subtab_ipc);
   draw_exploits_content();
   draw_visuals_tab(cat_menu::visuals_subtab_indicators);
-  draw_visuals_tab(cat_menu::visuals_subtab_map);
+  draw_visuals_tab(cat_menu::visuals_subtab_radar);
   draw_visuals_tab(cat_menu::visuals_subtab_other);
-  draw_misc_content(0);
-  draw_misc_content(1);
+  draw_movement_content();
 
   int& selected_group = cat_menu::selected_visual_group();
   const int previous_group = selected_group;
@@ -3136,7 +3125,6 @@ static void draw_menu(void) {
   static int aimbot_section{};
   static int automation_section{};
   static int visuals_section{};
-  static int misc_section{};
   static int settings_section{};
 
   const auto navbar_entry = [](const char* const label, const bool active, const char* const icon = nullptr) {
@@ -3190,12 +3178,11 @@ static void draw_menu(void) {
       case cathook_tab_visuals:
         if (subnavbar_entry("Entity profiles", visuals_section == 0)) visuals_section = 0;
         if (subnavbar_entry("Indicators", visuals_section == 1)) visuals_section = 1;
-        if (subnavbar_entry("Map", visuals_section == 2)) visuals_section = 2;
+        if (subnavbar_entry("Radar", visuals_section == 2)) visuals_section = 2;
         if (subnavbar_entry("Other", visuals_section == 3)) visuals_section = 3;
         break;
       case cathook_tab_misc:
-        if (subnavbar_entry("General", misc_section == 0)) misc_section = 0;
-        if (subnavbar_entry("Movement", misc_section == 1)) misc_section = 1;
+        subnavbar_entry("Movement", true);
         break;
       case cathook_tab_settings:
         if (subnavbar_entry("Configurations", settings_section == 0)) settings_section = 0;
@@ -3215,8 +3202,7 @@ static void draw_menu(void) {
     });
 
   if (visible) {
-    draw_settings_content(tab, tab == cathook_tab_misc ? misc_section :
-      tab == cathook_tab_visuals ? visuals_section : tab == cathook_tab_aimbot ? aimbot_section :
+    draw_settings_content(tab, tab == cathook_tab_visuals ? visuals_section : tab == cathook_tab_aimbot ? aimbot_section :
       tab == cathook_tab_automation ? automation_section : 0, settings_section);
     cat_bind::draw_popup();
   }

@@ -171,7 +171,8 @@ struct backtrack_config {
     boxes,
     projected_boxes,
     trail,
-    pulse
+    pulse,
+    unified
   };
 
   bool enabled = true;
@@ -461,6 +462,32 @@ struct visual_group_config {
 };
 
 struct Visuals {
+  enum modulation_flags : uint32_t {
+    modulation_world = 1u << 0,
+    modulation_sky = 1u << 1,
+    modulation_prop = 1u << 2,
+    modulation_particle = 1u << 3,
+    modulation_fog = 1u << 4
+  };
+
+  struct World {
+    uint32_t modulation_mask = 0;
+    RGBA_float world_color{};
+    RGBA_float sky_color{};
+    RGBA_float prop_color{};
+    RGBA_float particle_color{};
+    RGBA_float fog_color{};
+    int world_texture = 0;
+  } world;
+
+  struct Effects {
+    std::string projectile_trail = "Default";
+    std::string medigun_beam = "Default";
+    std::string medigun_charge = "Default";
+    bool remove_screen_overlays = false;
+    bool remove_screen_effects = false;
+  } effects;
+
   struct CasualMedal {
     bool guaranteed_flip = false;
     bool changer = false;
@@ -493,8 +520,17 @@ struct Visuals {
   } indicators;
 
   struct Removals {
+    bool interpolation = false;
+    bool lerp = false;
     bool scope = false;
     bool zoom = false;
+    bool disguises = false;
+    bool taunts = false;
+    bool post_processing = false;
+    bool view_punch = false;
+    bool angle_forcing = false;
+    bool ragdolls = false;
+    bool gibs = false;
   } removals;
 
   struct Thirdperson {

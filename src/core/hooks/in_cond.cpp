@@ -13,8 +13,6 @@ V  o o  V  file: src/core/hooks/in_cond.cpp
 #include "games/tf2/sdk/interfaces/entity_list.hpp"
 #include "games/tf2/sdk/entities/player.hpp"
 
-extern thread_local bool g_taunt_create_move_override;
-
 bool in_cond_hook(void* me, int mask) {
   CATHOOK_HOOK_GUARD();
   if (cathook::core::is_detach_pending()) {
@@ -25,11 +23,12 @@ bool in_cond_hook(void* me, int mask) {
     return false;
   }
 
-  if (g_taunt_create_move_override && mask == TF_COND_TAUNTING &&
-      config.misc.movement.taunt_slide && entity_list != nullptr) {
-    Player* localplayer = entity_list->get_localplayer();
-    if (localplayer != nullptr && me == localplayer->get_shared() &&
-        localplayer->is_alive() && localplayer->allow_move_during_taunt()) {
+  const bool remove_disguise = config.visuals.removals.disguises &&
+    (mask == TF_COND_DISGUISED || mask == TF_COND_DISGUISED_AS_DISPENSER);
+  const bool remove_taunt = config.visuals.removals.taunts && mask == TF_COND_TAUNTING;
+  if (remove_disguise || remove_taunt) {
+    Player* localplayer = entity_list != nullptr ? entity_list->get_localplayer() : nullptr;
+    if (localplayer == nullptr || me != localplayer->get_shared()) {
       return false;
     }
   }

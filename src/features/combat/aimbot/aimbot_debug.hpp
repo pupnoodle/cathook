@@ -257,6 +257,8 @@ inline const char* aimbot_debug_resolver_mode_name(int mode) {
     return "spin";
   case 5:
     return "fakewalk";
+  case 6:
+    return "sideways";
   default:
     break;
   }

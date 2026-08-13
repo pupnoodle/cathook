@@ -18,9 +18,11 @@ V  o o  V  file: src/core/hooks/client_create_move.cpp
 #include "games/tf2/sdk/entities/player.hpp"
 #include "core/entity_cache.hpp"
 #include "core/detach.hpp"
+#include "features/menu/binds.hpp"
 #include "features/automation/medic_automation/medic_automation.hpp"
 #include "features/combat/anti_aim/anti_aim.hpp"
 #include "features/combat/tickbase/tickbase.hpp"
+#include "features/visuals/thirdperson.hpp"
 
 void (*client_create_move_original)(void*, int, float, bool);
 
@@ -130,27 +132,23 @@ void client_create_move_hook(void* me, int sequence_number, float input_sample_f
   refresh_prediction_state();
   cat_bind::run();
   automation::controller().on_create_move(user_cmd);
+  thirdperson::update_taunt_camera();
 
-  move_features_result move_result{};
-  bool taunt_slide = false;
   if (can_run_move_features(user_cmd)) {
     Player* localplayer = entity_list->get_localplayer();
-    taunt_slide = should_run_taunt_slide(localplayer);
-    if (taunt_slide) {
-      user_cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2 | IN_ATTACK3);
+    const bool taunting = localplayer != nullptr && localplayer->is_taunting();
+    if (taunting) {
       apply_taunt_slide(localplayer, user_cmd);
     } else {
       update_player_head_emoji_cache();
-      move_result = run_move_features(user_cmd);
+      run_move_features(user_cmd);
     }
   }
 
-  if (!taunt_slide) {
+  Player* localplayer = entity_list->get_localplayer();
+  if (localplayer == nullptr || !localplayer->is_taunting()) {
     tickbase::on_create_move(user_cmd);
     anti_aim::on_create_move(user_cmd);
-    if (!move_result.use_psilent) {
-      navbot::controller().apply_post_anti_aim(user_cmd);
-    }
   }
   aimbot::update_local_client_side_animation();
   update_verified_user_cmd(sequence_number, user_cmd);

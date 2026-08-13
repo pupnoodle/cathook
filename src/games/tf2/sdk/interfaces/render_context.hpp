@@ -79,6 +79,26 @@ public:
     set_depth_range_fn(this, near, far);
   }
 
+  void get_fog_distances(float* start, float* end) {
+    void** vtable = *(void***)this;
+    ((void (*)(void*, float*, float*, float*))vtable[137])(this, start, end, nullptr);
+  }
+
+  void fog_start(float value) {
+    void** vtable = *(void***)this;
+    ((void (*)(void*, float))vtable[42])(this, value);
+  }
+
+  void fog_end(float value) {
+    void** vtable = *(void***)this;
+    ((void (*)(void*, float))vtable[43])(this, value);
+  }
+
+  void fog_color3ub(unsigned char r, unsigned char g, unsigned char b) {
+    void** vtable = *(void***)this;
+    ((void (*)(void*, unsigned char, unsigned char, unsigned char))vtable[48])(this, r, g, b);
+  }
+
   void set_stencil_test_mask(int mask) {
     void** vtable = *(void***)this;
 

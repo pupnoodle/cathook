@@ -17,7 +17,6 @@ V  o o  V  file: src/features/combat/tickbase/tickbase.cpp
 #include "core/hooks/cl_read_packets.hpp"
 #include "features/combat/anti_aim/anti_aim.hpp"
 #include "features/combat/aimbot/aimbot.hpp"
-#include "features/combat/random_crits/crit_hack.hpp"
 #include "features/movement/bhop/bhop.hpp"
 #include "features/menu/config.hpp"
 #include "games/tf2/sdk/interfaces/client_state.hpp"
@@ -429,8 +428,7 @@ auto should_recharge() -> bool
   if (!config.misc.exploits.tickbase
       || !config.misc.exploits.tickbase_recharge
       || g_state.in_shift_rebuild
-      || g_state.mode != shift_mode::none
-      || crit_hack::has_pending_queued_force()) {
+      || g_state.mode != shift_mode::none) {
     return false;
   }
 
@@ -756,12 +754,6 @@ void update_shift_state(user_cmd* cmd)
     return;
   }
 
-  const auto crit_stats = crit_hack::get_stats();
-  if (crit_hack::should_hold_attack(cmd)
-      || crit_stats.queue == crit_hack::queue_state::releasing) {
-    return;
-  }
-
   if (config.misc.exploits.warp) {
     const int ticks_to_shift = available_shift_ticks(true);
     if (ticks_to_shift > 0) {
@@ -859,8 +851,6 @@ auto run_rebuilt_move(float accumulated_extra_samples, bool final_tick, bool for
     }
     const bool started_shift = previous_mode == shift_mode::none && g_state.mode != shift_mode::none;
     auto* created_cmd = input->get_user_cmd(next_command);
-    const auto crit_stats = crit_hack::get_stats();
-
     if (g_state.in_shift_rebuild) {
       update_verified_user_cmd(next_command, created_cmd);
     }
@@ -872,23 +862,6 @@ auto run_rebuilt_move(float accumulated_extra_samples, bool final_tick, bool for
     if (started_shift) {
       spend_shift_tick();
       g_state.send_packet = g_state.processing_ticks <= g_state.shift_goal;
-    }
-
-    const bool should_choke_queued_crit = !config.misc.exploits.tickbase
-        && !g_state.in_shift_rebuild
-        && !started_shift
-        && crit_stats.queue == crit_hack::queue_state::waiting_for_seed
-        && crit_hack::wants_queued_force(created_cmd)
-        && crit_hack::should_hold_attack(created_cmd);
-
-    if (should_choke_queued_crit) {
-      g_state.send_packet = false;
-    } else if (!g_state.in_shift_rebuild
-        && crit_stats.queue == crit_hack::queue_state::releasing
-        && created_cmd != nullptr
-        && is_attack_command(created_cmd)) {
-      crit_hack::notify_queued_release(created_cmd->command_number);
-      g_state.send_packet = true;
     }
 
     if (client_state->chokedcommands >= max_choked_commands) {

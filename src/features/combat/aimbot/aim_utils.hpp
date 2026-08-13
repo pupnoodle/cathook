@@ -1141,8 +1141,62 @@ inline float aimbot_effective_bone_size_min_scale() {
   return std::clamp(configured, 0.05f, 1.0f);
 }
 
+inline float aimbot_multipoint_scale_for_hitbox(int base_hitbox) {
+  if (base_hitbox == aim_hitbox_head) {
+    return 0.72f;
+  }
+
+  return aimbot_effective_multipoint_scale();
+}
+
+inline bool aimbot_local_point_inside_hitbox(const Vec3& point, const studio_box& hitbox) {
+  if (!aimbot_vec3_is_finite(point) || !aimbot_vec3_is_finite(hitbox.bbmin) ||
+      !aimbot_vec3_is_finite(hitbox.bbmax)) {
+    return false;
+  }
+
+  constexpr float epsilon = 0.01f;
+  const Vec3 center = (hitbox.bbmin + hitbox.bbmax) * 0.5f;
+  const Vec3 half = (hitbox.bbmax - hitbox.bbmin) * 0.5f;
+  const Vec3 delta = point - center;
+  if (delta.x < -half.x - epsilon || delta.x > half.x + epsilon ||
+      delta.y < -half.y - epsilon || delta.y > half.y + epsilon ||
+      delta.z < -half.z - epsilon || delta.z > half.z + epsilon) {
+    return false;
+  }
+
+  if (!std::isfinite(hitbox.radius) || hitbox.radius <= 0.0f) {
+    return true;
+  }
+
+  const float half_values[3]{half.x, half.y, half.z};
+  int axis = 0;
+  if (half_values[1] > half_values[axis]) axis = 1;
+  if (half_values[2] > half_values[axis]) axis = 2;
+
+  const int first_radial_axis = axis == 0 ? 1 : 0;
+  const int second_radial_axis = axis == 2 ? 1 : 2;
+  const float radial_limit = std::min({
+    hitbox.radius,
+    half_values[first_radial_axis],
+    half_values[second_radial_axis]});
+  if (radial_limit <= 0.0f) {
+    return true;
+  }
+
+  const float axial_half = std::max(0.0f, half_values[axis] - radial_limit);
+  const float delta_values[3]{delta.x, delta.y, delta.z};
+  const float axial = std::fabs(delta_values[axis]);
+  const float radial_first = delta_values[first_radial_axis];
+  const float radial_second = delta_values[second_radial_axis];
+  const float outside_axial = std::max(0.0f, axial - axial_half);
+  const float distance_squared = outside_axial * outside_axial +
+    radial_first * radial_first + radial_second * radial_second;
+  return distance_squared <= (radial_limit * radial_limit) + epsilon;
+}
+
 inline int aimbot_build_local_hitbox_points(const studio_box& hitbox,
-  const matrix_3x4& bone_to_world,
+  const matrix_3x4&,
   const Vec3&,
   Vec3* points,
   int max_points,
@@ -1156,40 +1210,77 @@ inline int aimbot_build_local_hitbox_points(const studio_box& hitbox,
     return point_count;
   }
 
-  const float scale = aimbot_effective_multipoint_scale();
+  const float scale = aimbot_multipoint_scale_for_hitbox(base_hitbox);
   if (scale <= 0.0f) {
     return point_count;
   }
 
-  const Vec3 corners[8]{
-    { hitbox.bbmin.x, hitbox.bbmin.y, hitbox.bbmin.z },
-    { hitbox.bbmax.x, hitbox.bbmin.y, hitbox.bbmin.z },
-    { hitbox.bbmin.x, hitbox.bbmax.y, hitbox.bbmin.z },
-    { hitbox.bbmax.x, hitbox.bbmax.y, hitbox.bbmin.z },
-    { hitbox.bbmin.x, hitbox.bbmin.y, hitbox.bbmax.z },
-    { hitbox.bbmax.x, hitbox.bbmin.y, hitbox.bbmax.z },
-    { hitbox.bbmin.x, hitbox.bbmax.y, hitbox.bbmax.z },
-    { hitbox.bbmax.x, hitbox.bbmax.y, hitbox.bbmax.z }
-  };
-  const float shrink_base = base_hitbox >= aim_hitbox_pelvis && base_hitbox <= aim_hitbox_spine_3 ? 6.0f : 3.0f;
-  const float shrink_size = shrink_base;
-  Vec3 adjusted_corners[8]{};
-  for (int index = 0; index < 8; ++index) {
-    adjusted_corners[index] = corners[index] + (corners[7 - index] - corners[index]) * (1.0f / shrink_size);
-    aimbot_add_local_hitbox_point(points, &point_count, max_points, adjusted_corners[index]);
+  const Vec3 half = (hitbox.bbmax - hitbox.bbmin) * 0.5f;
+  if (!aimbot_vec3_is_finite(half) || half.x <= 0.0f || half.y <= 0.0f || half.z <= 0.0f) {
+    return point_count;
   }
 
-  const int edge_pairs[12][2] = {
-    {0, 1}, {0, 2}, {1, 3}, {2, 3},
-    {7, 6}, {7, 5}, {6, 4}, {5, 4},
-    {0, 4}, {1, 5}, {2, 6}, {3, 7}
+  const float subtract = aimbot_effective_bone_size_subtract();
+  const float minimum_scale = aimbot_effective_bone_size_min_scale();
+  const Vec3 safe_half{
+    std::min(half.x, std::max(half.x - subtract, half.x * minimum_scale)),
+    std::min(half.y, std::max(half.y - subtract, half.y * minimum_scale)),
+    std::min(half.z, std::max(half.z - subtract, half.z * minimum_scale))
   };
-  for (const auto& edge : edge_pairs) {
+
+  const Vec3 sample_half = safe_half * scale;
+  const Vec3 axis_points[6]{
+    {center.x - sample_half.x, center.y, center.z},
+    {center.x + sample_half.x, center.y, center.z},
+    {center.x, center.y - sample_half.y, center.z},
+    {center.x, center.y + sample_half.y, center.z},
+    {center.x, center.y, center.z - sample_half.z},
+    {center.x, center.y, center.z + sample_half.z}
+  };
+  for (const Vec3& point : axis_points) {
+    if (aimbot_local_point_inside_hitbox(point, hitbox)) {
+      aimbot_add_local_hitbox_point(points, &point_count, max_points, point);
+    }
+  }
+
+  const float signs[2]{-1.0f, 1.0f};
+  for (const float x_sign : signs) {
+    for (const float y_sign : signs) {
+      for (const float z_sign : signs) {
+        const Vec3 point = center + Vec3{
+          sample_half.x * x_sign,
+          sample_half.y * y_sign,
+          sample_half.z * z_sign};
+        if (aimbot_local_point_inside_hitbox(point, hitbox)) {
+          aimbot_add_local_hitbox_point(points, &point_count, max_points, point);
+        }
+      }
+    }
+  }
+
+  const Vec3 edge_points[12]{
+    {center.x - sample_half.x, center.y - sample_half.y, center.z},
+    {center.x - sample_half.x, center.y + sample_half.y, center.z},
+    {center.x + sample_half.x, center.y - sample_half.y, center.z},
+    {center.x + sample_half.x, center.y + sample_half.y, center.z},
+    {center.x - sample_half.x, center.y, center.z - sample_half.z},
+    {center.x - sample_half.x, center.y, center.z + sample_half.z},
+    {center.x + sample_half.x, center.y, center.z - sample_half.z},
+    {center.x + sample_half.x, center.y, center.z + sample_half.z},
+    {center.x, center.y - sample_half.y, center.z - sample_half.z},
+    {center.x, center.y - sample_half.y, center.z + sample_half.z},
+    {center.x, center.y + sample_half.y, center.z - sample_half.z},
+    {center.x, center.y + sample_half.y, center.z + sample_half.z}
+  };
+  for (const Vec3& point : edge_points) {
+    if (!aimbot_local_point_inside_hitbox(point, hitbox)) {
+      continue;
+    }
     aimbot_add_local_hitbox_point(
       points,
       &point_count,
       max_points,
-      (adjusted_corners[edge[0]] + adjusted_corners[edge[1]]) * 0.5f);
+      point);
   }
 
   return point_count;

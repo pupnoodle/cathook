@@ -22,9 +22,21 @@ void override_view_hook(void* me, view_setup* setup) {
   CATHOOK_HOOK_GUARD();
   thirdperson::update_taunt_camera();
 
+  Player* localplayer = entity_list->get_localplayer();
+  Vec3 original_punch{};
+  Vec3* punch = nullptr;
+  if (config.visuals.removals.view_punch && localplayer != nullptr) {
+    punch = reinterpret_cast<Vec3*>(reinterpret_cast<std::uintptr_t>(localplayer) + 0x74);
+    original_punch = *punch;
+    *punch = {};
+  }
+
   override_view_original(me, setup);
 
-  Player* localplayer = entity_list->get_localplayer();
+  if (punch != nullptr) {
+    *punch = original_punch;
+  }
+
   if (localplayer == nullptr) return;
 
   const int player_fov = localplayer->get_fov();

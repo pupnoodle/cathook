@@ -53,6 +53,9 @@ constexpr unsigned int create_render_target_flags_hdr = 0x00000001;
 class MaterialSystem {
 public:
 
+  using material_handle = unsigned short;
+  static constexpr material_handle invalid_material_handle = static_cast<material_handle>(0xFFFF);
+
   static constexpr unsigned int set_in_stub_mode_vtable_index = 58;
   static constexpr unsigned int create_named_render_target_texture_ex_vtable_index = 85;
   static constexpr unsigned int override_render_target_allocation_vtable_index = 127;
@@ -73,6 +76,23 @@ public:
     Material* (*create_material_fn)(void*, const char*, void*) = (Material* (*)(void*, const char*, void*))vtable[70];
 
     return create_material_fn(this, name, key_value);
+  }
+
+  material_handle first_material() {
+    void** vtable = *(void***)this;
+    return ((material_handle (*)(void*))vtable[86])(this);
+  }
+
+  material_handle next_material(material_handle handle) {
+    void** vtable = *(void***)this;
+    return ((material_handle (*)(void*, material_handle))vtable[87])(this, handle);
+  }
+
+  material_handle invalid_material() const { return invalid_material_handle; }
+
+  Material* get_material(material_handle handle) {
+    void** vtable = *(void***)this;
+    return ((Material* (*)(void*, material_handle))vtable[89])(this, handle);
   }
 
   void set_in_stub_mode(bool enabled) {

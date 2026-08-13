@@ -183,6 +183,10 @@ constexpr const char* shaderapivk_apply_pending_transition_snapshot =
   "55 48 8D 15 ? ? ? ? 48 89 E5 53 48 89 FB 48 83 EC 08 48 8B 07 48 8B 80 ? ? ? ? 48 39 D0 75 ? 8B 8F ? ? ? ? 85 C9";
 constexpr const char* particle_property_create =
   "55 48 89 E5 41 57 41 56 49 89 F6 41 55 41 54 53 48 89 FB 48 83 EC ? 48 8D 05 ? ? ? ? 89 55 ? 89 4D ? 66 0F D6 45 ?";
+constexpr const char* view_render_perform_screen_space_effects =
+  "55 48 89 E5 41 57 41 56 41 89 CE 41 55 41 89 D5 41 54 41 89 F4 53 44 89 C3 48 83 EC 48";
+constexpr const char* view_render_perform_screen_overlay =
+  "55 31 C0 48 89 E5 41 57 41 56 41 55 45 89 C5 41 54 53 48 89 FB 48 83 EC 68";
 
 constexpr const char* play_sequence =
   "48 85 F6 0F 84 ? ? ? ? 55 48 89 E5 41 57 41 56 41 55 41 54 49 89 FC 53 48 83 EC 28 83 BF 00 ? ? ? ?";

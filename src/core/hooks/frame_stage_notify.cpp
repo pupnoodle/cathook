@@ -29,6 +29,7 @@ V  o o  V  file: src/core/hooks/frame_stage_notify.cpp
 #include "features/automation/navbot/navbot_controller.hpp"
 #include "features/visuals/thirdperson.hpp"
 #include "features/visuals/skybox_changer.hpp"
+#include "features/visuals/world_visuals.hpp"
 #include "features/visuals/groups/visual_groups.hpp"
 #include "core/print.hpp"
 
@@ -50,6 +51,53 @@ static unsigned int a = 0;
 
 namespace
 {
+
+float saved_interpolation_amount = 0.0f;
+bool interpolation_amount_overridden = false;
+Convar* cl_interpolate = nullptr;
+int saved_cl_interpolate = 1;
+bool cl_interpolate_overridden = false;
+
+void update_interpolation_removals()
+{
+  if (convar_system != nullptr && cl_interpolate == nullptr) {
+    cl_interpolate = convar_system->find_var("cl_interpolate");
+  }
+
+  if (cl_interpolate != nullptr && config.visuals.removals.interpolation) {
+    if (!cl_interpolate_overridden) {
+      saved_cl_interpolate = cl_interpolate->get_int();
+      cl_interpolate_overridden = true;
+    }
+    if (cl_interpolate->get_int() != 0) {
+      cl_interpolate->set_int(0);
+    }
+  } else if (cl_interpolate != nullptr && cl_interpolate_overridden) {
+    cl_interpolate->set_int(saved_cl_interpolate);
+    cl_interpolate_overridden = false;
+  }
+}
+
+void begin_lerp_removal()
+{
+  if (!config.visuals.removals.lerp || global_vars == nullptr || interpolation_amount_overridden) {
+    return;
+  }
+
+  saved_interpolation_amount = global_vars->interpolation_amount;
+  global_vars->interpolation_amount = 0.0f;
+  interpolation_amount_overridden = true;
+}
+
+void end_lerp_removal()
+{
+  if (!interpolation_amount_overridden || global_vars == nullptr) {
+    return;
+  }
+
+  global_vars->interpolation_amount = saved_interpolation_amount;
+  interpolation_amount_overridden = false;
+}
 
 void update_zoom_sensitivity()
 {
@@ -144,6 +192,8 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
 
   if (current_stage == FRAME_RENDER_START) {
     thirdperson::begin_render_angles();
+    update_interpolation_removals();
+    begin_lerp_removal();
     update_zoom_sensitivity();
   }
 
@@ -153,6 +203,7 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
 
   if (current_stage == FRAME_RENDER_START) {
     aimbot_note_render_clock();
+    world_visuals::on_render_start();
     entity_visuals::on_render_start();
   }
 
@@ -240,6 +291,7 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
               resolver::record_player(player);
               backtrack::record_player(player);
             } else {
+              resolver::clear_player(player);
               aimbot::clear_network_pose(player);
             }
 
@@ -301,6 +353,7 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
   }
 
   if (current_stage == FRAME_RENDER_END) {
+    end_lerp_removal();
     entity_visuals::on_render_end();
     thirdperson::end_render_angles();
   }

@@ -91,6 +91,7 @@ bool (*in_cond_original)(void*, int) = nullptr;
 #include "core/hooks/cl_move.cpp"
 #include "core/hooks/client_mode_create_move.cpp"
 #include "core/hooks/client_mode_post_screen_space_effects.cpp"
+#include "core/hooks/view_render_removals.cpp"
 #include "core/hooks/client_create_move.cpp"
 #include "features/visuals/groups/visual_groups.cpp"
 #include "features/visuals/material_manager.cpp"
@@ -137,6 +138,7 @@ bool (*in_cond_original)(void*, int) = nullptr;
 #include "features/visuals/thirdperson.cpp"
 #include "features/visuals/radar/radar.cpp"
 #include "features/visuals/skybox_changer.cpp"
+#include "features/visuals/world_visuals.cpp"
 
 void** client_mode_vtable;
 void** model_render_vtable;
@@ -819,12 +821,15 @@ void clear_runtime_pointer_state()
   model_info = nullptr;
   steam_client = nullptr;
   steam_friends = nullptr;
+  world_visuals::particle_create_original = nullptr;
 
   model_render_draw_model_execute_original = nullptr;
   model_render_forced_material_override_original = nullptr;
   entity_visuals::draw_model_execute_original = nullptr;
   client_mode_create_move_original = nullptr;
   client_mode_post_screen_space_effects_original = nullptr;
+  view_render_perform_screen_space_effects_original = nullptr;
+  view_render_perform_screen_overlay_original = nullptr;
   client_create_move_original = nullptr;
   override_view_original = nullptr;
   draw_view_model_original = nullptr;
@@ -1022,6 +1027,7 @@ bool unload_module_runtime() {
   restore_client_crashfix_patches();
   backtrack::clear();
   entity_visuals::on_shutdown(release_graphics_resources);
+  world_visuals::on_shutdown();
   followbot::controller().shutdown();
   navbot::controller().shutdown();
   automation::shutdown();
@@ -1528,6 +1534,7 @@ bool initialize_game_runtime() {
 #if !defined(CATHOOK_TEXTMODE) || !CATHOOK_TEXTMODE
 
   skybox_changer::resolve_load_named_skys();
+  world_visuals::resolve_particle_hook();
 
   override_view_original = reinterpret_cast<void (*)(void*, view_setup*)>(read_vtable_entry(client_mode_vtable, 17, "ClientModeShared::OverrideView"));
   if (override_view_original == nullptr || !write_to_table(client_mode_vtable, 17, (void*)override_view_hook)) {
@@ -1579,6 +1586,8 @@ bool initialize_game_runtime() {
   }
 
   funchook = funchook_create();
+
+  resolve_view_render_removal_hooks();
 
   load_white_list_original = reinterpret_cast<void* (*)(void*)>(sigscan_module("engine.so", sigs::load_white_list));
 
@@ -1697,6 +1706,32 @@ bool initialize_game_runtime() {
   initialize_cl_move_globals(host_should_run);
 
   int rv;
+
+  if (view_render_perform_screen_space_effects_original != nullptr) {
+    rv = funchook_prepare(
+      funchook,
+      reinterpret_cast<void**>(&view_render_perform_screen_space_effects_original),
+      reinterpret_cast<void*>(view_render_perform_screen_space_effects_hook));
+    if (rv != 0) {
+      print("Failed to prepare CViewRender::PerformScreenSpaceEffects removal hook\n");
+      view_render_perform_screen_space_effects_original = nullptr;
+    }
+  }
+
+  if (view_render_perform_screen_overlay_original != nullptr) {
+    rv = funchook_prepare(
+      funchook,
+      reinterpret_cast<void**>(&view_render_perform_screen_overlay_original),
+      reinterpret_cast<void*>(view_render_perform_screen_overlay_hook));
+    if (rv != 0) {
+      print("Failed to prepare CViewRender::PerformScreenOverlay removal hook\n");
+      view_render_perform_screen_overlay_original = nullptr;
+    }
+  }
+
+  if (!world_visuals::prepare_particle_hook(funchook)) {
+    print("Particle visual hook preparation failed; particle effect replacements disabled\n");
+  }
 
   rv = funchook_prepare(funchook, (void**)&in_cond_original, (void*)in_cond_hook);
   error_assert(rv != 0, "Failed to prepare InCond hook\n");

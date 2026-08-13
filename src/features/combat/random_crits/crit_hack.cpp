@@ -112,11 +112,7 @@ int next_crit = 0;
 int damage_till_crit = 0;
 int queued_crit_command = 0;
 int queued_ticks = 0;
-bool queued_force_active = false;
-bool current_hold_attack = false;
 queue_state current_queue_state = queue_state::idle;
-bool pending_force_attack = false;
-int pending_force_weapon_ent_index = 0;
 
 int weapon_ent_index = 0;
 bool is_melee_weapon = false;
@@ -129,7 +125,10 @@ int cached_crit_checks = 0;
 int cached_crit_seed_requests = 0;
 bool weapon_info_cache_valid = false;
 
-constexpr int max_safe_choked_commands = 21;
+// Keep the search bounded while allowing the shot to use a future seed.
+// The current usercmd is rewritten and sent normally; no packet queue is
+// needed to wait for the selected command.
+constexpr int max_crit_command_search = 4096;
 
 enum class crit_request {
   any,
@@ -150,11 +149,7 @@ void reset_weapon_info() {
   damage_till_crit = 0;
   queued_crit_command = 0;
   queued_ticks = 0;
-  queued_force_active = false;
-  current_hold_attack = false;
   current_queue_state = queue_state::idle;
-  pending_force_attack = false;
-  pending_force_weapon_ent_index = 0;
   weapon_ent_index = 0;
   is_melee_weapon = false;
   crit_chance = 0.0f;
@@ -257,13 +252,6 @@ float active_rapid_fire_crit_check_time(Weapon* weapon) {
   return tf_weapon_criticals_nopred != nullptr && tf_weapon_criticals_nopred->get_int() != 0
     ? weapon->last_crit_check_time()
     : weapon->last_rapid_fire_crit_check_time();
-}
-
-int safe_queued_command_window() {
-  const int choked = client_state != nullptr ? std::clamp(client_state->chokedcommands, 0, max_safe_choked_commands) : 0;
-  const int protocol_room = std::max(0, max_new_commands - choked);
-  const int choke_room = std::max(0, max_safe_choked_commands - choked);
-  return std::min(protocol_room, choke_room);
 }
 
 float get_crit_bucket_cap() {
@@ -578,23 +566,10 @@ bool is_attack_command(user_cmd* cmd, Weapon* weapon) {
   return (cmd->buttons & IN_ATTACK) != 0;
 }
 
-void suppress_attack(user_cmd* cmd, Weapon* weapon) {
-  if (cmd == nullptr) {
-    return;
-  }
-
-  cmd->buttons &= ~IN_ATTACK;
-  if (weapon != nullptr && is_melee_weapon && weapon->get_weapon_id() == TF_WEAPON_FISTS) {
-    cmd->buttons &= ~IN_ATTACK2;
-  }
-}
-
 }
 
 create_move_result on_create_move(user_cmd* cmd, bool aimbot_requested_shot) {
   create_move_result result{};
-  current_hold_attack = false;
-  queued_force_active = false;
   queued_crit_command = 0;
   queued_ticks = 0;
   current_queue_state = queue_state::idle;
@@ -611,25 +586,10 @@ create_move_result on_create_move(user_cmd* cmd, bool aimbot_requested_shot) {
     return result;
   }
 
-  const int current_weapon_ent_index = weapon->to_entity()->get_index();
-  if (pending_force_attack && pending_force_weapon_ent_index != current_weapon_ent_index) {
-    pending_force_attack = false;
-    pending_force_weapon_ent_index = 0;
-  }
-
   update_info(local, weapon);
 
   if (local->is_crit_boosted() || weapon->crit_time() > global_vars->curtime) {
-    pending_force_attack = false;
-    pending_force_weapon_ent_index = 0;
     return result;
-  }
-
-  const bool force_enabled = config.crithack.force_crits ||
-    (config.crithack.always_melee && is_melee_weapon);
-  if (!force_enabled || crit_banned) {
-    pending_force_attack = false;
-    pending_force_weapon_ent_index = 0;
   }
 
   for (int i = 1; i <= global_vars->max_clients; i++) {
@@ -641,29 +601,18 @@ create_move_result on_create_move(user_cmd* cmd, bool aimbot_requested_shot) {
 
   bool attacking = is_attack_command(cmd, weapon) || aimbot_requested_shot;
 
-  // A forced request can outlive the single input command that created it.
-  // This matters for a one-frame manual click and for aimbot shots that were
-  // suppressed while waiting for the selected command seed.
-  if (!attacking && pending_force_attack &&
-      pending_force_weapon_ent_index == current_weapon_ent_index &&
-      weapon->can_primary_attack()) {
-    cmd->buttons |= IN_ATTACK;
-    attacking = true;
-  }
-
   if (!attacking) {
     return result;
   }
 
   if (weapon->is_rapid_fire() && global_vars->curtime < active_rapid_fire_crit_check_time(weapon) + 1.0f) {
     current_queue_state = queue_state::blocked;
+    result.attack_allowed = true;
     return result;
   }
 
   crit_request req = get_crit_request(cmd, weapon);
   if (req == crit_request::any) {
-    pending_force_attack = false;
-    pending_force_weapon_ent_index = 0;
     result.attack_allowed = true;
     return result;
   }
@@ -673,45 +622,30 @@ create_move_result on_create_move(user_cmd* cmd, bool aimbot_requested_shot) {
   result.skip_requested = req == crit_request::skip;
 
   if (!is_crit_command(cmd->command_number, weapon, wants_crit, true, is_melee_weapon)) {
-    if (wants_crit) {
-      const int queued_command = get_crit_command(
-        weapon,
-        cmd->command_number,
-        safe_queued_command_window(),
-        true,
-        true,
-        is_melee_weapon);
-      if (queued_command <= 0) {
-        current_queue_state = queue_state::blocked;
-        pending_force_attack = true;
-        pending_force_weapon_ent_index = current_weapon_ent_index;
-        current_hold_attack = true;
-        suppress_attack(cmd, weapon);
-        result.attack_suppressed = true;
-        return result;
-      }
+    const int selected_command = get_crit_command(
+      weapon,
+      cmd->command_number,
+      max_crit_command_search,
+      wants_crit,
+      true,
+      is_melee_weapon);
 
-      queued_crit_command = queued_command;
-      queued_ticks = std::max(0, queued_crit_command - cmd->command_number);
-      current_queue_state = queue_state::waiting_for_seed;
-      queued_force_active = true;
-      pending_force_attack = true;
-      pending_force_weapon_ent_index = current_weapon_ent_index;
+    if (selected_command > 0) {
+      queued_crit_command = selected_command;
+      queued_ticks = std::max(0, selected_command - cmd->command_number);
+      current_queue_state = queue_state::releasing;
+
+      cmd->command_number = selected_command;
+      cmd->random_seed = MD5_PseudoRandom(static_cast<unsigned int>(selected_command)) & INT_MAX;
     } else {
-      current_queue_state = queue_state::waiting_for_seed;
+      current_queue_state = queue_state::blocked;
     }
 
-    current_hold_attack = true;
-    suppress_attack(cmd, weapon);
-    result.attack_suppressed = true;
+    result.attack_allowed = true;
     return result;
   }
 
   current_queue_state = wants_crit ? queue_state::releasing : queue_state::idle;
-  if (wants_crit) {
-    pending_force_attack = false;
-    pending_force_weapon_ent_index = 0;
-  }
   result.attack_allowed = true;
   return result;
 }
@@ -907,15 +841,15 @@ int predict_command_number(user_cmd* cmd) {
 }
 
 bool should_hold_attack(user_cmd* cmd) {
-  return cmd != nullptr && current_hold_attack;
+  return false;
 }
 
 bool wants_queued_force(user_cmd* cmd) {
-  return cmd != nullptr && queued_force_active;
+  return false;
 }
 
 bool has_pending_queued_force() {
-  return pending_force_attack || queued_force_active;
+  return false;
 }
 
 bool is_command_crit(user_cmd* cmd, int command_number) {
@@ -958,7 +892,7 @@ int find_queued_crit_command(user_cmd* cmd, int max_commands) {
     return 0;
   }
 
-  const int bounded_commands = std::min(max_commands, safe_queued_command_window());
+  const int bounded_commands = std::min(max_commands, max_crit_command_search);
   const int target_command = get_crit_command(weapon, cmd->command_number, bounded_commands, true, true, weapon->is_melee());
   queued_crit_command = target_command;
   queued_ticks = target_command > 0 ? std::max(0, target_command - cmd->command_number) : 0;
@@ -971,10 +905,6 @@ int find_queued_crit_command(user_cmd* cmd, int max_commands) {
 void notify_queued_release(int command_number) {
   if (command_number > 0 && queued_crit_command == command_number) {
     current_queue_state = queue_state::releasing;
-    current_hold_attack = false;
-    queued_force_active = false;
-    pending_force_attack = false;
-    pending_force_weapon_ent_index = 0;
   }
 }
 

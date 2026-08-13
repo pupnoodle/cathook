@@ -75,7 +75,7 @@ private:
   void install_active_path(const path_result& path);
   void update_draw_snapshot();
   void clear_draw_snapshot();
-  void update_weapon_choice(Player* localplayer);
+  void update_weapon_choice(Player* localplayer, user_cmd* user_cmd);
   void update_mvm_wave_state(Player* localplayer);
   void apply_mvm_combat_controls(Player* localplayer, user_cmd* user_cmd);
   bool record_crumb_failure(const follower_tick_result& follow_result, float current_time);
@@ -107,6 +107,7 @@ private:
   float next_hazard_update_time_ = 0.0f;
   float next_weapon_switch_time_ = 0.0f;
   int last_requested_weapon_slot_ = 0;
+  int last_weapon_selection_mode_ = -1;
   int pending_desired_weapon_slot_ = 0;
   float pending_desired_since_ = 0.0f;
   crumb_failure_state crumb_failure_{};
