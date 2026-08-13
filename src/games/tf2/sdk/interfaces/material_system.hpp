@@ -56,6 +56,10 @@ public:
   using material_handle = unsigned short;
   static constexpr material_handle invalid_material_handle = static_cast<material_handle>(0xFFFF);
 
+  static constexpr unsigned int first_material_vtable_index = 73;
+  static constexpr unsigned int next_material_vtable_index = 74;
+  static constexpr unsigned int invalid_material_vtable_index = 75;
+  static constexpr unsigned int get_material_vtable_index = 76;
   static constexpr unsigned int set_in_stub_mode_vtable_index = 58;
   static constexpr unsigned int create_named_render_target_texture_ex_vtable_index = 85;
   static constexpr unsigned int override_render_target_allocation_vtable_index = 127;
@@ -78,21 +82,24 @@ public:
     return create_material_fn(this, name, key_value);
   }
 
-  material_handle first_material() {
+  material_handle first_material() const {
     void** vtable = *(void***)this;
-    return ((material_handle (*)(void*))vtable[86])(this);
+    return ((material_handle (*)(const void*))vtable[first_material_vtable_index])(this);
   }
 
-  material_handle next_material(material_handle handle) {
+  material_handle next_material(material_handle handle) const {
     void** vtable = *(void***)this;
-    return ((material_handle (*)(void*, material_handle))vtable[87])(this, handle);
+    return ((material_handle (*)(const void*, material_handle))vtable[next_material_vtable_index])(this, handle);
   }
 
-  material_handle invalid_material() const { return invalid_material_handle; }
-
-  Material* get_material(material_handle handle) {
+  material_handle invalid_material() const {
     void** vtable = *(void***)this;
-    return ((Material* (*)(void*, material_handle))vtable[89])(this, handle);
+    return ((material_handle (*)(const void*))vtable[invalid_material_vtable_index])(this);
+  }
+
+  Material* get_material(material_handle handle) const {
+    void** vtable = *(void***)this;
+    return ((Material* (*)(const void*, material_handle))vtable[get_material_vtable_index])(this, handle);
   }
 
   void set_in_stub_mode(bool enabled) {

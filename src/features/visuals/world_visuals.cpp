@@ -103,10 +103,18 @@ void apply_materials(const uint32_t mask)
   const RGBA_float prop = (mask & Visuals::modulation_prop) ? config.visuals.world.prop_color : RGBA_float{};
   const RGBA_float particle = (mask & Visuals::modulation_particle) ? config.visuals.world.particle_color : RGBA_float{};
 
+  bool logged_null_material = false;
   for (auto handle = material_system->first_material(); handle != material_system->invalid_material();
        handle = material_system->next_material(handle)) {
     Material* material = material_system->get_material(handle);
-    if (material == nullptr || material->is_error_material()) continue;
+    if (material == nullptr) {
+      if (!logged_null_material) {
+        print("[world_visuals] material enumeration returned null for handle %u\n", handle);
+        logged_null_material = true;
+      }
+      continue;
+    }
+    if (material->is_error_material() || !material->is_precached()) continue;
 
     const std::string group = lower(material->get_texture_group_name() != nullptr ? material->get_texture_group_name() : "");
     const std::string name = lower(material->get_name() != nullptr ? material->get_name() : "");

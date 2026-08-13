@@ -103,6 +103,13 @@ public:
     return is_error_material_fn(this);
   }
 
+  bool is_precached() const {
+    void** vtable = *(void***)const_cast<Material*>(this);
+
+    auto is_precached_fn = (bool (*)(const void*))vtable[56];
+    return is_precached_fn(this);
+  }
+
   void delete_if_unreferenced(void) {
     void** vtable = *(void***)this;
 
