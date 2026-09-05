@@ -1,4 +1,5 @@
 #include "theme.hpp"
+#include "window_chrome.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -21,15 +22,16 @@ ImVec4 mix(const ImVec4 &from, const ImVec4 &to, const float amount)
 
 void apply_layout()
 {
+	const float scale{ window_scale() };
 	ImGuiStyle &style{ ImGui::GetStyle() };
 	style.WindowPadding = { 0.0f, 0.0f };
-	style.FramePadding = { 8.0f, 5.0f };
-	style.ItemSpacing = { 8.0f, 8.0f };
-	style.ItemInnerSpacing = { 6.0f, 4.0f };
+	style.FramePadding = { 8.0f * scale, 5.0f * scale };
+	style.ItemSpacing = { 8.0f * scale, 8.0f * scale };
+	style.ItemInnerSpacing = { 6.0f * scale, 4.0f * scale };
 	style.TouchExtraPadding = { 0.0f, 0.0f };
-	style.IndentSpacing = 20.0f;
-	style.ScrollbarSize = 10.0f;
-	style.GrabMinSize = 10.0f;
+	style.IndentSpacing = 20.0f * scale;
+	style.ScrollbarSize = 10.0f * scale;
+	style.GrabMinSize = 10.0f * scale;
 	style.WindowBorderSize = 0.0f;
 	style.ChildBorderSize = 1.0f;
 	style.FrameBorderSize = 1.0f;
@@ -37,13 +39,13 @@ void apply_layout()
 	style.TabBorderSize = 0.0f;
 	style.TabBarBorderSize = 0.0f;
 	style.TabBarOverlineSize = 2.0f;
-	style.WindowRounding = 10.0f;
-	style.ChildRounding = 7.0f;
-	style.FrameRounding = 6.0f;
-	style.PopupRounding = 7.0f;
-	style.ScrollbarRounding = 6.0f;
-	style.GrabRounding = 6.0f;
-	style.TabRounding = 6.0f;
+	style.WindowRounding = 10.0f * scale;
+	style.ChildRounding = 7.0f * scale;
+	style.FrameRounding = 6.0f * scale;
+	style.PopupRounding = 7.0f * scale;
+	style.ScrollbarRounding = 6.0f * scale;
+	style.GrabRounding = 6.0f * scale;
+	style.TabRounding = 6.0f * scale;
 	style.AntiAliasedFill = true;
 	style.AntiAliasedLines = true;
 	style.AntiAliasedLinesUseTex = true;

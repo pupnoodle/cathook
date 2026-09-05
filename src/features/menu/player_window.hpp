@@ -283,7 +283,7 @@ inline void draw_player_team_column(const char* title, ImVec4 title_color, const
 inline void draw_player_window_content() {
   if (engine == nullptr || !engine->is_connected() || !engine->is_in_game()) {
     ImGui::PushStyleColor(ImGuiCol_Text, k_text_soft);
-    ImGui::Dummy(ImVec2(0.0f, 20.0f));
+    ImGui::Dummy(ImVec2(0.0f, scaled(20.0f)));
     const char* message = "Not in a game.";
     const ImVec2 text_size = ImGui::CalcTextSize(message);
     ImGui::SetCursorPosX((ImGui::GetWindowWidth() - text_size.x) * 0.5f);
@@ -314,23 +314,23 @@ inline void draw_player_window_content() {
   sort_by_name(other_rows);
 
   const float total_height = ImGui::GetContentRegionAvail().y;
-  const float spectator_height = other_rows.empty() ? 0.0f : 100.0f;
-  const float top_height = total_height - spectator_height - (spectator_height > 0.0f ? 6.0f : 0.0f);
-  const float column_width = (ImGui::GetContentRegionAvail().x - 6.0f) * 0.5f;
+  const float spectator_height = other_rows.empty() ? 0.0f : scaled(100.0f);
+  const float top_height = total_height - spectator_height - (spectator_height > 0.0f ? scaled(6.0f) : 0.0f);
+  const float column_width = (ImGui::GetContentRegionAvail().x - scaled(6.0f)) * 0.5f;
 
   ImGui::BeginChild("##pm_teams", ImVec2(0.0f, top_height), false, ImGuiWindowFlags_NoBackground);
   ImGui::SetCursorPos(ImVec2(0.0f, 0.0f));
   ImGui::BeginChild("##pm_blu_wrap", ImVec2(column_width, 0.0f), false, ImGuiWindowFlags_NoBackground);
   draw_player_team_column("BLU", ImVec4(0.45f, 0.65f, 0.95f, 1.0f), blu_rows);
   ImGui::EndChild();
-  ImGui::SameLine(0.0f, 6.0f);
+  ImGui::SameLine(0.0f, scaled(6.0f));
   ImGui::BeginChild("##pm_red_wrap", ImVec2(column_width, 0.0f), false, ImGuiWindowFlags_NoBackground);
   draw_player_team_column("RED", ImVec4(0.95f, 0.45f, 0.45f, 1.0f), red_rows);
   ImGui::EndChild();
   ImGui::EndChild();
 
   if (!other_rows.empty()) {
-    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+    ImGui::Dummy(ImVec2(0.0f, scaled(6.0f)));
     ImGui::BeginChild("##pm_spec_wrap", ImVec2(0.0f, spectator_height), false, ImGuiWindowFlags_NoBackground);
     draw_player_team_column("SPECTATORS", k_text_soft, other_rows);
     ImGui::EndChild();

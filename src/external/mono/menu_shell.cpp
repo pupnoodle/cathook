@@ -106,19 +106,21 @@ void smooth_menu_scroll(menu_state &state)
 bool begin_menu(const menu_config &config, menu_state &state, const std::function<void()> &render_navbar,
 	const std::function<void()> &render_subnavbar, const header_status &status)
 {
+	const float scale{ window_scale() };
+	const float padding{ config.viewport_padding * scale };
 	const ImGuiViewport *const viewport{ ImGui::GetMainViewport() };
 	const ImVec2 available{
-		std::max(1.0f, viewport->WorkSize.x - config.viewport_padding * 2.0f),
-		std::max(1.0f, viewport->WorkSize.y - config.viewport_padding * 2.0f)
+		std::max(1.0f, viewport->WorkSize.x - padding * 2.0f),
+		std::max(1.0f, viewport->WorkSize.y - padding * 2.0f)
 	};
 	const ImVec2 size{
-		std::min(config.preferred_size.x, available.x),
-		std::min(config.preferred_size.y, available.y)
+		std::min(config.preferred_size.x * scale, available.x),
+		std::min(config.preferred_size.y * scale, available.y)
 	};
-	const ImVec2 minimum{ viewport->WorkPos.x + config.viewport_padding, viewport->WorkPos.y + config.viewport_padding };
+	const ImVec2 minimum{ viewport->WorkPos.x + padding, viewport->WorkPos.y + padding };
 	const ImVec2 maximum{
-		viewport->WorkPos.x + viewport->WorkSize.x - config.viewport_padding - size.x,
-		viewport->WorkPos.y + viewport->WorkSize.y - config.viewport_padding - size.y
+		viewport->WorkPos.x + viewport->WorkSize.x - padding - size.x,
+		viewport->WorkPos.y + viewport->WorkSize.y - padding - size.y
 	};
 	state.position = {
 		std::clamp(state.position.x, minimum.x, maximum.x),
@@ -132,16 +134,16 @@ bool begin_menu(const menu_config &config, menu_state &state, const std::functio
 		state.position_initialized = true;
 	}
 
-	ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, config.viewport_padding > 0.0f ? 4.0f : 0.0f);
-	ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 2.0f);
-	ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 2.0f);
-	ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, 2.0f);
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, config.viewport_padding > 0.0f ? 4.0f * scale : 0.0f);
+	ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 2.0f * scale);
+	ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 2.0f * scale);
+	ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, 2.0f * scale);
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, config.viewport_padding > 0.0f ? 1.0f : 0.0f);
-	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, { 4.0f, 2.0f });
-	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, { 4.0f, 4.0f });
-	ImGui::PushStyleVar(ImGuiStyleVar_GrabRounding, 2.0f);
-	ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarRounding, 2.0f);
-	ImGui::PushStyleVar(ImGuiStyleVar_TabRounding, 2.0f);
+	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, { 4.0f * scale, 2.0f * scale });
+	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, { 4.0f * scale, 4.0f * scale });
+	ImGui::PushStyleVar(ImGuiStyleVar_GrabRounding, 2.0f * scale);
+	ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarRounding, 2.0f * scale);
+	ImGui::PushStyleVar(ImGuiStyleVar_TabRounding, 2.0f * scale);
 	ImVec4 group_background{ ImGui::GetStyleColorVec4(ImGuiCol_ChildBg) };
 	group_background.w = 0.52f;
 	ImVec4 group_border{ ImGui::GetStyleColorVec4(ImGuiCol_Border) };
@@ -160,25 +162,25 @@ bool begin_menu(const menu_config &config, menu_state &state, const std::functio
 	render_header(config, status, state, minimum, maximum);
 	state.position = ImGui::GetWindowPos();
 	ImGui::SetCursorPos({ 0.0f, window_header_height() });
-	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 8.0f, 4.0f });
-	if (ImGui::BeginChild("menu_navbar", { 0.0f, config.navbar_height }, ImGuiChildFlags_Border,
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 8.0f * scale, 4.0f * scale });
+	if (ImGui::BeginChild("menu_navbar", { 0.0f, config.navbar_height * scale }, ImGuiChildFlags_Border,
 		ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
-		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, { 2.0f, 0.0f });
+		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, { 2.0f * scale, 0.0f });
 		render_navbar();
 		ImGui::PopStyleVar();
 	}
 	ImGui::EndChild();
 	if (config.show_subnavbar && render_subnavbar) {
-		if (ImGui::BeginChild("menu_subnavbar", { 0.0f, config.subnavbar_height }, ImGuiChildFlags_Border,
+		if (ImGui::BeginChild("menu_subnavbar", { 0.0f, config.subnavbar_height * scale }, ImGuiChildFlags_Border,
 			ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
-			ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, { 2.0f, 0.0f });
+			ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, { 2.0f * scale, 0.0f });
 			render_subnavbar();
 			ImGui::PopStyleVar();
 		}
 		ImGui::EndChild();
 	}
 	ImGui::PopStyleVar();
-	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 8.0f, 8.0f });
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 8.0f * scale, 8.0f * scale });
 	ImGui::BeginChild(
 		"menu_body",
 		{ 0.0f, 0.0f },
@@ -213,14 +215,14 @@ bool navbar_entry(const char *const label, const bool active, const char *const 
 	if (active || hovered) {
 		ImVec4 fill{ ImGui::GetStyleColorVec4(active ? ImGuiCol_CheckMark : ImGuiCol_ChildBg) };
 		fill.w = active ? 0.16f : 0.58f;
-		draw_list->AddRectFilled(position, { position.x + size.x, position.y + size.y }, ImGui::ColorConvertFloat4ToU32(fill), 2.0f);
+		draw_list->AddRectFilled(position, { position.x + size.x, position.y + size.y }, ImGui::ColorConvertFloat4ToU32(fill), 2.0f * scale);
 	}
 	if (icon_font && icon) {
 		draw_list->AddText(icon_font, 15.0f * scale, { position.x + 8.0f * scale, position.y + (size.y - 15.0f * scale) * 0.5f }, ImGui::GetColorU32(active || hovered ? ImGuiCol_CheckMark : ImGuiCol_TextDisabled), icon);
 	}
 	const float text_offset{ icon_font && icon ? 8.0f * scale + icon_width : 8.0f * scale };
 	draw_list->AddText({ position.x + text_offset, position.y + (size.y - ImGui::GetFontSize()) * 0.5f }, ImGui::GetColorU32(active ? ImGuiCol_Text : ImGuiCol_TextDisabled), label);
-	ImGui::SameLine(0.0f, 2.0f);
+	ImGui::SameLine(0.0f, 2.0f * scale);
 	ImGui::PopID();
 	return pressed;
 }
@@ -239,14 +241,14 @@ bool subnavbar_entry(const char *const label, const bool active, const char *con
 	if (active || hovered) {
 		ImVec4 fill{ ImGui::GetStyleColorVec4(active ? ImGuiCol_CheckMark : ImGuiCol_ChildBg) };
 		fill.w = active ? 0.12f : 0.55f;
-		draw_list->AddRectFilled(position, { position.x + size.x, position.y + size.y }, ImGui::ColorConvertFloat4ToU32(fill), 2.0f);
+		draw_list->AddRectFilled(position, { position.x + size.x, position.y + size.y }, ImGui::ColorConvertFloat4ToU32(fill), 2.0f * scale);
 	}
 	if (icon_font && icon) {
 		draw_list->AddText(icon_font, 13.0f * scale, { position.x + 7.0f * scale, position.y + (size.y - 13.0f * scale) * 0.5f }, ImGui::GetColorU32(active ? ImGuiCol_CheckMark : ImGuiCol_TextDisabled), icon);
 	}
 	const float text_offset{ icon_font && icon ? 7.0f * scale + icon_width : 7.0f * scale };
 	draw_list->AddText({ position.x + text_offset, position.y + (size.y - ImGui::GetFontSize()) * 0.5f }, ImGui::GetColorU32(active ? ImGuiCol_Text : ImGuiCol_TextDisabled), label);
-	ImGui::SameLine(0.0f, 2.0f);
+	ImGui::SameLine(0.0f, 2.0f * scale);
 	ImGui::PopID();
 	return pressed;
 }

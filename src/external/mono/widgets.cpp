@@ -1,4 +1,5 @@
 #include "widgets.hpp"
+#include "window_chrome.hpp"
 
 #include <algorithm>
 #include <array>
@@ -8,7 +9,11 @@ namespace mono
 {
 namespace
 {
-constexpr float vertical_padding{ 2.0f };
+float vertical_padding()
+{
+	return 2.0f * window_scale();
+}
+
 input_adapter configured_input{};
 item_interaction configured_item_interaction{};
 
@@ -47,7 +52,7 @@ bool input_text(const char *const label, std::string *const value, const char *c
 		changed = ImGui::InputText(label, value->data(), value->capacity() + 1, actual_flags, resize_string, value);
 	}
 	remember_item_interaction();
-	ImGui::Dummy({ 0.0f, vertical_padding });
+	ImGui::Dummy({ 0.0f, vertical_padding() });
 	return changed;
 }
 
@@ -87,8 +92,9 @@ bool toggle(const char *const label, bool *const value)
 	if (!label || !value) {
 		return false;
 	}
+	const float scale{ window_scale() };
 	const ImVec2 position{ ImGui::GetCursorScreenPos() };
-	const ImVec2 size{ std::max(ImGui::GetContentRegionAvail().x, 1.0f), 22.0f };
+	const ImVec2 size{ std::max(ImGui::GetContentRegionAvail().x, 1.0f), 22.0f * scale };
 	ImGui::PushID(label);
 	const bool pressed{ ImGui::InvisibleButton("##toggle", size) };
 	const bool hovered{ ImGui::IsItemHovered() };
@@ -97,18 +103,19 @@ bool toggle(const char *const label, bool *const value)
 		*value = !*value;
 	}
 	ImDrawList *const draw_list{ ImGui::GetWindowDrawList() };
-	draw_list->AddText({ position.x + 2.0f, position.y + 3.0f }, ImGui::GetColorU32(*value ? ImGuiCol_Text : ImGuiCol_TextDisabled), label);
-	constexpr float switch_width{ 30.0f };
-	constexpr float switch_height{ 14.0f };
-	const ImVec2 minimum{ position.x + size.x - switch_width - 2.0f, position.y + 4.0f };
+	draw_list->AddText({ position.x + 2.0f * scale, position.y + (size.y - ImGui::GetTextLineHeight()) * 0.5f }, ImGui::GetColorU32(*value ? ImGuiCol_Text : ImGuiCol_TextDisabled), label);
+	const float switch_width{ 30.0f * scale };
+	const float switch_height{ 14.0f * scale };
+	const float knob_inset{ 2.0f * scale };
+	const ImVec2 minimum{ position.x + size.x - switch_width - 2.0f * scale, position.y + (size.y - switch_height) * 0.5f };
 	const ImVec2 maximum{ minimum.x + switch_width, minimum.y + switch_height };
 	ImVec4 background{ ImGui::GetStyleColorVec4(*value ? ImGuiCol_CheckMark : hovered ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg) };
 	background.w = *value ? 0.65f : 1.0f;
 	draw_list->AddRectFilled(minimum, maximum, ImGui::ColorConvertFloat4ToU32(background), switch_height * 0.5f);
-	const float knob_x{ *value ? maximum.x - switch_height + 2.0f : minimum.x + 2.0f };
-	draw_list->AddCircleFilled({ knob_x + (switch_height - 4.0f) * 0.5f, minimum.y + switch_height * 0.5f }, (switch_height - 4.0f) * 0.5f, ImGui::GetColorU32(ImGuiCol_Text));
+	const float knob_x{ *value ? maximum.x - switch_height + knob_inset : minimum.x + knob_inset };
+	draw_list->AddCircleFilled({ knob_x + (switch_height - knob_inset * 2.0f) * 0.5f, minimum.y + switch_height * 0.5f }, (switch_height - knob_inset * 2.0f) * 0.5f, ImGui::GetColorU32(ImGuiCol_Text));
 	ImGui::PopID();
-	ImGui::Dummy({ 0.0f, vertical_padding });
+	ImGui::Dummy({ 0.0f, vertical_padding() });
 	return pressed;
 }
 
@@ -124,7 +131,7 @@ bool button(const char *const label, const ImVec2 size, const bool danger)
 	ImGui::PushStyleColor(ImGuiCol_Button, accent);
 	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, { accent.x, accent.y, accent.z, 0.78f });
 	ImGui::PushStyleColor(ImGuiCol_ButtonActive, { accent.x, accent.y, accent.z, 1.0f });
-	ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0f);
+	ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0f * window_scale());
 	const bool pressed{ ImGui::Button(label, size) };
 	ImGui::PopStyleVar();
 	ImGui::PopStyleColor(3);
@@ -151,7 +158,7 @@ bool list_item(const char *const label, const bool selected, const ImVec2 size)
 			position,
 			{ position.x + actual_size.x, position.y + actual_size.y },
 			ImGui::GetColorU32(color),
-			std::min(5.0f, actual_size.y * 0.5f));
+			std::min(5.0f * window_scale(), actual_size.y * 0.5f));
 	}
 	draw_list->AddText(
 		{ position.x + ImGui::GetStyle().FramePadding.x,
@@ -188,7 +195,7 @@ bool select_single(const char *const label, int *const value, const std::vector<
 		ImGui::EndCombo();
 	}
 	ImGui::PopID();
-	ImGui::Dummy({ 0.0f, vertical_padding });
+	ImGui::Dummy({ 0.0f, vertical_padding() });
 	return changed;
 }
 
@@ -221,7 +228,7 @@ bool select_multi(const char *const label, const std::vector<std::pair<std::stri
 		ImGui::EndCombo();
 	}
 	ImGui::PopID();
-	ImGui::Dummy({ 0.0f, vertical_padding });
+	ImGui::Dummy({ 0.0f, vertical_padding() });
 	return changed;
 }
 
@@ -234,7 +241,7 @@ bool slider_int(const char *const label, int *const value, const int minimum, co
 	const bool changed{ ImGui::SliderInt("##value", value, minimum, maximum, format) };
 	remember_item_interaction();
 	ImGui::PopID();
-	ImGui::Dummy({ 0.0f, vertical_padding });
+	ImGui::Dummy({ 0.0f, vertical_padding() });
 	return changed;
 }
 
@@ -247,7 +254,7 @@ bool slider_float(const char *const label, float *const value, const float minim
 	const bool changed{ ImGui::SliderFloat("##value", value, minimum, maximum, format) };
 	remember_item_interaction();
 	ImGui::PopID();
-	ImGui::Dummy({ 0.0f, vertical_padding });
+	ImGui::Dummy({ 0.0f, vertical_padding() });
 	return changed;
 }
 
@@ -263,7 +270,7 @@ bool color_picker(const char *const label, rgba8 *const value)
 	ImGui::PushID(label);
 	ImGui::TextUnformatted(label);
 	ImGui::SameLine();
-	ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowWidth() - 34.0f));
+	ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowWidth() - 34.0f * window_scale()));
 	const bool changed{ ImGui::ColorEdit4("##value", color.data(), ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaPreviewHalf) };
 	remember_item_interaction();
 	if (changed) {
@@ -273,7 +280,7 @@ bool color_picker(const char *const label, rgba8 *const value)
 		value->a = static_cast<uint8_t>(std::clamp(color[3], 0.0f, 1.0f) * 255.0f);
 	}
 	ImGui::PopID();
-	ImGui::Dummy({ 0.0f, vertical_padding });
+	ImGui::Dummy({ 0.0f, vertical_padding() });
 	return changed;
 }
 
@@ -331,7 +338,7 @@ bool input_key(const char *const label, int *const value)
 		}
 	}
 	ImGui::PopID();
-	ImGui::Dummy({ 0.0f, vertical_padding });
+	ImGui::Dummy({ 0.0f, vertical_padding() });
 	return changed;
 }
 
@@ -340,7 +347,8 @@ void begin_panel(const char *const label, const ImVec2 size)
 	if (!label) {
 		return;
 	}
-	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 8.0f, 8.0f });
+	const float scale{ window_scale() };
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 8.0f * scale, 8.0f * scale });
 	ImGui::BeginChild(label, size, ImGuiChildFlags_Border);
 	ImGui::TextUnformatted(label);
 	ImGui::Separator();
@@ -361,6 +369,6 @@ void group_separator()
 
 void control_spacing()
 {
-	ImGui::Dummy({ 0.0f, 6.0f });
+	ImGui::Dummy({ 0.0f, 6.0f * window_scale() });
 }
 }

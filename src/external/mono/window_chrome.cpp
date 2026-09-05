@@ -4,9 +4,26 @@
 
 namespace mono
 {
+namespace
+{
+float configured_scale{};
+}
+
+void set_window_scale(const float scale)
+{
+	configured_scale = scale > 0.0f ? scale : 0.0f;
+}
+
 float window_scale()
 {
-	return std::max(ImGui::GetFontSize() / 13.0f, 0.5f);
+	if (configured_scale > 0.0f) {
+		return configured_scale;
+	}
+	const float font_size{ ImGui::GetFontSize() };
+	if (font_size <= 0.0f) {
+		return 1.0f;
+	}
+	return std::max(font_size / 13.0f, 0.5f);
 }
 
 float window_header_height()

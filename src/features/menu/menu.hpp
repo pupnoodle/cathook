@@ -62,7 +62,6 @@ namespace cat_menu
 namespace cat_menu
 {
 
-constexpr float k_ui_scale{ 1.18f };
 constexpr ImVec2 k_menu_size{ 820.0f, 600.0f };
 constexpr float k_title_height{ 24.0f };
 constexpr float k_gap{ 5.0f };
@@ -559,7 +558,7 @@ inline void ensure_fonts() {
 inline bool accent_button(const char* label, const ImVec2& size = ImVec2(0.0f, 26.0f), const bool danger = false) {
   ImVec2 button_size = size;
   if (button_size.x == 0.0f) button_size.x = -1.0f;
-  button_size.y = k_button_height;
+  button_size.y = scaled(k_button_height);
   return mono::button(label, button_size, danger);
 }
 
@@ -670,7 +669,7 @@ inline float end_panel_ex() {
     panel_state = stack.back();
   }
   const float header_height = panel_state.header_height;
-  const float required_height = header_height + content_height + k_panel_padding_y;
+  const float required_height = header_height + content_height + scaled(k_panel_padding_y);
 
   mono::end_panel();
   if (!stack.empty()) {
@@ -688,7 +687,7 @@ inline float column_width(const int column_count) {
     return ImGui::GetContentRegionAvail().x;
   }
 
-  return (ImGui::GetContentRegionAvail().x - (k_gap * static_cast<float>(column_count - 1))) / static_cast<float>(column_count);
+  return (ImGui::GetContentRegionAvail().x - (scaled(k_gap) * static_cast<float>(column_count - 1))) / static_cast<float>(column_count);
 }
 
 inline void begin_column() {
@@ -697,7 +696,7 @@ inline void begin_column() {
 
 inline void next_column() {
   ImGui::EndGroup();
-  ImGui::SameLine(0.0f, k_gap);
+  ImGui::SameLine(0.0f, scaled(k_gap));
   ImGui::BeginGroup();
 }
 
@@ -872,6 +871,9 @@ static void get_input(SDL_Event* event) {
 
 static void set_imgui_theme(void) {
   cat_menu::ensure_fonts();
+  // Publish the menu scale to mono before apply_layout() bakes it into the
+  // ImGui style, so both layers lay out against the same factor.
+  mono::set_window_scale(cat_menu::ui_scale());
   mono::apply_layout();
   const ImVec4 accent = cat_menu::menu_accent();
   mono::apply_colors({accent.x, accent.y, accent.z, accent.w});
@@ -1280,9 +1282,9 @@ static void draw_visual_groups_content() {
 
   cat_menu::begin_flow_layout("visual_groups_layout", 2);
   cat_menu::flow_panel("Groups", 0, 380.0f, [&]() {
-    const float content_width = ImMax(1.0f, ImGui::GetContentRegionAvail().x - 10.0f);
+    const float content_width = ImMax(1.0f, ImGui::GetContentRegionAvail().x - cat_menu::scaled(10.0f));
     cat_menu::input_text("New group", &new_group_name);
-    const float button_spacing = 6.0f;
+    const float button_spacing = cat_menu::scaled(6.0f);
     const float two_button_width = ImMax(1.0f, (content_width - button_spacing) * 0.5f);
     if (cat_menu::accent_button("Create", ImVec2(two_button_width, 22.0f)) &&
         config.visual_groups.groups.size() < visual_group_config::max_groups) {
@@ -2598,7 +2600,7 @@ static void draw_ipc_content() {
     config.ipc.auto_ignore_local_bots = true;
 #endif
 
-    ImGui::Dummy(ImVec2(0.0f, 4.0f));
+    ImGui::Dummy(ImVec2(0.0f, cat_menu::scaled(4.0f)));
     ImGui::PushStyleColor(ImGuiCol_Text, connected ? cat_menu::menu_accent() : cat_menu::k_text_soft);
     if (connected) {
       ImGui::Text("Status: connected as peer %d", peer_id);
@@ -2614,7 +2616,7 @@ static void draw_ipc_content() {
       cat_ipc::client::set_enabled(true);
       cat_ipc::client::start();
     }
-    ImGui::SameLine(0.0f, 6.0f);
+    ImGui::SameLine(0.0f, cat_menu::scaled(6.0f));
     if (cat_menu::accent_button("Reconnect", ImVec2(0.0f, 22.0f))) {
       config.ipc.enabled = true;
       cat_ipc::client::shutdown();
@@ -2787,7 +2789,7 @@ static void draw_debug_content() {
     cat_menu::checkbox("Draw all entities", &config.debug.debug_render_all_entities);
     cat_menu::checkbox("Show active flag IDs", &config.debug.show_active_flag_ids_of_players);
 
-    ImGui::Dummy(ImVec2(0.0f, 8.0f));
+    ImGui::Dummy(ImVec2(0.0f, cat_menu::scaled(8.0f)));
 
     const char* button_label = config.debug.insider_settings_unlocked ? "Insider Settings: Unlocked" : "Unlock Insider Settings";
     if (cat_menu::accent_button(button_label, ImVec2(-1.0f, 26.0f), false)) {
@@ -2848,7 +2850,7 @@ static void draw_config_content() {
     ImGui::EndChild();
     ImGui::PopStyleVar();
 
-    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+    ImGui::Dummy(ImVec2(0.0f, cat_menu::scaled(6.0f)));
     ImGui::PushStyleColor(ImGuiCol_Text, cat_menu::k_text_soft);
     ImGui::Text("Stored configs: %d", static_cast<int>(configs.size()));
     ImGui::Text("Current: %s", config_store->current_name().c_str());
@@ -2856,14 +2858,14 @@ static void draw_config_content() {
   });
   cat_menu::flow_panel("Config Options", 1, 186.0f, [&]() {
     cat_menu::input_text("Config name", config_name, static_cast<int>(std::size(config_name)));
-    ImGui::Dummy(ImVec2(0.0f, 6.0f));
-    if (cat_menu::accent_button("Create", ImVec2((ImGui::GetContentRegionAvail().x - 6.0f) * 0.5f, 22.0f))) {
+    ImGui::Dummy(ImVec2(0.0f, cat_menu::scaled(6.0f)));
+    if (cat_menu::accent_button("Create", ImVec2((ImGui::GetContentRegionAvail().x - cat_menu::scaled(6.0f)) * 0.5f, 22.0f))) {
       config_store->import_config(config);
       if (config_store->save_file(config_name)) {
         cat_bind::save(config_store, config_name);
       }
     }
-    ImGui::SameLine(0.0f, 6.0f);
+    ImGui::SameLine(0.0f, cat_menu::scaled(6.0f));
     if (cat_menu::accent_button("Save", ImVec2(0.0f, 22.0f))) {
       config_store->import_config(config);
       if (config_store->save_file(config_name)) {
@@ -2877,12 +2879,12 @@ static void draw_config_content() {
         cat_bind::load(config_store);
       }
     }
-    ImGui::SameLine(0.0f, 6.0f);
+    ImGui::SameLine(0.0f, cat_menu::scaled(6.0f));
     if (cat_menu::accent_button("Delete", ImVec2(0.0f, 22.0f), true)) {
       config_store->delete_file(config_name);
       cat_bind::delete_file(config_store, config_name);
     }
-    ImGui::Dummy(ImVec2(0.0f, 8.0f));
+    ImGui::Dummy(ImVec2(0.0f, cat_menu::scaled(8.0f)));
     ImGui::PushStyleColor(ImGuiCol_Text, cat_menu::k_text_soft);
     ImGui::TextUnformatted("Actions save the current in-memory config.");
     ImGui::TextUnformatted("Load replaces the current settings from disk.");
@@ -3315,7 +3317,7 @@ static void draw_menu(void) {
   if (player_manager_window_open) {
     if (!player_manager_state.position_initialized) {
       player_manager_state.position = {
-        menu_state.position.x + cat_menu::k_menu_size.x + 24.0f,
+        menu_state.position.x + cat_menu::scaled(cat_menu::k_menu_size.x + 24.0f),
         menu_state.position.y
       };
     }
