@@ -527,7 +527,21 @@ class BotManager {
         }
     }
 
-    update() {
+    async update() {
+        if (this.update_in_progress)
+            return;
+        this.update_in_progress = true;
+        try {
+            await this.update_bots();
+        } catch (error) {
+            this.log_exception('bot update failed', error);
+            this.schedule_update(1000);
+        } finally {
+            this.update_in_progress = false;
+        }
+    }
+
+    async update_bots() {
         var self = this;
         Bot.currentlyStartingGames = 0;
         Bot.currentlyBootingSteam = 0;
@@ -551,7 +565,7 @@ class BotManager {
         }
 
         Bot.set_process_table_cache_ms(this.process_table_cache_ms());
-        const process_table = Bot.read_process_table();
+        const process_table = await Bot.refresh_process_table();
         const children_by_parent = Bot.build_process_children_by_parent(process_table);
         this.granted_starts_this_tick = 0;
         this.refresh_start_lane();

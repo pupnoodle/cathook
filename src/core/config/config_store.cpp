@@ -586,6 +586,12 @@ void config_store::import_config(const Config& config)
     set_string("misc.automation.auto_item_primary", config.misc.automation.auto_item_primary);
     set_string("misc.automation.auto_item_secondary", config.misc.automation.auto_item_secondary);
     set_string("misc.automation.auto_item_melee", config.misc.automation.auto_item_melee);
+    set_bool("misc.automation.auto_item_equipment", config.misc.automation.auto_item_equipment);
+    set_string("misc.automation.auto_item_building", config.misc.automation.auto_item_building);
+    set_string("misc.automation.auto_item_pda", config.misc.automation.auto_item_pda);
+    set_string("misc.automation.auto_item_pda2", config.misc.automation.auto_item_pda2);
+    set_string("misc.automation.auto_item_action", config.misc.automation.auto_item_action);
+    set_string("misc.automation.auto_item_taunt", config.misc.automation.auto_item_taunt);
     set_bool("misc.automation.auto_item_hats", config.misc.automation.auto_item_hats);
     set_string("misc.automation.auto_item_hat1", config.misc.automation.auto_item_hat1);
     set_string("misc.automation.auto_item_hat2", config.misc.automation.auto_item_hat2);
@@ -637,6 +643,12 @@ void config_store::import_config(const Config& config)
     set_string(
         "misc.automation.region_selector_allowed_mask",
         std::to_string(config.misc.automation.region_selector_allowed_mask));
+    set_int("misc.automation.mvm_tour_index", config.misc.automation.mvm_tour_index);
+    set_bool("misc.automation.mvm_uncompleted_only", config.misc.automation.mvm_uncompleted_only);
+    set_bool("misc.automation.bootcamp_enabled", config.misc.automation.bootcamp_enabled);
+    set_int("misc.automation.bootcamp_mission_bits", static_cast<int>(config.misc.automation.bootcamp_mission_bits));
+    set_bool("misc.automation.stalker_enabled", config.misc.automation.stalker_enabled);
+    set_int("misc.automation.stalker_interval", config.misc.automation.stalker_interval);
     set_bool("misc.automation.navbot_enabled", config.misc.automation.navbot_enabled);
     set_int("misc.automation.navbot_behavior", static_cast<int>(config.misc.automation.navbot_behavior));
     set_bool("misc.automation.navbot_draw_path", config.misc.automation.navbot_draw_path);
@@ -671,6 +683,23 @@ void config_store::import_config(const Config& config)
     set_bool("crithack.force_crits", config.crithack.force_crits);
     set_bool("crithack.always_melee", config.crithack.always_melee);
     set_bool("crithack.avoid_random", config.crithack.avoid_random);
+    set_bool("auto_detonate.stickies", config.auto_detonate.stickies);
+    set_bool("auto_detonate.flares", config.auto_detonate.flares);
+    set_bool("auto_detonate.buildings", config.auto_detonate.buildings);
+    set_bool("auto_detonate.ignore_cloaked", config.auto_detonate.ignore_cloaked);
+    set_bool("auto_detonate.dont_blow_me_up", config.auto_detonate.dont_blow_me_up);
+    set_float("auto_detonate.sticky_radius", config.auto_detonate.sticky_radius);
+    set_float("auto_detonate.flare_radius", config.auto_detonate.flare_radius);
+    set_bool("auto_reflect.enabled", config.auto_reflect.enabled);
+    set_bool("auto_reflect.rockets", config.auto_reflect.rockets);
+    set_bool("auto_reflect.sentry_rockets", config.auto_reflect.sentry_rockets);
+    set_bool("auto_reflect.pipes", config.auto_reflect.pipes);
+    set_bool("auto_reflect.stickies", config.auto_reflect.stickies);
+    set_bool("auto_reflect.flares", config.auto_reflect.flares);
+    set_bool("auto_reflect.arrows", config.auto_reflect.arrows);
+    set_bool("auto_reflect.burning_teammates", config.auto_reflect.burning_teammates);
+    set_float("auto_reflect.range", config.auto_reflect.range);
+    set_float("auto_reflect.fov_limit", config.auto_reflect.fov_limit);
     set_int("debug.font_height", config.debug.font_height);
     set_int("debug.font_weight", config.debug.font_weight);
     set_bool("debug.render_all_entities", config.debug.debug_render_all_entities);
@@ -1268,6 +1297,7 @@ void config_store::export_config(Config& config) const
 #if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
 
     config.misc.exploits.null_graphics = true;
+    config.misc.exploits.no_engine_sleep = true;
 #endif
 
     config.misc.exploits.legacy_tickbase_indicator = false;
@@ -1340,6 +1370,24 @@ void config_store::export_config(Config& config) const
     config.misc.automation.auto_item_melee = get_string(
         "misc.automation.auto_item_melee",
         get_string("auto-item.weapons.melee", config.misc.automation.auto_item_melee));
+    config.misc.automation.auto_item_equipment = get_bool(
+        "misc.automation.auto_item_equipment",
+        config.misc.automation.auto_item_equipment);
+    config.misc.automation.auto_item_building = get_string(
+        "misc.automation.auto_item_building",
+        config.misc.automation.auto_item_building);
+    config.misc.automation.auto_item_pda = get_string(
+        "misc.automation.auto_item_pda",
+        config.misc.automation.auto_item_pda);
+    config.misc.automation.auto_item_pda2 = get_string(
+        "misc.automation.auto_item_pda2",
+        config.misc.automation.auto_item_pda2);
+    config.misc.automation.auto_item_action = get_string(
+        "misc.automation.auto_item_action",
+        config.misc.automation.auto_item_action);
+    config.misc.automation.auto_item_taunt = get_string(
+        "misc.automation.auto_item_taunt",
+        config.misc.automation.auto_item_taunt);
     config.misc.automation.auto_item_hats = get_bool(
         "misc.automation.auto_item_hats",
         get_bool("auto-item.hats", config.misc.automation.auto_item_hats));
@@ -1480,6 +1528,25 @@ void config_store::export_config(Config& config) const
             "misc.automation.region_selector_allowed_mask",
             std::to_string(config.misc.automation.region_selector_allowed_mask)),
         config.misc.automation.region_selector_allowed_mask) & automation::region_selector::all_region_bits;
+    config.misc.automation.mvm_tour_index = get_int(
+        "misc.automation.mvm_tour_index",
+        config.misc.automation.mvm_tour_index);
+    config.misc.automation.mvm_uncompleted_only = get_bool(
+        "misc.automation.mvm_uncompleted_only",
+        config.misc.automation.mvm_uncompleted_only);
+    config.misc.automation.bootcamp_enabled = get_bool(
+        "misc.automation.bootcamp_enabled",
+        config.misc.automation.bootcamp_enabled);
+    config.misc.automation.bootcamp_mission_bits = static_cast<std::uint32_t>(get_int(
+        "misc.automation.bootcamp_mission_bits",
+        static_cast<int>(config.misc.automation.bootcamp_mission_bits)));
+    config.misc.automation.stalker_enabled = get_bool(
+        "misc.automation.stalker_enabled",
+        config.misc.automation.stalker_enabled);
+    config.misc.automation.stalker_interval = std::clamp(
+        get_int("misc.automation.stalker_interval", config.misc.automation.stalker_interval),
+        5,
+        300);
     config.misc.automation.navbot_enabled = get_bool("misc.automation.navbot_enabled", config.misc.automation.navbot_enabled);
     config.misc.automation.navbot_behavior = static_cast<Misc::Automation::navbot_mode>(std::clamp(
         get_int("misc.automation.navbot_behavior", static_cast<int>(config.misc.automation.navbot_behavior)),
@@ -1562,6 +1629,34 @@ void config_store::export_config(Config& config) const
     config.crithack.always_melee = get_bool("crithack.always_melee", legacy_always_melee);
     const bool legacy_avoid_random = get_bool("random_crits.save_bucket", config.crithack.avoid_random);
     config.crithack.avoid_random = get_bool("crithack.avoid_random", legacy_avoid_random);
+    config.auto_detonate.stickies = get_bool("auto_detonate.stickies", config.auto_detonate.stickies);
+    config.auto_detonate.flares = get_bool("auto_detonate.flares", config.auto_detonate.flares);
+    config.auto_detonate.buildings = get_bool("auto_detonate.buildings", config.auto_detonate.buildings);
+    config.auto_detonate.ignore_cloaked = get_bool("auto_detonate.ignore_cloaked", config.auto_detonate.ignore_cloaked);
+    config.auto_detonate.dont_blow_me_up = get_bool("auto_detonate.dont_blow_me_up", config.auto_detonate.dont_blow_me_up);
+    config.auto_detonate.sticky_radius = std::clamp(
+        get_float("auto_detonate.sticky_radius", config.auto_detonate.sticky_radius),
+        40.0f,
+        400.0f);
+    config.auto_detonate.flare_radius = std::clamp(
+        get_float("auto_detonate.flare_radius", config.auto_detonate.flare_radius),
+        40.0f,
+        400.0f);
+    config.auto_reflect.enabled = get_bool("auto_reflect.enabled", config.auto_reflect.enabled);
+    config.auto_reflect.rockets = get_bool("auto_reflect.rockets", config.auto_reflect.rockets);
+    config.auto_reflect.sentry_rockets = get_bool("auto_reflect.sentry_rockets", config.auto_reflect.sentry_rockets);
+    config.auto_reflect.pipes = get_bool("auto_reflect.pipes", config.auto_reflect.pipes);
+    config.auto_reflect.stickies = get_bool("auto_reflect.stickies", config.auto_reflect.stickies);
+    config.auto_reflect.flares = get_bool("auto_reflect.flares", config.auto_reflect.flares);
+    config.auto_reflect.arrows = get_bool("auto_reflect.arrows", config.auto_reflect.arrows);
+    config.auto_reflect.burning_teammates = get_bool(
+        "auto_reflect.burning_teammates",
+        config.auto_reflect.burning_teammates);
+    config.auto_reflect.range = std::clamp(get_float("auto_reflect.range", config.auto_reflect.range), 40.0f, 400.0f);
+    config.auto_reflect.fov_limit = std::clamp(
+        get_float("auto_reflect.fov_limit", config.auto_reflect.fov_limit),
+        0.0f,
+        180.0f);
     config.debug.font_height = get_int("debug.font_height", config.debug.font_height);
     config.debug.font_weight = get_int("debug.font_weight", config.debug.font_weight);
     config.debug.debug_render_all_entities = get_bool("debug.render_all_entities", config.debug.debug_render_all_entities);

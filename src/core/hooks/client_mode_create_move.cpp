@@ -19,6 +19,8 @@ V  o o  V  file: src/core/hooks/client_mode_create_move.cpp
 #include "core/ui/mono_ui.hpp"
 #include "features/menu/config.hpp"
 #include "features/combat/backtrack/backtrack.hpp"
+#include "features/combat/auto_detonate/auto_detonate.hpp"
+#include "features/combat/auto_reflect/auto_reflect.hpp"
 #include "features/combat/aimbot/aimbot.cpp"
 #include "features/combat/random_crits/crit_hack.hpp"
 #include "features/movement/bhop/bhop.cpp"
@@ -197,6 +199,10 @@ static move_features_result run_move_features(user_cmd* user_cmd) {
   if (localplayer != nullptr && !suppress_aimbot && !aimbot_result.active_target && config.backtrack.to_crosshair) {
     backtrack::backtrack_to_crosshair(user_cmd, localplayer, localplayer->get_weapon());
   }
+
+  auto_detonate::on_create_move(user_cmd);
+  auto_reflect::on_create_move(user_cmd);
+
   movement_fix(user_cmd, original_view_angles, corrected_forward_move, corrected_side_move);
   if (!menu_movement_blocked && !suppress_aimbot &&
       !navbot::controller().should_prioritize_danger_movement() &&

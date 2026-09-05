@@ -17,7 +17,9 @@ V  o o  V  file: src/features/menu/menu.hpp
 #include "core/ipc/ipc_client.hpp"
 #include "core/logger.hpp"
 // #include "features/automation/inventory_changer/inventory_changer.hpp" // Temporarily disabled.
+#include "features/automation/mvm_queue/mvm_queue.hpp"
 #include "features/automation/navbot/navbot_types.hpp"
+#include "features/automation/profile_stalker_api.hpp"
 #include "features/automation/region_selector/region_selector.hpp"
 #include "features/visuals/material_manager.hpp"
 #include "features/visuals/groups/visual_groups.hpp"
@@ -1032,6 +1034,27 @@ static void draw_aimbot_content() {
     cat_menu::checkbox("Heavy auto rev", &config.aimbot.auto_rev);
     cat_menu::checkbox("Heavy auto unrev", &config.aimbot.auto_unrev);
     cat_menu::slider_float("Heavy rev threshold", &config.aimbot.auto_rev_threshold, 200.0f, 1200.0f, "%.0f HU");
+  });
+  cat_menu::flow_panel("Auto detonate", 1, 156.0f, [&]() {
+    cat_menu::checkbox("Sticky detonation", &config.auto_detonate.stickies);
+    cat_menu::checkbox("Flare airburst", &config.auto_detonate.flares);
+    cat_menu::checkbox("Target buildings", &config.auto_detonate.buildings);
+    cat_menu::checkbox("Ignore cloaked", &config.auto_detonate.ignore_cloaked);
+    cat_menu::checkbox("Don't blow me up", &config.auto_detonate.dont_blow_me_up);
+    cat_menu::slider_float("Sticky radius", &config.auto_detonate.sticky_radius, 40.0f, 400.0f, "%.0f HU");
+    cat_menu::slider_float("Flare radius", &config.auto_detonate.flare_radius, 40.0f, 400.0f, "%.0f HU");
+  });
+  cat_menu::flow_panel("Auto reflect", 1, 200.0f, [&]() {
+    cat_menu::checkbox("Enable", &config.auto_reflect.enabled);
+    cat_menu::checkbox("Rockets", &config.auto_reflect.rockets);
+    cat_menu::checkbox("Sentry rockets", &config.auto_reflect.sentry_rockets);
+    cat_menu::checkbox("Pipes", &config.auto_reflect.pipes);
+    cat_menu::checkbox("Stickies", &config.auto_reflect.stickies);
+    cat_menu::checkbox("Flares", &config.auto_reflect.flares);
+    cat_menu::checkbox("Arrows", &config.auto_reflect.arrows);
+    cat_menu::checkbox("Burning teammates", &config.auto_reflect.burning_teammates);
+    cat_menu::slider_float("Range", &config.auto_reflect.range, 40.0f, 400.0f, "%.0f HU");
+    cat_menu::slider_float("FOV limit", &config.auto_reflect.fov_limit, 0.0f, 180.0f, "%.0f deg");
   });
   cat_menu::flow_panel("Sniper", 1, 116.0f, [&]() {
     cat_menu::checkbox("Automatic scope", &config.aimbot.sniper_auto_scope);
@@ -2201,12 +2224,78 @@ static void draw_cat_bot_content() {
     cat_menu::checkbox("Requeue on kick", &config.misc.automation.requeue_on_kick);
     cat_menu::checkbox("Auto casual join", &config.misc.automation.auto_casual_join);
     cat_menu::combo("Queue mode", &config.misc.automation.auto_queue_mode, queue_mode_items, IM_ARRAYSIZE(queue_mode_items));
+    static int cached_tour_count = -1;
+    static std::vector<std::string> tour_name_storage{};
+    static std::vector<const char*> tour_items{};
+    const int tours = automation::mvm_queue::tour_count();
+    if (tours != cached_tour_count) {
+      cached_tour_count = tours;
+      tour_name_storage.clear();
+      tour_name_storage.reserve(static_cast<std::size_t>(tours));
+      for (int index = 0; index < tours; ++index) {
+        tour_name_storage.emplace_back(automation::mvm_queue::tour_display_name(index));
+      }
+      tour_items.clear();
+      tour_items.push_back("Any");
+      for (const auto& name : tour_name_storage) {
+        tour_items.push_back(name.c_str());
+      }
+      if (config.misc.automation.mvm_tour_index > tours) config.misc.automation.mvm_tour_index = 0;
+    }
+    if (!tour_items.empty()) {
+      cat_menu::combo("MvM tour", &config.misc.automation.mvm_tour_index, tour_items.data(), static_cast<int>(tour_items.size()));
+      cat_menu::checkbox("Only uncompleted missions", &config.misc.automation.mvm_uncompleted_only);
+    } else {
+      ImGui::TextDisabled("No MvM tours in schema");
+      config.misc.automation.mvm_tour_index = 0;
+    }
+    cat_menu::checkbox("Boot camp missions", &config.misc.automation.bootcamp_enabled);
+    static int cached_bootcamp_count = -1;
+    static std::vector<const char*> bootcamp_items{};
+    static std::vector<std::uint32_t> bootcamp_bits{};
+    const int bootcamp_missions = automation::mvm_queue::bootcamp_mission_count();
+    if (bootcamp_missions != cached_bootcamp_count) {
+      cached_bootcamp_count = bootcamp_missions;
+      bootcamp_items.clear();
+      bootcamp_bits.clear();
+      bootcamp_items.reserve(static_cast<std::size_t>(bootcamp_missions));
+      bootcamp_bits.reserve(static_cast<std::size_t>(bootcamp_missions));
+      for (int index = 0; index < bootcamp_missions; ++index) {
+        bootcamp_items.push_back(automation::mvm_queue::bootcamp_mission_name(index));
+        bootcamp_bits.push_back(1u << index);
+      }
+      const std::uint32_t selectable_mask = bootcamp_bits.empty() ? 0u : (bootcamp_missions >= 32 ? ~0u : ((1u << bootcamp_missions) - 1u));
+      config.misc.automation.bootcamp_mission_bits &= selectable_mask;
+    }
+    if (bootcamp_missions > 0) {
+      cat_menu::multi_select_combo(
+        "Bootcamp mission list",
+        &config.misc.automation.bootcamp_mission_bits,
+        bootcamp_items.data(),
+        bootcamp_bits.data(),
+        bootcamp_missions);
+    } else {
+      ImGui::TextDisabled("No practice missions in schema");
+    }
     cat_menu::slider_int("RQ if players <", &config.misc.automation.rq_if_players_lte, 0, 32);
     cat_menu::slider_int("RQ if players >", &config.misc.automation.rq_if_players_gte, 0, 32);
     cat_menu::slider_int("RQ if IPC bots >", &config.misc.automation.rq_if_ipc_bots_gt, 0, 32);
     cat_menu::checkbox("RQ if no navmesh", &config.misc.automation.rq_if_no_navmesh);
     cat_menu::checkbox("RQ ignore friends", &config.misc.automation.rq_ignore_friends);
     cat_menu::combo("Requeue action", (int*)&config.misc.automation.requeue_action, requeue_action_items, IM_ARRAYSIZE(requeue_action_items));
+  });
+  cat_menu::flow_panel("Profile stalker", 1, 150.0f, [&]() {
+    cat_menu::checkbox("Enable", &config.misc.automation.stalker_enabled);
+    cat_menu::slider_int("Query interval", &config.misc.automation.stalker_interval, 5, 300, "%d s");
+    ImGui::TextDisabled("Accounts from stalk.txt:");
+    const int status_lines = automation::profile_stalker::status_count();
+    if (status_lines == 0) {
+      ImGui::TextDisabled("none found");
+    } else {
+      for (int index = 0; index < status_lines; ++index) {
+        ImGui::TextUnformatted(automation::profile_stalker::status_line(index).c_str());
+      }
+    }
   });
   cat_menu::flow_panel("Region selector", 0, 360.0f, [&]() {
     draw_region_selector_panel("##region_selector_list");
@@ -2233,6 +2322,12 @@ static void draw_cat_bot_content() {
     cat_menu::input_text("Primary", &config.misc.automation.auto_item_primary);
     cat_menu::input_text("Secondary", &config.misc.automation.auto_item_secondary);
     cat_menu::input_text("Melee", &config.misc.automation.auto_item_melee);
+    cat_menu::checkbox("Equipment", &config.misc.automation.auto_item_equipment);
+    cat_menu::input_text("Building", &config.misc.automation.auto_item_building);
+    cat_menu::input_text("PDA", &config.misc.automation.auto_item_pda);
+    cat_menu::input_text("PDA2", &config.misc.automation.auto_item_pda2);
+    cat_menu::input_text("Action", &config.misc.automation.auto_item_action);
+    cat_menu::input_text("Taunt", &config.misc.automation.auto_item_taunt);
     cat_menu::checkbox("Hats", &config.misc.automation.auto_item_hats);
     cat_menu::input_text("Hat 1", &config.misc.automation.auto_item_hat1);
     cat_menu::input_text("Hat 2", &config.misc.automation.auto_item_hat2);
@@ -2461,6 +2556,14 @@ static void draw_autoitem_content() {
     cat_menu::input_text("Primary", &config.misc.automation.auto_item_primary);
     cat_menu::input_text("Secondary", &config.misc.automation.auto_item_secondary);
     cat_menu::input_text("Melee", &config.misc.automation.auto_item_melee);
+  });
+  cat_menu::flow_panel("Equipment", 1, 182.0f, [&]() {
+    cat_menu::checkbox("Equipment", &config.misc.automation.auto_item_equipment);
+    cat_menu::input_text("Building", &config.misc.automation.auto_item_building);
+    cat_menu::input_text("PDA", &config.misc.automation.auto_item_pda);
+    cat_menu::input_text("PDA2", &config.misc.automation.auto_item_pda2);
+    cat_menu::input_text("Action", &config.misc.automation.auto_item_action);
+    cat_menu::input_text("Taunt", &config.misc.automation.auto_item_taunt);
   });
   cat_menu::flow_panel("Cosmetics", 1, 182.0f, [&]() {
     cat_menu::checkbox("Hats", &config.misc.automation.auto_item_hats);

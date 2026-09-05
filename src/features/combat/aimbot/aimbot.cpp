@@ -537,7 +537,8 @@ void compute_readiness(aimbot_run_context& ctx) {
   ctx.readiness.trace = (!ctx.hitscan || ctx.hitscan_fire.ready) && melee_ready(ctx);
   ctx.readiness.settled = hitscan_settled(ctx);
   ctx.readiness.primary = weapon_allows_primary_fire(ctx.local, ctx.weapon) &&
-    (ctx.cmd->buttons & IN_ATTACK2) == 0;
+    (ctx.cmd->buttons & IN_ATTACK2) == 0 &&
+    (ctx.weapon == nullptr || ctx.weapon->can_primary_attack() || (global_vars != nullptr && global_vars->curtime + 0.02f >= ctx.weapon->get_next_primary_attack()));
   ctx.readiness.attack = ctx.target.entity != nullptr &&
     aim_auto_shoot::weapon_has_primary_ammo(ctx.weapon);
 
@@ -602,6 +603,19 @@ void apply_fire_state(aimbot_run_context& ctx) {
       ctx.target.tick_count > 0) {
     ctx.cmd->tick_count = ctx.target.tick_count;
   }
+#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
+  if (firing && ctx.hitscan && !ctx.target.backtrack && ctx.target.player != nullptr && global_vars != nullptr &&
+      ctx.target.tick_count == 0) {
+    Convar* interp = convar_system->find_var("cl_interp");
+    if (interp) {
+      float interp_val = interp->get_float();
+      float interval = global_vars->interval_per_tick > 0.0f ? global_vars->interval_per_tick : 0.015f;
+      if (std::isfinite(interp_val) && interp_val > 0.0f && std::isfinite(interval) && interval > 0.0f) {
+        ctx.cmd->tick_count += static_cast<int>(0.5f + interp_val / interval);
+      }
+    }
+  }
+#endif
   const bool diagnostic_attempt = ctx.auto_shoot.requested || ctx.auto_shoot.release_attack ||
     (firing && ctx.readiness.ready());
   if (diagnostic_attempt && ctx.hitscan && ctx.hitscan_fire.ready && ctx.target.player != nullptr) {

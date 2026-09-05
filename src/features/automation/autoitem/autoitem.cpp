@@ -4,14 +4,12 @@ V  o o  V  file: src/features/automation/autoitem/autoitem.cpp
  |  Y  |   author: pupnoodle
   \ Q /
   / - \
-  |    \
   |     \     )
   || (___\====
 */
 #include "features/automation/autoitem/autoitem.hpp"
 #include <algorithm>
 #include <array>
-#include <charconv>
 #include <chrono>
 #include <cstdarg>
 #include <cstdint>
@@ -22,6 +20,8 @@ V  o o  V  file: src/features/automation/autoitem/autoitem.cpp
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 #include "core/print.hpp"
 #include "core/shared/sigs.hpp"
@@ -35,8 +35,6 @@ V  o o  V  file: src/features/automation/autoitem/autoitem.cpp
 #include "games/tf2/sdk/interfaces/steam_runtime.hpp"
 #include "libsigscan/libsigscan.h"
 
-void* get_interface(const char* lib_path, const char* version);
-
 namespace autoitem
 {
 
@@ -46,7 +44,14 @@ namespace
 constexpr int primary_slot = 0;
 constexpr int secondary_slot = 1;
 constexpr int melee_slot = 2;
-constexpr int noisemaker_slot = 9;
+constexpr int building_slot = 4;
+constexpr int pda_slot = 5;
+constexpr int pda2_slot = 6;
+constexpr int head_slot = 7;
+constexpr int misc_slot = 8;
+constexpr int action_slot = 9;
+constexpr int misc2_slot = 10;
+constexpr int taunt_slot = 11;
 constexpr int birthday_noisemaker_def = 536;
 constexpr int winter_noisemaker_def = 673;
 constexpr int fallback_attempt_limit = 3;
@@ -58,6 +63,8 @@ constexpr std::uint32_t gc_msg_item_preview_request = 1703;
 constexpr std::uint16_t gc_header_version = 1;
 constexpr std::uint64_t gc_invalid_job_id = ~0ull;
 constexpr std::uint16_t gc_custom_craft_recipe = 0xFFFEu;
+constexpr std::uint64_t unequipped_item_id = static_cast<std::uint64_t>(-1);
+constexpr int max_item_def_id = 65535;
 
 constexpr std::uintptr_t inventory_item_array_offset = 0x60;
 constexpr std::uintptr_t inventory_item_count_offset = 0x70;
@@ -65,7 +72,6 @@ constexpr std::uintptr_t inventory_item_stride = 0x150;
 constexpr std::uintptr_t inventory_item_id_high_offset = 0x58;
 constexpr std::uintptr_t inventory_item_id_low_offset = 0x5C;
 constexpr std::uintptr_t inventory_item_def_offset = 0x44;
-constexpr std::uintptr_t inventory_item_position_offset = 0x64;
 
 constexpr int inventory_manager_get_local_inventory_index = 24;
 constexpr int inventory_manager_update_inventory_equipped_state_index = 33;
@@ -88,19 +94,63 @@ struct achievement_item
   const char* name;
 };
 
-struct fallback_state
+enum class spec_kind : std::uint8_t
 {
-  std::string spec{};
+  skip,
+  unequip,
+  single,
+  alternatives,
+  craft
+};
+
+struct parsed_spec
+{
+  spec_kind kind = spec_kind::skip;
+  std::vector<int> defs{};
+  std::vector<std::vector<int>> craft_groups{};
+  int craft_result = -1;
+};
+
+struct slot_task_state
+{
+  std::string raw{};
+  parsed_spec spec{};
   int attempts = 0;
+};
+
+enum task_id : std::size_t
+{
+  task_primary,
+  task_secondary,
+  task_melee,
+  task_building,
+  task_pda,
+  task_pda2,
+  task_action,
+  task_taunt,
+  task_hat1,
+  task_hat2,
+  task_hat3,
+  task_count
+};
+
+struct equip_request_record
+{
+  bool valid = false;
+  std::uint64_t item_id = 0;
 };
 
 inventory_api g_inventory_api{};
 float g_next_auto_item_time = 0.0f;
-std::array<fallback_state, 3> g_fallback_states{};
+std::array<slot_task_state, task_count> g_task_states{};
 int g_hat_rotation_offset = 0;
+std::unordered_map<int, std::vector<std::uint64_t>> g_item_ids_by_def{};
+bool g_item_ids_valid = false;
+std::unordered_map<std::uint32_t, equip_request_record> g_last_equip_requests{};
+std::string g_cache_level_name{};
+int g_cache_class_id = 0;
 int g_pending_pickup_ack_attempts = 0;
 float g_next_pending_pickup_ack_time = 0.0f;
-float g_next_inventory_dump_time = 0.0f;
 bool g_initialize_diagnostics_emitted = false;
 int g_initialize_retry_count = 0;
 float g_next_initialize_retry_time = 0.0f;
@@ -241,13 +291,24 @@ std::optional<int> parse_int(std::string_view value)
     return std::nullopt;
   }
 
-  int parsed = 0;
-  const auto result = std::from_chars(text.data(), text.data() + text.size(), parsed);
-  if (result.ec != std::errc{} || result.ptr != text.data() + text.size())
+  std::size_t cursor = 0;
+  if (text[0] == '+' || text[0] == '-')
+  {
+    cursor = 1;
+  }
+  if (cursor >= text.size() || text.find_first_not_of("0123456789", cursor) != std::string::npos)
   {
     return std::nullopt;
   }
-  return parsed;
+
+  try
+  {
+    return std::stoi(text);
+  }
+  catch (...)
+  {
+    return std::nullopt;
+  }
 }
 
 template <typename value_type>
@@ -258,14 +319,30 @@ value_type read_unaligned(const void* address)
   return value;
 }
 
-std::vector<int> parse_int_list(std::string_view value, const char delimiter)
+std::uint8_t* decode_rip_relative(std::uint8_t* instruction, const int displacement_offset, const int instruction_size)
+{
+  const auto displacement = read_unaligned<std::int32_t>(instruction + displacement_offset);
+  return instruction + instruction_size + displacement;
+}
+
+std::optional<int> parse_item_def(std::string_view value)
+{
+  const auto parsed = parse_int(value);
+  if (!parsed || *parsed < 0 || *parsed > max_item_def_id)
+  {
+    return std::nullopt;
+  }
+  return parsed;
+}
+
+std::vector<int> parse_item_def_list(std::string_view value, const char delimiter)
 {
   const auto pieces = split(value, delimiter);
   std::vector<int> parsed_values{};
   parsed_values.reserve(pieces.size());
   for (const auto& piece : pieces)
   {
-    const auto parsed = parse_int(piece);
+    const auto parsed = parse_item_def(piece);
     if (!parsed)
     {
       return {};
@@ -275,10 +352,94 @@ std::vector<int> parse_int_list(std::string_view value, const char delimiter)
   return parsed_values;
 }
 
-std::uint8_t* decode_rip_relative(std::uint8_t* instruction, const int displacement_offset, const int instruction_size)
+parsed_spec parse_spec(std::string_view raw)
 {
-  const auto displacement = read_unaligned<std::int32_t>(instruction + displacement_offset);
-  return instruction + instruction_size + displacement;
+  parsed_spec parsed{};
+  const std::string cleaned = trim(raw);
+  if (cleaned.empty())
+  {
+    return parsed;
+  }
+
+  if (cleaned == "-1")
+  {
+    parsed.kind = spec_kind::unequip;
+    return parsed;
+  }
+
+  const std::size_t result_separator = cleaned.find('-');
+  const bool is_craft_spec =
+    cleaned.find(',') != std::string::npos ||
+    cleaned.find(';') != std::string::npos ||
+    (result_separator != std::string::npos && result_separator > 0);
+
+  if (is_craft_spec)
+  {
+    if (result_separator == std::string::npos)
+    {
+      debug_log("craft spec '%s' has no result item\n", cleaned.c_str());
+      return parsed;
+    }
+
+    const auto result = parse_item_def(cleaned.substr(result_separator + 1));
+    if (!result)
+    {
+      debug_log("craft spec '%s' has invalid result item\n", cleaned.c_str());
+      return parsed;
+    }
+
+    const auto result_token = std::to_string(*result);
+    for (const auto& group : split_craft_groups(cleaned))
+    {
+      if (group == result_token)
+      {
+        continue;
+      }
+
+      auto inputs = parse_item_def_list(group, ',');
+      if (inputs.empty())
+      {
+        debug_log("invalid crafting group '%s'\n", group.c_str());
+        continue;
+      }
+      parsed.craft_groups.emplace_back(std::move(inputs));
+    }
+
+    if (parsed.craft_groups.empty())
+    {
+      debug_log("craft spec '%s' has no usable input groups\n", cleaned.c_str());
+      return parsed;
+    }
+
+    parsed.kind = spec_kind::craft;
+    parsed.craft_result = *result;
+    return parsed;
+  }
+
+  if (cleaned.find('/') != std::string::npos)
+  {
+    auto defs = parse_item_def_list(cleaned, '/');
+    if (defs.empty())
+    {
+      debug_log("invalid alternative weapon spec '%s'\n", cleaned.c_str());
+      return parsed;
+    }
+
+    parsed.kind = spec_kind::alternatives;
+    parsed.defs = std::move(defs);
+    return parsed;
+  }
+
+  const auto def = parse_item_def(cleaned);
+  if (!def)
+  {
+    debug_log("invalid item spec '%s'\n", cleaned.c_str());
+    return parsed;
+  }
+
+  parsed.kind = spec_kind::single;
+  parsed.defs.push_back(*def);
+  return parsed;
 }
 
 const achievement_item* find_achievement_item(const int item_def_id)
@@ -385,122 +546,75 @@ std::uint64_t read_item_id(std::uint8_t* item)
   return (static_cast<std::uint64_t>(high) << 32u) | static_cast<std::uint64_t>(low);
 }
 
-std::vector<std::uint64_t> get_item_ids_of_item_def(const int item_def_id)
+void rebuild_inventory_index()
 {
-  std::vector<std::uint64_t> item_ids{};
+  g_item_ids_by_def.clear();
+  g_item_ids_valid = false;
+
   auto* inventory = reinterpret_cast<std::uint8_t*>(get_local_inventory());
   if (inventory == nullptr)
   {
-    return item_ids;
+    return;
   }
 
   auto* item_array = read_unaligned<std::uint8_t*>(inventory + inventory_item_array_offset);
   const int item_count = read_unaligned<int>(inventory + inventory_item_count_offset);
   if (item_array == nullptr || item_count <= 0 || item_count > 20000)
   {
-    return item_ids;
+    return;
   }
 
-  item_ids.reserve(static_cast<std::size_t>(std::min(item_count, 64)));
+  g_item_ids_by_def.reserve(static_cast<std::size_t>(item_count));
   for (int index = 0; index < item_count; ++index)
   {
     auto* item = item_array + (static_cast<std::uintptr_t>(index) * inventory_item_stride);
-    if (static_cast<int>(read_item_def_id(item)) != item_def_id)
+    const int item_def = static_cast<int>(read_item_def_id(item));
+    const auto item_id = read_item_id(item);
+    if (item_def <= 0 || item_id == 0)
     {
       continue;
     }
 
-    const auto item_id = read_item_id(item);
-    if (item_id != 0)
+    auto& item_ids = g_item_ids_by_def[item_def];
+    if (item_ids.size() < max_crafting_inputs)
     {
       item_ids.emplace_back(item_id);
     }
   }
 
-  return item_ids;
+  g_item_ids_valid = true;
 }
 
-std::optional<std::uint64_t> get_first_item_id_of_item_def(const int item_def_id)
+const std::vector<std::uint64_t>* find_item_ids_of_def(const int item_def_id)
 {
-  const auto item_ids = get_item_ids_of_item_def(item_def_id);
-  if (item_ids.empty())
+  if (!g_item_ids_valid)
   {
-    return std::nullopt;
-  }
-  return item_ids.front();
-}
-
-void debug_dump_local_inventory(const int wanted_def)
-{
-  if (!config.misc.automation.auto_item_debug)
-  {
-    return;
-  }
-  if (global_vars != nullptr && global_vars->realtime < g_next_inventory_dump_time)
-  {
-    return;
-  }
-  g_next_inventory_dump_time = global_vars != nullptr ? global_vars->realtime + 3.0f : 0.0f;
-
-  auto* inventory = reinterpret_cast<std::uint8_t*>(get_local_inventory());
-  if (inventory == nullptr)
-  {
-    debug_log("inventory dump: get_local_inventory() returned null\n");
-    return;
+    return nullptr;
   }
 
-  auto* item_array = read_unaligned<std::uint8_t*>(inventory + inventory_item_array_offset);
-  const int item_count = read_unaligned<int>(inventory + inventory_item_count_offset);
-  debug_log("inventory dump: inv=%p array=%p count=%d (looking for def=%d)\n",
-    inventory, item_array, item_count, wanted_def);
-  if (item_array == nullptr || item_count <= 0 || item_count > 20000)
+  const auto found = g_item_ids_by_def.find(item_def_id);
+  if (found == g_item_ids_by_def.end() || found->second.empty())
   {
-    return;
+    return nullptr;
   }
 
-  int found_at = -1;
-  std::uint32_t found_raw = 0;
-  std::uint32_t max_def = 0;
-  int flagged_count = 0;
-  std::string defs_line{};
-  defs_line.reserve(static_cast<std::size_t>(item_count) * 5u);
-  for (int index = 0; index < item_count; ++index)
-  {
-    auto* item = item_array + (static_cast<std::uintptr_t>(index) * inventory_item_stride);
-    const std::uint32_t raw_position = read_unaligned<std::uint32_t>(item + inventory_item_position_offset);
-    const std::uint32_t def = read_item_def_id(item);
-    if ((raw_position & 0x40000000u) != 0)
-    {
-      ++flagged_count;
-    }
-    if (def > max_def)
-    {
-      max_def = def;
-    }
-    if ((static_cast<int>(def) == wanted_def || (raw_position & 0xFFFFu) == static_cast<std::uint32_t>(wanted_def)) && found_at < 0)
-    {
-      found_at = index;
-      found_raw = raw_position;
-    }
-    defs_line += std::to_string(def);
-    defs_line += ' ';
-  }
-
-  debug_log("inventory dump: max_def=%u flagged(0x40000000)=%d\n", max_def, flagged_count);
-  if (found_at >= 0)
-  {
-    debug_log("inventory dump: def=%d FOUND at index %d raw_dword=0x%08x\n", wanted_def, found_at, found_raw);
-  }
-  else
-  {
-    debug_log("inventory dump: def=%d NOT present in the %d loaded items\n", wanted_def, item_count);
-  }
-  debug_log("inventory dump defs: %s\n", defs_line.c_str());
+  return &found->second;
 }
 
 bool has_item_def(const int item_def_id)
 {
-  return get_first_item_id_of_item_def(item_def_id).has_value();
+  return find_item_ids_of_def(item_def_id) != nullptr;
+}
+
+std::optional<std::uint64_t> first_owned_item_id(const int item_def_id)
+{
+  const auto* item_ids = find_item_ids_of_def(item_def_id);
+  if (item_ids == nullptr)
+  {
+    return std::nullopt;
+  }
+
+  return item_ids->front();
 }
 
 void append_u16(std::vector<std::uint8_t>& output, const std::uint16_t value)
@@ -624,10 +738,67 @@ int corrected_loadout_slot(const int class_id, const int slot)
   }
   if (slot == secondary_slot)
   {
-    return 6;
+    return pda2_slot;
   }
 
   return slot;
+}
+
+std::uint32_t equip_cache_key(const int class_id, const int loadout_slot)
+{
+  return static_cast<std::uint32_t>(class_id) * 100u + static_cast<std::uint32_t>(loadout_slot);
+}
+
+bool request_equip(const int class_id, const int slot, const std::uint64_t item_id)
+{
+  const int loadout_slot = corrected_loadout_slot(class_id, slot);
+  const auto key = equip_cache_key(class_id, loadout_slot);
+
+  if (const auto found = g_last_equip_requests.find(key);
+      found != g_last_equip_requests.end() && found->second.valid && found->second.item_id == item_id)
+  {
+    return true;
+  }
+
+  if (!api_ready() || get_local_inventory() == nullptr)
+  {
+    debug_log("local inventory not ready, skipping equip class=%d slot=%d\n", class_id, loadout_slot);
+    return false;
+  }
+
+  if (!send_equip_item_request(class_id, loadout_slot, item_id))
+  {
+    error_log("equip failed class=%d slot=%d item_id=%llu\n",
+      class_id, loadout_slot, static_cast<unsigned long long>(item_id));
+    return false;
+  }
+
+  g_last_equip_requests.insert_or_assign(key, equip_request_record{ true, item_id });
+  debug_log("equipped class=%d slot=%d item_id=%llu\n",
+    class_id, loadout_slot, static_cast<unsigned long long>(item_id));
+  return true;
+}
+
+void reset_runtime_caches()
+{
+  g_last_equip_requests.clear();
+  for (auto& state : g_task_states)
+  {
+    state.attempts = 0;
+  }
+}
+
+void refresh_runtime_caches(const int class_id)
+{
+  const char* raw_level = engine != nullptr ? engine->get_level_name() : nullptr;
+  const std::string_view level_name = raw_level != nullptr ? raw_level : "";
+
+  if (level_name != std::string_view{ g_cache_level_name } || class_id != g_cache_class_id)
+  {
+    reset_runtime_caches();
+    g_cache_level_name.assign(level_name);
+    g_cache_class_id = class_id;
+  }
 }
 
 bool acknowledge_new_items_without_panel()
@@ -736,220 +907,125 @@ bool get_item(const int item_def_id, const bool allow_rent)
   return false;
 }
 
-bool equip_item(const int class_id, const int slot, const int item_def_id, const bool get_missing = true, const bool allow_rent = false)
+void acquire_item(const int item_def_id, const bool allow_rent, slot_task_state& state)
 {
-  if (!api_ready())
+  if (state.attempts >= fallback_attempt_limit)
   {
-    return false;
-  }
-
-  const int loadout_slot = corrected_loadout_slot(class_id, slot);
-  if (get_local_inventory() == nullptr)
-  {
-    debug_log("local inventory not ready, skipping equip class=%d slot=%d def=%d\n", class_id, loadout_slot, item_def_id);
-    return false;
-  }
-
-  if (item_def_id == -1)
-  {
-    const bool ok = send_equip_item_request(class_id, loadout_slot, static_cast<std::uint64_t>(-1));
-    if (!ok) error_log("unequip failed class=%d slot=%d\n", class_id, loadout_slot);
-    return ok;
-  }
-
-  auto item_id = get_first_item_id_of_item_def(item_def_id);
-  if (!item_id)
-  {
-    debug_log("no owned item id for def=%d (class=%d slot=%d)\n", item_def_id, class_id, loadout_slot);
-    debug_dump_local_inventory(item_def_id);
-    if (get_missing)
-    {
-      get_item(item_def_id, allow_rent);
-    }
-    return false;
-  }
-
-  const bool ok = send_equip_item_request(class_id, loadout_slot, *item_id);
-  if (!ok)
-  {
-    error_log("equip failed class=%d slot=%d def=%d item_id=%llu\n",
-      class_id, loadout_slot, item_def_id, static_cast<unsigned long long>(*item_id));
-  }
-  else
-  {
-    debug_log("equipped class=%d slot=%d def=%d item_id=%llu\n",
-      class_id, loadout_slot, item_def_id, static_cast<unsigned long long>(*item_id));
-  }
-  return ok;
-}
-
-bool is_metal_item_def(const int item_def_id)
-{
-  return item_def_id == 5000 || item_def_id == 5001 || item_def_id == 5002;
-}
-
-void equip_weapon_list_spec(
-  std::string_view spec,
-  fallback_state& state,
-  const int class_id,
-  const int slot)
-{
-  const auto ids = parse_int_list(spec, '/');
-  if (ids.empty())
-  {
-    debug_log("invalid weapon spec '%.*s'\n", static_cast<int>(spec.size()), spec.data());
+    debug_log("stopping acquisition of item def %d after %d attempt(s)\n", item_def_id, state.attempts);
     return;
   }
 
-  if (ids.size() < 2)
-  {
-    equip_item(class_id, slot, ids.front(), true, true);
-    return;
-  }
+  ++state.attempts;
+  get_item(item_def_id, allow_rent);
+}
 
-  if (has_item_def(ids[0]))
+void run_craft_task(slot_task_state& state, const int class_id, const int slot)
+{
+  const int result_def = state.spec.craft_result;
+  if (auto item_id = first_owned_item_id(result_def))
   {
     state.attempts = 0;
-    equip_item(class_id, slot, ids[0], false, false);
+    request_equip(class_id, slot, *item_id);
     return;
   }
 
   if (state.attempts >= fallback_attempt_limit)
   {
-    equip_item(class_id, slot, ids[1], true, true);
+    debug_log("crafting paused for result def %d after %d attempt(s)\n", result_def, state.attempts);
     return;
   }
 
-  ++state.attempts;
-  equip_item(class_id, slot, ids[0], true, true);
-}
-
-bool try_craft_group(const std::vector<int>& required_item_defs)
-{
-  for (const int required_item_def : required_item_defs)
+  for (const auto& inputs : state.spec.craft_groups)
   {
-    if (is_metal_item_def(required_item_def) || has_item_def(required_item_def))
+    bool ready = true;
+    for (const int input_def : inputs)
     {
-      continue;
-    }
-
-    const auto* achievement_backed = find_achievement_item(required_item_def);
-    if (achievement_backed != nullptr)
-    {
-      if (has_achievement(achievement_backed->achievement_id))
+      if (has_item_def(input_def))
       {
-        debug_log("achievement-backed item def %d is already unlocked but missing\n", required_item_def);
         continue;
       }
 
-      get_item(required_item_def, false);
-      return false;
-    }
+      const auto* achievement_backed = find_achievement_item(input_def);
+      if (achievement_backed == nullptr || has_achievement(achievement_backed->achievement_id))
+      {
+        debug_log("cannot obtain crafting material item def %d, skipping group\n", input_def);
+        ready = false;
+        break;
+      }
 
-    debug_log("missing crafting material item def %d\n", required_item_def);
-    return false;
-  }
-
-  if (craft_items(required_item_defs))
-  {
-    trigger_new_item_notification();
-  }
-  return true;
-}
-
-void equip_craft_spec(std::string_view spec, const int class_id, const int slot)
-{
-  const std::size_t result_separator = spec.find('-');
-  if (result_separator == std::string::npos)
-  {
-    debug_log("craft spec '%.*s' has no result item\n", static_cast<int>(spec.size()), spec.data());
-    return;
-  }
-
-  const auto result = parse_int(spec.substr(result_separator + 1));
-  if (!result)
-  {
-    debug_log("craft spec '%.*s' has invalid result item\n", static_cast<int>(spec.size()), spec.data());
-    return;
-  }
-
-  if (has_item_def(*result))
-  {
-    equip_item(class_id, slot, *result, false, false);
-    return;
-  }
-
-  const auto result_token = std::to_string(*result);
-  for (const auto& group : split_craft_groups(spec))
-  {
-    if (group == result_token)
-    {
-      continue;
-    }
-
-    const auto required_item_defs = parse_int_list(group, ',');
-    if (required_item_defs.empty())
-    {
-      debug_log("invalid crafting group '%s'\n", group.c_str());
+      ++state.attempts;
+      get_item(input_def, false);
       return;
     }
 
-    if (try_craft_group(required_item_defs))
+    if (ready && craft_items(inputs))
     {
+      ++state.attempts;
+      trigger_new_item_notification();
       return;
     }
   }
 }
 
-void equip_weapon_spec(std::string_view spec, const int class_id, const int slot)
+void run_slot_task(
+  const std::size_t task,
+  const std::string& raw,
+  const int class_id,
+  const int slot,
+  const bool allow_rent)
 {
-  const auto cleaned_spec = trim(spec);
-  if (cleaned_spec.empty())
+  auto& state = g_task_states[task];
+  if (state.raw != raw)
   {
-    return;
-  }
-
-  auto& state = g_fallback_states[static_cast<std::size_t>(std::clamp(slot, 0, 2))];
-  if (state.spec != cleaned_spec)
-  {
-    state.spec = cleaned_spec;
+    state.raw = raw;
+    state.spec = parse_spec(raw);
     state.attempts = 0;
   }
 
-  if (cleaned_spec == "-1")
+  switch (state.spec.kind)
   {
-    equip_item(class_id, slot, -1, false, false);
-    return;
-  }
+    case spec_kind::skip:
+      return;
 
-  const bool is_craft_spec =
-    cleaned_spec.find(',') != std::string::npos || cleaned_spec.find(';') != std::string::npos;
-  if (is_craft_spec)
-  {
-    equip_craft_spec(cleaned_spec, class_id, slot);
-  }
-  else
-  {
-    equip_weapon_list_spec(cleaned_spec, state, class_id, slot);
-  }
-}
+    case spec_kind::unequip:
+      request_equip(class_id, slot, unequipped_item_id);
+      return;
 
-void equip_hat_spec(std::string_view spec, const int class_id, const int slot)
-{
-  const auto item_def_id = parse_int(spec);
-  if (!item_def_id)
-  {
-    debug_log("invalid hat spec '%s'\n", trim(spec).c_str());
-    return;
-  }
+    case spec_kind::single:
+    {
+      const int item_def = state.spec.defs.front();
+      if (auto item_id = first_owned_item_id(item_def))
+      {
+        state.attempts = 0;
+        request_equip(class_id, slot, *item_id);
+        return;
+      }
+      acquire_item(item_def, allow_rent, state);
+      return;
+    }
 
-  if (*item_def_id < -1 || *item_def_id > 65535)
-  {
-    debug_log("hat item def %d is out of range\n", *item_def_id);
-    return;
-  }
+    case spec_kind::alternatives:
+    {
+      const auto& defs = state.spec.defs;
+      for (const int item_def : defs)
+      {
+        if (auto item_id = first_owned_item_id(item_def))
+        {
+          state.attempts = 0;
+          request_equip(class_id, slot, *item_id);
+          return;
+        }
+      }
 
-  equip_item(class_id, slot, *item_def_id);
+      const int wanted_def = state.attempts >= fallback_attempt_limit && defs.size() > 1 ? defs.back() : defs.front();
+      acquire_item(wanted_def, true, state);
+      return;
+    }
+
+    case spec_kind::craft:
+      run_craft_task(state, class_id, slot);
+      return;
+  }
 }
 
 int seasonal_noisemaker_item_def()
@@ -1033,12 +1109,7 @@ void on_tick()
 
   process_pending_pickup_ack();
 
-  if (!config.misc.automation.auto_item)
-  {
-    return;
-  }
-
-  if (entity_list == nullptr)
+  if (!config.misc.automation.auto_item || entity_list == nullptr)
   {
     return;
   }
@@ -1068,36 +1139,51 @@ void on_tick()
     return;
   }
 
-  if (config.misc.automation.auto_item_weapons)
+  refresh_runtime_caches(class_id);
+  rebuild_inventory_index();
+
+  const auto& settings = config.misc.automation;
+  if (settings.auto_item_weapons)
   {
-    equip_weapon_spec(config.misc.automation.auto_item_primary, class_id, primary_slot);
-    equip_weapon_spec(config.misc.automation.auto_item_secondary, class_id, secondary_slot);
-    equip_weapon_spec(config.misc.automation.auto_item_melee, class_id, melee_slot);
+    run_slot_task(task_primary, settings.auto_item_primary, class_id, primary_slot, true);
+    run_slot_task(task_secondary, settings.auto_item_secondary, class_id, secondary_slot, true);
+    run_slot_task(task_melee, settings.auto_item_melee, class_id, melee_slot, true);
   }
 
-  if (config.misc.automation.auto_item_hats)
+  if (settings.auto_item_equipment)
   {
-    constexpr std::array<int, 3> hat_slots{ 7, 8, 10 };
-    const std::array<std::string_view, 3> hat_specs{
-      config.misc.automation.auto_item_hat1,
-      config.misc.automation.auto_item_hat2,
-      config.misc.automation.auto_item_hat3,
-    };
+    run_slot_task(task_building, settings.auto_item_building, class_id, building_slot, true);
+    run_slot_task(task_pda, settings.auto_item_pda, class_id, pda_slot, true);
+    run_slot_task(task_pda2, settings.auto_item_pda2, class_id, pda2_slot, true);
+    run_slot_task(task_action, settings.auto_item_action, class_id, action_slot, true);
+    run_slot_task(task_taunt, settings.auto_item_taunt, class_id, taunt_slot, true);
+  }
 
+  if (settings.auto_item_hats)
+  {
+    constexpr std::array<int, 3> hat_slots{ head_slot, misc_slot, misc2_slot };
+    const std::array<const std::string*, 3> hat_specs{
+      &settings.auto_item_hat1,
+      &settings.auto_item_hat2,
+      &settings.auto_item_hat3
+    };
     for (int index = 0; index < 3; ++index)
     {
       const int rotated_slot = hat_slots[static_cast<std::size_t>((g_hat_rotation_offset + index) % 3)];
-      equip_hat_spec(hat_specs[static_cast<std::size_t>(index)], class_id, rotated_slot);
+      const auto task = static_cast<std::size_t>(task_hat1 + index);
+      run_slot_task(task, *hat_specs[static_cast<std::size_t>(index)], class_id, rotated_slot, false);
     }
     g_hat_rotation_offset = (g_hat_rotation_offset + 1) % 3;
   }
 
-  if (config.misc.automation.auto_item_noisemaker)
+  const bool action_slot_claimed =
+    settings.auto_item_equipment && g_task_states[task_action].spec.kind != spec_kind::skip;
+  if (settings.auto_item_noisemaker && !action_slot_claimed)
   {
     const int item_def = seasonal_noisemaker_item_def();
-    if (has_item_def(item_def))
+    if (auto item_id = first_owned_item_id(item_def))
     {
-      equip_item(class_id, noisemaker_slot, item_def, false, false);
+      request_equip(class_id, action_slot, *item_id);
     }
   }
 }
@@ -1125,19 +1211,30 @@ bool craft_items(const std::vector<int>& item_def_ids)
     return false;
   }
 
+  if (!g_item_ids_valid)
+  {
+    rebuild_inventory_index();
+  }
+
   std::vector<std::uint64_t> selected_item_ids{};
   selected_item_ids.reserve(item_def_ids.size());
   for (const int item_def_id : item_def_ids)
   {
-    const auto candidates = get_item_ids_of_item_def(item_def_id);
-    auto selected = std::find_if(candidates.begin(), candidates.end(), [&](const std::uint64_t item_id)
+    const auto* candidates = find_item_ids_of_def(item_def_id);
+    if (candidates == nullptr)
+    {
+      debug_log("cannot craft, missing unique item def %d\n", item_def_id);
+      return false;
+    }
+
+    const auto selected = std::find_if(candidates->begin(), candidates->end(), [&](const std::uint64_t item_id)
     {
       return std::find(selected_item_ids.begin(), selected_item_ids.end(), item_id) == selected_item_ids.end();
     });
 
-    if (selected == candidates.end())
+    if (selected == candidates->end())
     {
-      debug_log("cannot craft, missing unique item def %d\n", item_def_id);
+      debug_log("cannot craft, no spare item instance of def %d\n", item_def_id);
       return false;
     }
 

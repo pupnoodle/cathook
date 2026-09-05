@@ -26,6 +26,7 @@ V  o o  V  file: src/core/hooks/frame_stage_notify.cpp
 #include "features/combat/aimbot/aimbot.hpp"
 #include "features/combat/aimbot/resolver.hpp"
 #include "features/combat/backtrack/backtrack.hpp"
+#include "features/combat/animation/anim_driver.hpp"
 #include "features/automation/navbot/navbot_controller.hpp"
 #include "features/visuals/thirdperson.hpp"
 #include "features/visuals/skybox_changer.hpp"
@@ -253,6 +254,10 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
           entity_cache[class_id::PUMPKIN].push_back(entity);
         }
 
+        if (entity->is_network_class("CTFProjectile_SentryRocket")) {
+          entity_cache[class_id::SENTRY_ROCKET].push_back(entity);
+        }
+
         if (entity->is_network_class("CCurrencyPack")) {
           entity_cache[class_id::MVM_CURRENCY].push_back(entity);
         }
@@ -288,10 +293,9 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
                 .fakeplayer = player_info_valid && pinfo.fakeplayer,
                 .player_info_valid = player_info_valid
               });
-              resolver::record_player(player);
-              backtrack::record_player(player);
             } else {
               resolver::clear_player(player);
+              animation::reset_player(player);
               aimbot::clear_network_pose(player);
             }
 
@@ -341,6 +345,17 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
       }
 
       entity_cache_publish_snapshot(std::move(snapshot));
+
+      animation::update_all();
+
+      for (const entity_cache_player_entry& entry : entity_cache_current_snapshot().players) {
+        if (entry.player == nullptr || entry.dormant || !entry.alive) {
+          continue;
+        }
+
+        resolver::record_player(entry.player);
+        backtrack::record_player(entry.player);
+      }
 
       if (global_vars->curtime - last_time >= 1) {
 	last_time = global_vars->curtime;

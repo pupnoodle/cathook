@@ -6,47 +6,50 @@
 #include <cfloat>
 #include <vector>
 #include "core/types.hpp"
+#include "features/combat/simulation/movesim.hpp"
+#include "features/combat/simulation/projsim.hpp"
 #include "aimbot.hpp"
 #include "aim_state.hpp"
 #include "aim_utils.hpp"
+#include "projectile_helpers.hpp"
 #include "splashbot.hpp"
 #include "core/entity_cache.hpp"
 #include "games/tf2/sdk/interfaces/client_state.hpp"
 #include "games/tf2/sdk/interfaces/engine_trace.hpp"
-#include "games/tf2/sdk/interfaces/game_movement.hpp"
 #include "games/tf2/sdk/interfaces/global_vars.hpp"
-#include "games/tf2/sdk/interfaces/move_helper.hpp"
 #include "games/tf2/sdk/interfaces/prediction.hpp"
 
 namespace projectile_aim {
+
+inline struct settings {
+  bool strafe_prediction = true;
+  bool hitchance_gate = true;
+  float hitchance_minimum = 0.35f;
+  int direct_trace_interval = 1;
+  int splash_trace_interval = 5;
+  int geometry_trace_interval = 10;
+  bool interval_retest = true;
+  int splash_restrict_direct = 16;
+  int splash_restrict_arc = 24;
+  int splash_restrict_first = 40;
+  int direct_sphere_points = 14;
+  int arc_sphere_points = 21;
+  int air_point_count = 3;
+  bool air_splash = true;
+  bool sticky_arm_time = true;
+  bool huntsman_pull_point = true;
+  bool lob_angles = true;
+  bool lob_underpredict = false;
+  bool cannon_hitcharge = true;
+  bool beggars_clip_guard = true;
+  bool beggars_wall_guard = true;
+  bool rocket_jump_radius = true;
+  float splash_radius_scale = 100.0f;
+} cfg{};
+
 namespace detail {
 
-static constexpr unsigned int projectile_collision_mask =
-  MASK_SOLID | CONTENTS_DEBRIS | CONTENTS_HITBOX;
-
-enum class launch_type {
-  fire_setup,
-  hand,
-  bat,
-  grenade
-};
-
-struct projectile_info {
-  float speed = 0.0f;
-  float gravity_mod = 0.0f;
-  float drag_mod = 0.0f;
-  float life_time = 0.0f;
-  float splash_radius = 0.0f;
-  float initial_up_velocity = 0.0f;
-  float release_delay = 0.0f;
-  Vec3 offset{};
-  Vec3 hull{};
-  unsigned int collision_mask = projectile_collision_mask;
-  launch_type launch = launch_type::fire_setup;
-  bool trace_launch = false;
-  bool direct_hit = true;
-  bool secondary_attack = false;
-};
+inline bool projectile_fov_exceeds_limit(float fov);
 
 struct target_seed {
   Entity* entity = nullptr;
@@ -54,995 +57,780 @@ struct target_seed {
   Vec3 origin{};
   Vec3 aim_offset{};
   Vec3 velocity{};
+  Vec3 view_offset{};
+  Vec3 bounds_mins{};
+  Vec3 bounds_maxs{};
   float current_fov = FLT_MAX;
   float distance = FLT_MAX;
   bool preferred = false;
-  bool fixed_aim_position_valid = false;
-  Vec3 fixed_aim_position{};
-};
-
-struct solution {
-  bool valid = false;
-  Vec3 angles{};
-  Vec3 aim_position{};
-  Vec3 predicted_origin{};
-  bool predicted_origin_valid = false;
-  float time = 0.0f;
-  float predicted_fov = FLT_MAX;
 };
 
 struct movement_path {
-  std::vector<Vec3> origins{};
+  movesim::storage simulation{};
   bool simulated = false;
-  Vec3 terminal_velocity{};
+  bool failed = false;
 };
 
-inline float interval() {
-  if (global_vars != nullptr && std::isfinite(global_vars->interval_per_tick) && global_vars->interval_per_tick > 0.0001f) {
-    return global_vars->interval_per_tick;
-  }
-  return TICK_INTERVAL;
-}
+struct movesim_guard {
+  movesim::storage* storage = nullptr;
+  bool owned = false;
 
-inline bool finite(const Vec3& value) {
-  return aimbot_vec3_is_finite(value);
-}
-
-inline float attribute(float fallback, const char* name, Entity* entity) {
-  return attribute_manager != nullptr ? attribute_manager->attrib_hook_value(fallback, name, entity) : fallback;
-}
-
-inline int weapon_id(Weapon* weapon);
-
-struct projectile_random_stream {
-  static constexpr int table_size = 32;
-  static constexpr int ia = 16807;
-  static constexpr int im = 2147483647;
-  static constexpr int iq = 127773;
-  static constexpr int ir = 2836;
-  static constexpr int ndiv = 1 + ((im - 1) / table_size);
-  static constexpr double am = 1.0 / static_cast<double>(im);
-  static constexpr double rnmx = 1.0 - 1.2e-7;
-
-  int seed_value = 0;
-  int shuffle_value = 0;
-  int table[table_size]{};
-
-  void set_seed(int seed) {
-    seed_value = seed < 0 ? seed : -seed;
-    shuffle_value = 0;
-  }
-
-  int generate_random_number() {
-    if (seed_value <= 0 || shuffle_value == 0) {
-      seed_value = -seed_value < 1 ? 1 : -seed_value;
-      for (int j = table_size + 7; j >= 0; --j) {
-        const int k = seed_value / iq;
-        seed_value = ia * (seed_value - (k * iq)) - (ir * k);
-        if (seed_value < 0) {
-          seed_value += im;
-        }
-        if (j < table_size) {
-          table[j] = seed_value;
-        }
-      }
-      shuffle_value = table[0];
+  explicit movesim_guard(movesim::storage& value) : storage(&value), owned(true) {}
+  ~movesim_guard() {
+    if (owned && storage != nullptr) {
+      movesim::restore(*storage);
     }
-
-    const int k = seed_value / iq;
-    seed_value = ia * (seed_value - (k * iq)) - (ir * k);
-    if (seed_value < 0) {
-      seed_value += im;
-    }
-
-    int j = shuffle_value / ndiv;
-    if (j >= table_size || j < 0) {
-      j &= table_size - 1;
-    }
-    shuffle_value = table[j];
-    table[j] = seed_value;
-    return shuffle_value;
   }
-
-  float random_float(float lo, float hi) {
-    double value = am * static_cast<double>(generate_random_number());
-    if (value > rnmx) {
-      value = rnmx;
-    }
-    return static_cast<float>((value * static_cast<double>(hi - lo)) + static_cast<double>(lo));
-  }
-
-  int random_int(int lo, int hi) {
-    if (hi <= lo) {
-      return lo;
-    }
-    const std::uint32_t range = static_cast<std::uint32_t>(hi - lo) + 1U;
-    const std::uint32_t limit = 0x80000000U - (0x80000000U % range);
-    std::uint32_t value = 0;
-    do {
-      value = static_cast<std::uint32_t>(generate_random_number());
-    } while (value >= limit);
-    return lo + static_cast<int>(value % range);
-  }
+  movesim_guard(const movesim_guard&) = delete;
+  movesim_guard& operator=(const movesim_guard&) = delete;
 };
 
-inline std::uint32_t projectile_crc32_byte(std::uint32_t crc, std::uint8_t byte) {
-  crc ^= byte;
-  for (int bit = 0; bit < 8; ++bit) {
-    const std::uint32_t mask = 0U - (crc & 1U);
-    crc = (crc >> 1) ^ (0xEDB88320U & mask);
-  }
-  return crc;
-}
-
-inline std::uint32_t projectile_seed_file_line_hash(int seed, const char* name, int additional_seed) {
-  std::uint32_t crc = 0xFFFFFFFFU;
-  const auto process_int = [&crc](int value) {
-    const auto* bytes = reinterpret_cast<const std::uint8_t*>(&value);
-    for (std::size_t index = 0; index < sizeof(value); ++index) {
-      crc = projectile_crc32_byte(crc, bytes[index]);
-    }
-  };
-  process_int(seed);
-  process_int(additional_seed);
-  if (name != nullptr) {
-    for (const char* cursor = name; *cursor != '\0'; ++cursor) {
-      crc = projectile_crc32_byte(crc, static_cast<std::uint8_t>(*cursor));
-    }
-  }
-  return crc ^ 0xFFFFFFFFU;
-}
-
-struct projectile_randomness {
-  bool valid = false;
-  float syringe_pitch = 0.0f;
-  float syringe_yaw = 0.0f;
-  float arrow_pitch = 0.0f;
-  float arrow_yaw = 0.0f;
-  float grenade_up = 0.0f;
-  float grenade_right = 0.0f;
+enum class calc_state : std::uint8_t {
+  pending,
+  good,
+  timing,
+  bad
 };
 
-inline projectile_randomness projectile_randomness_for(Weapon* weapon, user_cmd* cmd) {
-  projectile_randomness result{};
-  if (weapon == nullptr || cmd == nullptr || cmd->command_number <= 0) {
-    return result;
-  }
+struct point_solution {
+  calc_state calculated = calc_state::pending;
+  float pitch = 0.0f;
+  float yaw = 0.0f;
+  float time = 0.0f;
+  Vec3 launch{};
+  Vec3 launch_angles{};
+};
 
-  const int seed = static_cast<int>(MD5_PseudoRandom(static_cast<unsigned int>(cmd->command_number)) & INT_MAX);
-  projectile_random_stream stream{};
-  stream.set_seed(static_cast<int>(projectile_seed_file_line_hash(seed, "SelectWeightedSequence", 0)));
-  for (int index = 0; index < 6; ++index) {
-    (void)stream.random_float(0.0f, 1.0f);
-  }
+inline Vec3& entity_obb_mins(Entity* entity) {
+  void* collideable = entity->get_collideable();
+  void** vtable = *(void***)collideable;
+  Vec3& (*obb_mins_fn)(void*) = (Vec3 & (*)(void*))vtable[3];
+  return obb_mins_fn(collideable);
+}
 
-  const int id = weapon_id(weapon);
-  if (id == TF_WEAPON_SYRINGEGUN_MEDIC) {
-    result.syringe_pitch = stream.random_float(-1.5f, 1.5f);
-    result.syringe_yaw = stream.random_float(-1.5f, 1.5f);
-  }
-  else if (id == TF_WEAPON_COMPOUND_BOW) {
-    const float charge_begin = weapon->get_charge_begin_time();
-    const float now = global_vars != nullptr ? global_vars->curtime : 0.0f;
-    if (charge_begin > 0.0f && now - charge_begin >= 5.0f) {
-      result.arrow_pitch = (static_cast<float>(stream.random_int(0, INT_MAX)) /
-        static_cast<float>(INT_MAX)) * 12.0f - 6.0f;
-      result.arrow_yaw = (static_cast<float>(stream.random_int(0, INT_MAX)) /
-        static_cast<float>(INT_MAX)) * 12.0f - 6.0f;
+inline Vec3& entity_obb_maxs(Entity* entity) {
+  void* collideable = entity->get_collideable();
+  void** vtable = *(void***)collideable;
+  Vec3& (*obb_maxs_fn)(void*) = (Vec3 & (*)(void*))vtable[4];
+  return obb_maxs_fn(collideable);
+}
+
+class target_bounds_guard {
+public:
+  target_bounds_guard(Entity* entity, const Vec3& predicted_origin)
+    : entity_(entity),
+      mins_(entity != nullptr ? entity->get_collideable_mins() : Vec3{}),
+      maxs_(entity != nullptr ? entity->get_collideable_maxs() : Vec3{}),
+      origin_(entity != nullptr ? entity->get_abs_origin() : Vec3{}) {
+    if (entity_ == nullptr || entity_->get_collideable() == nullptr) {
+      return;
     }
+    Vec3& mins = entity_obb_mins(entity_);
+    Vec3& maxs = entity_obb_maxs(entity_);
+    mins = {std::clamp(mins.x, -24.0f, 0.0f), std::clamp(mins.y, -24.0f, 0.0f), mins.z};
+    maxs = {std::clamp(maxs.x, 0.0f, 24.0f), std::clamp(maxs.y, 0.0f, 24.0f), maxs.z};
+    entity_->set_abs_origin(predicted_origin);
+    active_ = true;
   }
-  else if (id == TF_WEAPON_GRENADELAUNCHER || id == TF_WEAPON_PIPEBOMBLAUNCHER || id == TF_WEAPON_CANNON) {
-    result.grenade_up = stream.random_float(-10.0f, 10.0f);
-    result.grenade_right = stream.random_float(-10.0f, 10.0f);
+
+  ~target_bounds_guard() {
+    if (!active_) {
+      return;
+    }
+    entity_obb_mins(entity_) = mins_;
+    entity_obb_maxs(entity_) = maxs_;
+    entity_->set_abs_origin(origin_);
   }
-  result.valid = true;
-  return result;
+
+  target_bounds_guard(const target_bounds_guard&) = delete;
+  target_bounds_guard& operator=(const target_bounds_guard&) = delete;
+
+private:
+  Entity* entity_ = nullptr;
+  Vec3 mins_{};
+  Vec3 maxs_{};
+  Vec3 origin_{};
+  bool active_ = false;
+};
+
+inline Vec3 path_origin(const movement_path& path, const target_seed& seed, float seconds) {
+  const std::vector<Vec3>& origins = path.simulation.path;
+  if (!origins.empty()) {
+    const float tick = std::max(seconds, 0.0f) / interval();
+    const float last_tick = static_cast<float>(origins.size() - 1);
+    if (tick > last_tick && finite(path.simulation.terminal_velocity)) {
+      return origins.back() +
+        path.simulation.terminal_velocity * ((tick - last_tick) * interval());
+    }
+    const std::size_t low =
+      std::min(static_cast<std::size_t>(tick), origins.size() - 1);
+    const std::size_t high = std::min(low + 1, origins.size() - 1);
+    const float fraction = std::clamp(tick - static_cast<float>(low), 0.0f, 1.0f);
+    return origins[low] + (origins[high] - origins[low]) * fraction;
+  }
+  return seed.origin + seed.velocity * seconds;
 }
 
-inline float projectile_speed(Weapon* weapon, float fallback) {
-  if (weapon == nullptr) {
-    return fallback;
+inline float splash_radius_for(Player* local, const projectile_info& info) {
+  if (info.splash_radius <= 0.0f || cfg.splash_radius_scale <= 0.0f) {
+    return 0.0f;
   }
-
-  const float data_speed = weapon->get_projectile_speed_from_data();
-  const float base_speed = data_speed > 1.0f ? data_speed : fallback;
-  const float modified_speed = attribute(base_speed, "mult_projectile_speed", weapon->to_entity());
-  return std::isfinite(modified_speed) ? std::clamp(modified_speed, 1.0f, 5000.0f) : base_speed;
+  float radius = info.splash_radius;
+  if (cfg.rocket_jump_radius && is_rocket_weapon(info.weapon_id_value) &&
+      local != nullptr && local->in_cond(TF_COND_BLASTJUMPING)) {
+    radius *= 0.8f;
+  }
+  return radius * std::clamp(cfg.splash_radius_scale, 10.0f, 300.0f) * 0.01f;
 }
 
-inline int weapon_id(Weapon* weapon) {
-  if (weapon == nullptr) {
-    return TF_WEAPON_NONE;
-  }
-  const int id = weapon->get_weapon_id();
-  if (id == TF_WEAPON_GRENADE_THROWABLE) {
-    return TF_WEAPON_THROWABLE;
-  }
-  if (id != TF_WEAPON_NONE) {
-    return id;
-  }
-
-  switch (weapon->get_def_id()) {
-  case Soldier_m_RocketLauncher:
-  case Soldier_m_RocketLauncherR:
-  case Soldier_m_TheBlackBox:
-  case Soldier_m_RocketJumper:
-  case Soldier_m_TheLibertyLauncher:
-  case Soldier_m_TheCowMangler5000:
-  case Soldier_m_TheOriginal:
-  case Soldier_m_FestiveRocketLauncher:
-  case Soldier_m_TheBeggarsBazooka:
-  case Soldier_m_FestiveBlackBox:
-  case Soldier_m_TheAirStrike:
-    return TF_WEAPON_ROCKETLAUNCHER;
-  case Soldier_m_TheDirectHit:
-    return TF_WEAPON_ROCKETLAUNCHER_DIRECTHIT;
-  case Soldier_s_TheRighteousBison:
-    return TF_WEAPON_RAYGUN;
-  case Demoman_m_GrenadeLauncher:
-  case Demoman_m_GrenadeLauncherR:
-  case Demoman_m_TheLochnLoad:
-  case Demoman_m_TheLooseCannon:
-  case Demoman_m_FestiveGrenadeLauncher:
-  case Demoman_m_TheIronBomber:
-    return weapon->get_def_id() == Demoman_m_TheLooseCannon ? TF_WEAPON_CANNON : TF_WEAPON_GRENADELAUNCHER;
-  case Demoman_s_StickybombLauncher:
-  case Demoman_s_StickybombLauncherR:
-  case Demoman_s_FestiveStickybombLauncher:
-  case Demoman_s_TheScottishResistance:
-  case Demoman_s_TheQuickiebombLauncher:
-    return TF_WEAPON_PIPEBOMBLAUNCHER;
-  case Medic_m_CrusadersCrossbow:
-  case Medic_m_FestiveCrusadersCrossbow:
-    return TF_WEAPON_CROSSBOW;
-  case Medic_m_SyringeGun:
-  case Medic_m_SyringeGunR:
-  case Medic_m_TheBlutsauger:
-  case Medic_m_TheOverdose:
-    return TF_WEAPON_SYRINGEGUN_MEDIC;
-  case Engi_m_TheRescueRanger:
-    return TF_WEAPON_SHOTGUN_BUILDING_RESCUE;
-  case Engi_m_ThePomson6000:
-    return TF_WEAPON_DRG_POMSON;
-  case Sniper_m_TheHuntsman:
-  case Sniper_m_FestiveHuntsman:
-  case Sniper_m_TheFortifiedCompound:
-    return TF_WEAPON_COMPOUND_BOW;
-  case Pyro_s_TheFlareGun:
-  case Pyro_s_TheDetonator:
-  case Pyro_s_TheManmelter:
-  case Pyro_s_TheScorchShot:
-  case Pyro_s_FestiveFlareGun:
-    return TF_WEAPON_FLAREGUN;
-  case Pyro_m_DragonsFury:
-    return TF_WEAPON_FLAMETHROWER;
-  case Scout_s_MadMilk:
-  case Scout_s_MutatedMilk:
-    return TF_WEAPON_JAR_MILK;
-  case Scout_s_TheFlyingGuillotine:
-  case Scout_s_TheFlyingGuillotineG:
-    return TF_WEAPON_CLEAVER;
-  case Sniper_s_Jarate:
-  case Sniper_s_FestiveJarate:
-  case Sniper_s_TheSelfAwareBeautyMark:
-    return TF_WEAPON_JAR;
-  case Pyro_s_GasPasser:
-    return TF_WEAPON_GRENADE_GAS;
-  default:
-    return TF_WEAPON_NONE;
-  }
+inline float sticky_air_radius_scale(int sim_tick) {
+  const float livetime = game_convar_float("tf_grenadelauncher_livetime", 0.8f);
+  const float ramp = game_convar_float("tf_sticky_radius_ramp_time", 0.15f);
+  const float airdet = game_convar_float("tf_sticky_airdet_radius", 0.4f);
+  return remap_val_clamped(ticks_to_time(sim_tick), livetime, livetime + ramp, airdet, 1.0f);
 }
 
-inline bool is_grenade_launcher(int weapon_id) {
-  return weapon_id == TF_WEAPON_GRENADELAUNCHER ||
-    weapon_id == TF_WEAPON_PIPEBOMBLAUNCHER ||
-    weapon_id == TF_WEAPON_CANNON ||
-    weapon_id == TF_WEAPON_STICKY_BALL_LAUNCHER;
+inline splash_target_state make_target_state(const target_seed& seed, const Vec3& origin) {
+  splash_target_state state{};
+  state.origin = origin;
+  state.mins = origin + seed.bounds_mins;
+  state.maxs = origin + seed.bounds_maxs;
+  state.body = origin + seed.aim_offset;
+  state.eye = origin + seed.view_offset;
+  return state;
 }
 
-inline bool is_rocket_weapon(int weapon_id) {
-  return weapon_id == TF_WEAPON_ROCKETLAUNCHER ||
-    weapon_id == TF_WEAPON_PARTICLE_CANNON ||
-    weapon_id == TF_WEAPON_ROCKETLAUNCHER_DIRECTHIT;
-}
-
-inline float game_convar_float(const char* name, float fallback) {
-  if (name == nullptr || convar_system == nullptr) {
-    return fallback;
+inline bool trace_hull_segment(Player* local, const projectile_info& info, Entity* ignored_target,
+                               const Vec3& start, const Vec3& end, trace_t& out) {
+  if (engine_trace == nullptr) {
+    return false;
   }
-  Convar* var = convar_system->find_var(name);
-  if (var == nullptr) {
-    return fallback;
-  }
-  const float value = var->get_float();
-  return std::isfinite(value) && value >= 0.0f ? value : fallback;
-}
-
-inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
+  Vec3 mins = info.hull * -1.0f;
+  Vec3 maxs = info.hull;
+  Vec3 trace_start = start;
+  Vec3 trace_end = end;
+  ray_t ray = engine_trace->init_ray(&trace_start, &trace_end, &mins, &maxs);
+  trace_filter filter{};
+  engine_trace->init_projectile_trace_filter(&filter, local->to_entity(), ignored_target,
+                                             ignored_target != nullptr);
   out = {};
-  if (local == nullptr || weapon == nullptr) {
+  engine_trace->trace_ray(&ray, info.collision_mask, &filter, &out);
+  return true;
+}
+
+struct shot_test {
+  Vec3 launch{};
+  Vec3 velocity{};
+  float drag = 0.0f;
+  Entity* target = nullptr;
+  Vec3 predicted_origin{};
+  splash_target_state state{};
+  Vec3 aim_point{};
+  int sim_ticks = 1;
+  int kind = 0;
+  float radius_sqr = 0.0f;
+  float normal_offset = 0.0f;
+  int trace_interval = 1;
+  bool interval_retest = false;
+};
+
+inline bool validate_shot(Player* local, const projectile_info& info, const shot_test& test) {
+  if (local == nullptr || engine_trace == nullptr || test.target == nullptr ||
+      test.sim_ticks <= 0) {
     return false;
   }
 
-  const int id = weapon_id(weapon);
-  const bool ducking = local->is_ducking();
-  const float weapon_z = ducking ? 8.0f : -3.0f;
+  const bool direct = test.kind == 0;
+  Entity* ignored_target = direct ? nullptr : test.target;
 
-  if (weapon->is_flamethrower()) {
-    out.speed = 2000.0f;
-    out.splash_radius = 0.18f;
-    out.offset = {23.5f, 12.0f, weapon_z};
-    return true;
-  }
+  projsim::params params{};
+  params.origin = test.launch;
+  params.velocity = test.velocity;
+  params.gravity = 800.0f * info.gravity_mod;
+  params.drag = test.drag;
+  params.hull = info.hull;
+  params.collision_mask = info.collision_mask;
+  params.local_player = local->to_entity();
+  params.ignore_target = !direct;
+  engine_trace->init_projectile_trace_filter(&params.filter, local->to_entity(),
+                                             ignored_target, !direct);
 
-  switch (id) {
-  case TF_WEAPON_ROCKETLAUNCHER:
-  case TF_WEAPON_PARTICLE_CANNON:
-  case TF_WEAPON_ROCKETLAUNCHER_DIRECTHIT:
-    out.speed = projectile_speed(weapon, 1100.0f);
-    out.splash_radius = id == TF_WEAPON_ROCKETLAUNCHER_DIRECTHIT ? 0.0f :
-      (weapon->get_def_id() == Soldier_m_TheAirStrike ? 130.0f : 170.0f);
-    out.offset = {23.5f, attribute(0.0f, "centerfire_projectile", weapon->to_entity()) != 0.0f ? 0.0f : 12.0f, weapon_z};
-    out.trace_launch = true;
-    return true;
+  projsim::simulation simulation{};
+  simulation.reset(params);
 
-  case TF_WEAPON_GRENADELAUNCHER: {
-    const bool loch = weapon->get_def_id() == Demoman_m_TheLochnLoad;
-    const bool iron_bomber = weapon->get_def_id() == Demoman_m_TheIronBomber;
-    out.speed = std::min(projectile_speed(weapon, 1200.0f), 3500.0f);
-    out.gravity_mod = 1.0f;
-    out.drag_mod = loch ? 0.07f : 0.11f;
-    out.life_time = iron_bomber ? 1.4f : game_convar_float("tf_grenadelauncher_livetime", 0.8f);
-    out.splash_radius = 146.0f;
-    out.offset = {16.0f, 8.0f, -6.0f};
-    out.hull = {2.0f, 2.0f, 2.0f};
-    out.initial_up_velocity = 200.0f;
-    out.trace_launch = true;
-    return true;
-  }
+  const target_bounds_guard bounds_guard(test.target, test.predicted_origin);
 
-  case TF_WEAPON_PIPEBOMBLAUNCHER:
-  case TF_WEAPON_STICKY_BALL_LAUNCHER: {
-    const float charge_rate = std::max(attribute(4.0f, "stickybomb_charge_rate", weapon->to_entity()), 0.1f);
-    const float charge_begin = weapon->get_charge_begin_time();
-    const float now = global_vars != nullptr ? global_vars->curtime : local->get_tickbase() * interval();
-    const float charge = std::clamp(now - charge_begin, 0.0f, charge_rate);
-    out.speed = std::min(std::lerp(900.0f, 2400.0f, charge / charge_rate), 3500.0f);
-    out.gravity_mod = 1.0f;
-    out.drag_mod = 0.16f;
-    out.splash_radius = 146.0f;
-    out.offset = {16.0f, 8.0f, -6.0f};
-    out.hull = {2.0f, 2.0f, 2.0f};
-    out.initial_up_velocity = 200.0f;
-    out.trace_launch = true;
-    return true;
-  }
+  const int tolerance_ticks =
+    std::max(time_to_ticks(length(test.state.maxs - test.state.mins) /
+                           std::max(length(test.velocity), 1.0f)), 1);
+  Vec3 previous = simulation.position;
 
-  case TF_WEAPON_CANNON:
-    out.speed = 1100.0f;
-    out.gravity_mod = 1.0f;
-    out.drag_mod = 0.05f;
-    out.life_time = 0.95f;
-    out.splash_radius = 146.0f;
-    out.offset = {16.0f, 8.0f, -6.0f};
-    out.hull = {2.0f, 2.0f, 2.0f};
-    out.initial_up_velocity = 200.0f;
-    out.trace_launch = true;
-    return true;
+  for (int tick = 1; tick <= test.sim_ticks; ++tick) {
+    const Vec3 segment_start = previous;
+    if (!simulation.step()) {
+      return false;
+    }
+    const Vec3 current = simulation.position;
+    previous = current;
+    const bool sweep = test.trace_interval <= 1 || (tick % test.trace_interval) == 0 ||
+      tick == test.sim_ticks;
+    if (!sweep) {
+      continue;
+    }
 
-  case TF_WEAPON_FLAREGUN:
-    out.speed = 2000.0f;
-    out.gravity_mod = 0.3f;
-    out.initial_up_velocity = weapon->get_def_id() == Pyro_s_TheScorchShot ? 150.0f : 0.0f;
-    out.offset = {23.5f, 12.0f, weapon_z};
-    return true;
+    trace_t segment{};
+    if (!trace_hull_segment(local, info, ignored_target, segment_start, current, segment)) {
+      return false;
+    }
+    const bool solid_hit = segment.start_solid || segment.all_solid ||
+      segment.fraction < 1.0f || segment.entity != nullptr;
+    bool candidate_hit = false;
+    switch (test.kind) {
+    case 0:
+    case 1:
+      candidate_hit = solid_hit;
+      break;
+    default:
+      candidate_hit = length_squared(current - test.aim_point) < test.radius_sqr || solid_hit;
+      break;
+    }
+    if (!candidate_hit) {
+      continue;
+    }
 
-  case TF_WEAPON_FLAREGUN_REVENGE:
-    out.speed = 3000.0f;
-    out.gravity_mod = 0.45f;
-    out.offset = {23.5f, 12.0f, weapon_z};
-    return true;
-
-  case TF_WEAPON_RAYGUN:
-  case TF_WEAPON_DRG_POMSON:
-    out.speed = 1200.0f;
-    out.hull = {1.0f, 1.0f, 1.0f};
-    out.offset = {23.5f, 12.0f, weapon_z};
-    out.trace_launch = true;
-    return true;
-
-  case TF_WEAPON_FLAMETHROWER:
-    out.speed = 2000.0f;
-    out.splash_radius = 0.18f;
-    out.offset = {23.5f, 12.0f, weapon_z};
-    return true;
-
-  case TF_WEAPON_COMPOUND_BOW: {
-    const float begin = weapon->get_charge_begin_time();
-    const float now = global_vars != nullptr ? global_vars->curtime : local->get_tickbase() * interval();
-    const float charge = begin > 0.0f ? std::clamp(now - begin, 0.0f, 1.0f) : 0.0f;
-
-    out.speed = std::lerp(1800.0f, 2600.0f, charge);
-    out.gravity_mod = std::lerp(0.5f, 0.1f, charge);
-    out.life_time = 10.0f;
-    out.offset = {23.5f, 8.0f, -3.0f};
-    out.hull = {1.0f, 1.0f, 1.0f};
-    return true;
-  }
-
-  case TF_WEAPON_CROSSBOW:
-  case TF_WEAPON_SHOTGUN_BUILDING_RESCUE:
-    out.speed = id == TF_WEAPON_CROSSBOW ? 2400.0f : 2400.0f;
-    out.gravity_mod = 0.2f;
-    out.offset = {23.5f, 8.0f, -3.0f};
-    return true;
-
-  case TF_WEAPON_SYRINGEGUN_MEDIC:
-    out.speed = 1000.0f;
-    out.gravity_mod = 0.3f;
-    out.hull = {1.0f, 1.0f, 1.0f};
-    out.offset = {16.0f, 6.0f, -8.0f};
-    return true;
-
-  case TF_WEAPON_JAR:
-  case TF_WEAPON_JAR_MILK:
-    out.speed = 1000.0f;
-    out.gravity_mod = 1.0f;
-    out.drag_mod = 1.0f;
-    out.life_time = 2.2f;
-    out.splash_radius = 200.0f;
-    out.offset = {16.0f, 8.0f, -6.0f};
-    out.hull = {2.0f, 2.0f, 2.0f};
-    out.initial_up_velocity = 200.0f;
-    out.release_delay = 0.1f;
-    out.launch = launch_type::hand;
-    out.trace_launch = true;
-    return true;
-
-  case TF_WEAPON_CLEAVER:
-  case TF_WEAPON_GRENADE_CLEAVER:
-    out.speed = 3000.0f * (10.0f / std::sqrt(101.0f));
-    out.gravity_mod = 1.0f;
-    out.drag_mod = 1.0f;
-    out.life_time = 2.2f;
-    out.offset = {16.0f, 8.0f, -6.0f};
-    out.initial_up_velocity = 3000.0f / std::sqrt(101.0f);
-    out.release_delay = 0.1f;
-    out.hull = {1.0f, 1.0f, 10.0f};
-    out.launch = launch_type::hand;
-    out.trace_launch = true;
-    return true;
-
-  case TF_WEAPON_BAT_WOOD:
-  case TF_WEAPON_BAT_GIFTWRAP:
-    out.speed = 3000.0f * (10.0f / std::sqrt(101.0f));
-    out.gravity_mod = 1.0f;
-    out.drag_mod = 1.0f;
-    out.splash_radius = id == TF_WEAPON_BAT_GIFTWRAP ? 50.0f : 0.0f;
-    out.offset = {0.0f, 0.0f, 0.0f};
-    out.hull = {3.0f, 3.0f, 3.0f};
-    out.initial_up_velocity = 3000.0f / std::sqrt(101.0f);
-    out.release_delay = 0.1f;
-    out.launch = launch_type::bat;
-    out.secondary_attack = true;
-    return true;
-
-  case TF_WEAPON_GRENADE_GAS:
-    out.speed = 950.0f;
-    out.gravity_mod = 0.4f;
-    out.drag_mod = 1.0f;
-    out.life_time = 3.0f;
-    out.splash_radius = 256.0f;
-    out.offset = {3.0f, 7.0f, -9.0f};
-    out.hull = {2.0f, 2.0f, 2.0f};
-    out.trace_launch = true;
-    out.launch = launch_type::grenade;
-    out.direct_hit = false;
-    return true;
-
-  case TF_WEAPON_THROWABLE:
-    out.speed = 1000.0f;
-    out.gravity_mod = 1.0f;
-    out.drag_mod = 1.0f;
-    out.life_time = attribute(5.0f, "throwable_detonation_time", weapon->to_entity());
-    out.splash_radius = 250.0f;
-    out.offset = {3.0f, 7.0f, -9.0f};
-    out.hull = {2.0f, 2.0f, 2.0f};
-    out.initial_up_velocity = 200.0f;
-    out.release_delay = 0.1f;
-    out.launch = launch_type::hand;
-    out.trace_launch = true;
-    return true;
-
-  default:
-    break;
+    const Vec3 endpos = solid_hit ? segment.endpos : current;
+    switch (test.kind) {
+    case 0: {
+      const bool valid = segment.entity == test.target &&
+        (test.sim_ticks - tick) < tolerance_ticks;
+      if (!valid) {
+        return false;
+      }
+      if (test.interval_retest && test.trace_interval > 1) {
+        const std::vector<Vec3>& path = simulation.path;
+        const int available = static_cast<int>(path.size());
+        const int limit = std::min(tick, available - 1);
+        for (int replay = 1; replay <= limit; ++replay) {
+          trace_t retest_trace{};
+          if (!trace_hull_segment(local, info, ignored_target, path[replay - 1],
+                                  path[replay], retest_trace)) {
+            return false;
+          }
+          if (retest_trace.start_solid || retest_trace.all_solid ||
+              retest_trace.fraction < 1.0f || retest_trace.entity != nullptr) {
+            return false;
+          }
+        }
+      }
+      return true;
+    }
+    case 1: {
+      const bool valid = length_squared(endpos - test.aim_point) < test.radius_sqr &&
+        splashbot_instance.exposure_clear(endpos, segment.plane.normal,
+                                          test.normal_offset, test.target,
+                                          test.state.eye);
+      return valid;
+    }
+    default:
+      return !solid_hit;
+    }
   }
 
   return false;
 }
 
-inline float latency_seconds() {
-  if (client_state == nullptr || client_state->m_NetChannel == nullptr) {
-    return 0.0f;
+inline point_solution solve_point(Player* local, const projectile_info& info, const Vec3& eye,
+                                  const Vec3& point, bool lob, bool two_pass, float drag) {
+  point_solution result{};
+  float pitch_command = 0.0f;
+  float yaw_command = 0.0f;
+  float time = 0.0f;
+  if (!solve_ballistic(info, eye, point, drag, lob, pitch_command, yaw_command, time)) {
+    result.calculated = calc_state::bad;
+    return result;
   }
 
-  const float latency = client_state->m_NetChannel->get_latency(0);
-  return std::isfinite(latency) ? std::clamp(latency, 0.0f, 0.25f) : 0.0f;
-}
-
-inline int target_position(Player* player, Weapon* weapon) {
-  if (player == nullptr) {
-    return 2;
+  const bool needs_two_pass = two_pass && info.launch != launch_type::bat;
+  if (!needs_two_pass) {
+    result.calculated = calc_state::good;
+    result.pitch = pitch_command;
+    result.yaw = yaw_command;
+    result.time = time;
+    return result;
   }
 
-  const int id = weapon_id(weapon);
-  if (id == TF_WEAPON_COMPOUND_BOW) {
-    return 3;
-  }
-  if (is_rocket_weapon(id) || is_grenade_launcher(id)) {
-    return player->is_on_ground() ? 1 : 2;
-  }
-  return 2;
-}
-
-inline Vec3 target_offset_for_position(Player* player, int position) {
-  if (player == nullptr) {
-    return {};
+  const bool ignore_friendlies = !is_rocket_weapon(info.weapon_id_value);
+  Vec3 launch{};
+  Vec3 launch_angles{};
+  if (!launch_position(local, info, {pitch_command, yaw_command, 0.0f}, ignore_friendlies,
+                       launch, &launch_angles)) {
+    result.calculated = calc_state::bad;
+    return result;
   }
 
-  const Vec3 origin = player->get_origin();
-  const Vec3 maxs = player->get_player_maxs();
-  if (position == 1) {
-    return {0.0f, 0.0f, maxs.z * 0.10f};
-  }
-  if (position == 3) {
-    Vec3 head{};
-    if (aimbot_get_hitbox_center(player, aim_hitbox_head, &head)) {
-      return head - origin;
-    }
-    return {0.0f, 0.0f, maxs.z * 0.93f};
+  float muzzle_pitch = 0.0f;
+  float muzzle_yaw = 0.0f;
+  float muzzle_time = 0.0f;
+  if (!solve_ballistic(info, launch, point, drag, lob, muzzle_pitch, muzzle_yaw, muzzle_time)) {
+    result.calculated = calc_state::bad;
+    return result;
   }
 
-  return {0.0f, 0.0f, maxs.z * 0.50f};
-}
+  if (info.launch == launch_type::fire_setup && length_squared(info.offset) > 0.0001f) {
+    Vec3 forward{};
+    angle_vectors(launch_angles, &forward, nullptr, nullptr);
 
-inline Vec3 target_offset(Player* player, Weapon* weapon) {
-  if (player == nullptr) {
-    return {};
-  }
-  const int position = config.aimbot.projectile_aim_pos == 0
-    ? target_position(player, weapon)
-    : config.aimbot.projectile_aim_pos;
-  return target_offset_for_position(player, position);
-}
-
-inline Vec3 path_origin(const target_seed& seed, const movement_path& path, float seconds) {
-  if (!path.origins.empty()) {
-    const float tick = std::max(seconds, 0.0f) / interval();
-    const float last_tick = static_cast<float>(path.origins.size() - 1);
-    if (tick > last_tick && path.simulated && finite(path.terminal_velocity)) {
-      return path.origins.back() + path.terminal_velocity * ((tick - last_tick) * interval());
-    }
-    const std::size_t low = std::min(static_cast<std::size_t>(tick), path.origins.size() - 1);
-    const std::size_t high = std::min(low + 1, path.origins.size() - 1);
-    const float fraction = std::clamp(tick - static_cast<float>(low), 0.0f, 1.0f);
-    return path.origins[low] + (path.origins[high] - path.origins[low]) * fraction;
-  }
-  return seed.origin + seed.velocity * seconds;
-}
-
-inline Vec3 target_point(const target_seed& seed, const movement_path& path, float seconds) {
-  if (seed.fixed_aim_position_valid) {
-    return seed.fixed_aim_position;
-  }
-  return path_origin(seed, path, seconds) + seed.aim_offset;
-}
-
-inline bool build_move_path(const target_seed& seed, float max_time, movement_path& out) {
-  out = {};
-  if (seed.player == nullptr || game_movement == nullptr || move_helper == nullptr ||
-      prediction == nullptr || global_vars == nullptr) {
-    return false;
-  }
-
-  const int move_type = seed.player->get_move_type();
-  if (!seed.player->is_alive() || seed.player->get_water_level() > 1 ||
-      (move_type != MOVETYPE_WALK && move_type != MOVETYPE_NOCLIP)) {
-    return false;
-  }
-
-  struct movement_state_guard {
-    Player* player;
-    Vec3 origin;
-    Vec3 abs_origin;
-    Vec3 velocity;
-    Vec3 base_velocity;
-    Vec3 view_offset;
-    int flags;
-    int ground_entity;
-    int buttons;
-    int last_buttons;
-    bool ducked;
-    bool ducking;
-    bool in_duck_jump;
-    float duck_time;
-    float duck_jump_time;
-    float fall_velocity;
-    int tickbase;
-    user_cmd* current_command;
-    float curtime;
-    float frametime;
-    int tickcount;
-    bool prediction_in_prediction;
-    bool prediction_first_time_predicted;
-
-    explicit movement_state_guard(Player* value)
-      : player(value), origin(value->get_origin()), abs_origin(value->get_abs_origin()),
-        velocity(value->get_velocity()),
-        base_velocity(value->get_base_velocity()), view_offset(value->get_view_offset()),
-        flags(value->get_flags()), ground_entity(value->get_ground_entity_handle()),
-        buttons(value->get_buttons()), last_buttons(value->get_last_buttons()),
-        ducked(value->get_ducked()), ducking(value->get_ducking_state()),
-        in_duck_jump(value->get_in_duck_jump()), duck_time(value->get_duck_time()),
-        duck_jump_time(value->get_duck_jump_time()), fall_velocity(value->get_fall_velocity()),
-        tickbase(value->get_tickbase()), current_command(value->get_current_cmd()),
-        curtime(global_vars->curtime), frametime(global_vars->frametime),
-        tickcount(global_vars->tickcount), prediction_in_prediction(prediction->in_prediction),
-        prediction_first_time_predicted(prediction->first_time_predicted) {}
-
-    ~movement_state_guard() {
-      if (player == nullptr) {
-        return;
+    const Vec3 shoot_offset = launch - eye;
+    const Vec3 target_offset = point - eye;
+    const Vec3 forward_xy = normalized({forward.x, forward.y, 0.0f});
+    float corrected_yaw = muzzle_yaw;
+    if (length_squared(forward_xy) > 0.0001f) {
+      const Vec3 shoot_xy{shoot_offset.x, shoot_offset.y, 0.0f};
+      const Vec3 target_xy{target_offset.x, target_offset.y, 0.0f};
+      float root = 0.0f;
+      if (solve_quadratic_front_root(1.0f, 2.0f * dot(shoot_xy, forward_xy),
+                                     length_squared(shoot_xy) - length_squared(target_xy),
+                                     root)) {
+        const Vec3 shifted = shoot_xy + forward_xy * root;
+        corrected_yaw = std::atan2(shifted.y, shifted.x) * radpi;
       }
-      player->set_origin(origin);
-      player->set_abs_origin(abs_origin);
-      player->set_velocity(velocity);
-      player->set_base_velocity(base_velocity);
-      player->set_view_offset(view_offset);
-      player->set_flags(flags);
-      player->set_ground_entity_handle(ground_entity);
-      player->set_buttons(buttons);
-      player->set_last_buttons(last_buttons);
-      player->set_ducked(ducked);
-      player->set_ducking_state(ducking);
-      player->set_in_duck_jump(in_duck_jump);
-      player->set_duck_time(duck_time);
-      player->set_duck_jump_time(duck_jump_time);
-      player->set_fall_velocity(fall_velocity);
-      player->set_tickbase(tickbase);
-      player->set_current_cmd(current_command);
-      move_helper->set_host(nullptr);
-      global_vars->curtime = curtime;
-      global_vars->frametime = frametime;
-      global_vars->tickcount = tickcount;
-      prediction->in_prediction = prediction_in_prediction;
-      prediction->first_time_predicted = prediction_first_time_predicted;
     }
-  } state_guard{seed.player};
+    yaw_command = corrected_yaw;
 
-  prediction->in_prediction = true;
-  prediction->first_time_predicted = false;
-  move_helper->set_host(seed.player);
-
-  const bool was_grounded = seed.player->get_ground_entity() != nullptr;
-  if (seed.player->get_flags() & FL_DUCKING) {
-    seed.player->set_ducked(true);
-    seed.player->set_ducking_state(false);
-    seed.player->set_in_duck_jump(false);
-    seed.player->set_duck_time(0.0f);
-    seed.player->set_duck_jump_time(0.0f);
-    seed.player->set_flags(seed.player->get_flags() & ~FL_DUCKING);
-  }
-  seed.player->set_base_velocity({});
-  if (seed.player->get_flags() & FL_ONGROUND) {
-    Vec3 velocity = seed.player->get_velocity();
-    velocity.z = std::min(velocity.z, 0.0f);
-    seed.player->set_velocity(velocity);
+    if (800.0f * info.gravity_mod > 0.001f) {
+      pitch_command = muzzle_pitch + (pitch_command - launch_angles.x);
+    } else {
+      const float cyaw = std::cos(yaw_command * pideg);
+      const float syaw = std::sin(yaw_command * pideg);
+      const auto flatten = [cyaw, syaw](const Vec3& value) {
+        return Vec3{value.x * cyaw + value.y * syaw, 0.0f, value.z};
+      };
+      const Vec3 shoot_plane = flatten(shoot_offset);
+      const Vec3 target_plane = flatten(target_offset);
+      const Vec3 forward_plane_raw = flatten(forward);
+      Vec3 forward_plane = forward_plane_raw;
+      const float plane_length =
+        std::sqrt(forward_plane.x * forward_plane.x + forward_plane.z * forward_plane.z);
+      if (plane_length > 0.0001f) {
+        forward_plane = Vec3{forward_plane.x / plane_length, 0.0f,
+                             forward_plane.z / plane_length};
+        const float planar_b =
+          2.0f * (shoot_plane.x * forward_plane.x + shoot_plane.z * forward_plane.z);
+        const float planar_c = (shoot_plane.x * shoot_plane.x + shoot_plane.z * shoot_plane.z) -
+          (target_plane.x * target_plane.x + target_plane.z * target_plane.z);
+        float plane_root = 0.0f;
+        if (solve_quadratic_front_root(1.0f, planar_b, planar_c, plane_root)) {
+          const Vec3 shifted_plane = shoot_plane + forward_plane * plane_root;
+          pitch_command = -std::atan2(shifted_plane.z, shifted_plane.x) * radpi;
+        }
+      }
+    }
   } else {
-    seed.player->set_ground_entity_handle(0);
+    pitch_command = muzzle_pitch;
+    yaw_command = muzzle_yaw;
   }
 
-  user_cmd simulated_command{};
-  simulated_command.view_angles = seed.player->get_eye_angles();
-  simulated_command.command_number = global_vars->tickcount;
-  simulated_command.tick_count = global_vars->tickcount;
-  simulated_command.forwardmove = 0.0f;
-  simulated_command.sidemove = 0.0f;
-  simulated_command.upmove = 0.0f;
-  simulated_command.buttons = seed.player->get_buttons();
-  seed.player->set_current_cmd(&simulated_command);
-
-  const float simulation_start = seed.entity != nullptr &&
-      std::isfinite(seed.entity->get_simulation_time())
-    ? seed.entity->get_simulation_time()
-    : global_vars->curtime;
-
-  MoveData move{};
-  move.m_bFirstRunOfFunctions = false;
-  move.m_bGameCodeMovedPlayer = false;
-  move.m_nPlayerHandle = seed.player->get_ref_handle();
-  move.m_vecVelocity = seed.player->get_velocity();
-  move.SetAbsOrigin(seed.origin);
-  move.m_flClientMaxSpeed = seed.player->get_max_speed();
-  move.m_flMaxSpeed = move.m_flClientMaxSpeed > 1.0f ? move.m_flClientMaxSpeed : 320.0f;
-  move.m_nButtons = seed.player->get_buttons();
-  move.m_nOldButtons = seed.player->get_last_buttons();
-  Vec3 horizontal_velocity = seed.velocity;
-  horizontal_velocity.z = 0.0f;
-  move.m_vecViewAngles = horizontal_velocity.x * horizontal_velocity.x + horizontal_velocity.y * horizontal_velocity.y > 1.0f
-    ? aimbot_direction_to_angles(horizontal_velocity)
-    : seed.player->get_eye_angles();
-  if (!finite(move.m_vecViewAngles)) {
-    move.m_vecViewAngles = aimbot_direction_to_angles(horizontal_velocity);
-  }
-  move.m_vecViewAngles.x = 0.0f;
-  move.m_vecViewAngles.z = 0.0f;
-  move.m_vecAbsViewAngles = move.m_vecViewAngles;
-  move.m_vecAngles = move.m_vecViewAngles;
-  move.m_vecOldAngles = move.m_vecViewAngles;
-
-  const float speed = std::hypot(seed.velocity.x, seed.velocity.y);
-  const float max_speed = move.m_flMaxSpeed > 1.0f ? move.m_flMaxSpeed : 320.0f;
-
-  move.m_flForwardMove = was_grounded ? std::min(speed, max_speed) : 0.0f;
-  move.m_flOldForwardMove = move.m_flForwardMove;
-  move.m_flSideMove = 0.0f;
-  move.m_flUpMove = 0.0f;
-  move.m_vecConstraintCenter = seed.player->get_constraint_center();
-  move.m_flConstraintRadius = seed.player->get_constraint_radius();
-  move.m_flConstraintWidth = seed.player->get_constraint_width();
-  move.m_flConstraintSpeedFactor = seed.player->get_constraint_speed_factor();
-
-  const int max_ticks = std::clamp(static_cast<int>(std::ceil(max_time / interval())), 1, 400);
-  out.origins.reserve(static_cast<std::size_t>(max_ticks) + 1);
-  out.origins.push_back(seed.origin);
-  for (int tick = 0; tick < max_ticks; ++tick) {
-    global_vars->curtime = simulation_start + static_cast<float>(tick) * interval();
-    global_vars->frametime = prediction->engine_paused ? 0.0f : interval();
-    global_vars->tickcount = static_cast<int>(global_vars->curtime / interval());
-    simulated_command.command_number++;
-    simulated_command.tick_count = global_vars->tickcount;
-    simulated_command.forwardmove = move.m_flForwardMove;
-    simulated_command.sidemove = move.m_flSideMove;
-    simulated_command.upmove = move.m_flUpMove;
-    simulated_command.view_angles = move.m_vecViewAngles;
-    if (!game_movement->process_movement(seed.player, &move)) {
-      out = {};
-      return false;
-    }
-
-    seed.player->set_velocity(move.m_vecVelocity);
-    seed.player->set_origin(move.GetAbsOrigin());
-    seed.player->set_abs_origin(move.GetAbsOrigin());
-    out.origins.push_back(move.GetAbsOrigin());
-    out.terminal_velocity = move.m_vecVelocity;
-    move.m_nOldButtons = move.m_nButtons;
-  }
-  out.simulated = true;
-  return true;
+  result.calculated = calc_state::good;
+  result.pitch = pitch_command;
+  result.yaw = yaw_command;
+  result.time = muzzle_time;
+  result.launch = launch;
+  result.launch_angles = launch_angles;
+  return result;
 }
 
-inline bool launch_position(Player* local, const projectile_info& info, const Vec3& angles,
-  bool ignore_friendly_players,
-  Vec3& out, Vec3* launch_angles_out = nullptr) {
-  if (local == nullptr || !finite(angles)) {
+inline bool solution_within_timing(const point_solution& solution, int sim_tick, int tolerance) {
+  if (solution.calculated != calc_state::good) {
     return false;
   }
-
-  Vec3 launch_angles = aimbot_clamp_angles(angles);
-  Vec3 forward{};
-  Vec3 right{};
-  Vec3 up{};
-  angle_vectors(launch_angles, &forward, &right, &up);
-
-  const Vec3 eye = local->get_shoot_pos();
-
-  if (info.launch == launch_type::fire_setup) {
-    Vec3 fire_offset = info.offset;
-
-    static Convar* cl_flipviewmodels = nullptr;
-    if (cl_flipviewmodels == nullptr && convar_system != nullptr) {
-      cl_flipviewmodels = convar_system->find_var("cl_flipviewmodels");
-    }
-    if (cl_flipviewmodels != nullptr && cl_flipviewmodels->get_int() != 0) {
-      fire_offset.y *= -1.0f;
-    }
-    out = eye + (forward * fire_offset.x) + (right * fire_offset.y) + (up * fire_offset.z);
-
-    Vec3 fire_end = eye + forward * 2000.0f;
-    Vec3 effective_end = fire_end;
-    if (engine_trace != nullptr) {
-      Vec3 trace_start = eye;
-      Vec3 trace_end = fire_end;
-      ray_t ray = engine_trace->init_ray(&trace_start, &trace_end);
-      trace_filter filter{};
-      if (ignore_friendly_players) {
-        engine_trace->init_projectile_trace_filter(&filter, local->to_entity());
-      } else {
-        engine_trace->init_trace_filter(&filter, local->to_entity());
-      }
-      trace_t trace{};
-      engine_trace->trace_ray(&ray, projectile_collision_mask, &filter, &trace);
-      if (trace.start_solid || trace.all_solid) {
-        return false;
-      }
-      effective_end = trace.fraction > 0.1f ? trace.endpos : fire_end;
-    }
-
-    launch_angles = aimbot_calculate_angles_to_position(out, effective_end);
-    if (!finite(out) || !finite(launch_angles)) {
-      return false;
-    }
-
-    if (launch_angles_out != nullptr) {
-      *launch_angles_out = launch_angles;
-    }
+  const int time_to = time_to_ticks(solution.time);
+  if (tolerance == INT_MAX) {
     return true;
   }
+  if (tolerance < 0) {
+    return time_to <= sim_tick;
+  }
+  return std::abs(time_to - sim_tick) <= tolerance;
+}
 
-  if (info.launch == launch_type::bat) {
-    out = local->get_origin() + Vec3{0.0f, 0.0f, 50.0f} + (forward * 32.0f);
-    if (launch_angles_out != nullptr) {
-      *launch_angles_out = launch_angles;
+inline Vec3 pull_point_toward_eye(const Vec3& point, const Vec3& eye, const Vec3& mins,
+                                  const Vec3& maxs) {
+  float enter_fraction = 0.0f;
+  if (aimbot_segment_aabb_enter_fraction(eye, point, mins, maxs, &enter_fraction)) {
+    return point + (eye - point) * std::clamp(enter_fraction, 0.0f, 1.0f);
+  }
+  return point;
+}
+
+struct direct_slot {
+  bool active = false;
+  bool head = false;
+  Vec3 offset{};
+};
+
+struct direct_history_entry {
+  int tick = 0;
+  Vec3 origin{};
+  Vec3 point{};
+  bool head = false;
+  point_solution solution{};
+};
+
+struct splash_history_entry {
+  int tick = 0;
+  Vec3 origin{};
+  float time_to = 0.0f;
+};
+
+struct seed_outcome {
+  bool found = false;
+  float solution_time = 0.0f;
+  aimbot_candidate candidate{};
+};
+
+inline seed_outcome evaluate_seed(Player* local, Weapon* weapon, const projectile_info& info,
+                                  const target_seed& seed,
+                                  const Vec3& original_view_angles) {
+  seed_outcome outcome{};
+  if (local == nullptr || weapon == nullptr || seed.entity == nullptr) {
+    return outcome;
+  }
+
+  const Vec3 eye = local->get_shoot_pos();
+  const int weapon_id_value = info.weapon_id_value;
+  const float radius = splash_radius_for(local, info);
+  const float speed = std::max(info.speed, 1.0f);
+  const float bounds_time = length(seed.bounds_maxs - seed.bounds_mins) / speed;
+  const float radius_time = bounds_time + radius / speed;
+  const int arm_ticks = cfg.sticky_arm_time && info.arm_time > 0.0f
+                          ? time_to_ticks(info.arm_time)
+                          : 0;
+  const bool lob_enabled = cfg.lob_angles && info.gravity_mod > 0.0f;
+  const bool underpredict = cfg.lob_underpredict && radius > 0.0f;
+  const float drag_base = effective_drag(info, speed, lob_enabled);
+  const int splash_policy = std::clamp(config.aimbot.projectile_splash_policy, 0, 2);
+  const bool splash_allowed = radius > 0.0f && splash_policy != 0 && info.direct_hit;
+  const bool splash_only = !info.direct_hit;
+  const bool huntsman = weapon_id_value == TF_WEAPON_COMPOUND_BOW;
+  const float latency = latency_seconds();
+
+  std::array<direct_slot, 4> slots{};
+  int slot_count = 0;
+  const Vec3 maxs = seed.bounds_maxs;
+  const Vec3 mins = seed.bounds_mins;
+  if (seed.player != nullptr && config.aimbot.projectile_aim_pos == 0) {
+    const bool grounded = seed.player->is_on_ground();
+    if (huntsman) {
+      Vec3 head_center{};
+      if (aimbot_get_hitbox_center(seed.player, aim_hitbox_head, &head_center)) {
+        slots[slot_count++] = {true, true, head_center - seed.origin};
+      } else {
+        slots[slot_count++] = {true, true, Vec3{0.0f, 0.0f, maxs.z * 0.93f}};
+      }
+      slots[slot_count++] = {true, false, Vec3{0.0f, 0.0f, (maxs.z - mins.z) * 0.5f}};
+    } else if (grounded && (is_rocket_weapon(weapon_id_value) || is_grenade_launcher(weapon_id_value))) {
+      slots[slot_count++] = {true, false, Vec3{0.0f, 0.0f, maxs.z * 0.10f}};
+      slots[slot_count++] = {true, false, Vec3{0.0f, 0.0f, (maxs.z - mins.z) * 0.5f}};
+    } else {
+      slots[slot_count++] = {true, false, Vec3{0.0f, 0.0f, (maxs.z - mins.z) * 0.5f}};
     }
-    return finite(out);
+  } else {
+    slots[slot_count++] = {true, false, seed.aim_offset};
   }
 
-  if (info.launch == launch_type::grenade) {
-    out = eye + forward * 16.0f - right * 8.0f - up * 20.0f;
-  }
-  else {
-    out = eye + (forward * info.offset.x) + (right * info.offset.y) + (up * info.offset.z);
+  movement_path path{};
+  movesim_guard path_guard(path.simulation);
+  const bool simulate_movement =
+    seed.player != nullptr &&
+    config.aimbot.projectile_prediction_mode == Aim::ProjectilePredictionMode::MOVE_SIM;
+  if (simulate_movement) {
+    movesim::init_options options{};
+    options.strafe_prediction = cfg.strafe_prediction;
+    options.hitchance_gate = cfg.hitchance_gate;
+    options.hitchance_minimum = cfg.hitchance_minimum;
+    options.predict_networked = false;
+    options.drain_charge = false;
+    options.inject_jump = false;
+    options.local_command = nullptr;
+    if (!movesim::initialize(seed.player, path.simulation, options)) {
+      path.failed = true;
+    } else {
+      path.simulated = true;
+    }
   }
 
-  if (info.trace_launch && engine_trace != nullptr) {
-    Vec3 mins{-8.0f, -8.0f, -8.0f};
-    Vec3 maxs{8.0f, 8.0f, 8.0f};
-    Vec3 trace_start = eye;
-    Vec3 trace_end = out;
-    ray_t ray = engine_trace->init_ray(&trace_start, &trace_end, &mins, &maxs);
-    trace_filter filter{};
-    engine_trace->init_world_and_props_trace_filter(&filter);
-    trace_t trace{};
-    engine_trace->trace_ray(&ray, projectile_collision_mask, &filter, &trace);
-    if (trace.start_solid || trace.all_solid || trace.fraction < 0.999f) {
+  const float life_cap = info.life_time > 0.0f
+                           ? std::min(info.life_time, config.aimbot.projectile_max_sim_time)
+                           : config.aimbot.projectile_max_sim_time;
+  const int max_tick = std::clamp(time_to_ticks(life_cap), 1, 400);
+  const int start_tick = 1 - time_to_ticks(latency);
+
+  std::vector<direct_history_entry> direct_history;
+  direct_history.reserve(16);
+  std::vector<splash_history_entry> splash_history;
+  splash_history.reserve(32);
+  bool splash_exhausted = false;
+
+  for (int tick = start_tick; tick <= max_tick; ++tick) {
+    if (path.simulated && !path.failed) {
+      if (!movesim::run_tick(path.simulation)) {
+        path.failed = true;
+      }
+    }
+    const float elapsed = ticks_to_time(std::max(tick, 0));
+    const Vec3 origin = path.simulated && !path.failed
+                          ? path.simulation.predicted_origin
+                          : (path.simulated
+                               ? path_origin(path, seed, elapsed)
+                               : (seed.player != nullptr
+                                    ? seed.origin + seed.velocity * elapsed
+                                    : seed.origin));
+    if (tick < 1) {
+      continue;
+    }
+
+    const bool moving_target = length_squared(seed.velocity) > 100.0f;
+    const bool armed = arm_ticks <= 0 || tick >= arm_ticks || !moving_target;
+
+    bool directs_alive = false;
+    if (!splash_only) {
+      for (int index = 0; index < slot_count; ++index) {
+        direct_slot& slot = slots[index];
+        if (!slot.active) {
+          continue;
+        }
+        if (!armed) {
+          directs_alive = true;
+          continue;
+        }
+        Vec3 point = origin + slot.offset;
+        if (slot.head && cfg.huntsman_pull_point && seed.player != nullptr) {
+          point = pull_point_toward_eye(point, eye, origin + mins, origin + maxs);
+        }
+        point_solution solution =
+          solve_point(local, info, eye, point, lob_enabled, true, drag_base);
+        if (solution.calculated == calc_state::bad) {
+          slot.active = false;
+          continue;
+        }
+        const int tolerance = underpredict && lob_enabled ? INT_MAX : -1;
+        if (solution_within_timing(solution, tick, tolerance)) {
+          direct_history.push_back({tick, origin, point, slot.head, solution});
+          slot.active = false;
+        } else {
+          directs_alive = true;
+        }
+      }
+    }
+
+    bool splashes_alive = false;
+    if ((splash_allowed || splash_only) && !splash_exhausted) {
+      const Vec3 schedule_point = origin + seed.aim_offset;
+      const point_solution schedule =
+        solve_point(local, info, eye, schedule_point, lob_enabled, true, drag_base);
+      if (schedule.calculated == calc_state::bad && !directs_alive) {
+        splash_exhausted = true;
+      } else {
+        const float time_to = schedule.time - ticks_to_time(tick);
+        if (time_to > radius_time) {
+          splashes_alive = true;
+        } else if (time_to < -radius_time) {
+          splash_exhausted = true;
+        } else {
+          splash_history.push_back({tick, origin, std::fabs(time_to)});
+          splashes_alive = true;
+        }
+      }
+    }
+
+    if (!directs_alive && !splashes_alive) {
+      break;
+    }
+  }
+
+  const auto finish_candidate = [&](const Vec3& aim_position, const Vec3& predicted_origin,
+                                    const Vec3& angles, float time, bool head) {
+    const Vec3 current_angles =
+      aimbot_calculate_angles_to_position(eye, predicted_origin + seed.aim_offset);
+    const float current_fov = aimbot_calculate_fov(current_angles, original_view_angles);
+    const float predicted_fov = aimbot_calculate_fov(angles, original_view_angles);
+    const float fov = config.aimbot.projectile_mode == 0 ? current_fov : predicted_fov;
+    if (config.aimbot.projectile_mode != 2 && projectile_fov_exceeds_limit(fov)) {
       return false;
     }
-    out = trace.endpos;
-  }
 
-  if (launch_angles_out != nullptr) {
-    *launch_angles_out = launch_angles;
-  }
-  return finite(out);
-}
+    aimbot_candidate candidate{};
+    candidate.entity = seed.entity;
+    candidate.player = seed.player;
+    candidate.aim_position = aim_position;
+    candidate.predicted_origin = predicted_origin;
+    candidate.predicted_origin_valid = seed.player != nullptr;
+    candidate.aim_angles = aimbot_clamp_angles(angles);
+    candidate.command_angles = candidate.aim_angles;
+    candidate.fov = fov;
+    candidate.distance = seed.distance;
+    candidate.health = seed.player != nullptr
+                         ? seed.player->get_health()
+                         : aimbot_entity_health(seed.entity);
+    candidate.simulation_time = seed.entity->get_simulation_time();
+    candidate.visible = true;
+    candidate.preferred = seed.preferred;
+    candidate.hitbox = head ? aim_hitbox_head : -1;
+    candidate.debug_reason = aimbot_debug_reason::attack_ready;
+    outcome.found = true;
+    outcome.solution_time = time;
+    outcome.candidate = candidate;
+    return true;
+  };
 
-inline Vec3 compensate_projectile_spread(Player* local, Weapon* weapon,
-  user_cmd* cmd, const projectile_info& info, const Vec3& desired_angles) {
-  if (local == nullptr || weapon == nullptr || cmd == nullptr || !finite(desired_angles)) {
-    return desired_angles;
-  }
-
-  const projectile_randomness random = projectile_randomness_for(weapon, cmd);
-  if (!random.valid) {
-    return desired_angles;
-  }
-
-  Vec3 compensated = desired_angles;
-  const int id = weapon_id(weapon);
-  if (id == TF_WEAPON_SYRINGEGUN_MEDIC) {
-
-    compensated.x -= random.syringe_pitch;
-    compensated.y -= random.syringe_yaw;
-  }
-  else if (id == TF_WEAPON_COMPOUND_BOW) {
-    compensated.x -= random.arrow_pitch;
-    compensated.y -= random.arrow_yaw;
-  }
-
-  if (random.grenade_up == 0.0f && random.grenade_right == 0.0f) {
-    return aimbot_clamp_angles(compensated);
-  }
-
-  const bool ignore_friendly_players = !is_rocket_weapon(id);
-  for (int iteration = 0; iteration < 4; ++iteration) {
-    Vec3 launch{};
-    Vec3 launch_angles{};
-    if (!launch_position(local, info, compensated, ignore_friendly_players, launch, &launch_angles)) {
-      break;
-    }
-
-    Vec3 forward{};
-    Vec3 right{};
-    Vec3 up{};
-    angle_vectors(launch_angles, &forward, &right, &up);
-    const Vec3 base_velocity = forward * info.speed + up * info.initial_up_velocity;
-    const Vec3 actual_velocity = base_velocity + up * random.grenade_up + right * random.grenade_right;
-    const Vec3 actual_angles = aimbot_direction_to_angles(aimbot_normalize_vector(actual_velocity));
-    const Vec3 error = aimbot_normalize_angle_delta(launch_angles, actual_angles);
-    compensated = aimbot_clamp_angles(compensated + error);
-    if (!finite(compensated)) {
-      return desired_angles;
-    }
-  }
-
-  return aimbot_clamp_angles(compensated);
-}
-
-inline bool solve_ballistic(const projectile_info& info, const Vec3& from, const Vec3& to,
-  float drag_factor, Vec3& angles, float& time) {
-  const Vec3 delta = to - from;
-  const float horizontal = std::hypot(delta.x, delta.y);
-  if (horizontal <= 0.001f || !std::isfinite(info.speed) || info.speed <= 0.0f) {
-    return false;
-  }
-
-  float speed = info.speed;
-  const float gravity = 800.0f * info.gravity_mod;
-  for (int iteration = 0; iteration < 2; ++iteration) {
-    if (gravity > 0.001f) {
-      const float v0 = std::hypot(speed, info.initial_up_velocity);
-      const float launch_pitch = std::atan2(info.initial_up_velocity, speed);
-      const float root = v0 * v0 * v0 * v0 - gravity * (gravity * horizontal * horizontal +
-        2.0f * delta.z * v0 * v0);
-      if (root < 0.0f) {
-        return false;
+  const auto try_direct = [&]() {
+    std::sort(direct_history.begin(), direct_history.end(),
+              [](const direct_history_entry& left, const direct_history_entry& right) {
+                return left.tick < right.tick;
+              });
+    for (const direct_history_entry& entry : direct_history) {
+      Vec3 launch{};
+      Vec3 launch_angles{};
+      const bool ignore_friendlies = !is_rocket_weapon(weapon_id_value);
+      if (!launch_position(local, info, {entry.solution.pitch, entry.solution.yaw, 0.0f},
+                           ignore_friendlies, launch, &launch_angles)) {
+        continue;
       }
-      const float pitch = std::atan((v0 * v0 - std::sqrt(root)) / (gravity * horizontal));
-      angles = {
-        -((pitch - launch_pitch) * radpi),
-        std::atan2(delta.y, delta.x) * radpi,
-        0.0f
-      };
-      time = horizontal / (std::max(std::cos(pitch) * v0, 0.001f));
-    } else {
-      angles = aimbot_calculate_angles_to_position(from, to);
-      time = distance_3d(from, to) / speed;
+      const Vec3 velocity = launch_velocity(info, launch_angles, local);
+      shot_test test{};
+      test.launch = launch;
+      test.velocity = velocity;
+      test.drag = effective_drag(info, length(velocity), lob_enabled);
+      test.target = seed.entity;
+      test.predicted_origin = entry.origin;
+      test.state = make_target_state(seed, entry.origin);
+      test.aim_point = entry.point;
+      test.sim_ticks = std::max(
+        time_to_ticks(entry.solution.time + info.release_delay) + 1, 1);
+      test.kind = 0;
+      test.radius_sqr = FLT_MAX;
+      test.normal_offset = 0.0f;
+      test.trace_interval = std::clamp(cfg.direct_trace_interval, 1, 16);
+      test.interval_retest = cfg.interval_retest;
+      if (!validate_shot(local, info, test)) {
+        continue;
+      }
+      return finish_candidate(entry.point, entry.origin,
+                              {entry.solution.pitch, entry.solution.yaw, 0.0f},
+                              entry.solution.time, entry.head);
     }
+    return false;
+  };
 
-    if (drag_factor <= 0.0f || !std::isfinite(time)) {
-      break;
+  const auto try_splash = [&]() {
+    std::sort(splash_history.begin(), splash_history.end(),
+              [](const splash_history_entry& left, const splash_history_entry& right) {
+                return left.tick < right.tick;
+              });
+    const int restrict_arc = std::clamp(cfg.splash_restrict_arc, 1, 128);
+    const int restrict_direct = std::clamp(cfg.splash_restrict_direct, 1, 128);
+    const int restrict_first = std::clamp(cfg.splash_restrict_first, 1, 256);
+    const int restrict_base = info.gravity_mod > 0.0f ? restrict_arc : restrict_direct;
+    const int trace_interval =
+      std::clamp(info.gravity_mod > 0.0f ? cfg.geometry_trace_interval
+                                         : cfg.splash_trace_interval, 1, 16);
+
+    bool first_bucket = true;
+    for (const splash_history_entry& entry : splash_history) {
+      const splash_target_state state = make_target_state(seed, entry.origin);
+      const int capacity = 256;
+      std::array<splash_candidate, capacity> candidates{};
+      const int count = splashbot_instance.collect_candidates(
+        state, radius, info.hull, cfg.air_splash && info.air_splash,
+        cfg.air_point_count, eye, candidates.data(), capacity);
+      if (count <= 0) {
+        first_bucket = false;
+        continue;
+      }
+
+      int limit = first_bucket ? std::max(restrict_base, restrict_first) : restrict_base;
+      limit = std::min(limit, count);
+
+      float best_score = -FLT_MAX;
+      Vec3 best_point{};
+      point_solution best_solution{};
+
+      for (int index = 0; index < limit; ++index) {
+        const splash_candidate& candidate = candidates[index];
+        const point_solution solution =
+          solve_point(local, info, eye, candidate.point, lob_enabled, true, drag_base);
+        if (solution.calculated != calc_state::good) {
+          continue;
+        }
+        if (candidate.kind == splash_point_kind::air &&
+            arm_ticks > 0 && solution.time < info.arm_time) {
+          continue;
+        }
+
+        Vec3 launch{};
+        Vec3 launch_angles{};
+        const bool ignore_friendlies = !is_rocket_weapon(weapon_id_value);
+        if (!launch_position(local, info, {solution.pitch, solution.yaw, 0.0f},
+                             ignore_friendlies, launch, &launch_angles)) {
+          continue;
+        }
+        const Vec3 velocity = launch_velocity(info, launch_angles, local);
+        const float effective_radius = candidate.kind == splash_point_kind::air &&
+                                           info.weapon_id_value == TF_WEAPON_PIPEBOMBLAUNCHER
+                                         ? radius * sticky_air_radius_scale(entry.tick)
+                                         : radius;
+        shot_test test{};
+        test.launch = launch;
+        test.velocity = velocity;
+        test.drag = effective_drag(info, length(velocity), lob_enabled);
+        test.target = seed.entity;
+        test.predicted_origin = entry.origin;
+        test.state = state;
+        test.aim_point = candidate.point;
+        test.sim_ticks = std::max(time_to_ticks(solution.time + info.release_delay) + 1, 1);
+        test.kind = candidate.kind == splash_point_kind::air ? 2 : 1;
+        test.radius_sqr = effective_radius * effective_radius;
+        test.normal_offset = info.normal_offset;
+        test.trace_interval = trace_interval;
+        test.interval_retest = cfg.interval_retest;
+        if (!validate_shot(local, info, test)) {
+          continue;
+        }
+
+        const float score =
+          candidate.falloff * 1000.0f - solution.time * 0.01f;
+        if (score > best_score) {
+          best_score = score;
+          best_point = candidate.point;
+          best_solution = solution;
+        }
+      }
+
+      first_bucket = false;
+      if (best_score > -FLT_MAX) {
+        return finish_candidate(best_point, entry.origin,
+                                {best_solution.pitch, best_solution.yaw, 0.0f},
+                                best_solution.time, false);
+      }
     }
-    const float drag_loss = std::clamp(drag_factor * time * 0.5f, 0.0f, 0.75f);
-    speed = info.speed * (1.0f - drag_loss);
+    return false;
+  };
+
+  if (splash_only) {
+    if (!try_splash()) {
+      return outcome;
+    }
+  } else if (splash_policy == 2 && splash_allowed) {
+    if (!try_splash() && !try_direct()) {
+      return outcome;
+    }
+  } else {
+    if (!try_direct() && !(splash_allowed && try_splash())) {
+      return outcome;
+    }
   }
 
-  angles = aimbot_clamp_angles(angles);
-  return finite(angles) && std::isfinite(time) && time >= 0.0f &&
-    (info.life_time <= 0.0f || time <= info.life_time);
-}
-
-inline float point_segment_distance_squared(const Vec3& point, const Vec3& start, const Vec3& end) {
-  const Vec3 segment = end - start;
-  const float length_squared = segment.x * segment.x + segment.y * segment.y + segment.z * segment.z;
-  if (length_squared <= 0.0001f) {
-    const Vec3 delta = point - start;
-    return delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
-  }
-  const Vec3 to_point = point - start;
-  const float fraction = std::clamp((to_point.x * segment.x + to_point.y * segment.y + to_point.z * segment.z) / length_squared, 0.0f, 1.0f);
-  const Vec3 closest = start + segment * fraction;
-  const Vec3 delta = point - closest;
-  return delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
-}
-
-inline float target_radius(const target_seed& seed) {
-  if (seed.player != nullptr) {
-    const Vec3 mins = seed.player->get_player_mins();
-    const Vec3 maxs = seed.player->get_player_maxs();
-    return std::max({std::fabs(mins.x), std::fabs(mins.y), std::fabs(maxs.x), std::fabs(maxs.y), 8.0f});
-  }
-  if (seed.entity != nullptr) {
-    const Vec3 mins = seed.entity->get_collideable_mins();
-    const Vec3 maxs = seed.entity->get_collideable_maxs();
-    return std::max({std::fabs(mins.x), std::fabs(mins.y), std::fabs(maxs.x), std::fabs(maxs.y), 8.0f});
-  }
-  return 16.0f;
-}
-
-inline bool same_entity(Entity* left, Entity* right) {
-  return left != nullptr && right != nullptr &&
-    (left == right || left->get_index() == right->get_index());
+  return outcome;
 }
 
 inline bool projectile_fov_exceeds_limit(float fov) {
@@ -1053,313 +841,10 @@ inline bool projectile_fov_exceeds_limit(float fov) {
   if (!std::isfinite(limit) || limit <= 0.0f) {
     return false;
   }
-
   if (limit >= 180.0f) {
     return false;
   }
-
   return fov > limit;
-}
-
-inline bool trace_projectile_segment(Player* local, const projectile_info& info,
-  const Vec3& start, const Vec3& end, bool ignore_friendly_players,
-  Entity* ignored_target, trace_t& out) {
-  if (engine_trace == nullptr || local == nullptr) {
-    return false;
-  }
-  Vec3 mins = info.hull * -1.0f;
-  Vec3 maxs = info.hull;
-  Vec3 trace_start = start;
-  Vec3 trace_end = end;
-  ray_t ray = engine_trace->init_ray(&trace_start, &trace_end, &mins, &maxs);
-  trace_filter filter{};
-  if (ignore_friendly_players || ignored_target != nullptr) {
-    engine_trace->init_projectile_trace_filter(&filter, local->to_entity(),
-      ignored_target, ignored_target != nullptr);
-  } else {
-    engine_trace->init_trace_filter(&filter, local->to_entity());
-  }
-  out = {};
-  engine_trace->trace_ray(&ray, info.collision_mask, &filter, &out);
-  return true;
-}
-
-inline bool reaches_target(Player* local, Weapon* weapon, const projectile_info& info, const target_seed& seed,
-  const movement_path& path, const solution& shot, bool allow_splash = true) {
-  if (!shot.valid || local == nullptr) {
-    return false;
-  }
-
-  Vec3 launch{};
-  Vec3 launch_angles{};
-  const bool ignore_friendly_players = !is_rocket_weapon(weapon_id(weapon));
-  if (!launch_position(local, info, shot.angles, ignore_friendly_players, launch, &launch_angles)) {
-    return false;
-  }
-
-  Vec3 forward{};
-  Vec3 up{};
-  angle_vectors(launch_angles, &forward, nullptr, &up);
-  Vec3 velocity = forward * info.speed + up * info.initial_up_velocity;
-  const float gravity = 800.0f * info.gravity_mod;
-  const float drag_factor = info.drag_mod > 0.0f ?
-    (is_grenade_launcher(weapon_id(weapon)) ? 0.12f : 0.08f) : 0.0f;
-  const bool splash_allowed = allow_splash && config.aimbot.projectile_splash_policy != 0 && info.splash_radius > 0.0f;
-  const float multipoint_scale = std::clamp(config.aimbot.projectile_multipoint_scale / 100.0f, 0.5f, 1.0f);
-  const float tolerance = target_radius(seed) * multipoint_scale +
-    std::max({info.hull.x, info.hull.y, info.hull.z, 1.0f});
-  const int max_ticks = std::clamp(static_cast<int>(std::ceil((shot.time + info.release_delay + interval()) / interval())) + 2, 1, 500);
-
-  Vec3 position = launch;
-  for (int tick = 0; tick < max_ticks; ++tick) {
-    const float elapsed = static_cast<float>(tick + 1) * interval();
-    Vec3 next = position + velocity * interval();
-    next.z += -0.5f * gravity * interval() * interval();
-
-    trace_t trace{};
-    if (!trace_projectile_segment(local, info, position, next, ignore_friendly_players,
-        seed.entity, trace)) {
-      return false;
-    }
-
-    const Vec3 target_position = target_point(seed, path,
-      elapsed + info.release_delay + latency_seconds());
-    const bool near_target = point_segment_distance_squared(target_position, position, next) <= tolerance * tolerance;
-    Entity* hit_entity = static_cast<Entity*>(trace.entity);
-    if (hit_entity != nullptr) {
-      if (same_entity(hit_entity, seed.entity)) {
-        if (near_target) {
-          return info.direct_hit || splash_allowed;
-        }
-        position = next;
-        continue;
-      }
-      if (splash_allowed && point_segment_distance_squared(target_position, position, trace.endpos) <=
-          (info.splash_radius + tolerance) * (info.splash_radius + tolerance)) {
-        return true;
-      }
-      return false;
-    }
-
-    if (trace.start_solid || trace.all_solid || trace.fraction < 0.999f) {
-      if (splash_allowed) {
-        const Vec3 impact = trace.endpos;
-        const Vec3 delta = target_position - impact;
-        if (delta.x * delta.x + delta.y * delta.y + delta.z * delta.z <=
-            (info.splash_radius + tolerance) * (info.splash_radius + tolerance)) {
-          return true;
-        }
-      }
-      return false;
-    }
-
-    if (near_target && (info.direct_hit || splash_allowed)) {
-      return true;
-    }
-
-    position = next;
-    velocity.z -= gravity * interval();
-    if (drag_factor > 0.0f) {
-      velocity = velocity * std::clamp(1.0f - drag_factor * interval(), 0.5f, 1.0f);
-    }
-    if (elapsed >= shot.time + info.release_delay) {
-      break;
-    }
-  }
-
-  return false;
-}
-
-inline bool reaches_splash_candidate(Player* local, Weapon* weapon, const projectile_info& info,
-  const target_seed& seed, const movement_path& path, const solution& shot) {
-  if (!shot.valid || local == nullptr || engine_trace == nullptr) {
-    return false;
-  }
-
-  Vec3 launch{};
-  Vec3 launch_angles{};
-  const bool ignore_friendly_players = !is_rocket_weapon(weapon_id(weapon));
-  if (!launch_position(local, info, shot.angles, ignore_friendly_players, launch, &launch_angles)) {
-    return false;
-  }
-
-  Vec3 forward{};
-  Vec3 up{};
-  angle_vectors(launch_angles, &forward, nullptr, &up);
-  Vec3 velocity = forward * info.speed + up * info.initial_up_velocity;
-  const float gravity = 800.0f * info.gravity_mod;
-  const float drag_factor = info.drag_mod > 0.0f ?
-    (is_grenade_launcher(weapon_id(weapon)) ? 0.12f : 0.08f) : 0.0f;
-  const float tolerance = std::sqrt(info.hull.x * info.hull.x + info.hull.y * info.hull.y + info.hull.z * info.hull.z) + 4.0f;
-  const int max_ticks = std::clamp(static_cast<int>(std::ceil(
-    (shot.time + info.release_delay + interval()) / interval())) + 2, 1, 500);
-
-  Vec3 position = launch;
-  for (int tick = 0; tick < max_ticks; ++tick) {
-    const float elapsed = static_cast<float>(tick + 1) * interval();
-    Vec3 next = position + velocity * interval();
-    next.z += -0.5f * gravity * interval() * interval();
-
-    Vec3 trace_start = position;
-    Vec3 trace_end = next;
-    Vec3 hull_mins = info.hull * -1.0f;
-    Vec3 hull_maxs = info.hull;
-    ray_t ray = engine_trace->init_ray(&trace_start, &trace_end, &hull_mins, &hull_maxs);
-    trace_filter filter{};
-    engine_trace->init_world_and_props_trace_filter(&filter);
-    trace_t trace{};
-    engine_trace->trace_ray(&ray, projectile_collision_mask, &filter, &trace);
-
-    const Vec3 moving_point = path_origin(seed, path,
-      elapsed + info.release_delay + latency_seconds()) + seed.aim_offset;
-    if (trace.start_solid || trace.all_solid) {
-      return false;
-    }
-    if (trace.fraction < 1.0f) {
-      return point_segment_distance_squared(moving_point, trace_start, trace.endpos) <= tolerance * tolerance &&
-        distance_3d(trace.endpos, moving_point) <= tolerance;
-    }
-
-    position = next;
-    velocity.z -= gravity * interval();
-    if (drag_factor > 0.0f) {
-      velocity = velocity * std::clamp(1.0f - drag_factor * interval(), 0.5f, 1.0f);
-    }
-    if (elapsed >= shot.time + info.release_delay) {
-      break;
-    }
-  }
-
-  return false;
-}
-
-inline splash_target_state target_splash_state(const target_seed& seed) {
-  splash_target_state state{};
-  state.mins = seed.origin;
-  state.maxs = seed.origin;
-  state.body = seed.origin + seed.aim_offset;
-  if (seed.player != nullptr) {
-    state.mins = seed.origin + seed.player->get_player_mins();
-    state.maxs = seed.origin + seed.player->get_player_maxs();
-  }
-  else if (seed.entity != nullptr) {
-    state.mins = seed.origin + seed.entity->get_collideable_mins();
-    state.maxs = seed.origin + seed.entity->get_collideable_maxs();
-  }
-  return state;
-}
-
-inline solution solve_target(Player* local, Weapon* weapon, const projectile_info& info,
-  const target_seed& seed, const movement_path& path);
-
-inline bool solve_splash_target(Player* local, Weapon* weapon, const projectile_info& info,
-  const target_seed& seed, const movement_path& path, solution& best_solution, float& best_score) {
-  if (local == nullptr || weapon == nullptr || info.splash_radius <= 0.0f) {
-    return false;
-  }
-
-  const splash_target_state target = target_splash_state(seed);
-  std::array<splash_candidate, splashbot::candidate_limit> candidates{};
-  const int count = splashbot_instance.collect_candidates(
-    target, info.splash_radius, info.hull, candidates.data(), static_cast<int>(candidates.size()));
-  if (count <= 0) {
-    return false;
-  }
-
-  best_solution = {};
-  best_score = -FLT_MAX;
-  for (int index = 0; index < count; ++index) {
-    const splash_candidate& candidate = candidates[index];
-    target_seed candidate_seed = seed;
-    candidate_seed.fixed_aim_position_valid = true;
-    candidate_seed.fixed_aim_position = candidate.point;
-    const solution candidate_solution = solve_target(local, weapon, info, candidate_seed, path);
-    if (!candidate_solution.valid || !reaches_splash_candidate(
-        local, weapon, info, candidate_seed, path, candidate_solution) ||
-        !splashbot_instance.has_exposure(target, candidate, info.splash_radius)) {
-      continue;
-    }
-
-    const float score = candidate.falloff * 1000.0f - candidate_solution.time * 0.01f;
-    if (score > best_score) {
-      best_solution = candidate_solution;
-      best_score = score;
-    }
-  }
-  return best_score > -FLT_MAX;
-}
-
-inline solution solve_target(Player* local, Weapon* weapon, const projectile_info& info,
-  const target_seed& seed, const movement_path& path) {
-  solution result{};
-  const bool ignore_friendly_players = !is_rocket_weapon(weapon_id(weapon));
-  Vec3 point = target_point(seed, path, 0.0f);
-  Vec3 view_angles = aimbot_calculate_angles_to_position(local->get_shoot_pos(), point);
-  float time = 0.0f;
-  const float drag_factor = info.drag_mod > 0.0f ?
-    (is_grenade_launcher(weapon_id(weapon)) ? 0.12f : 0.08f) : 0.0f;
-
-  for (int iteration = 0; iteration < 8; ++iteration) {
-    Vec3 launch{};
-    Vec3 launch_angles{};
-    if (!launch_position(local, info, view_angles, ignore_friendly_players, launch, &launch_angles)) {
-      return {};
-    }
-
-    Vec3 desired_launch_angles{};
-    if (!solve_ballistic(info, launch, point, drag_factor, desired_launch_angles, time)) {
-      return {};
-    }
-
-    if (info.launch == launch_type::fire_setup) {
-      view_angles = aimbot_clamp_angles(
-        view_angles + aimbot_normalize_angle_delta(desired_launch_angles, launch_angles));
-    }
-    else {
-      view_angles = desired_launch_angles;
-    }
-
-    const float target_time = time + info.release_delay + latency_seconds();
-    const Vec3 next_point = target_point(seed, path, target_time);
-    const float point_delta = distance_3d(next_point, point);
-    point = next_point;
-    if (point_delta <= 0.25f) {
-      break;
-    }
-  }
-
-  Vec3 launch{};
-  Vec3 launch_angles{};
-  if (!launch_position(local, info, view_angles, ignore_friendly_players, launch, &launch_angles)) {
-    return {};
-  }
-
-  Vec3 desired_launch_angles{};
-  if (!solve_ballistic(info, launch, point, drag_factor, desired_launch_angles, time)) {
-    return {};
-  }
-
-  if (info.launch == launch_type::fire_setup) {
-    view_angles = aimbot_clamp_angles(
-      view_angles + aimbot_normalize_angle_delta(desired_launch_angles, launch_angles));
-
-    if (!launch_position(local, info, view_angles, ignore_friendly_players, launch, &launch_angles) ||
-        !solve_ballistic(info, launch, point, drag_factor, desired_launch_angles, time)) {
-      return {};
-    }
-  }
-
-  result.valid = finite(view_angles) && finite(point) && std::isfinite(time);
-  result.angles = aimbot_clamp_angles(view_angles);
-  result.aim_position = point;
-  result.predicted_origin = seed.fixed_aim_position_valid
-    ? path_origin(seed, path, time + info.release_delay + latency_seconds())
-    : point - seed.aim_offset;
-  result.predicted_origin_valid = finite(result.predicted_origin);
-  result.time = time;
-  result.predicted_fov = aimbot_calculate_fov(result.angles,
-    engine != nullptr ? local->get_eye_angles() : result.angles);
-  return result;
 }
 
 inline bool seed_better(const target_seed& left, const target_seed& right) {
@@ -1381,7 +866,6 @@ inline bool candidate_better(const aimbot_candidate& left, const aimbot_candidat
   if (config.aimbot.projectile_mode == 2) {
     return left.distance < right.distance;
   }
-
   return left.fov < right.fov;
 }
 
@@ -1392,6 +876,7 @@ struct charge_state {
   int weapon_def_id = TF_WEAPON_NONE;
   bool last_attack = false;
   bool last_aiming = false;
+  float last_solution_time = 0.0f;
 };
 
 inline charge_state projectile_charge_state{};
@@ -1464,7 +949,8 @@ struct apply_result {
   bool psilent = false;
 };
 
-inline aimbot_candidate find_candidate(Player* local, Weapon* weapon, const Vec3& original_view_angles) {
+inline aimbot_candidate find_candidate(Player* local, Weapon* weapon,
+                                       const Vec3& original_view_angles) {
   aimbot_candidate best{};
   if (local == nullptr || weapon == nullptr || !config.aimbot.projectile_active) {
     return best;
@@ -1474,6 +960,8 @@ inline aimbot_candidate find_candidate(Player* local, Weapon* weapon, const Vec3
   if (!detail::get_info(local, weapon, info)) {
     return best;
   }
+
+  projectile_charge_state.last_solution_time = 0.0f;
 
   std::vector<detail::target_seed> seeds{};
   seeds.reserve(entity_cache_players().size() + 3);
@@ -1491,21 +979,50 @@ inline aimbot_candidate find_candidate(Player* local, Weapon* weapon, const Vec3
     seed.entity = entry.entity != nullptr ? entry.entity : entry.player->to_entity();
     seed.player = entry.player;
     seed.origin = entry.player->get_origin();
-    seed.aim_offset = detail::target_offset(entry.player, weapon);
+    seed.view_offset = entry.player->get_view_offset();
+    seed.bounds_mins = entry.player->get_player_mins();
+    seed.bounds_maxs = entry.player->get_player_maxs();
+    const int id = info.weapon_id_value;
+    Vec3 aim_offset{};
+    if (id == TF_WEAPON_COMPOUND_BOW) {
+      Vec3 head_center{};
+      if (aimbot_get_hitbox_center(entry.player, aim_hitbox_head, &head_center)) {
+        aim_offset = head_center - seed.origin;
+      } else {
+        aim_offset = {0.0f, 0.0f, seed.bounds_maxs.z * 0.93f};
+      }
+    } else if ((detail::is_rocket_weapon(id) || detail::is_grenade_launcher(id)) &&
+               entry.player->is_on_ground()) {
+      aim_offset = {0.0f, 0.0f, seed.bounds_maxs.z * 0.10f};
+    } else {
+      aim_offset = {0.0f, 0.0f, seed.bounds_maxs.z * 0.50f};
+    }
+    if (config.aimbot.projectile_aim_pos == 1) {
+      aim_offset = {0.0f, 0.0f, seed.bounds_maxs.z * 0.10f};
+    } else if (config.aimbot.projectile_aim_pos == 2) {
+      aim_offset = {0.0f, 0.0f, seed.bounds_maxs.z * 0.50f};
+    } else if (config.aimbot.projectile_aim_pos == 3) {
+      aim_offset = {0.0f, 0.0f, seed.bounds_maxs.z * 0.93f};
+    }
+    seed.aim_offset = aim_offset;
     seed.velocity = entry.player->get_velocity();
     seed.current_fov = aimbot_calculate_fov(
-      aimbot_calculate_angles_to_position(shoot_pos, seed.origin + seed.aim_offset), original_view_angles);
+      aimbot_calculate_angles_to_position(shoot_pos, seed.origin + seed.aim_offset),
+      original_view_angles);
     seed.distance = distance_3d(shoot_pos, seed.origin);
     seed.preferred = aimbot_player_is_preferred(entry.player);
-    if (config.aimbot.projectile_mode == 0 && detail::projectile_fov_exceeds_limit(seed.current_fov)) {
-      aim_state::record_reject(aim_state::make_reject_debug(seed.entity, aimbot_reject_reason::fov,
-        seed.current_fov, config.aimbot.projectile_fov, seed.distance));
+    if (config.aimbot.projectile_mode == 0 &&
+        detail::projectile_fov_exceeds_limit(seed.current_fov)) {
+      aim_state::record_reject(aim_state::make_reject_debug(
+        seed.entity, aimbot_reject_reason::fov, seed.current_fov,
+        config.aimbot.projectile_fov, seed.distance));
       continue;
     }
     seeds.push_back(seed);
   }
 
-  constexpr class_id building_ids[] = {class_id::SENTRY, class_id::DISPENSER, class_id::TELEPORTER};
+  constexpr class_id building_ids[] = {class_id::SENTRY, class_id::DISPENSER,
+                                       class_id::TELEPORTER};
   if (aimbot_aim_at_enabled(Aim::aim_at_buildings)) {
     for (const class_id id : building_ids) {
       for (Entity* entity : entity_cache[id]) {
@@ -1517,11 +1034,16 @@ inline aimbot_candidate find_candidate(Player* local, Weapon* weapon, const Vec3
         seed.origin = entity->get_collision_origin();
         const Vec3 mins = entity->get_collideable_mins();
         const Vec3 maxs = entity->get_collideable_maxs();
+        seed.bounds_mins = mins;
+        seed.bounds_maxs = maxs;
         seed.aim_offset = (mins + maxs) * 0.5f;
+        seed.view_offset = (mins + maxs) * 0.5f;
         seed.current_fov = aimbot_calculate_fov(
-          aimbot_calculate_angles_to_position(shoot_pos, seed.origin + seed.aim_offset), original_view_angles);
+          aimbot_calculate_angles_to_position(shoot_pos, seed.origin + seed.aim_offset),
+          original_view_angles);
         seed.distance = distance_3d(shoot_pos, seed.origin);
-        if (config.aimbot.projectile_mode == 0 && detail::projectile_fov_exceeds_limit(seed.current_fov)) {
+        if (config.aimbot.projectile_mode == 0 &&
+            detail::projectile_fov_exceeds_limit(seed.current_fov)) {
           continue;
         }
         seeds.push_back(seed);
@@ -1539,11 +1061,16 @@ inline aimbot_candidate find_candidate(Player* local, Weapon* weapon, const Vec3
     seed.origin = entity->get_collision_origin();
     const Vec3 mins = entity->get_collideable_mins();
     const Vec3 maxs = entity->get_collideable_maxs();
+    seed.bounds_mins = mins;
+    seed.bounds_maxs = maxs;
     seed.aim_offset = (mins + maxs) * 0.5f;
+    seed.view_offset = (mins + maxs) * 0.5f;
     seed.current_fov = aimbot_calculate_fov(
-      aimbot_calculate_angles_to_position(shoot_pos, seed.origin + seed.aim_offset), original_view_angles);
+      aimbot_calculate_angles_to_position(shoot_pos, seed.origin + seed.aim_offset),
+      original_view_angles);
     seed.distance = distance_3d(shoot_pos, seed.origin);
-    if (config.aimbot.projectile_mode == 0 && detail::projectile_fov_exceeds_limit(seed.current_fov)) {
+    if (config.aimbot.projectile_mode == 0 &&
+        detail::projectile_fov_exceeds_limit(seed.current_fov)) {
       return;
     }
     seeds.push_back(seed);
@@ -1574,155 +1101,20 @@ inline aimbot_candidate find_candidate(Player* local, Weapon* weapon, const Vec3
     }
     ++attempts;
 
-    detail::movement_path path{};
-    if (config.aimbot.projectile_prediction_mode == Aim::ProjectilePredictionMode::MOVE_SIM && seed.player != nullptr) {
-
-      const Vec3 initial_delta = seed.origin + seed.aim_offset - shoot_pos;
-      const float initial_distance = distance_3d(shoot_pos, seed.origin + seed.aim_offset);
-      const float distance_scale = initial_distance > 0.001f ? 1.0f / initial_distance : 0.0f;
-      const Vec3 initial_direction = initial_delta * distance_scale;
-      const float target_closing_speed = seed.velocity.x * initial_direction.x +
-        seed.velocity.y * initial_direction.y + seed.velocity.z * initial_direction.z;
-      const float effective_projectile_speed = std::max(
-        info.speed - target_closing_speed, info.speed * 0.25f);
-      const float estimated_flight_time = info.speed > 0.0f
-        ? initial_distance / effective_projectile_speed : 0.0f;
-      const float required_sim_time = estimated_flight_time + detail::latency_seconds() +
-        info.release_delay + detail::interval() * 2.0f;
-      const float sim_time = std::max(config.aimbot.projectile_max_sim_time,
-        std::min(required_sim_time, 5.0f));
-      if (!detail::build_move_path(seed, sim_time, path)) {
-        path = {};
-      }
+    const detail::seed_outcome outcome =
+      detail::evaluate_seed(local, weapon, info, seed, original_view_angles);
+    if (!outcome.found) {
+      aim_state::record_reject(aim_state::make_reject_debug(
+        seed.entity, aimbot_reject_reason::no_candidate,
+        std::isfinite(seed.current_fov) ? seed.current_fov : FLT_MAX,
+        config.aimbot.projectile_fov, seed.distance));
+      continue;
     }
 
-    std::array<int, 4> positions{ config.aimbot.projectile_aim_pos, 0, 0, 0 };
-    int position_count = 1;
-    if (seed.player != nullptr && config.aimbot.projectile_aim_pos == 0) {
-      positions[0] = detail::target_position(seed.player, weapon);
-      for (const int position : {1, 2, 3}) {
-        if (position != positions[0]) {
-          positions[position_count++] = position;
-        }
-      }
-    }
-
-    bool accepted = false;
-    float last_fov = seed.current_fov;
-    for (int position_index = 0; position_index < position_count; ++position_index) {
-      detail::target_seed point_seed = seed;
-      if (point_seed.player != nullptr) {
-        point_seed.aim_offset = detail::target_offset_for_position(
-          point_seed.player, positions[position_index]);
-      }
-
-      const auto make_candidate = [&](const detail::solution& shot,
-        const detail::target_seed& shot_seed, aimbot_candidate& out) {
-        if (!shot.valid) {
-          return false;
-        }
-        const float current_fov = aimbot_calculate_fov(
-          aimbot_calculate_angles_to_position(
-            shoot_pos, shot_seed.origin + shot_seed.aim_offset),
-          original_view_angles);
-        const float predicted_fov = aimbot_calculate_fov(shot.angles, original_view_angles);
-        const float fov = config.aimbot.projectile_mode == 0 ? current_fov : predicted_fov;
-        last_fov = fov;
-        if (config.aimbot.projectile_mode != 2 && detail::projectile_fov_exceeds_limit(fov)) {
-          return false;
-        }
-
-        out = {};
-        out.entity = shot_seed.entity;
-        out.player = shot_seed.player;
-        out.aim_position = shot.aim_position;
-        out.predicted_origin = shot.predicted_origin;
-        out.predicted_origin_valid = shot.predicted_origin_valid && shot_seed.player != nullptr;
-        out.aim_angles = shot.angles;
-        out.command_angles = shot.angles;
-        out.fov = fov;
-        out.distance = shot_seed.distance;
-        out.health = shot_seed.player != nullptr ? shot_seed.player->get_health() : aimbot_entity_health(shot_seed.entity);
-        out.simulation_time = shot_seed.entity != nullptr ? shot_seed.entity->get_simulation_time() : 0.0f;
-        out.visible = true;
-        out.preferred = shot_seed.preferred;
-        out.hitbox = positions[position_index] == 3 ? aim_hitbox_head : -1;
-        out.debug_reason = aimbot_debug_reason::attack_ready;
-        return true;
-      };
-
-      if (!info.direct_hit) {
-        if (info.splash_radius <= 0.0f) {
-          continue;
-        }
-
-        detail::solution splash_solution{};
-        float splash_score = -FLT_MAX;
-        aimbot_candidate splash{};
-        if (!detail::solve_splash_target(local, weapon, info, point_seed, path,
-            splash_solution, splash_score) || !make_candidate(splash_solution, point_seed, splash)) {
-          continue;
-        }
-
-        ++aim_state::scan.candidates_visible;
-        if (detail::candidate_better(splash, best)) {
-          best = splash;
-        }
-        accepted = true;
-        break;
-      }
-
-      detail::solution direct_solution{};
-      const auto direct_candidate = [&]() {
-        aimbot_candidate result{};
-        direct_solution = detail::solve_target(local, weapon, info, point_seed, path);
-        if (detail::reaches_target(local, weapon, info, point_seed, path, direct_solution, false) &&
-            make_candidate(direct_solution, point_seed, result)) {
-          return std::pair<bool, aimbot_candidate>{true, result};
-        }
-        return std::pair<bool, aimbot_candidate>{false, result};
-      };
-
-      const int splash_policy = std::clamp(config.aimbot.projectile_splash_policy, 0, 2);
-      auto [direct_valid, direct] = direct_candidate();
-      detail::solution splash_solution{};
-      float splash_score = -FLT_MAX;
-      aimbot_candidate splash{};
-
-      const bool splash_valid = (position_index == 0 || point_seed.player == nullptr) &&
-        splash_policy != 0 && info.splash_radius > 0.0f &&
-        detail::solve_splash_target(local, weapon, info, point_seed, path, splash_solution, splash_score) &&
-        make_candidate(splash_solution, point_seed, splash);
-
-      aimbot_candidate selected{};
-      bool selected_valid = false;
-      if (splash_policy == 2) {
-        selected_valid = splash_valid ? (selected = splash, true) : (direct_valid ? (selected = direct, true) : false);
-      }
-      else if (splash_policy == 1) {
-        const float direct_score = direct_valid ? 1000.0f - direct_solution.time * 0.01f : -FLT_MAX;
-        const bool prefer_splash = splash_valid && (!direct_valid || splash_score > direct_score);
-        selected_valid = prefer_splash ? (selected = splash, true) : (direct_valid ? (selected = direct, true) : false);
-      }
-      else {
-        selected_valid = direct_valid ? (selected = direct, true) : false;
-      }
-
-      if (!selected_valid) {
-        continue;
-      }
-
-      ++aim_state::scan.candidates_visible;
-      if (detail::candidate_better(selected, best)) {
-        best = selected;
-      }
-      accepted = true;
-      break;
-    }
-
-    if (!accepted) {
-      aim_state::record_reject(aim_state::make_reject_debug(seed.entity,
-        aimbot_reject_reason::no_candidate, last_fov, config.aimbot.projectile_fov, seed.distance));
+    ++aim_state::scan.candidates_visible;
+    if (detail::candidate_better(outcome.candidate, best)) {
+      best = outcome.candidate;
+      projectile_charge_state.last_solution_time = outcome.solution_time;
     }
   }
 
@@ -1730,8 +1122,8 @@ inline aimbot_candidate find_candidate(Player* local, Weapon* weapon, const Vec3
 }
 
 inline apply_result apply(user_cmd* cmd, Player* local, Weapon* weapon,
-  const Vec3& original_view_angles, const aimbot_candidate& target,
-  bool manual_attack = false) {
+                          const Vec3& original_view_angles, const aimbot_candidate& target,
+                          bool manual_attack = false) {
   apply_result result{};
   if (cmd == nullptr || local == nullptr || weapon == nullptr || target.entity == nullptr) {
     return result;
@@ -1743,11 +1135,14 @@ inline apply_result apply(user_cmd* cmd, Player* local, Weapon* weapon,
   }
 
   const int attack_button = info.secondary_attack ? IN_ATTACK2 : IN_ATTACK;
-  const int id = detail::weapon_id(weapon);
-  const bool charge_weapon = id == TF_WEAPON_COMPOUND_BOW || id == TF_WEAPON_PIPEBOMBLAUNCHER;
+  const int id = info.weapon_id_value;
+  const bool charge_weapon =
+    id == TF_WEAPON_COMPOUND_BOW || id == TF_WEAPON_PIPEBOMBLAUNCHER;
   const float charge_time = charge_weapon ? charge_elapsed(weapon, local) : 0.0f;
   const bool charged = charge_weapon && charge_time > 0.0f;
-  const bool cannon_detonating = id == TF_WEAPON_CANNON && weapon->get_detonate_time() > 0.0f;
+  const bool cannon_detonating =
+    id == TF_WEAPON_CANNON && weapon->get_detonate_time() > 0.0f;
+  const bool beggars = weapon->get_def_id() == Soldier_m_TheBeggarsBazooka;
   const bool has_ammo = weapon->get_clip1() != 0;
   const bool raw_attack = (cmd->buttons & attack_button) != 0;
   bool manual_bow_release = is_bow(weapon) && same_charge_weapon(weapon) &&
@@ -1755,35 +1150,64 @@ inline apply_result apply(user_cmd* cmd, Player* local, Weapon* weapon,
   const bool can_attack = has_ammo;
 
   Vec3 target_angles = target.command_angles;
-  const Aim::AimMode aim_mode = static_cast<Aim::AimMode>(std::clamp(
-    static_cast<int>(config.aimbot.aim_mode), 0, 3));
+  const Aim::AimMode aim_mode = static_cast<Aim::AimMode>(
+    std::clamp(static_cast<int>(config.aimbot.aim_mode), 0, 3));
   if (config.aimbot.projectile_smooth_flamethrowers_active && weapon->is_flamethrower()) {
     target_angles = aimbot_lerp_angles(original_view_angles, target_angles,
       std::clamp(config.aimbot.projectile_smooth_flamethrowers / 100.0f, 0.0f, 1.0f));
   } else if (aim_mode == Aim::AimMode::SMOOTH || aim_mode == Aim::AimMode::ASSISTIVE) {
     const aimbot::aimbot_state& state = aimbot::current_state();
-    target_angles = aimbot_apply_mode_angles(
-      original_view_angles,
-      target_angles,
-      state.last_input_angles,
-      state.last_input_angles_valid,
-      target);
+    target_angles = aimbot_apply_mode_angles(original_view_angles, target_angles,
+                                             state.last_input_angles,
+                                             state.last_input_angles_valid, target);
+  }
+
+  bool release_requested =
+    !manual_attack && config.aimbot.auto_shoot && has_ammo && (charged || cannon_detonating);
+  if (release_requested && id == TF_WEAPON_CANNON && cfg.cannon_hitcharge &&
+      weapon->get_detonate_time() > 0.0f) {
+    const float remaining = weapon->get_detonate_time() - current_time(local);
+    if (remaining > detail::grenade_check_interval &&
+        projectile_charge_state.last_solution_time >
+          remaining - detail::grenade_check_interval) {
+      release_requested = false;
+    }
   }
 
   const bool manual_release_ready = manual_bow_release;
-  const bool release_requested = !manual_attack && config.aimbot.auto_shoot && has_ammo &&
-    (charged || cannon_detonating);
   if (release_requested || manual_release_ready) {
-
     cmd->buttons &= ~attack_button;
     if (release_requested) {
       result.requested_shot = true;
     }
-  }
-  else if (!manual_attack && config.aimbot.auto_shoot && has_ammo && !charged && !cannon_detonating &&
-      !manual_bow_release) {
+  } else if (!manual_attack && config.aimbot.auto_shoot && has_ammo && !charged &&
+             !cannon_detonating && !manual_bow_release) {
     cmd->buttons |= attack_button;
     result.requested_shot = true;
+  }
+
+  if (beggars && cfg.beggars_clip_guard && (cmd->buttons & IN_ATTACK) != 0) {
+    bool suppress = false;
+    if (weapon->get_clip1() > 0) {
+      suppress = true;
+    } else if (cfg.beggars_wall_guard && engine_trace != nullptr) {
+      Vec3 forward{};
+      angle_vectors(cmd->view_angles, &forward, nullptr, nullptr);
+      const float probe_distance =
+        std::max(detail::splash_radius_for(local, info), 96.0f);
+      Vec3 trace_start = local->get_shoot_pos();
+      Vec3 trace_end = trace_start + forward * probe_distance;
+      ray_t ray = engine_trace->init_ray(&trace_start, &trace_end);
+      trace_filter filter{};
+      engine_trace->init_world_and_props_trace_filter(&filter);
+      trace_t trace{};
+      engine_trace->trace_ray(&ray, detail::projectile_collision_mask, &filter, &trace);
+      suppress = trace.start_solid || trace.all_solid || trace.fraction < 1.0f;
+    }
+    if (suppress) {
+      cmd->buttons &= ~IN_ATTACK;
+      result.requested_shot = false;
+    }
   }
 
   if (is_bow(weapon) && projectile_modifier_enabled(Aim::projectile_mod_charge_weapon) &&
@@ -1802,8 +1226,8 @@ inline apply_result apply(user_cmd* cmd, Player* local, Weapon* weapon,
   result.psilent = aim_mode == Aim::AimMode::PSILENT && shot_command && !manual_attack;
 
   if (config.aimbot.spread_compensation && shot_command) {
-    target_angles = detail::compensate_projectile_spread(
-      local, weapon, cmd, info, target_angles);
+    target_angles = detail::compensate_projectile_spread(local, weapon, cmd, info,
+                                                         target_angles);
   }
   cmd->view_angles = aimbot_clamp_angles(target_angles);
 

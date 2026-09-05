@@ -29,7 +29,7 @@ LDLIBS := -ldl -pthread
 
 all: $(TARGET) $(STANDALONE_TARGET)
 
-$(TARGET): $(SOURCES) Makefile
+$(TARGET): $(SOURCES) $(wildcard src/*.hpp) Makefile
 
 	@mkdir -p $(dir $@)
 	$(CXX) $(ARCH_FLAGS) $(CXXFLAGS) $(LDFLAGS) -o $@ $(SOURCES) $(LDLIBS)

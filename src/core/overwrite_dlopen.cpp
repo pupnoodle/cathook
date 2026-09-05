@@ -38,6 +38,19 @@ bool is_launcher_path(const char* file)
   return name == "launcher.so";
 }
 
+bool is_gameoverlayrenderer_path(const char* file)
+{
+  if (file == nullptr || file[0] == '\0')
+  {
+    return false;
+  }
+
+  const std::string_view path{ file };
+  const auto slash = path.find_last_of('/');
+  const auto name = slash == std::string_view::npos ? path : path.substr(slash + 1);
+  return name == "gameoverlayrenderer.so";
+}
+
 void patch_launcher_source_lock()
 {
   static std::atomic_bool patch_attempted = false;
@@ -71,6 +84,11 @@ extern "C" void* dlopen(const char* file, int mode) __THROWNL
 {
   auto* real_dlopen = reinterpret_cast<dlopen_fn>(dlsym(RTLD_NEXT, "dlopen"));
   if (real_dlopen == nullptr)
+  {
+    return nullptr;
+  }
+
+  if (is_gameoverlayrenderer_path(file) && nographics::is_enabled())
   {
     return nullptr;
   }

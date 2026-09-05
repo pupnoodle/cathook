@@ -1,392 +1,577 @@
-#include "steam_nographics.hpp"
+#include "config.hpp"
 
-#include <cstdarg>
+#include <atomic>
+#include <algorithm>
+#include <cerrno>
+#include <cstring>
+#include <ctime>
+
 #include <dlfcn.h>
-#include <link.h>
-#include <fcntl.h>
-#include <ifaddrs.h>
-#include <sys/ioctl.h>
-#include <sys/types.h>
-#include <sys/utsname.h>
+#include <signal.h>
 #include <unistd.h>
 
 namespace
 {
 
+using namespace cat_stm;
+
+using gl_proc = void (*)();
+using dlopen_fn = void* (*)(const char*, int);
+using dlmopen_fn = void* (*)(long, const char*, int);
 using x_display = void;
 using x_window = unsigned long;
+using x_drawable = unsigned long;
 using x_bool = int;
-using gl_enum = unsigned int;
-using gl_sizei = int;
-using egl_display = void*;
-using egl_surface = void*;
-using egl_boolean = unsigned int;
-using glx_drawable = unsigned long;
-using sdl_window = void;
-using sdl_window_flags = std::uint64_t;
 
-constexpr sdl_window_flags sdl_window_hidden = 0x00000008ULL;
+std::atomic<int> g_should_throttle{ -1 };
 
-template <typename function_type>
-function_type next_symbol(const char* name)
+template <typename fn>
+fn next_symbol(fn& slot, const char* name)
 {
-  return reinterpret_cast<function_type>(dlsym(RTLD_NEXT, name));
-}
-
-}
-
-#define CAT_STEAM_NOGRAPHICS_EXPORT extern "C" __attribute__((visibility("default")))
-
-// Source's GetCPUInformation() is a C++ symbol.  Keep this wrapper outside
-// steam_nographics so it exports the exact global ABI name _Z17GetCPUInformationv.
-__attribute__((visibility("default"))) const void* GetCPUInformation()
-{
-  return steam_nographics::synthetic_cpu_information_pointer();
-}
-
-__attribute__((constructor)) static void steam_nographics_constructor()
-{
-  steam_nographics::initialize();
-}
-
-CAT_STEAM_NOGRAPHICS_EXPORT void* dlopen(const char* path, int flags)
-{
-  using function_type = void* (*)(const char*, int);
-  static const auto original = next_symbol<function_type>("dlopen");
-  void* const result = original != nullptr ? original(path, flags) : nullptr;
-  if (result != nullptr)
+  if (slot == nullptr)
   {
-    steam_nographics::on_library_loaded(path, result);
+    slot = reinterpret_cast<fn>(::dlsym(RTLD_NEXT, name));
   }
-  return result;
+  return slot;
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT void* dlmopen(Lmid_t namespace_id, const char* path, int flags)
+bool path_base_matches(const char* path, const char* name)
 {
-  using function_type = void* (*)(Lmid_t, const char*, int);
-  static const auto original = next_symbol<function_type>("dlmopen");
-  void* const result = original != nullptr ? original(namespace_id, path, flags) : nullptr;
-  if (result != nullptr)
+  if (path == nullptr)
   {
-    steam_nographics::on_library_loaded(path, result);
+    return false;
   }
-  return result;
+  const char* slash = std::strrchr(path, '/');
+  const char* base = slash ? slash + 1 : path;
+  return std::strcmp(base, name) == 0;
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT x_window XCreateWindow(
-  x_display* display, x_window parent, int x, int y, unsigned int width, unsigned int height,
-  unsigned int border_width, int depth, unsigned int window_class, void* visual,
-  unsigned long value_mask, void* attributes)
+bool process_base_is(const char* name)
 {
-  using function_type = x_window (*)(x_display*, x_window, int, int, unsigned int, unsigned int,
-                                     unsigned int, int, unsigned int, void*, unsigned long, void*);
-  static const auto original = next_symbol<function_type>("XCreateWindow");
-  if (original == nullptr)
+  char path[4096]{};
+  const ssize_t length = ::readlink("/proc/self/exe", path, sizeof(path) - 1);
+  return length > 0 && path_base_matches(path, name);
+}
+
+bool should_throttle_process()
+{
+  const int cached = g_should_throttle.load(std::memory_order_relaxed);
+  if (cached >= 0)
+  {
+    return cached == 1;
+  }
+
+  const bool throttle = process_base_is("steam") || process_base_is("steamwebhelper");
+  g_should_throttle.store(throttle ? 1 : 0, std::memory_order_relaxed);
+  return throttle;
+}
+
+void sleep_microseconds(int microseconds)
+{
+  if (microseconds <= 0)
+  {
+    return;
+  }
+
+  timespec remaining{};
+  remaining.tv_sec = microseconds / 1000000;
+  remaining.tv_nsec = static_cast<long>(microseconds % 1000000) * 1000L;
+  while (::nanosleep(&remaining, &remaining) == -1 && errno == EINTR)
+  {
+  }
+}
+
+void sleep_loop_if(bool condition)
+{
+  const config& cfg = settings();
+  if (!cfg.disabled && cfg.loop_sleep && cfg.loop_sleep_us > 0 && condition && should_throttle_process())
+  {
+    sleep_microseconds(cfg.loop_sleep_us);
+  }
+}
+
+bool should_hide_x11()
+{
+  const config& cfg = settings();
+  return !cfg.disabled && cfg.hide_x11;
+}
+
+bool should_drop_gl()
+{
+  const config& cfg = settings();
+  return !cfg.disabled && cfg.no_gl;
+}
+
+int swap_interval(int requested)
+{
+  const config& cfg = settings();
+  return (!cfg.disabled && cfg.no_vsync) ? 0 : requested;
+}
+
+gl_proc proc_override(const char* name);
+
+}
+
+#define CAT_STM_EXPORT extern "C" __attribute__((visibility("default")))
+
+CAT_STM_EXPORT int XMapWindow(x_display* display, x_window window)
+{
+  static int (*real)(x_display*, x_window) = nullptr;
+  if (should_hide_x11())
   {
     return 0;
   }
-  if (steam_nographics::should_hide_windows())
-  {
-    return original(display, parent, steam_nographics::offscreen_coordinate(), steam_nographics::offscreen_coordinate(),
-      steam_nographics::offscreen_extent(), steam_nographics::offscreen_extent(), border_width, depth,
-      window_class, visual, value_mask, attributes);
-  }
-  return original(display, parent, x, y, width, height, border_width, depth, window_class, visual, value_mask, attributes);
+  return next_symbol(real, "XMapWindow") != nullptr ? real(display, window) : 0;
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT x_bool XMapRaised(x_display* display, x_window window)
+CAT_STM_EXPORT int XMapRaised(x_display* display, x_window window)
 {
-  using function_type = x_bool (*)(x_display*, x_window);
-  if (steam_nographics::should_hide_windows())
+  static int (*real)(x_display*, x_window) = nullptr;
+  if (should_hide_x11())
   {
     return 0;
   }
-  static const auto original = next_symbol<function_type>("XMapRaised");
-  return original != nullptr ? original(display, window) : 0;
+  return next_symbol(real, "XMapRaised") != nullptr ? real(display, window) : 0;
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT sdl_window* SDL_CreateWindow(
-  const char* title, int width, int height, sdl_window_flags flags)
+CAT_STM_EXPORT int XRaiseWindow(x_display* display, x_window window)
 {
-  using function_type = sdl_window* (*)(const char*, int, int, sdl_window_flags);
-  static const auto original = next_symbol<function_type>("SDL_CreateWindow");
-  if (original == nullptr)
+  static int (*real)(x_display*, x_window) = nullptr;
+  if (should_hide_x11())
+  {
+    return 0;
+  }
+  return next_symbol(real, "XRaiseWindow") != nullptr ? real(display, window) : 0;
+}
+
+CAT_STM_EXPORT x_window XCreateWindow(
+  x_display* display,
+  x_window parent,
+  int x,
+  int y,
+  unsigned int width,
+  unsigned int height,
+  unsigned int border_width,
+  int depth,
+  unsigned int window_class,
+  void* visual,
+  unsigned long valuemask,
+  void* attributes)
+{
+  static x_window (*real)(x_display*, x_window, int, int, unsigned int, unsigned int, unsigned int, int, unsigned int, void*, unsigned long, void*) = nullptr;
+  if (next_symbol(real, "XCreateWindow") == nullptr)
+  {
+    return 0;
+  }
+  if (should_hide_x11())
+  {
+    return real(display, parent, -32000, -32000, 1, 1, border_width, depth, window_class, visual, valuemask, attributes);
+  }
+  return real(display, parent, x, y, width, height, border_width, depth, window_class, visual, valuemask, attributes);
+}
+
+CAT_STM_EXPORT x_window XCreateSimpleWindow(
+  x_display* display,
+  x_window parent,
+  int x,
+  int y,
+  unsigned int width,
+  unsigned int height,
+  unsigned int border_width,
+  unsigned long border,
+  unsigned long background)
+{
+  static x_window (*real)(x_display*, x_window, int, int, unsigned int, unsigned int, unsigned int, unsigned long, unsigned long) = nullptr;
+  if (next_symbol(real, "XCreateSimpleWindow") == nullptr)
+  {
+    return 0;
+  }
+  if (should_hide_x11())
+  {
+    return real(display, parent, -32000, -32000, 1, 1, border_width, border, background);
+  }
+  return real(display, parent, x, y, width, height, border_width, border, background);
+}
+
+CAT_STM_EXPORT int XConfigureWindow(x_display* display, x_window window, unsigned int value_mask, void* values)
+{
+  static int (*real)(x_display*, x_window, unsigned int, void*) = nullptr;
+  if (should_hide_x11())
+  {
+    return 0;
+  }
+  return next_symbol(real, "XConfigureWindow") != nullptr ? real(display, window, value_mask, values) : 0;
+}
+
+CAT_STM_EXPORT int XMoveResizeWindow(x_display* display, x_window window, int x, int y, unsigned int width, unsigned int height)
+{
+  static int (*real)(x_display*, x_window, int, int, unsigned int, unsigned int) = nullptr;
+  if (next_symbol(real, "XMoveResizeWindow") == nullptr)
+  {
+    return 0;
+  }
+  if (should_hide_x11())
+  {
+    return real(display, window, -32000, -32000, 1, 1);
+  }
+  return real(display, window, x, y, width, height);
+}
+
+CAT_STM_EXPORT int XResizeWindow(x_display* display, x_window window, unsigned int width, unsigned int height)
+{
+  static int (*real)(x_display*, x_window, unsigned int, unsigned int) = nullptr;
+  if (next_symbol(real, "XResizeWindow") == nullptr)
+  {
+    return 0;
+  }
+  return should_hide_x11() ? real(display, window, 1, 1) : real(display, window, width, height);
+}
+
+CAT_STM_EXPORT int XIconifyWindow(x_display* display, x_window window, int screen)
+{
+  static int (*real)(x_display*, x_window, int) = nullptr;
+  if (should_hide_x11())
+  {
+    return 1;
+  }
+  return next_symbol(real, "XIconifyWindow") != nullptr ? real(display, window, screen) : 0;
+}
+
+CAT_STM_EXPORT void glClear(unsigned int mask)
+{
+  static void (*real)(unsigned int) = nullptr;
+  if (!should_drop_gl() && next_symbol(real, "glClear") != nullptr)
+  {
+    real(mask);
+  }
+}
+
+CAT_STM_EXPORT void glDrawArrays(unsigned int mode, int first, int count)
+{
+  static void (*real)(unsigned int, int, int) = nullptr;
+  if (!should_drop_gl() && next_symbol(real, "glDrawArrays") != nullptr)
+  {
+    real(mode, first, count);
+  }
+}
+
+CAT_STM_EXPORT void glDrawElements(unsigned int mode, int count, unsigned int type, const void* indices)
+{
+  static void (*real)(unsigned int, int, unsigned int, const void*) = nullptr;
+  if (!should_drop_gl() && next_symbol(real, "glDrawElements") != nullptr)
+  {
+    real(mode, count, type, indices);
+  }
+}
+
+CAT_STM_EXPORT void glDrawRangeElements(unsigned int mode, unsigned int start, unsigned int end, int count, unsigned int type, const void* indices)
+{
+  static void (*real)(unsigned int, unsigned int, unsigned int, int, unsigned int, const void*) = nullptr;
+  if (!should_drop_gl() && next_symbol(real, "glDrawRangeElements") != nullptr)
+  {
+    real(mode, start, end, count, type, indices);
+  }
+}
+
+CAT_STM_EXPORT void glFlush()
+{
+  static void (*real)() = nullptr;
+  if (!should_drop_gl() && next_symbol(real, "glFlush") != nullptr)
+  {
+    real();
+  }
+}
+
+CAT_STM_EXPORT void glFinish()
+{
+  static void (*real)() = nullptr;
+  if (!should_drop_gl() && next_symbol(real, "glFinish") != nullptr)
+  {
+    real();
+  }
+}
+
+CAT_STM_EXPORT void glXSwapBuffers(void* dpy, x_drawable drawable)
+{
+  sleep_loop_if(should_drop_gl());
+  static void (*real)(void*, x_drawable) = nullptr;
+  if (!should_drop_gl() && next_symbol(real, "glXSwapBuffers") != nullptr)
+  {
+    real(dpy, drawable);
+  }
+}
+
+CAT_STM_EXPORT unsigned int eglSwapBuffers(void* dpy, void* surface)
+{
+  sleep_loop_if(should_drop_gl());
+  static unsigned int (*real)(void*, void*) = nullptr;
+  if (!should_drop_gl() && next_symbol(real, "eglSwapBuffers") != nullptr)
+  {
+    return real(dpy, surface);
+  }
+  return 1u;
+}
+
+CAT_STM_EXPORT void SDL_GL_SwapWindow(void* window)
+{
+  sleep_loop_if(should_drop_gl());
+  static void (*real)(void*) = nullptr;
+  if (!should_drop_gl() && next_symbol(real, "SDL_GL_SwapWindow") != nullptr)
+  {
+    real(window);
+  }
+}
+
+CAT_STM_EXPORT void* SDL_CreateWindow(const char* title, int x, int y, int w, int h, unsigned int flags)
+{
+  static void* (*real)(const char*, int, int, int, int, unsigned int) = nullptr;
+  if (next_symbol(real, "SDL_CreateWindow") == nullptr)
   {
     return nullptr;
   }
-  if (steam_nographics::should_hide_windows())
+  if (should_hide_x11())
   {
-    return original(title, 1, 1, flags | sdl_window_hidden);
+    return real(title, -32000, -32000, 1, 1, flags);
   }
-  return original(title, width, height, flags);
+  return real(title, x, y, w, h, flags);
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT int SDL_GL_SwapWindow(sdl_window* window)
+CAT_STM_EXPORT void SDL_ShowWindow(void* window)
 {
-  using function_type = int (*)(sdl_window*);
-  if (steam_nographics::should_skip_presentation())
+  static void (*real)(void*) = nullptr;
+  if (!should_hide_x11() && next_symbol(real, "SDL_ShowWindow") != nullptr)
   {
-    steam_nographics::limit_present_rate();
-    return 1;
-  }
-  static const auto original = next_symbol<function_type>("SDL_GL_SwapWindow");
-  return original != nullptr ? original(window) : 0;
-}
-
-CAT_STEAM_NOGRAPHICS_EXPORT void glXSwapBuffers(void* display, glx_drawable drawable)
-{
-  using function_type = void (*)(void*, glx_drawable);
-  if (steam_nographics::should_skip_presentation())
-  {
-    steam_nographics::limit_present_rate();
-    return;
-  }
-  static const auto original = next_symbol<function_type>("glXSwapBuffers");
-  if (original != nullptr)
-  {
-    original(display, drawable);
+    real(window);
   }
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT egl_boolean eglSwapBuffers(egl_display display, egl_surface surface)
+CAT_STM_EXPORT void SDL_RaiseWindow(void* window)
 {
-  using function_type = egl_boolean (*)(egl_display, egl_surface);
-  if (steam_nographics::should_skip_presentation())
+  static void (*real)(void*) = nullptr;
+  if (!should_hide_x11() && next_symbol(real, "SDL_RaiseWindow") != nullptr)
   {
-    steam_nographics::limit_present_rate();
-    return 1;
+    real(window);
   }
-  static const auto original = next_symbol<function_type>("eglSwapBuffers");
-  return original != nullptr ? original(display, surface) : 0;
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT void glClear(gl_enum mask)
+CAT_STM_EXPORT void SDL_SetWindowPosition(void* window, int x, int y)
 {
-  using function_type = void (*)(gl_enum);
-  if (steam_nographics::should_skip_draw_calls())
+  static void (*real)(void*, int, int) = nullptr;
+  if (next_symbol(real, "SDL_SetWindowPosition") == nullptr)
   {
     return;
   }
-  static const auto original = next_symbol<function_type>("glClear");
-  if (original != nullptr)
+  if (should_hide_x11())
   {
-    original(mask);
+    real(window, -32000, -32000);
+    return;
   }
+  real(window, x, y);
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT void glDrawArrays(gl_enum mode, int first, gl_sizei count)
+CAT_STM_EXPORT void SDL_SetWindowSize(void* window, int w, int h)
 {
-  using function_type = void (*)(gl_enum, int, gl_sizei);
-  if (steam_nographics::should_skip_draw_calls())
+  static void (*real)(void*, int, int) = nullptr;
+  if (next_symbol(real, "SDL_SetWindowSize") == nullptr)
   {
     return;
   }
-  static const auto original = next_symbol<function_type>("glDrawArrays");
-  if (original != nullptr)
+  if (should_hide_x11())
   {
-    original(mode, first, count);
-  }
-}
-
-CAT_STEAM_NOGRAPHICS_EXPORT void glDrawElements(gl_enum mode, gl_sizei count, gl_enum type, const void* indices)
-{
-  using function_type = void (*)(gl_enum, gl_sizei, gl_enum, const void*);
-  if (steam_nographics::should_skip_draw_calls())
-  {
+    real(window, 1, 1);
     return;
   }
-  static const auto original = next_symbol<function_type>("glDrawElements");
-  if (original != nullptr)
+  real(window, w, h);
+}
+
+CAT_STM_EXPORT void SDL_MaximizeWindow(void* window)
+{
+  static void (*real)(void*) = nullptr;
+  if (!should_hide_x11() && next_symbol(real, "SDL_MaximizeWindow") != nullptr)
   {
-    original(mode, count, type, indices);
+    real(window);
   }
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT int open(const char* path, int flags, ...)
+CAT_STM_EXPORT void SDL_RestoreWindow(void* window)
 {
-  va_list arguments;
-  va_start(arguments, flags);
-  const bool has_mode = (flags & O_CREAT) != 0 || (flags & O_TMPFILE) == O_TMPFILE;
-  const unsigned int mode = has_mode ? va_arg(arguments, unsigned int) : 0;
-  va_end(arguments);
-  return steam_nographics::synthetic_open(path, flags, has_mode, mode);
+  static void (*real)(void*) = nullptr;
+  if (!should_hide_x11() && next_symbol(real, "SDL_RestoreWindow") != nullptr)
+  {
+    real(window);
+  }
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT int open64(const char* path, int flags, ...)
+CAT_STM_EXPORT unsigned int eglSwapInterval(void* dpy, int interval)
 {
-  va_list arguments;
-  va_start(arguments, flags);
-  const bool has_mode = (flags & O_CREAT) != 0 || (flags & O_TMPFILE) == O_TMPFILE;
-  const unsigned int mode = has_mode ? va_arg(arguments, unsigned int) : 0;
-  va_end(arguments);
-  return steam_nographics::synthetic_open(path, flags, has_mode, mode);
+  static unsigned int (*real)(void*, int) = nullptr;
+  if (next_symbol(real, "eglSwapInterval") == nullptr)
+  {
+    return 1u;
+  }
+  return real(dpy, swap_interval(interval));
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT int openat(int directory_fd, const char* path, int flags, ...)
+CAT_STM_EXPORT void glXSwapIntervalEXT(void* dpy, x_drawable drawable, int interval)
 {
-  va_list arguments;
-  va_start(arguments, flags);
-  const bool has_mode = (flags & O_CREAT) != 0 || (flags & O_TMPFILE) == O_TMPFILE;
-  const unsigned int mode = has_mode ? va_arg(arguments, unsigned int) : 0;
-  va_end(arguments);
-  return steam_nographics::synthetic_openat(directory_fd, path, flags, has_mode, mode);
+  static void (*real)(void*, x_drawable, int) = nullptr;
+  if (next_symbol(real, "glXSwapIntervalEXT") != nullptr)
+  {
+    real(dpy, drawable, swap_interval(interval));
+  }
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT int openat64(int directory_fd, const char* path, int flags, ...)
+CAT_STM_EXPORT int glXSwapIntervalSGI(int interval)
 {
-  va_list arguments;
-  va_start(arguments, flags);
-  const bool has_mode = (flags & O_CREAT) != 0 || (flags & O_TMPFILE) == O_TMPFILE;
-  const unsigned int mode = has_mode ? va_arg(arguments, unsigned int) : 0;
-  va_end(arguments);
-  return steam_nographics::synthetic_openat(directory_fd, path, flags, has_mode, mode);
+  static int (*real)(int) = nullptr;
+  return next_symbol(real, "glXSwapIntervalSGI") != nullptr ? real(swap_interval(interval)) : 0;
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT FILE* fopen(const char* path, const char* mode)
+CAT_STM_EXPORT int glXSwapIntervalMESA(unsigned int interval)
 {
-  return steam_nographics::synthetic_fopen(path, mode);
+  static int (*real)(unsigned int) = nullptr;
+  const unsigned int value = static_cast<unsigned int>(swap_interval(static_cast<int>(interval)));
+  return next_symbol(real, "glXSwapIntervalMESA") != nullptr ? real(value) : 0;
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT FILE* fopen64(const char* path, const char* mode)
+CAT_STM_EXPORT int SDL_GL_SetSwapInterval(int interval)
 {
-  return steam_nographics::synthetic_fopen(path, mode);
+  static int (*real)(int) = nullptr;
+  return next_symbol(real, "SDL_GL_SetSwapInterval") != nullptr ? real(swap_interval(interval)) : 0;
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT int fclose(FILE* stream)
+namespace
 {
-  return steam_nographics::synthetic_fclose(stream);
+
+gl_proc proc_override(const char* name)
+{
+  if (name == nullptr || !should_drop_gl())
+  {
+    return nullptr;
+  }
+
+  struct entry
+  {
+    const char* name;
+    gl_proc proc;
+  };
+
+  static const entry table[] = {
+    { "glClear", reinterpret_cast<gl_proc>(&glClear) },
+    { "glDrawArrays", reinterpret_cast<gl_proc>(&glDrawArrays) },
+    { "glDrawElements", reinterpret_cast<gl_proc>(&glDrawElements) },
+    { "glDrawRangeElements", reinterpret_cast<gl_proc>(&glDrawRangeElements) },
+    { "glFlush", reinterpret_cast<gl_proc>(&glFlush) },
+    { "glFinish", reinterpret_cast<gl_proc>(&glFinish) },
+    { "glXSwapBuffers", reinterpret_cast<gl_proc>(&glXSwapBuffers) },
+    { "eglSwapBuffers", reinterpret_cast<gl_proc>(&eglSwapBuffers) },
+    { "eglSwapInterval", reinterpret_cast<gl_proc>(&eglSwapInterval) },
+    { "glXSwapIntervalEXT", reinterpret_cast<gl_proc>(&glXSwapIntervalEXT) },
+    { "glXSwapIntervalSGI", reinterpret_cast<gl_proc>(&glXSwapIntervalSGI) },
+    { "glXSwapIntervalMESA", reinterpret_cast<gl_proc>(&glXSwapIntervalMESA) },
+  };
+
+  for (const entry& item : table)
+  {
+    if (std::strcmp(item.name, name) == 0)
+    {
+      return item.proc;
+    }
+  }
+  return nullptr;
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT ssize_t read(int file_descriptor, void* buffer, size_t count)
-{
-  return steam_nographics::synthetic_read(file_descriptor, buffer, count);
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT ssize_t pread64(int file_descriptor, void* buffer, size_t count, off64_t offset)
+CAT_STM_EXPORT gl_proc eglGetProcAddress(const char* name)
 {
-  return steam_nographics::synthetic_pread(file_descriptor, buffer, count, offset);
+  static gl_proc (*real)(const char*) = nullptr;
+  if (gl_proc override = proc_override(name))
+  {
+    return override;
+  }
+  return next_symbol(real, "eglGetProcAddress") != nullptr ? real(name) : nullptr;
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT int close(int file_descriptor)
+CAT_STM_EXPORT gl_proc glXGetProcAddressARB(const unsigned char* name)
 {
-  return steam_nographics::synthetic_close(file_descriptor);
+  static gl_proc (*real)(const unsigned char*) = nullptr;
+  if (gl_proc override = proc_override(reinterpret_cast<const char*>(name)))
+  {
+    return override;
+  }
+  return next_symbol(real, "glXGetProcAddressARB") != nullptr ? real(name) : nullptr;
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT off_t lseek(int file_descriptor, off_t offset, int whence)
+CAT_STM_EXPORT gl_proc glXGetProcAddress(const unsigned char* name)
 {
-  return steam_nographics::synthetic_lseek(file_descriptor, offset, whence);
+  static gl_proc (*real)(const unsigned char*) = nullptr;
+  if (gl_proc override = proc_override(reinterpret_cast<const char*>(name)))
+  {
+    return override;
+  }
+  return next_symbol(real, "glXGetProcAddress") != nullptr ? real(name) : nullptr;
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT off64_t lseek64(int file_descriptor, off64_t offset, int whence)
+CAT_STM_EXPORT void* dlopen(const char* filename, int flags)
 {
-  return steam_nographics::synthetic_lseek64(file_descriptor, offset, whence);
+  static dlopen_fn real = nullptr;
+  return next_symbol(real, "dlopen") != nullptr ? real(filename, flags) : nullptr;
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT int ioctl(int file_descriptor, unsigned long request, ...)
+CAT_STM_EXPORT void* dlmopen(long namespace_id, const char* filename, int flags)
 {
-  va_list arguments;
-  va_start(arguments, request);
-  void* argument = va_arg(arguments, void*);
-  va_end(arguments);
-  return steam_nographics::synthetic_ioctl(file_descriptor, request, argument);
+  static dlmopen_fn real = nullptr;
+  return next_symbol(real, "dlmopen") != nullptr ? real(namespace_id, filename, flags) : nullptr;
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT int uname(struct utsname* name)
+CAT_STM_EXPORT void* alcOpenDevice(const char* device_name)
 {
-  return steam_nographics::synthetic_uname(name);
+  static void* (*real)(const char*) = nullptr;
+  if (!settings().disabled && settings().no_audio)
+  {
+    return nullptr;
+  }
+  return next_symbol(real, "alcOpenDevice") != nullptr ? real(device_name) : nullptr;
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT int getifaddrs(struct ifaddrs** ifaddrs)
+CAT_STM_EXPORT int snd_pcm_open(void** pcm, const char* name, int stream, int mode)
 {
-  return steam_nographics::synthetic_getifaddrs(ifaddrs);
+  static int (*real)(void**, const char*, int, int) = nullptr;
+  if (!settings().disabled && settings().no_audio)
+  {
+    return -2;
+  }
+  return next_symbol(real, "snd_pcm_open") != nullptr ? real(pcm, name, stream, mode) : -2;
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT void freeifaddrs(struct ifaddrs* ifaddrs)
+
+namespace
 {
-  steam_nographics::synthetic_freeifaddrs(ifaddrs);
+
+__attribute__((constructor)) void cat_steamtxtmode_init()
+{
+  config& cfg = settings();
+  cfg.log = env_flag("CAT_STM_LOG", true);
+  cfg.disabled = !env_flag("CAT_STEAM_TXTMODE", true) || env_flag("CAT_STM_DISABLE", false);
+  cfg.hide_x11 = env_flag("CAT_STM_HIDE_X11", env_flag("CAT_STEAM_TXTMODE_HIDE_WINDOWS", true));
+  cfg.no_gl = env_flag("CAT_STM_NO_GL", env_flag("CAT_STEAM_TXTMODE_DROP_DRAWS", true));
+  cfg.no_vsync = env_flag("CAT_STM_NO_VSYNC", true);
+  cfg.no_audio = env_flag("CAT_STM_NO_AUDIO", true);
+  cfg.webhelper_trim = env_flag("CAT_STM_WEBHELPER_TRIM", env_flag("CAT_STEAM_TXTMODE_TRIM_WEBHELPER", true));
+  cfg.webhelper_single = env_flag("CAT_STM_WEBHELPER_SINGLE", false);
+  cfg.loop_sleep = env_flag("CAT_STM_LOOP_SLEEP", true);
+  cfg.loop_sleep_us = std::clamp(env_int("CAT_STM_LOOP_SLEEP_US", env_int("CAT_STEAM_TXTMODE_FRAME_INTERVAL_US", 100000)), 0, 1000000);
+
+  if (cfg.disabled)
+  {
+    log_line("disabled via CAT_STM_DISABLE");
+    return;
+  }
+
+  log_line("loaded (%d-bit): hide_x11=%d no_gl=%d no_vsync=%d no_audio=%d webhelper_trim=%d webhelper_single=%d loop_sleep=%d loop_sleep_us=%d",
+           static_cast<int>(sizeof(void*) * 8), cfg.hide_x11, cfg.no_gl, cfg.no_vsync,
+           cfg.no_audio, cfg.webhelper_trim, cfg.webhelper_single, cfg.loop_sleep, cfg.loop_sleep_us);
 }
 
-CAT_STEAM_NOGRAPHICS_EXPORT const unsigned char* glGetString(gl_enum name)
-{
-  return steam_nographics::synthetic_gl_get_string(name);
-}
-
-CAT_STEAM_NOGRAPHICS_EXPORT void vkGetPhysicalDeviceProperties(void* physical_device, void* properties)
-{
-  steam_nographics::synthetic_vk_get_physical_device_properties(physical_device, properties);
-}
-
-CAT_STEAM_NOGRAPHICS_EXPORT void vkGetPhysicalDeviceProperties2(void* physical_device, void* properties2)
-{
-  steam_nographics::synthetic_vk_get_physical_device_properties2(physical_device, properties2);
-}
-
-CAT_STEAM_NOGRAPHICS_EXPORT void vkGetPhysicalDeviceProperties2KHR(void* physical_device, void* properties2)
-{
-  steam_nographics::synthetic_vk_get_physical_device_properties2(physical_device, properties2);
-}
-
-CAT_STEAM_NOGRAPHICS_EXPORT const char* udev_device_get_sysattr_value(void* device, const char* attribute)
-{
-  return steam_nographics::synthetic_udev_sysattr_value(device, attribute);
-}
-
-CAT_STEAM_NOGRAPHICS_EXPORT const char* udev_device_get_property_value(void* device, const char* property)
-{
-  return steam_nographics::synthetic_udev_property_value(device, property);
-}
-
-CAT_STEAM_NOGRAPHICS_EXPORT const char* nm_device_wifi_get_hw_address(void* device)
-{
-  return steam_nographics::synthetic_nm_hw_address(device, "nm_device_wifi_get_hw_address");
-}
-
-CAT_STEAM_NOGRAPHICS_EXPORT const char* nm_device_wifi_get_permanent_hw_address(void* device)
-{
-  return steam_nographics::synthetic_nm_hw_address(device, "nm_device_wifi_get_permanent_hw_address");
-}
-
-CAT_STEAM_NOGRAPHICS_EXPORT const char* nm_device_ethernet_get_hw_address(void* device)
-{
-  return steam_nographics::synthetic_nm_hw_address(device, "nm_device_ethernet_get_hw_address");
-}
-
-CAT_STEAM_NOGRAPHICS_EXPORT const char* nm_device_get_vendor(void* device)
-{
-  return steam_nographics::synthetic_nm_device_string(device, "nm_device_get_vendor");
-}
-
-CAT_STEAM_NOGRAPHICS_EXPORT const char* nm_device_get_product(void* device)
-{
-  return steam_nographics::synthetic_nm_device_string(device, "nm_device_get_product");
-}
-
-CAT_STEAM_NOGRAPHICS_EXPORT const char* nm_device_get_udi(void* device)
-{
-  return steam_nographics::synthetic_nm_device_string(device, "nm_device_get_udi");
-}
-
-CAT_STEAM_NOGRAPHICS_EXPORT int execve(const char* path, char* const argv[], char* const envp[])
-{
-  using function_type = int (*)(const char*, char* const[], char* const[]);
-  static const auto original = next_symbol<function_type>("execve");
-  char** const rewritten = steam_nographics::rewrite_webhelper_argv(path, argv);
-  return original != nullptr ? original(path, rewritten != nullptr ? rewritten : argv, envp) : -1;
-}
-
-CAT_STEAM_NOGRAPHICS_EXPORT int execvp(const char* file, char* const argv[])
-{
-  using function_type = int (*)(const char*, char* const[]);
-  static const auto original = next_symbol<function_type>("execvp");
-  char** const rewritten = steam_nographics::rewrite_webhelper_argv(file, argv);
-  return original != nullptr ? original(file, rewritten != nullptr ? rewritten : argv) : -1;
-}
-
-CAT_STEAM_NOGRAPHICS_EXPORT int posix_spawn(pid_t* pid, const char* path, const void* actions,
-  const void* attributes, char* const argv[], char* const envp[])
-{
-  using function_type = int (*)(pid_t*, const char*, const void*, const void*, char* const[], char* const[]);
-  static const auto original = next_symbol<function_type>("posix_spawn");
-  char** const rewritten = steam_nographics::rewrite_webhelper_argv(path, argv);
-  return original != nullptr ? original(pid, path, actions, attributes, rewritten != nullptr ? rewritten : argv, envp) : -1;
 }

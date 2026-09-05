@@ -25,6 +25,7 @@ V  o o  V  file: src/features/automation/nographics/nographics.cpp
 #include "games/tf2/sdk/interfaces/client.hpp"
 #include "games/tf2/sdk/interfaces/file_system.hpp"
 #include "games/tf2/sdk/interfaces/material_system.hpp"
+#include "funchook/funchook.h"
 #include "libsigscan/libsigscan.h"
 #if defined(__linux__)
 #include <dlfcn.h>
@@ -52,6 +53,7 @@ constexpr int base_file_system_read_file_index = 14;
 constexpr std::uintptr_t base_file_system_vptr_offset = sizeof(void*);
 constexpr const char* client_module_name = "tf/bin/linux64/client.so";
 constexpr int fs_async_err_fileopen = -1;
+constexpr int client_hud_update_index = 11;
 
 using find_first_fn = const char* (*)(void*, const char*, file_find_handle_t*);
 using find_next_fn = const char* (*)(void*, file_find_handle_t);
@@ -320,14 +322,88 @@ bool is_required_model_asset(const std::string_view filename, const std::string_
          path_equals(extension, ".vtx");
 }
 
+bool sound_family_file(const std::string_view filename)
+{
+  return path_contains(filename, "sound.cache") ||
+         path_contains(filename, "tf2_sound") ||
+         path_contains(filename, "game_sounds") ||
+         path_starts_with(filename, "sound/player/footsteps");
+}
+
+bool extension_blocks_file(const std::string_view filename, const std::string_view extension)
+{
+  if (extension.size() < 2)
+  {
+    return false;
+  }
+
+  switch (extension[1])
+  {
+    case 'a':
+    {
+      return path_equals(extension, ".ani");
+    }
+    case 'b':
+    {
+      return path_equals(extension, ".bik");
+    }
+    case 'c':
+    {
+      if (path_equals(extension, ".cache"))
+      {
+        return !path_contains(filename, "sound.cache");
+      }
+      return path_equals(extension, ".cur");
+    }
+    case 'd':
+    {
+      return path_equals(extension, ".dds") || path_equals(extension, ".dem");
+    }
+    case 'i':
+    {
+      return path_equals(extension, ".ico");
+    }
+    case 'j':
+    {
+      return path_equals(extension, ".jpg");
+    }
+    case 'm':
+    {
+      return path_equals(extension, ".mp3");
+    }
+    case 'p':
+    {
+      return path_equals(extension, ".png") || path_equals(extension, ".pcf");
+    }
+    case 't':
+    {
+      return path_equals(extension, ".tga");
+    }
+    case 'v':
+    {
+      return path_equals(extension, ".vvd") || path_equals(extension, ".vtx") ||
+             path_equals(extension, ".vtf") || path_equals(extension, ".vfe") ||
+             path_equals(extension, ".vcd");
+    }
+    case 'w':
+    {
+      if (path_equals(extension, ".webm"))
+      {
+        return true;
+      }
+      return path_equals(extension, ".wav") && !sound_family_file(filename);
+    }
+    default:
+    {
+      break;
+    }
+  }
+
+  return false;
+}
+
 bool should_block_file(const char* raw_filename)
 {
-  constexpr std::array<std::string_view, 19> blocked_extensions = {
-    ".ani", ".wav", ".mp3", ".vvd", ".vtx", ".vtf", ".vfe", ".cache",
-    ".jpg", ".png", ".tga", ".dds", ".bik", ".webm", ".vcd", ".pcf",
-    ".cur", ".ico", ".dem",
-  };
-
   if (raw_filename == nullptr)
   {
     return false;
@@ -340,12 +416,9 @@ bool should_block_file(const char* raw_filename)
   }
 
   const std::string_view extension = file_extension(filename);
-  if (path_equals(extension, ".cat") || path_equals(extension, ".cfg"))
-  {
-    return false;
-  }
 
-  if (path_equals(extension, ".bsp") || path_equals(extension, ".nav") || is_required_model_asset(filename, extension))
+  if (path_equals(extension, ".cat") || path_equals(extension, ".cfg") ||
+      path_equals(extension, ".bsp") || path_equals(extension, ".nav") || is_required_model_asset(filename, extension))
   {
     return false;
   }
@@ -353,6 +426,37 @@ bool should_block_file(const char* raw_filename)
   if (is_soundscape_script(filename) ||
       path_starts_with(filename, "materials/console/") ||
       path_starts_with(filename, "debug/"))
+  {
+    return false;
+  }
+
+  if (path_equals(extension, ".vmt"))
+  {
+    if (path_contains(filename, "corner") ||
+        path_contains(filename, "hud") ||
+        path_contains(filename, "vgui") ||
+        path_contains(filename, "console"))
+    {
+      return false;
+    }
+
+    if constexpr (textmode_build)
+    {
+      if (aggressive_material_block && path_starts_with(filename, "materials/models/"))
+      {
+        return true;
+      }
+    }
+
+    return true;
+  }
+
+  if (!extension.empty() && extension_blocks_file(filename, extension))
+  {
+    return true;
+  }
+
+  if (extension.empty())
   {
     return false;
   }
@@ -369,23 +473,7 @@ bool should_block_file(const char* raw_filename)
     return true;
   }
 
-  if (extension.empty())
-  {
-    return false;
-  }
-
-  if (path_equals(extension, ".vmt"))
-  {
-    return !path_contains(filename, "corner") &&
-           !path_contains(filename, "hud") &&
-           !path_contains(filename, "vgui") &&
-           !path_contains(filename, "console");
-  }
-
-  if (path_contains(filename, "sound.cache") ||
-      path_contains(filename, "tf2_sound") ||
-      path_contains(filename, "game_sounds") ||
-      path_starts_with(filename, "sound/player/footsteps"))
+  if (sound_family_file(filename))
   {
     return false;
   }
@@ -400,14 +488,6 @@ bool should_block_file(const char* raw_filename)
       (path_contains(filename, "soundscape") && !path_equals(extension, ".txt")))
   {
     return true;
-  }
-
-  for (const std::string_view blocked_extension : blocked_extensions)
-  {
-    if (path_equals(extension, blocked_extension))
-    {
-      return true;
-    }
   }
 
   return false;
@@ -835,6 +915,100 @@ void disable_file_system_hooks()
   base_file_system_vtable = nullptr;
 }
 
+using hud_update_fn = void (*)(void*, bool);
+hud_update_fn hud_update_original = nullptr;
+funchook_t* hud_update_funchook = nullptr;
+std::uint64_t hud_update_frame_counter = 0;
+
+void hud_update_hook(void* this_ptr, bool active)
+{
+  CATHOOK_HOOK_GUARD();
+  if (hud_update_original == nullptr || !is_enabled() || should_skip_rendering_hooks())
+  {
+    if (hud_update_original != nullptr)
+    {
+      hud_update_original(this_ptr, active);
+    }
+    return;
+  }
+
+  std::uint64_t interval = static_cast<std::uint64_t>(hud_throttle_frames);
+  if (interval < 1)
+  {
+    interval = 1;
+  }
+
+  if (++hud_update_frame_counter < interval)
+  {
+    return;
+  }
+
+  hud_update_frame_counter = 0;
+  hud_update_original(this_ptr, active);
+}
+
+void disable_hud_update_hook()
+{
+  if (hud_update_funchook != nullptr)
+  {
+    funchook_uninstall(hud_update_funchook, 0);
+    funchook_destroy(hud_update_funchook);
+    hud_update_funchook = nullptr;
+  }
+
+  hud_update_original = nullptr;
+  hud_update_frame_counter = 0;
+}
+
+void enable_hud_update_hook()
+{
+  if (hud_update_funchook != nullptr || client == nullptr)
+  {
+    return;
+  }
+
+  auto** client_vtable_local = *reinterpret_cast<void***>(client);
+  if (client_vtable_local == nullptr)
+  {
+    return;
+  }
+
+  auto* target = read_vtable_entry(client_vtable_local, client_hud_update_index, "Client::HudUpdate");
+  if (target == nullptr)
+  {
+    return;
+  }
+
+  auto* handle = funchook_create();
+  if (handle == nullptr)
+  {
+    return;
+  }
+
+  hud_update_original = reinterpret_cast<hud_update_fn>(target);
+  if (funchook_prepare(handle, reinterpret_cast<void**>(&hud_update_original), reinterpret_cast<void*>(hud_update_hook)) != FUNCHOOK_ERROR_SUCCESS ||
+      funchook_install(handle, 0) != FUNCHOOK_ERROR_SUCCESS)
+  {
+    print("[nographics] HudUpdate throttle install failed: %s\n", funchook_error_message(handle));
+    disable_hud_update_hook();
+    return;
+  }
+
+  hud_update_funchook = handle;
+  print("[nographics] HudUpdate throttle hooked every %d frames\n", hud_throttle_frames);
+}
+
+void update_hud_update_throttle()
+{
+  if (is_enabled() && !should_skip_rendering_hooks())
+  {
+    enable_hud_update_hook();
+    return;
+  }
+
+  disable_hud_update_hook();
+}
+
 void update_material_stub(bool enabled)
 {
   if (material_system == nullptr || material_stub_enabled == enabled)
@@ -893,7 +1067,7 @@ void initialize()
   {
     config.misc.exploits.null_graphics = true;
 
-    config.misc.exploits.no_engine_sleep = false;
+    config.misc.exploits.no_engine_sleep = !textmode_allow_engine_sleep;
   }
 
   resolve_game_file_system_interface();
@@ -967,6 +1141,7 @@ void update()
       update_material_stub(false);
       disable_file_system_hooks();
     }
+    disable_hud_update_hook();
     nographics_runtime_enabled = false;
     return;
   }
@@ -980,6 +1155,7 @@ void update()
   initialize();
   resolve_material_system_interface();
   enable_file_system_hooks();
+  update_hud_update_throttle();
   update_material_stub(textmode_build);
   apply_cathook2017_render_patches();
 
@@ -992,6 +1168,7 @@ void shutdown()
   restore_render_patches();
   update_material_stub(false);
   disable_file_system_hooks();
+  disable_hud_update_hook();
   nographics_runtime_enabled = false;
   nographics_next_maintenance = {};
   initialized = false;

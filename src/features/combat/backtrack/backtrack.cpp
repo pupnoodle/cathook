@@ -5,7 +5,9 @@
 #include <cstdint>
 #include <deque>
 #include <optional>
+#include <sstream>
 #include "core/entity_cache.hpp"
+#include "core/logger.hpp"
 #include "features/combat/aimbot/aim_utils.hpp"
 #include "features/combat/aimbot/resolver.hpp"
 #include "features/menu/config.hpp"
@@ -20,6 +22,8 @@
 #include "games/tf2/sdk/interfaces/global_vars.hpp"
 #include "games/tf2/sdk/interfaces/model_info.hpp"
 #include "core/hooks/cl_read_packets.hpp"
+#include "features/combat/animation/anim_driver.hpp"
+#include <memory>
 
 bool write_to_table(void** vtable, int index, void* func);
 void* read_vtable_entry(void** vtable, int index, const char* hook_name);
@@ -89,6 +93,75 @@ send_datagram_fn g_send_datagram_original = nullptr;
   return static_cast<float>(ticks) * tick_interval();
 }
 
+struct interp_convars {
+  Convar* cl_interpolate = nullptr;
+  Convar* cl_interp = nullptr;
+  Convar* cl_interp_ratio = nullptr;
+  Convar* cl_updaterate = nullptr;
+  Convar* sv_client_min_interp_ratio = nullptr;
+  Convar* sv_client_max_interp_ratio = nullptr;
+};
+
+const interp_convars& interpolation_convars()
+{
+  static interp_convars vars = [] {
+    interp_convars found{};
+    if (convar_system != nullptr) {
+      found.cl_interpolate = convar_system->find_var("cl_interpolate");
+      found.cl_interp = convar_system->find_var("cl_interp");
+      found.cl_interp_ratio = convar_system->find_var("cl_interp_ratio");
+      found.cl_updaterate = convar_system->find_var("cl_updaterate");
+      found.sv_client_min_interp_ratio = convar_system->find_var("sv_client_min_interp_ratio");
+      found.sv_client_max_interp_ratio = convar_system->find_var("sv_client_max_interp_ratio");
+    }
+    return found;
+  }();
+  return vars;
+}
+
+float lerp_time_from_convars(float override_interp)
+{
+  const interp_convars& vars = interpolation_convars();
+  if (vars.cl_interpolate != nullptr && vars.cl_interpolate->get_int() == 0) {
+    return 0.0f;
+  }
+
+  const float interp = override_interp >= 0.0f
+    ? std::max(override_interp, 0.0f)
+    : (vars.cl_interp != nullptr ? std::max(vars.cl_interp->get_float(), 0.0f) : 0.0f);
+  const float ratio_raw = vars.cl_interp_ratio != nullptr ? vars.cl_interp_ratio->get_float() : 1.0f;
+  const float ratio_min = vars.sv_client_min_interp_ratio != nullptr
+    ? vars.sv_client_min_interp_ratio->get_float()
+    : 1.0f;
+  const float ratio_max = vars.sv_client_max_interp_ratio != nullptr
+    ? std::max(vars.sv_client_max_interp_ratio->get_float(), ratio_min)
+    : 5.0f;
+  const float updaterate = std::clamp(
+    vars.cl_updaterate != nullptr ? vars.cl_updaterate->get_float() : 66.0f,
+    10.0f,
+    66.0f);
+  const float ratio = std::clamp(ratio_raw, ratio_min, ratio_max);
+  return std::max(interp, ratio / updaterate);
+}
+
+float server_believed_lerp_seconds()
+{
+  return lerp_time_from_convars(interpolation_time());
+}
+
+[[nodiscard]] float exact_max_unlag_value()
+{
+  static Convar* sv_maxunlag_exact = nullptr;
+  if (sv_maxunlag_exact == nullptr && convar_system != nullptr) {
+    sv_maxunlag_exact = convar_system->find_var("sv_maxunlag");
+  }
+
+  const float value = sv_maxunlag_exact != nullptr && std::isfinite(sv_maxunlag_exact->get_float())
+    ? sv_maxunlag_exact->get_float()
+    : fallback_max_unlag_seconds;
+  return std::max(value, 0.0f);
+}
+
 [[nodiscard]] float interpolation_time_value()
 {
   static Convar* cl_interp = nullptr;
@@ -148,7 +221,8 @@ send_datagram_fn g_send_datagram_original = nullptr;
 
 [[nodiscard]] bool should_record()
 {
-  return is_enabled() &&
+  const bool history_needed = is_enabled() || config.aimbot.master;
+  return history_needed &&
          engine != nullptr &&
          global_vars != nullptr &&
          engine->is_in_game();
@@ -287,8 +361,7 @@ send_datagram_fn g_send_datagram_original = nullptr;
   const backtrack_timing& timing,
   int* tick_count)
 {
-  if (!timing.valid ||
-      !record.valid ||
+  if (!record.valid ||
       record.invalid ||
       record.teleport ||
       record.player != player ||
@@ -300,7 +373,29 @@ send_datagram_fn g_send_datagram_original = nullptr;
     return false;
   }
 
-  if (player->is_dormant() || !player->is_alive() || player->get_index() != record.ent_index) {
+  if (player->get_index() != record.ent_index || !player->is_alive()) {
+    return false;
+  }
+
+  const bool is_dormant = player->is_dormant();
+  if (is_dormant) {
+    const float cur = global_vars != nullptr ? global_vars->curtime : 0.0f;
+    const float dormant_age = cur - record.sim_time;
+    if (!std::isfinite(dormant_age) || dormant_age < -tick_interval() || dormant_age > dormant_shoot_seconds + 0.5f) {
+      return false;
+    }
+    if (timing.valid) {
+      const int target_tick = time_to_ticks(record.sim_time);
+      const int command_tick = target_tick + timing.lerp_ticks;
+      if (tick_count != nullptr) {
+        *tick_count = command_tick;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  if (!timing.valid) {
     return false;
   }
 
@@ -615,6 +710,20 @@ bool add_record_hitbox(backtrack_record* record,
     return false;
   }
 
+  constexpr float origin_snap_grid = 8.0f;
+  const Vec3 eye_angles = player->get_eye_angles();
+  record->yaw_angle = std::isfinite(eye_angles.y)
+    ? std::remainder(eye_angles.y, 360.0f)
+    : 0.0f;
+  record->snapped_origin = settings.snap_origin
+    ? Vec3{
+        std::floor(record->origin.x * origin_snap_grid + 0.5f) / origin_snap_grid,
+        std::floor(record->origin.y * origin_snap_grid + 0.5f) / origin_snap_grid,
+        std::floor(record->origin.z * origin_snap_grid + 0.5f) / origin_snap_grid}
+    : record->origin;
+  record->sequence = aimbot_sequence(player);
+  record->cycle = aimbot_cycle(player);
+
   const model_t* model = player->get_model();
   if (model == nullptr || model_info == nullptr) {
     return false;
@@ -630,9 +739,22 @@ bool add_record_hitbox(backtrack_record* record,
   int bone_count = 0;
   const float setup_time = record->sim_time;
   const int pose_frame = global_vars != nullptr ? global_vars->framecount : 0;
-  if (!aimbot_setup_bones_at_time(player, bone_to_world, setup_time, pose_frame,
-      player->get_origin(), true, false, &bone_count)) {
-    return false;
+
+  bool bones_captured = false;
+  int driven_bone_count = 0;
+  if (animation::copy_pose_bones(player, bone_to_world, max_bones, &driven_bone_count)) {
+    const animation::anim_driver_pose* pose = animation::latest_pose(player);
+    if (pose != nullptr && std::fabs(pose->sim_time - record->sim_time) <= tick_interval() * 0.5f) {
+      bone_count = driven_bone_count;
+      bones_captured = true;
+    }
+  }
+
+  if (!bones_captured) {
+    if (!aimbot_setup_bones_at_time(player, bone_to_world, setup_time, pose_frame,
+        player->get_origin(), true, false, &bone_count)) {
+      return false;
+    }
   }
 
   for (int bone_index = 0; bone_index < bone_count; ++bone_index) {
@@ -841,6 +963,137 @@ bool command_tick_for_record(const backtrack_record& record, Player* player, int
   return command_tick_for_record_timing(record, player, build_timing(), tick_count);
 }
 
+float lerp_seconds()
+{
+  return lerp_time_from_convars(-1.0f);
+}
+
+float correct_seconds()
+{
+  net_channel* channel = current_net_channel();
+  const float latency = channel != nullptr
+    ? std::max(channel->get_latency(flow_outgoing), 0.0f)
+    : 0.0f;
+  const float lerp = ticks_to_time(time_to_ticks(lerp_seconds()));
+  return std::clamp(latency + lerp, 0.0f, exact_max_unlag_value());
+}
+
+int rewind_tick_for(int cmd_tick_count)
+{
+  if (!settings.exact_server_math || global_vars == nullptr) {
+    return cmd_tick_count;
+  }
+
+  const backtrack_timing timing = build_timing(false);
+  if (!timing.valid) {
+    return cmd_tick_count;
+  }
+
+  int targettick = cmd_tick_count - time_to_ticks(server_believed_lerp_seconds());
+  const float correct = correct_seconds();
+  const float delta_time = correct - ticks_to_time(timing.server_tick - targettick);
+  if (std::fabs(delta_time) > lag_compensation_delta_limit) {
+    targettick = timing.server_tick - time_to_ticks(correct);
+  }
+  return targettick;
+}
+
+bool command_tick_for_rewind(float sim_time, int* tick_count)
+{
+  if (!settings.exact_server_math || global_vars == nullptr) {
+    return false;
+  }
+
+  const backtrack_timing timing = build_timing(false);
+  if (!timing.valid || !std::isfinite(sim_time) || sim_time <= 0.0f) {
+    return false;
+  }
+
+  const int target_tick = time_to_ticks(sim_time);
+  const float age = ticks_to_time(timing.server_tick - target_tick);
+  if (!std::isfinite(age) || age < -tick_interval() || age > timing.max_unlag + tick_interval()) {
+    return false;
+  }
+
+  const float correct = correct_seconds();
+  const float delta_time = correct - age;
+  if (!std::isfinite(delta_time) || std::fabs(delta_time) > lag_compensation_delta_limit) {
+    return false;
+  }
+
+  if (tick_count != nullptr) {
+    *tick_count = target_tick + time_to_ticks(server_believed_lerp_seconds());
+  }
+  return true;
+}
+
+bool interpolated_pose(const backtrack_record& newer,
+  const backtrack_record& older,
+  float target_time,
+  backtrack_interp_pose* out)
+{
+  if (out == nullptr ||
+      !newer.valid ||
+      !older.valid ||
+      newer.invalid ||
+      older.invalid ||
+      newer.teleport ||
+      older.teleport ||
+      newer.ent_index != older.ent_index ||
+      newer.player == nullptr ||
+      older.player == nullptr) {
+    return false;
+  }
+
+  if (newer.sequence >= 0 && older.sequence >= 0 && newer.sequence != older.sequence) {
+    return false;
+  }
+
+  const float span = newer.sim_time - older.sim_time;
+  if (!std::isfinite(span) || span <= 0.0001f || span > 1.0f) {
+    return false;
+  }
+
+  *out = {};
+  const float frac = std::clamp((target_time - older.sim_time) / span, 0.0f, 1.0f);
+  out->origin = older.origin + ((newer.origin - older.origin) * frac);
+  out->mins = older.mins + ((newer.mins - older.mins) * frac);
+  out->maxs = older.maxs + ((newer.maxs - older.maxs) * frac);
+
+  const float yaw_span = std::remainder(newer.yaw_angle - older.yaw_angle, 360.0f);
+  out->yaw = std::remainder(older.yaw_angle + (yaw_span * frac), 360.0f);
+
+  float cycle_delta = newer.cycle - older.cycle;
+  if (cycle_delta < -0.5f) {
+    cycle_delta += 1.0f;
+  } else if (cycle_delta > 0.5f) {
+    cycle_delta -= 1.0f;
+  }
+  out->cycle = older.cycle + (cycle_delta * frac);
+  out->valid = aimbot_vec3_is_finite(out->origin) &&
+    aimbot_vec3_is_finite(out->mins) &&
+    aimbot_vec3_is_finite(out->maxs);
+  return out->valid;
+}
+
+void mark_stale(Player* player)
+{
+  if (player == nullptr) {
+    return;
+  }
+
+  const int ent_index = player->get_index();
+  if (ent_index <= 0 || ent_index >= max_entities) {
+    return;
+  }
+
+  backtrack_history& history = g_records[static_cast<std::size_t>(ent_index)];
+  for (int index = 0; index < history.record_count; ++index) {
+    history.records[static_cast<std::size_t>(index)].invalid = true;
+    history.records[static_cast<std::size_t>(index)].dormant = true;
+  }
+}
+
 void on_create_move(user_cmd* user_cmd)
 {
   if (is_enabled() && config.backtrack.fake_latency_ms > 0.0f) {
@@ -915,6 +1168,10 @@ void record_player(Player* player)
       record.choked_ticks = std::max(time_to_ticks(sim_delta) - 1, 0);
       record.velocity = (record.origin - last.origin) * (1.0f / std::max(sim_delta, 0.0001f));
       record.sample_gap = sim_delta;
+      if (resolver::minwalk_active(player)) {
+        record.velocity.x = 1.0f;
+        record.velocity.y = 1.0f;
+      }
     }
     const float receive_delta = record.receive_time - last.receive_time;
     if (std::isfinite(receive_delta) && receive_delta > 0.0f) {
@@ -940,10 +1197,47 @@ void record_player(Player* player)
   history.records[0] = record;
   history.record_count = std::min(history.record_count + 1, max_records);
 
-  const float retention = max_unlag_seconds() + (tick_interval() * 2.0f);
+  {
+    static constexpr bool enable_bones_log = false;
+    if constexpr (enable_bones_log) {
+      static std::unique_ptr<cathook::core::logger> capture_log{};
+      static float next_capture_log_time = 0.0f;
+      const float realtime_now = global_vars != nullptr ? global_vars->realtime : 0.0f;
+      const float speed_2d = std::sqrt(record.velocity.x * record.velocity.x + record.velocity.y * record.velocity.y);
+      if (capture_log == nullptr) {
+        capture_log = std::make_unique<cathook::core::logger>(cathook::core::log_directory() / "bones.log");
+      }
+      if (capture_log->is_open() && global_vars != nullptr && (speed_2d > 10.0f || next_capture_log_time == 0.0f) && realtime_now >= next_capture_log_time) {
+        const matrix_3x4& root_bone = record.bones[record.bone_count > 0 ? 0 : 0];
+        const Vec3 root{root_bone.mat[0][3], root_bone.mat[1][3], root_bone.mat[2][3]};
+        const Vec3 root_delta = root - record.origin;
+        const float root_offset = std::sqrt(root_delta.x * root_delta.x + root_delta.y * root_delta.y + root_delta.z * root_delta.z);
+        const Vec3 render_origin = record.player != nullptr ? record.player->get_render_origin() : record.origin;
+        Vec3 implicit_origin{};
+        const bool have_implicit = implicit_rewind_position(record.player, &implicit_origin);
+        std::ostringstream line{};
+        line << std::fixed << std::setprecision(3) << "idx=" << record.ent_index << " sim=" << record.sim_time << " curtime=" << global_vars->curtime << " tickcount=" << global_vars->tickcount << " frame=" << global_vars->framecount << " origin={" << record.origin.x << ',' << record.origin.y << ',' << record.origin.z << "}" << " render={" << render_origin.x << ',' << render_origin.y << ',' << render_origin.z << "}" << " implicit=" << (have_implicit ? 1 : 0) << ",{" << implicit_origin.x << ',' << implicit_origin.y << ',' << implicit_origin.z << "}" << " bone0={" << root.x << ',' << root.y << ',' << root.z << "}" << " root_offset=" << root_offset << " speed=" << speed_2d << " choked=" << record.choked_ticks << " gap=" << record.sample_gap;
+        capture_log->write(line.str());
+        next_capture_log_time = realtime_now + 0.25f;
+      }
+    }
+  }
+
+  const float base_retention = max_unlag_seconds() + (tick_interval() * 2.0f);
+  const float retention = std::max(base_retention, dormant_keep_seconds);
   while (history.record_count > 1 &&
          history.records[0].sim_time - history.records[history.record_count - 1].sim_time > retention) {
     --history.record_count;
+  }
+  if (history.record_count > 1) {
+    const float cur = global_vars != nullptr ? global_vars->curtime : 0.0f;
+    while (history.record_count > 1) {
+      const backtrack_record& oldest = history.records[history.record_count - 1];
+      const float age = cur - oldest.sim_time;
+      if (age <= dormant_keep_seconds) break;
+      if (oldest.sim_time > cur - base_retention) break;
+      --history.record_count;
+    }
   }
   g_did_shoot[record.ent_index] = false;
 }
@@ -981,6 +1275,62 @@ const backtrack_history* records_for_player(Player* player)
   return &g_records[ent_index];
 }
 
+bool implicit_rewind_position(Player* player, Vec3* position)
+{
+  if (player == nullptr || position == nullptr || global_vars == nullptr) {
+    return false;
+  }
+
+  const backtrack_history* history = records_for_player(player);
+  if (history == nullptr || history->record_count <= 0) {
+    return false;
+  }
+
+  const float lerp = server_believed_lerp_seconds();
+  const float target_time = history->records[0].sim_time - std::max(lerp, tick_interval());
+  const backtrack_record* newer = nullptr;
+  const backtrack_record* older = nullptr;
+  for (int index = 0; index < history->record_count; ++index) {
+    const backtrack_record& entry = history->records[index];
+    if (!entry.valid || entry.invalid || entry.teleport ||
+        !std::isfinite(entry.sim_time) || !aimbot_vec3_is_finite(entry.origin)) {
+      continue;
+    }
+    if (entry.sim_time <= target_time) {
+      older = &entry;
+      break;
+    }
+    newer = &entry;
+  }
+
+  if (newer == nullptr && older == nullptr) {
+    return false;
+  }
+  if (newer == nullptr) {
+    *position = older->origin;
+    return true;
+  }
+  if (older == nullptr || newer->player != player || older->player != player) {
+    const Vec3 vel = newer->velocity;
+    const float dt = newer->sim_time - target_time;
+    if (aimbot_vec3_is_finite(vel) && std::isfinite(dt) && dt > 0.0f && dt < 0.5f) {
+      *position = newer->origin - vel * dt;
+    } else {
+      *position = newer->origin;
+    }
+    return true;
+  }
+
+  const float span = newer->sim_time - older->sim_time;
+  if (!std::isfinite(span) || span <= tick_interval() * 0.5f) {
+    *position = newer->origin;
+    return true;
+  }
+  const float frac = std::clamp((target_time - older->sim_time) / span, 0.0f, 1.0f);
+  *position = older->origin + (newer->origin - older->origin) * frac;
+  return true;
+}
+
 backtrack_record_view valid_records(Player* player)
 {
   backtrack_record_view view{};
@@ -990,12 +1340,13 @@ backtrack_record_view valid_records(Player* player)
   }
 
   const backtrack_timing timing = build_timing();
-  const float current_sim_time = player != nullptr ? player->get_simulation_time() : 0.0f;
+  const float current_sim_time = player != nullptr && !player->is_dormant() ? player->get_simulation_time() : 0.0f;
+  const bool is_dormant = player != nullptr && player->is_dormant();
 
   for (int index = 0; index < history->record_count && view.count < max_records; ++index) {
     const backtrack_record& record = history->records[index];
     if (record_valid_for_timing(record, player, timing)) {
-      if (std::fabs(record.sim_time - current_sim_time) <= 0.0001f) {
+      if (!is_dormant && std::fabs(record.sim_time - current_sim_time) <= 0.0001f) {
         continue;
       }
 
@@ -1024,11 +1375,14 @@ backtrack_record_view visual_records(Player* player)
   }
 
   const backtrack_timing timing = build_timing();
-  const float current_sim_time = player->get_simulation_time();
+  const bool is_dormant = player->is_dormant();
+  const float current_sim_time = is_dormant ? 0.0f : player->get_simulation_time();
   for (int index = 0; index < history->record_count && view.count < max_records; ++index) {
     const backtrack_record& record = history->records[index];
-    if (!record_valid_for_timing(record, player, timing) ||
-        std::fabs(record.sim_time - current_sim_time) <= 0.0001f) {
+    if (!record_valid_for_timing(record, player, timing)) {
+      continue;
+    }
+    if (!is_dormant && std::fabs(record.sim_time - current_sim_time) <= 0.0001f) {
       continue;
     }
 
@@ -1040,6 +1394,97 @@ backtrack_record_view visual_records(Player* player)
 bool is_record_valid(const backtrack_record& record, Player* player)
 {
   return record_valid_for_timing(record, player, build_timing());
+}
+
+Vec3 dormant_extrapolated_origin(const backtrack_record& record)
+{
+  if (!record.valid || global_vars == nullptr) {
+    return record.origin;
+  }
+  const float cur = global_vars->curtime;
+  const float dt = cur - record.sim_time;
+  if (!std::isfinite(dt) || dt <= 0.0f || dt > dormant_shoot_seconds + 1.0f) {
+    return record.origin;
+  }
+  const float speed2 = record.velocity.x * record.velocity.x + record.velocity.y * record.velocity.y;
+  if (speed2 < 0.01f) {
+    return record.origin;
+  }
+  Vec3 out = record.origin + record.velocity * dt;
+  if (!aimbot_vec3_is_finite(out)) {
+    return record.origin;
+  }
+  return out;
+}
+
+backtrack_record dormant_extrapolated_record(const backtrack_record& record)
+{
+  backtrack_record out = record;
+  const Vec3 extrapolated = dormant_extrapolated_origin(record);
+  const Vec3 delta = extrapolated - record.origin;
+  if (aimbot_vec3_is_finite(delta) && (delta.x != 0.0f || delta.y != 0.0f || delta.z != 0.0f)) {
+    out.origin = extrapolated;
+    for (int i = 0; i < out.bone_count; ++i) {
+      out.bones[i].mat[0][3] += delta.x;
+      out.bones[i].mat[1][3] += delta.y;
+      out.bones[i].mat[2][3] += delta.z;
+    }
+    for (int i = 0; i < out.hitbox_count; ++i) {
+      if (out.hitboxes[i].valid) {
+        out.hitboxes[i].center = out.hitboxes[i].center + delta;
+      }
+    }
+  }
+  return out;
+}
+
+const backtrack_record* latest_dormant_record(Player* player)
+{
+  const backtrack_history* history = records_for_player(player);
+  if (history == nullptr || history->record_count <= 0 || player == nullptr) {
+    return nullptr;
+  }
+  if (!player->is_dormant()) {
+    return nullptr;
+  }
+  for (int i = 0; i < history->record_count; ++i) {
+    const backtrack_record& r = history->records[i];
+    if (r.valid && !r.invalid && !r.teleport && r.player == player) {
+      const float cur = global_vars != nullptr ? global_vars->curtime : 0.0f;
+      const float age = cur - r.sim_time;
+      if (std::isfinite(age) && age >= -0.1f && age <= dormant_keep_seconds) {
+        return &r;
+      }
+    }
+  }
+  return nullptr;
+}
+
+bool dormant_ghost_valid(Player* player)
+{
+  return latest_dormant_record(player) != nullptr;
+}
+
+bool dormant_origin(Player* player, Vec3* out)
+{
+  if (out == nullptr) return false;
+  const backtrack_record* r = latest_dormant_record(player);
+  if (r == nullptr) return false;
+  *out = dormant_extrapolated_origin(*r);
+  return aimbot_vec3_is_finite(*out);
+}
+
+bool dormant_can_shoot(Player* player)
+{
+  if (player == nullptr || !player->is_dormant() || !player->is_alive()) return false;
+  const backtrack_record* r = latest_dormant_record(player);
+  if (r == nullptr) return false;
+  const float cur = global_vars != nullptr ? global_vars->curtime : 0.0f;
+  const float age = cur - r->sim_time;
+  if (!std::isfinite(age) || age < -0.1f || age > dormant_shoot_seconds) return false;
+  const Vec3 exp = dormant_extrapolated_origin(*r);
+  if (!aimbot_vec3_is_finite(exp)) return false;
+  return true;
 }
 
 bool selected_position(Vec3* position)
@@ -1187,6 +1632,7 @@ aimbot_candidate find_hitscan_candidate(Player* localplayer,
 {
   g_selected_position = std::nullopt;
   if (!is_enabled() ||
+      !config.backtrack.enabled ||
       localplayer == nullptr ||
       weapon == nullptr ||
       player == nullptr ||

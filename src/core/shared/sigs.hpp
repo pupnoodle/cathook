@@ -80,7 +80,7 @@ constexpr const char* ctf_player_anim_state_store =
   "E8 ? ? ? ? 48 8B 7D ? 49 89 84 24 ? ? ? ? 4C 89 E6 E8 ? ? ? ? 49 8D B4 24 ? ? ? ?";
 
 constexpr const char* base_animating_invalidate_bone_cache =
-  "48 8B 05 ? ? ? ? C7 87 A0 0B 00 00 FF FF 7F FF 48 83 E8 01 48 89 87 20 08 00 00 C3";
+  "48 8B 05 ? ? ? ? C7 87 ? ? ? ? FF FF 7F FF 48 83 E8 01 48 89 87 ? ? ? ? C3";
 constexpr const char* studio_get_bone_cache =
   "55 48 8D 0D ? ? ? ? 48 89 E5 41 56 41 55 4C 8D 35 ? ? ? ? 49 89 FD 41 54 4C 8D 25 ? ? ? ? 66 49 0F 6E CE 53 66 49 0F 6E C4 48 83 EC 30 48 8B 1D ? ? ? ? 66 0F 6C C1 48 89 4D C0 0F 29 45 B0 C7 45 C8 DC 00 00 00";
 constexpr const char* studio_bone_cache_update_bones =
@@ -90,28 +90,14 @@ constexpr const char* base_animating_auto_allow_bone_access =
 constexpr const char* base_animating_auto_allow_bone_access_on_delete =
   "55 BF 01 00 00 00 48 89 E5 E8 ? ? ? ? 5D C3";
 
-constexpr const char* base_animating_lock_studio_hdr =
-  "55 48 8D 0D ? ? ? ? 48 89 E5 41 57 41 56 4C 8D 35 ? ? ? ? 41 55 41 54 4C 8D A7 ? ? ? ? 53 48 89 FB 48 83 EC 38";
+constexpr const char* base_animating_bone_handle =
+  "55 48 89 E5 41 56 49 89 F6 41 55 49 89 FD 41 54 53 48 83 EC 20 48 8B BF ? ? ? ?";
 
 constexpr const char* base_animating_reset_sequence_info =
   "55 48 89 E5 41 54 53 83 BF 00 ? ? ? ? 48 89 FB 0F 84 ? ? ? ? 80 BB DD ? ? ? ? 74 ? C6 83 DE ? ? ? ? 5B 41 5C";
 
-constexpr const char* base_animating_bone_accessor_enable =
-  "09 B7 ? ? ? ? C3 90";
-constexpr const char* base_animating_bone_accessor_disable =
-  "F7 D6 21 B7 ? ? ? ? C3 90";
 
-constexpr const char* base_animating_setup_bones_attachment_helper =
-  "55 48 89 E5 41 57 48 8D 45 88 41 56 49 89 F6 41 55 49 89 FD 41 54 45 31 E4 53 48 83 EC 68";
 
-constexpr const char* ik_context_update_targets =
-  "55 48 89 F8 48 89 E5 41 57 41 56 41 55 41 54 53 48 81 EC D8 00 00 00 44 8B 8F ? ? ? ? 48 89 B5 ? ? ? ? 48 89 95 ? ? ? ?";
-constexpr const char* ik_context_solve_dependencies =
-  "55 48 89 E5 41 57 41 56 41 55 49 89 FD 41 54 53 48 81 EC 88 05 00 00 48 8B BF ? ? ? ? 48 89 95 ? ? ? ? 48 89 B5 ? ? ? ?";
-constexpr const char* ik_context_constructor =
-  "48 B8 FF FF FF FF 00 00 80 BF 66 0F EF C0 C7 87 80 10 00 00 ? ? ? ? 48 89 BF ? ? ? ? 48 C7 87 98 10 00 00 ? ? ? ? 48 C7 87 A0 10 00 00 ? ? ? ? C7 87 A8 10 00 00 ? ? ? ? 0F 11 87 ? ? ? ? 48 C7 87 C0 10 00 00 ? ? ? ? C7 87 C8 10 00 00 ? ? ? ?";
-constexpr const char* ik_context_init =
-  "55 48 89 E5 41 57 49 89 FF 41 56 49 89 CE 41 55 49 89 D5 41 54 4C 8D A7 ? ? ? ? 53 44 89 CB 48 83 EC 28 48 89 B7 ? ? ? ? 4C 89 E7 48 89 75 C0 F3 0F 11 45 CC 44 89 45 C8";
 constexpr const char* ik_context_clear_targets =
   "8B 8F ? ? ? ? 48 8D 97 ? ? ? ? 31 C0 85 C9 7E ? 0F 1F 44 00 00 C7 02 F1 D8 FF FF 83 C0 01 48 81 C2 60 01 00 00 39 87 ? ? ? ? 7F ? C3 90";
 
@@ -208,6 +194,13 @@ constexpr const char* server_base_entity_should_transmit =
   "55 48 89 E5 41 55 41 54 49 89 FC 53 48 89 F3 48 83 EC 08 E8 ? ? ? ? A8 20 75 ? A8 08 0F 85 ? ? ? ? A8 10 41 B8 10 00 00 00";
 constexpr const char* load_named_skys =
   "48 8D 05 ? ? ? ? 55 48 8D 15 ? ? ? ? 66 48 0F 6E C8 48 89 E5 41 57 48 8D 05 ? ? ? ? 41 56 66 48 0F 6E C2 41 55";
+
+constexpr const char* mvm_completed_tour_mask =
+  "55 48 89 E5 41 57 41 56 49 89 F6 41 55 49 89 D5 41 54 41 89 FC 53 48 83 EC 18 C7 06 00 00 00 00 C7 02 00 00 00 00";
+constexpr const char* protobuf_repeated_field_reserve =
+  "8B 47 10 39 F0 7D ? 55 53 48 89 FB 48 83 EC 08 83 FE 04";
+constexpr const char* protobuf_string_new_element =
+  "48 83 EC 08 BF 20 00 00 00 E8 ? ? ? ? 48 8D 50 10 48 C7 40 08 00 00 00 00 48 89 10 C6 40 10 00";
 
 }
 #endif

@@ -1,5 +1,6 @@
 #include <cstring>
 
+#include "features/automation/nographics/nographics.hpp"
 #include "features/menu/config.hpp"
 #include "games/tf2/sdk/entities/entity.hpp"
 #include "games/tf2/sdk/interfaces/entity_list.hpp"
@@ -21,7 +22,9 @@ void model_render_draw_model_execute_hook(void* me, const DrawModelState& state,
   const bool gib = (network_name != nullptr &&
     (std::strstr(network_name, "Gib") != nullptr || std::strstr(network_name, "gib") != nullptr)) ||
     (model_name != nullptr && (std::strstr(model_name, "/gibs/") != nullptr || std::strstr(model_name, "gib") != nullptr));
-  if ((config.visuals.removals.ragdolls && ragdoll) || (config.visuals.removals.gibs && gib)) {
+  const bool nographics_drop = nographics::is_enabled();
+  if (((config.visuals.removals.ragdolls || nographics_drop) && ragdoll) ||
+      ((config.visuals.removals.gibs || nographics_drop) && gib)) {
     return;
   }
 

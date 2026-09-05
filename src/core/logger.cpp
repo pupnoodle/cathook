@@ -84,7 +84,6 @@ void logger::write(const std::string_view message)
     }
 
     m_stream << message << '\n';
-    m_stream.flush();
 }
 
 void logger::write_raw(const std::string_view message)
@@ -95,7 +94,6 @@ void logger::write_raw(const std::string_view message)
     }
 
     m_stream << message;
-    m_stream.flush();
 }
 
 bool logger::is_open() const

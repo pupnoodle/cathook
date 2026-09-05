@@ -24,10 +24,27 @@ V  o o  V  file: src/games/tf2/sdk/entities/player.hpp
 #include "weapon.hpp"
 #include "core/types.hpp"
 #include "core/print.hpp"
+#include "core/shared/sigs.hpp"
+#include "libsigscan/libsigscan.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+
+namespace tf2_player_offsets {
+inline int cached_bone_data() {
+  static const int v = [] {
+    const auto* p = reinterpret_cast<const uint8_t*>(sigscan_module("client.so", "48 8B B3 ? ? ? ? 48 8D 14 52 41 BC 01 00 00"));
+    if (p) {
+      int32_t d = 0;
+      std::memcpy(&d, p + 3, sizeof(d));
+      if (d > 0x500 && d < 0x2000) return static_cast<int>(d);
+    }
+    return 0xB78;
+  }();
+  return v;
+}
+}
 
 struct user_cmd;
 #define	FL_ONGROUND (1<<0)
@@ -546,7 +563,8 @@ public:
       return false;
     }
 
-    constexpr std::uintptr_t cached_bone_data_offset = 0xB78;
+    const std::uintptr_t cached_bone_data_offset = static_cast<std::uintptr_t>(tf2_player_offsets::cached_bone_data());
+    if (cached_bone_data_offset == 0) return false;
     const auto base = reinterpret_cast<std::uintptr_t>(this);
     const auto* cached = reinterpret_cast<const CUtlVector<matrix_3x4>*>(
       base + cached_bone_data_offset);
@@ -914,11 +932,15 @@ public:
   }
 
   int get_flags(void) {
-    return *(int*)(this + 0x460);
+    static const int off = tf2_netvars::find_offset("DT_BaseEntity", {"m_fFlags"});
+    const int use = off ? off : 0x460;
+    return *reinterpret_cast<int*>(reinterpret_cast<std::uintptr_t>(this) + static_cast<std::uintptr_t>(use));
   }
 
   void set_flags(int flags) {
-    *(int*)(this + 0x460) = flags;
+    static const int off = tf2_netvars::find_offset("DT_BaseEntity", {"m_fFlags"});
+    const int use = off ? off : 0x460;
+    *reinterpret_cast<int*>(reinterpret_cast<std::uintptr_t>(this) + static_cast<std::uintptr_t>(use)) = flags;
   }
 
   Vec3 get_velocity(void) {

@@ -85,6 +85,8 @@ bool (*in_cond_original)(void*, int) = nullptr;
 #include "features/combat/tickbase/tickbase.cpp"
 #include "features/combat/anti_aim/anti_aim.cpp"
 #include "features/combat/random_crits/crit_hack.cpp"
+#include "features/combat/auto_detonate/auto_detonate.cpp"
+#include "features/combat/auto_reflect/auto_reflect.cpp"
 #include "core/hooks/ctf_weapon_base_calc_is_attack_critical.cpp"
 #include "core/hooks/cl_process_packet_entities.cpp"
 #include "core/hooks/cl_read_packets.cpp"
@@ -132,6 +134,10 @@ bool (*in_cond_original)(void*, int) = nullptr;
 #include "features/automation/region_selector/region_selector.cpp"
 #include "features/automation/autoitem/autoitem.cpp"
 #include "features/automation/misc/misc.cpp"
+#include "features/automation/mvm_queue/mvm_queue.cpp"
+#if defined(CATHOOK_WITH_PROFILE_STALKER) && CATHOOK_WITH_PROFILE_STALKER
+#include "features/automation/profile_stalker/profile_stalker.cpp"
+#endif
 #include "features/automation/navbot/navbot_controller.cpp"
 #include "features/visuals/hitmarker.cpp"
 #include "features/visuals/spectator_list.cpp"

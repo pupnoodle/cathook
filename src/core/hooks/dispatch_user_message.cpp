@@ -10,6 +10,7 @@ V  o o  V  file: src/core/hooks/dispatch_user_message.cpp
 */
 #include "games/tf2/sdk/bitbuf.hpp"
 #include "features/automation/misc/misc.hpp"
+#include "features/automation/nographics/nographics.hpp"
 #include "features/menu/config.hpp"
 #include "games/tf2/sdk/interfaces/engine.hpp"
 #include <cstring>
@@ -53,6 +54,14 @@ void close_welcome_menu()
 bool dispatch_user_message_hook(void* me, int message_type, bf_read* message_data) {
   CATHOOK_HOOK_GUARD();
   automation::controller().on_dispatch_user_message(message_type, message_data);
+  if (nographics::is_enabled() &&
+      (message_type == shake_user_message_type || message_type == fade_user_message_type ||
+       message_type == rumble_user_message_type || message_type == spawn_flying_bird_user_message_type ||
+       message_type == player_god_ray_effect_user_message_type ||
+       message_type == player_taunt_sound_loop_start_user_message_type ||
+       message_type == player_taunt_sound_loop_end_user_message_type)) {
+    return true;
+  }
   const bool dont_close_motd =
       config.misc.automation.anti_motd_dont_close_during_warmup && automation::controller().is_setup_time();
   if (config.misc.automation.anti_motd && !dont_close_motd && message_type == vgui_menu_user_message_type && is_vgui_info_menu(message_data)) {

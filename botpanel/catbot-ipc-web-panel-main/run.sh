@@ -23,6 +23,11 @@ if [ -x "$ipc_setup" ]; then
 		echo "[ipc] automatic server setup failed; continuing with panel startup" >>"$log_path"
 fi
 
+if [ ! -f public/bundle.js ] || [ script.js -nt public/bundle.js ] || [ steam_id.js -nt public/bundle.js ]; then
+    "$node_path" node_modules/browserify/bin/cmd.js script.js -o public/bundle.js.tmp || exit 1
+    mv -f public/bundle.js.tmp public/bundle.js || exit 1
+fi
+
 stopping=0
 child_pid=""
 

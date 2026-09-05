@@ -29,6 +29,7 @@ enum class_id {
   PLAYER = 247,
   PLAYER_RESOURCE = 249,
   ROCKET = 264,
+  SENTRY_ROCKET = 271,
   PILL_OR_STICKY = 217,
   FLARE = 257,
   CROSSBOW_BOLT = 259,
@@ -247,7 +248,7 @@ public:
     }
 
     void** vtable = *reinterpret_cast<void***>(renderable);
-    constexpr std::size_t setup_bones_index = 13;
+    constexpr std::size_t setup_bones_index = 16;
     if (vtable == nullptr || vtable[setup_bones_index] == nullptr) {
       return false;
     }

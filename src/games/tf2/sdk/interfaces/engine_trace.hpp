@@ -199,7 +199,7 @@ inline bool hitscan_trace_should_hit_entity(struct trace_filter* interface, Enti
     return false;
   }
   if (interface != nullptr && trace_filter_same_entity(entity, interface->target)) {
-    return true;
+    return !interface->ignore_target;
   }
 
   const class_id cid = entity->get_class_id();

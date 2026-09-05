@@ -866,6 +866,12 @@ struct Misc {
     std::string auto_item_primary = "-1";
     std::string auto_item_secondary = "-1";
     std::string auto_item_melee = "-1";
+    bool auto_item_equipment = false;
+    std::string auto_item_building;
+    std::string auto_item_pda;
+    std::string auto_item_pda2;
+    std::string auto_item_action;
+    std::string auto_item_taunt;
     bool auto_item_hats = false;
     std::string auto_item_hat1 = "940";
     std::string auto_item_hat2 = "941";
@@ -929,6 +935,12 @@ struct Misc {
     bool region_selector = false;
 
     std::uint64_t region_selector_allowed_mask = 0xe0995ff6c3feull;
+    int mvm_tour_index = 0;
+    bool mvm_uncompleted_only = false;
+    bool bootcamp_enabled = false;
+    std::uint32_t bootcamp_mission_bits = 0;
+    bool stalker_enabled = false;
+    int stalker_interval = 15;
     bool navbot_enabled = false;
     navbot_mode navbot_behavior = navbot_mode::DEFAULT;
     bool navbot_draw_path = true;
@@ -986,6 +998,29 @@ struct crit_hack_config {
   bool avoid_random = false;
 };
 
+struct auto_detonate_config {
+  bool stickies = false;
+  bool flares = false;
+  bool buildings = true;
+  bool ignore_cloaked = true;
+  bool dont_blow_me_up = true;
+  float sticky_radius = 140.0f;
+  float flare_radius = 150.0f;
+};
+
+struct auto_reflect_config {
+  bool enabled = false;
+  bool rockets = true;
+  bool sentry_rockets = true;
+  bool pipes = true;
+  bool stickies = false;
+  bool flares = false;
+  bool arrows = false;
+  bool burning_teammates = false;
+  float range = 165.0f;
+  float fov_limit = 0.0f;
+};
+
 struct Config {
   Aim aimbot;
   backtrack_config backtrack;
@@ -995,6 +1030,8 @@ struct Config {
   Misc misc;
   Debug debug;
   crit_hack_config crithack;
+  auto_detonate_config auto_detonate;
+  auto_reflect_config auto_reflect;
 };
 #if defined(__GNUC__) || defined(__clang__)
 #define cathook_EARLY_INIT __attribute__((init_priority(101)))

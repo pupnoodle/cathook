@@ -50,7 +50,7 @@ a:visited {
 
 #footer {
     position: static;
-    bottom: 16;
+    bottom: 16px;
     left: 0;
     width: 100%;
 }
@@ -396,4 +396,16 @@ input[type="number"]::-webkit-outer-spin-button {
     border-top: 1px solid #282f22;
     border-left: 1px solid #282f22;
     background: #3f4737;
+}
+
+#table-container {
+    max-height: 70vh;
+    overflow: auto;
+}
+
+#clients tr:first-child td {
+    position: sticky;
+    top: 0;
+    background: #4d5844;
+    z-index: 1;
 }

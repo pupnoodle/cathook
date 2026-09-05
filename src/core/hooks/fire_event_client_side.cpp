@@ -66,6 +66,7 @@ bool fire_event_client_side_hook(void* me, GameEvent* event) {
   if (event_name == "weapon_fire" || event_name == "player_shoot") {
     Player* shooter = entity_list->get_player_from_id(event->get_int("userid"));
     backtrack::report_shot(shooter);
+    resolver::on_local_weapon_fire(shooter);
     aimbot::on_weapon_fire(shooter);
   }
 

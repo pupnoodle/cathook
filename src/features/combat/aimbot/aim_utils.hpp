@@ -30,12 +30,48 @@ V  o o  V  file: src/features/combat/aimbot/aim_utils.hpp
 #include "games/tf2/sdk/entities/player.hpp"
 #include "games/tf2/sdk/entities/building.hpp"
 #include "games/tf2/sdk/aim_hitboxes.hpp"
+#include "games/tf2/sdk/netvars.hpp"
 #include "games/tf2/sdk/interfaces/attribute_manager.hpp"
 #include "games/tf2/sdk/interfaces/convar_system.hpp"
 #include "games/tf2/sdk/interfaces/client.hpp"
 #include "games/tf2/sdk/interfaces/engine.hpp"
 #include "games/tf2/sdk/interfaces/engine_trace.hpp"
 #include "games/tf2/sdk/interfaces/global_vars.hpp"
+#include "features/combat/backtrack/backtrack.hpp"
+
+namespace aimbot_offsets {
+
+namespace detail {
+inline int extract_disp(const void* p) {
+  int32_t v = 0;
+  std::memcpy(&v, p, sizeof(v));
+  return static_cast<int>(v);
+}
+inline const uint8_t* scan(const char* pat) {
+  return reinterpret_cast<const uint8_t*>(sigscan_module("client.so", pat));
+}
+}
+
+inline int bone_cache_handle() {
+  static const int v = [] {
+    if (auto* p = detail::scan("55 48 89 E5 41 56 49 89 F6 41 55 49 89 FD 41 54 53 48 83 EC 20 48 8B BF ? ? ? ?")) {
+      int d = detail::extract_disp(p + 24);
+      if (d > 0x500 && d < 0x2000) return d;
+    }
+    return 0xB98;
+  }();
+  return v;
+}
+
+inline int ik_context() {
+  static const int offset = [] {
+    const std::uint8_t* instruction = detail::scan("F3 0F 10 83 ? ? ? ? 0F 2F 05 ? ? ? ? 4C 8B 83 ? ? ? ? 72");
+    return instruction != nullptr ? detail::extract_disp(instruction + 18) : 0;
+  }();
+  return offset;
+}
+
+}
 
 struct aimbot_candidate {
   Entity* entity = nullptr;
@@ -198,6 +234,7 @@ inline bool aimbot_current_pose_signature_matches(const aimbot_current_pose& pos
                                                   std::uint64_t pose_parameter_hash,
                                                   float setup_time) {
   return pose.valid && pose.player == target && pose.model == model &&
+    pose.debug.target_handle == target->get_ref_handle() &&
     global_vars != nullptr && pose.render_frame == global_vars->framecount &&
     pose.simulation_time == simulation_time &&
     std::memcmp(&pose.network_origin, &network_origin, sizeof(Vec3)) == 0 &&
@@ -233,20 +270,6 @@ inline bool aimbot_copy_cached_bones(Player* target, matrix_3x4* bone_to_world, 
   }
 
   return target->copy_cached_bones(bone_to_world, aimbot_max_bones, bone_count_out);
-}
-
-inline std::uint64_t aimbot_model_bone_counter() {
-  static const auto* counter = []() -> const std::uint64_t* {
-    const auto* instruction = reinterpret_cast<const std::uint8_t*>(
-      sigscan_module("client.so", sigs::base_animating_invalidate_bone_cache));
-    if (instruction == nullptr) {
-      return nullptr;
-    }
-    std::int32_t displacement = 0;
-    std::memcpy(&displacement, instruction + 3, sizeof(displacement));
-    return reinterpret_cast<const std::uint64_t*>(instruction + 7 + displacement);
-  }();
-  return counter != nullptr ? *counter : 0;
 }
 
 inline bool aimbot_invalidate_bone_cache(Player* target) {
@@ -289,7 +312,8 @@ inline bool aimbot_update_engine_bone_cache(Player* target,
     return false;
   }
 
-  constexpr std::uintptr_t bone_cache_handle_offset = 0xB98;
+  const std::uintptr_t bone_cache_handle_offset = static_cast<std::uintptr_t>(aimbot_offsets::bone_cache_handle());
+  if (bone_cache_handle_offset == 0) return false;
   const std::uintptr_t handle = *reinterpret_cast<const std::uintptr_t*>(
     reinterpret_cast<std::uintptr_t>(target) + bone_cache_handle_offset);
   aimbot_bone_cache_debug.cache_handle = handle;
@@ -307,34 +331,35 @@ inline bool aimbot_update_engine_bone_cache(Player* target,
   return true;
 }
 
-inline bool aimbot_ensure_studio_header(Player* target) {
-  if (target == nullptr) {
-    return false;
-  }
+namespace aimbot_anim_detail {
 
-  using lock_studio_hdr_fn = void (*)(void*);
-  static const auto lock_studio_hdr = reinterpret_cast<lock_studio_hdr_fn>(
-    sigscan_module("client.so", sigs::base_animating_lock_studio_hdr));
-  if (lock_studio_hdr == nullptr) {
-    return false;
-  }
+constexpr int anim_slot_count = 65;
+inline Player* slot_player[anim_slot_count]{};
+inline unsigned int slot_handle[anim_slot_count]{};
+inline const model_t* slot_model[anim_slot_count]{};
+inline float slot_simtime[anim_slot_count]{};
 
-  lock_studio_hdr(target);
-  constexpr std::uintptr_t studio_hdr_offset = 0xBE8;
-  return *reinterpret_cast<void**>(reinterpret_cast<std::uintptr_t>(target) + studio_hdr_offset) != nullptr;
+inline void reset(Player* target) {
+  const int index = target != nullptr ? target->get_index() : -1;
+  if (index > 0 && index < anim_slot_count) {
+    slot_player[index] = nullptr;
+    slot_simtime[index] = 0.0f;
+  }
 }
 
-inline bool aimbot_sequence_is_valid(Player* target) {
-  if (target == nullptr) {
-    return false;
-  }
-
-  constexpr std::uintptr_t sequence_offset = 0xB00;
-  return *reinterpret_cast<int*>(reinterpret_cast<std::uintptr_t>(target) + sequence_offset) != -1;
 }
 
 inline bool aimbot_update_client_side_animation(Player* target) {
-  if (target == nullptr) {
+  if (target == nullptr || global_vars == nullptr || target->is_dormant() || !target->is_alive()) {
+    return false;
+  }
+
+  const int index = target->get_index();
+  const float sim_time = target->get_simulation_time();
+  const float tick_interval = global_vars->interval_per_tick;
+  static const int anim_time_offset = tf2_netvars::find_offset("DT_BaseEntity", {"m_flAnimTime"});
+  if (index <= 0 || index >= aimbot_anim_detail::anim_slot_count || anim_time_offset <= 0 ||
+      !std::isfinite(sim_time) || sim_time <= 0.0f || tick_interval <= 0.0f) {
     return false;
   }
 
@@ -345,204 +370,26 @@ inline bool aimbot_update_client_side_animation(Player* target) {
     return false;
   }
 
+  const bool same_identity = aimbot_anim_detail::slot_player[index] == target &&
+    aimbot_anim_detail::slot_handle[index] == target->get_ref_handle() &&
+    aimbot_anim_detail::slot_model[index] == target->get_model();
+  const float elapsed = same_identity ? sim_time - aimbot_anim_detail::slot_simtime[index] : 0.0f;
+  const float interval = elapsed > 0.0f && elapsed <= tick_interval * 16.0f ? elapsed : 0.0f;
+  auto* anim_time = reinterpret_cast<float*>(reinterpret_cast<std::uint8_t*>(target) + anim_time_offset);
+  const float saved_anim_time = *anim_time;
+  const float saved_curtime = global_vars->curtime;
+  const float saved_frametime = global_vars->frametime;
+  global_vars->curtime = sim_time;
+  global_vars->frametime = interval;
+  *anim_time = sim_time - interval;
   reinterpret_cast<update_client_side_animation_fn>(vtable[update_client_side_animation_index])(target);
-  return true;
-}
-
-struct aimbot_quaternion {
-  float x;
-  float y;
-  float z;
-  float w;
-};
-
-struct aimbot_bone_bit_list {
-  std::uint32_t bits[4]{};
-};
-
-inline void aimbot_make_angle_matrix(const Vec3& angles, const Vec3& origin, matrix_3x4& output) {
-  constexpr float degrees_to_radians = 0.01745329251994329577f;
-  const float pitch = angles.x * degrees_to_radians;
-  const float yaw = angles.y * degrees_to_radians;
-  const float roll = angles.z * degrees_to_radians;
-  const float sp = std::sin(pitch);
-  const float cp = std::cos(pitch);
-  const float sy = std::sin(yaw);
-  const float cy = std::cos(yaw);
-  const float sr = std::sin(roll);
-  const float cr = std::cos(roll);
-
-  output.mat[0][0] = cp * cy;
-  output.mat[1][0] = cp * sy;
-  output.mat[2][0] = -sp;
-  output.mat[0][1] = (sr * sp * cy) - (cr * sy);
-  output.mat[1][1] = (sr * sp * sy) + (cr * cy);
-  output.mat[2][1] = sr * cp;
-  output.mat[0][2] = (cr * sp * cy) + (sr * sy);
-  output.mat[1][2] = (cr * sp * sy) - (sr * cy);
-  output.mat[2][2] = cr * cp;
-  output.mat[0][3] = origin.x;
-  output.mat[1][3] = origin.y;
-  output.mat[2][3] = origin.z;
-}
-
-inline bool aimbot_reconstruct_bones(Player* target,
-                                     matrix_3x4* bone_to_world,
-                                     int bone_count,
-                                     float current_time,
-                                     int pose_frame,
-                                     const Vec3& network_origin,
-                                     bool clear_ik_targets) {
-  if (target == nullptr || bone_to_world == nullptr || bone_count <= 0 ||
-      bone_count > aimbot_max_bones || !std::isfinite(current_time)) {
-    return false;
-  }
-
-  using render_state_fn = const Vec3& (*)(void*);
-  using get_skeleton_fn = void (*)(void*, void*, Vec3*, aimbot_quaternion*, int, float);
-  using build_transformations_fn = void (*)(void*, void*, Vec3*, aimbot_quaternion*,
-                                             const matrix_3x4&, int, aimbot_bone_bit_list*);
-  using bone_accessor_fn = void (*)(void*, int);
-  using ik_stage_fn = void (*)(void*, Vec3*, aimbot_quaternion*, void*, aimbot_bone_bit_list*);
-  using ik_lock_fn = void (*)(void*, float);
-  using ik_constructor_fn = void (*)(void*);
-  using ik_init_fn = void (*)(void*, void*, const Vec3*, const Vec3*, float, int, int);
-  using ik_clear_targets_fn = void (*)(void*);
-  using post_transform_fn = void (*)(void*, void*);
-  using attachment_helper_fn = bool (*)(void*, void*);
-
-  static const auto enable_bone_accessor = reinterpret_cast<bone_accessor_fn>(
-    sigscan_module("client.so", sigs::base_animating_bone_accessor_enable));
-  static const auto disable_bone_accessor = reinterpret_cast<bone_accessor_fn>(
-    sigscan_module("client.so", sigs::base_animating_bone_accessor_disable));
-  static const auto setup_bones_attachment_helper = reinterpret_cast<attachment_helper_fn>(
-    sigscan_module("client.so", sigs::base_animating_setup_bones_attachment_helper));
-  static const auto ik_update_targets = reinterpret_cast<ik_stage_fn>(
-    sigscan_module("client.so", sigs::ik_context_update_targets));
-  static const auto ik_solve_dependencies = reinterpret_cast<ik_stage_fn>(
-    sigscan_module("client.so", sigs::ik_context_solve_dependencies));
-  static const auto ik_init = reinterpret_cast<ik_init_fn>(
-    sigscan_module("client.so", sigs::ik_context_init));
-  static const auto ik_clear_targets = reinterpret_cast<ik_clear_targets_fn>(
-    sigscan_module("client.so", sigs::ik_context_clear_targets));
-  if (enable_bone_accessor == nullptr || disable_bone_accessor == nullptr ||
-      setup_bones_attachment_helper == nullptr || ik_update_targets == nullptr ||
-      ik_solve_dependencies == nullptr || ik_init == nullptr || ik_clear_targets == nullptr) {
-    return false;
-  }
-
-  void** vtable = *reinterpret_cast<void***>(target);
-  constexpr std::size_t render_angles_index = 47;
-  constexpr std::size_t get_skeleton_index = 241;
-  constexpr std::size_t build_transformations_index = 227;
-  constexpr std::size_t update_ik_locks_index = 229;
-  constexpr std::size_t calculate_ik_locks_index = 230;
-  constexpr std::size_t post_transform_index = 235;
-  if (vtable == nullptr || vtable[render_angles_index] == nullptr ||
-      vtable[get_skeleton_index] == nullptr || vtable[build_transformations_index] == nullptr ||
-      vtable[update_ik_locks_index] == nullptr || vtable[calculate_ik_locks_index] == nullptr ||
-      vtable[post_transform_index] == nullptr) {
-    return false;
-  }
-
-  const auto get_render_angles = reinterpret_cast<render_state_fn>(vtable[render_angles_index]);
-  const auto get_skeleton = reinterpret_cast<get_skeleton_fn>(vtable[get_skeleton_index]);
-  const auto build_transformations = reinterpret_cast<build_transformations_fn>(vtable[build_transformations_index]);
-  const auto update_ik_locks = reinterpret_cast<ik_lock_fn>(vtable[update_ik_locks_index]);
-  const auto calculate_ik_locks = reinterpret_cast<ik_lock_fn>(vtable[calculate_ik_locks_index]);
-  const auto post_transform = reinterpret_cast<post_transform_fn>(vtable[post_transform_index]);
-
-  constexpr std::uintptr_t studio_hdr_offset = 0xBE8;
-  void* studio_header = *reinterpret_cast<void**>(reinterpret_cast<std::uintptr_t>(target) + studio_hdr_offset);
-  if (studio_header == nullptr) {
-    return false;
-  }
-
-  const Vec3 root_origin = network_origin;
-  const Vec3 ik_angles = get_render_angles(target);
-  if (!aimbot_vec3_is_finite(root_origin) || !aimbot_vec3_is_finite(ik_angles)) {
-    return false;
-  }
-
-  Vec3 root_angles = ik_angles;
-  root_angles.x = 0.0f;
-  root_angles.z = 0.0f;
-
-  matrix_3x4 root_transform{};
-  aimbot_make_angle_matrix(root_angles, root_origin, root_transform);
-  Vec3 positions[aimbot_max_bones]{};
-  aimbot_quaternion rotations[aimbot_max_bones]{};
-  aimbot_bone_bit_list computed{};
-
-  constexpr std::uintptr_t previous_bone_mask_offset = 0x830;
-  constexpr std::uintptr_t accumulated_bone_mask_offset = 0x834;
-  constexpr std::uintptr_t readable_bone_mask_offset = 0x848;
-  constexpr std::uintptr_t writable_bone_mask_offset = 0x84C;
-  constexpr std::uintptr_t last_bone_setup_time_offset = 0xBA0;
-  constexpr std::uintptr_t model_bone_counter_offset = 0x820;
-  auto* const target_bytes = reinterpret_cast<std::uint8_t*>(target);
-  const std::uint64_t model_bone_counter = aimbot_model_bone_counter();
-  if (model_bone_counter == 0) {
-    return false;
-  }
-  const std::uint32_t previous_accumulated_mask =
-    *reinterpret_cast<std::uint32_t*>(target_bytes + accumulated_bone_mask_offset);
-  *reinterpret_cast<std::uint64_t*>(target_bytes + readable_bone_mask_offset) = 0;
-  *reinterpret_cast<float*>(target_bytes + last_bone_setup_time_offset) = current_time;
-  *reinterpret_cast<std::uint32_t*>(target_bytes + previous_bone_mask_offset) = previous_accumulated_mask;
-  *reinterpret_cast<std::uint32_t*>(target_bytes + accumulated_bone_mask_offset) = 0;
-  *reinterpret_cast<std::uint32_t*>(target_bytes + accumulated_bone_mask_offset) |= aimbot_bone_mask;
-  const std::uint32_t available_mask = previous_accumulated_mask | aimbot_bone_mask;
-  *reinterpret_cast<std::uint32_t*>(target_bytes + readable_bone_mask_offset) = available_mask;
-  *reinterpret_cast<std::uint32_t*>(target_bytes + writable_bone_mask_offset) = available_mask;
-  *reinterpret_cast<std::uint64_t*>(target_bytes + model_bone_counter_offset) = model_bone_counter;
-
-  enable_bone_accessor(target, 8);
-  constexpr std::uintptr_t entity_flags_offset = 0x460;
-  constexpr std::uint32_t setting_up_bones_flag = 1u << 3;
-  auto* const entity_flags = reinterpret_cast<std::uint32_t*>(target_bytes + entity_flags_offset);
-  const std::uint32_t saved_entity_flags = *entity_flags;
-  *entity_flags = saved_entity_flags | setting_up_bones_flag;
-  constexpr std::uintptr_t ik_context_offset = 0x7F0;
-  constexpr std::uintptr_t bone_accessor_offset = 0x840;
-
-  void* const ik_context = *reinterpret_cast<void**>(target_bytes + ik_context_offset);
-  if (ik_context != nullptr && clear_ik_targets) {
-    ik_clear_targets(ik_context);
-  }
-  if (ik_context != nullptr) {
-    ik_init(ik_context, studio_header, &ik_angles, &root_origin,
-      current_time, pose_frame, available_mask);
-  }
-
-  get_skeleton(target, studio_header, positions, rotations, available_mask, current_time);
-  void* const bone_array = *reinterpret_cast<void**>(target_bytes + bone_accessor_offset);
-  if (bone_array == nullptr) {
-    *entity_flags = saved_entity_flags;
-    disable_bone_accessor(target, 8);
-    return false;
-  }
-  if (ik_context != nullptr) {
-    update_ik_locks(target, current_time);
-    ik_update_targets(ik_context, positions, rotations, bone_array, &computed);
-    calculate_ik_locks(target, current_time);
-    ik_solve_dependencies(ik_context, positions, rotations, bone_array, &computed);
-  }
-  build_transformations(target, studio_header, positions, rotations, root_transform, available_mask, &computed);
-  *entity_flags = saved_entity_flags;
-  disable_bone_accessor(target, 8);
-
-  post_transform(target, studio_header);
-
-  if (!setup_bones_attachment_helper(target, studio_header)) {
-    return false;
-  }
-
-  int reconstructed_count = 0;
-  if (!target->copy_cached_bones(bone_to_world, aimbot_max_bones, &reconstructed_count) ||
-      reconstructed_count < bone_count || !aimbot_bones_are_finite(bone_to_world, bone_count)) {
-    return false;
-  }
+  *anim_time = saved_anim_time;
+  global_vars->frametime = saved_frametime;
+  global_vars->curtime = saved_curtime;
+  aimbot_anim_detail::slot_player[index] = target;
+  aimbot_anim_detail::slot_handle[index] = target->get_ref_handle();
+  aimbot_anim_detail::slot_model[index] = target->get_model();
+  aimbot_anim_detail::slot_simtime[index] = sim_time;
   return true;
 }
 
@@ -590,7 +437,7 @@ inline bool aimbot_setup_bones_at_time(Player* target,
   int pose_frame,
   const Vec3& network_origin,
   bool clear_ik_targets,
-  bool = false,
+  bool animation_already_updated = false,
   int* bone_count_out = nullptr) {
   aimbot_bone_failure = aimbot_reject_reason::none;
   aimbot_bone_cache_debug = {};
@@ -616,13 +463,8 @@ inline bool aimbot_setup_bones_at_time(Player* target,
     return false;
   }
 
-  if (!aimbot_ensure_studio_header(target)) {
-    aimbot_bone_failure = aimbot_reject_reason::bone_studio_header;
-    return false;
-  }
-
-  if (!aimbot_sequence_is_valid(target)) {
-    aimbot_bone_failure = aimbot_reject_reason::bone_sequence;
+  if (!animation_already_updated && !aimbot_update_client_side_animation(target)) {
+    aimbot_bone_failure = aimbot_reject_reason::bone_reconstruction;
     return false;
   }
 
@@ -632,9 +474,40 @@ inline bool aimbot_setup_bones_at_time(Player* target,
     return false;
   }
 
-  if (!aimbot_reconstruct_bones(target, bone_to_world, setup_bone_count, setup_time,
-      pose_frame, network_origin, clear_ik_targets) ||
-      !aimbot_bones_are_finite(bone_to_world, setup_bone_count)) {
+  aimbot_bone_access_guard access;
+  if (!access.active() || global_vars == nullptr || !aimbot_vec3_is_finite(network_origin) ||
+      !aimbot_invalidate_bone_cache(target)) {
+    aimbot_bone_failure = aimbot_reject_reason::bone_reconstruction;
+    return false;
+  }
+
+  if (clear_ik_targets) {
+    using clear_targets_fn = void (*)(void*);
+    static const auto clear_targets = reinterpret_cast<clear_targets_fn>(
+      sigscan_module("client.so", sigs::ik_context_clear_targets));
+    const int offset = aimbot_offsets::ik_context();
+    if (offset == 0 || clear_targets == nullptr) {
+      aimbot_bone_failure = aimbot_reject_reason::bone_reconstruction;
+      return false;
+    }
+    void* context = *reinterpret_cast<void**>(reinterpret_cast<std::uint8_t*>(target) + offset);
+    if (context != nullptr) {
+      clear_targets(context);
+    }
+  }
+
+  const Vec3 saved_origin = target->get_abs_origin();
+  const float saved_curtime = global_vars->curtime;
+  const int saved_framecount = global_vars->framecount;
+  target->set_abs_origin(network_origin);
+  global_vars->curtime = setup_time;
+  global_vars->framecount = pose_frame;
+  const bool built = target->setup_bones(bone_to_world, aimbot_max_bones, aimbot_bone_mask, setup_time);
+  global_vars->framecount = saved_framecount;
+  global_vars->curtime = saved_curtime;
+  target->set_abs_origin(saved_origin);
+  aimbot_invalidate_bone_cache(target);
+  if (!built || !aimbot_bones_are_finite(bone_to_world, setup_bone_count)) {
     aimbot_bone_failure = aimbot_reject_reason::bone_reconstruction;
     return false;
   }
@@ -690,7 +563,8 @@ inline void aimbot_capture_latest_network_pose(Player* target,
     return;
   }
 
-  const bool same_identity = pose.player == target && pose.model == model;
+  const bool same_identity = pose.player == target && pose.model == model &&
+    pose.debug.target_handle == target->get_ref_handle();
   const float sample_gap = same_identity ? simulation_time - pose.simulation_time : FLT_MAX;
   const float origin_delta_sq = same_identity
     ? aimbot_distance_squared(pose.network_origin, network_origin)
@@ -2522,7 +2396,9 @@ inline aimbot_player_skip_reason aimbot_player_skip_reason_for(
   Player* localplayer, Player* player, Weapon* weapon = nullptr) {
   if (localplayer == nullptr || player == nullptr) return aimbot_player_skip_reason::invalid;
   if (player == localplayer) return aimbot_player_skip_reason::local;
-  if (player->is_dormant()) return aimbot_player_skip_reason::dormant;
+  if (player->is_dormant()) {
+    if (!backtrack::dormant_can_shoot(player)) return aimbot_player_skip_reason::dormant;
+  }
   if (!player->is_alive()) return aimbot_player_skip_reason::dead;
   if (aimbot_ignore_enabled(Aim::ignore_invulnerable) && player->is_invulnerable()) return aimbot_player_skip_reason::invulnerable;
   if (player->is_ignored()) return aimbot_player_skip_reason::ignored;
@@ -2541,14 +2417,14 @@ inline aimbot_player_skip_reason aimbot_player_skip_reason_for(
   if (aimbot_ignore_enabled(Aim::ignore_disguised) && player->is_disguised()) return aimbot_player_skip_reason::ignored;
   if (aimbot_ignore_enabled(Aim::ignore_taunting) && player->is_taunting()) return aimbot_player_skip_reason::ignored;
   if (aimbot_ignore_enabled(Aim::ignore_sentry_busters) && player->is_sentry_buster()) return aimbot_player_skip_reason::ignored;
-  if (aimbot_ignore_enabled(Aim::ignore_unsimulated) && global_vars != nullptr &&
+  if (false && aimbot_ignore_enabled(Aim::ignore_unsimulated) && global_vars != nullptr &&
       config.aimbot.ignore_unsimulated_ticks > 0 && global_vars->interval_per_tick > 0.0f &&
       global_vars->curtime - player->get_simulation_time() >
         global_vars->interval_per_tick * static_cast<float>(config.aimbot.ignore_unsimulated_ticks)) {
     return aimbot_player_skip_reason::ignored;
   }
   player_info pinfo{};
-  if (aimbot_ignore_enabled(Aim::ignore_ipc_bots) &&
+  if (false && aimbot_ignore_enabled(Aim::ignore_ipc_bots) &&
       engine != nullptr &&
       engine->get_player_info(player->get_index(), &pinfo) &&
       pinfo.friends_id != 0 &&
@@ -2558,7 +2434,8 @@ inline aimbot_player_skip_reason aimbot_player_skip_reason_for(
   }
   if (player->get_team() == localplayer->get_team() &&
       (!aimbot_is_friendlyfire_enabled() || aimbot_ignore_enabled(Aim::ignore_team)) &&
-      !aimbot_should_extinguish_team(localplayer, player, weapon)) return aimbot_player_skip_reason::team;
+      !aimbot_should_extinguish_team(localplayer, player, weapon) &&
+      !(weapon != nullptr && weapon->get_weapon_id() == TF_WEAPON_CROSSBOW && player->get_health() < player->get_max_health())) return aimbot_player_skip_reason::team;
   if (!aimbot_should_target_player_type(player)) return aimbot_player_skip_reason::type;
   return aimbot_player_skip_reason::none;
 }
@@ -2568,7 +2445,13 @@ inline aimbot_player_skip_reason aimbot_player_skip_reason_for(
   Player* player = entry.player;
   if (localplayer == nullptr || player == nullptr) return aimbot_player_skip_reason::invalid;
   if (player == localplayer) return aimbot_player_skip_reason::local;
-  if (entry.dormant) return aimbot_player_skip_reason::dormant;
+  if (entry.dormant) {
+    if (player->is_dormant()) {
+      if (!backtrack::dormant_can_shoot(player)) return aimbot_player_skip_reason::dormant;
+    } else {
+      return aimbot_player_skip_reason::dormant;
+    }
+  }
   if (!entry.alive) return aimbot_player_skip_reason::dead;
   if (aimbot_ignore_enabled(Aim::ignore_invulnerable) && player->is_invulnerable()) return aimbot_player_skip_reason::invulnerable;
   if (entry.ignored) return aimbot_player_skip_reason::ignored;

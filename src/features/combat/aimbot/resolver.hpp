@@ -6,10 +6,14 @@
 #include <cfloat>
 #include <cstdint>
 #include <cstring>
+#include <unordered_map>
 #include "aim_utils.hpp"
 #include "core/entity_cache.hpp"
 #include "core/shared/sigs.hpp"
 #include "games/tf2/sdk/netvars.hpp"
+#include "games/tf2/sdk/interfaces/client_state.hpp"
+#include "games/tf2/sdk/interfaces/engine.hpp"
+#include "games/tf2/sdk/interfaces/net_channel.hpp"
 #include "libsigscan/libsigscan.h"
 
 namespace resolver
@@ -23,7 +27,21 @@ constexpr int max_pose_parameters = 24;
 
 constexpr std::uintptr_t anim_state_gait_yaw_offset = 100;
 constexpr std::uintptr_t anim_state_eye_yaw_offset = 140;
+constexpr std::uintptr_t anim_state_eye_yaw_offset_ctf = 60;
 constexpr std::uintptr_t anim_state_eye_pitch_offset = 144;
+
+struct resolver_settings {
+  bool auto_brute = false;
+  float yaw_step_degrees = 90.0f;
+  float brute_latency_scale = 1.5f;
+  float brute_grace_seconds = 0.1f;
+  bool sniper_dot_pitch = true;
+  bool pitch_fold_recovery = true;
+  bool minwalk_breaker = true;
+};
+
+inline resolver_settings settings{};
+inline std::unordered_map<int, float> g_userid_yaw_offsets{};
 
 struct anim_state_snapshot {
   bool valid = false;
@@ -115,6 +133,12 @@ struct player_resolver_state {
   int yaw_candidates = 0;
   float selected_yaw = 0.0f;
   float selected_pitch = 0.0f;
+  float yaw_offset = 0.0f;
+  bool inverse_pitch = false;
+  bool minwalk = false;
+  bool brute_armed = false;
+  float brute_deadline = 0.0f;
+  int user_id = 0;
   resolver_mode mode = resolver_mode::unknown;
   pending_shot shot{};
 };
@@ -175,6 +199,69 @@ inline std::array<player_resolver_state, max_entities> g_resolver_state{};
 [[nodiscard]] inline float speed_2d(const Vec3& value)
 {
   return std::sqrt((value.x * value.x) + (value.y * value.y));
+}
+
+constexpr int flow_outgoing = 0;
+
+[[nodiscard]] inline float outgoing_latency_seconds()
+{
+  net_channel* channel = client_state != nullptr ? client_state->m_NetChannel : nullptr;
+  return channel != nullptr ? std::clamp(channel->get_latency(flow_outgoing), 0.0f, 10.0f) : 0.0f;
+}
+
+inline void apply_yaw_offset(player_resolver_state* state, float* yaw)
+{
+  if (state == nullptr || yaw == nullptr || !settings.auto_brute) {
+    return;
+  }
+  *yaw = normalize_yaw(*yaw + state->yaw_offset);
+}
+
+inline void apply_pitch_flags(const player_resolver_state* state, float* pitch)
+{
+  if (state == nullptr || pitch == nullptr) {
+    return;
+  }
+  if (state->inverse_pitch) {
+    *pitch = clamp_pitch(-*pitch);
+  }
+}
+
+[[nodiscard]] inline bool minwalk_active(Player* player)
+{
+  if (!settings.minwalk_breaker || player == nullptr || !player->is_alive() || !player->is_on_ground()) {
+    return false;
+  }
+
+  const Vec3 velocity = player->get_velocity();
+  const float horizontal_speed_sqr = (velocity.x * velocity.x) + (velocity.y * velocity.y);
+  return std::isfinite(horizontal_speed_sqr) && horizontal_speed_sqr < 2.0f;
+}
+
+inline void sync_user_identity(Player* player, player_resolver_state* state)
+{
+  if (player == nullptr || state == nullptr || engine == nullptr) {
+    return;
+  }
+
+  player_info pinfo{};
+  if (!engine->get_player_info(player->get_index(), &pinfo) || pinfo.user_id <= 0) {
+    return;
+  }
+
+  if (state->user_id != 0 && state->user_id != pinfo.user_id) {
+    g_userid_yaw_offsets[state->user_id] = state->yaw_offset;
+    const auto restored = g_userid_yaw_offsets.find(pinfo.user_id);
+    state->yaw_offset = restored != g_userid_yaw_offsets.end() ? restored->second : 0.0f;
+    state->brute_yaw_index = 0;
+    state->brute_pitch_index = 0;
+    state->misses = 0;
+    state->hits = 0;
+    state->inverse_pitch = false;
+    state->brute_armed = false;
+    state->shot = {};
+  }
+  state->user_id = pinfo.user_id;
 }
 
 [[nodiscard]] inline int player_anim_state_offset()
@@ -323,8 +410,19 @@ inline void clear_player(Player* player)
     return;
   }
 
+  player_resolver_state& state = g_resolver_state[ent_index];
+  if (state.user_id > 0) {
+    g_userid_yaw_offsets[state.user_id] = state.yaw_offset;
+  }
+  const bool keep_offsets = state.user_id > 0;
+  const float saved_yaw_offset = state.yaw_offset;
+  const int saved_user_id = state.user_id;
   g_history[ent_index] = {};
   g_resolver_state[ent_index] = {};
+  if (keep_offsets) {
+    g_resolver_state[ent_index].yaw_offset = saved_yaw_offset;
+    g_resolver_state[ent_index].user_id = saved_user_id;
+  }
 }
 
 inline void record_player(Player* player)
@@ -332,6 +430,12 @@ inline void record_player(Player* player)
   if (!config.aimbot.resolver || player == nullptr || player->is_dormant() || !player->is_alive()) {
     clear_player(player);
     return;
+  }
+
+  player_resolver_state* state = state_for_player(player);
+  if (state != nullptr) {
+    sync_user_identity(player, state);
+    state->minwalk = minwalk_active(player);
   }
 
   player_history* history = history_for_player(player);
@@ -390,6 +494,7 @@ inline void clear()
 {
   g_history = {};
   g_resolver_state = {};
+  g_userid_yaw_offsets.clear();
 }
 
 inline void add_yaw(yaw_candidate_list* list, float yaw, float penalty)
@@ -441,6 +546,25 @@ inline void add_pitch(pitch_candidate_list* list, float pitch, float penalty)
   }
 
   return aimbot_calculate_angles_to_position(player->get_origin(), localplayer->get_origin()).y;
+}
+
+inline Vec3 owned_sniper_dot_origin(Player* player)
+{
+  if (player == nullptr) {
+    return {};
+  }
+
+  for (Entity* entity : entity_cache_entities(class_id::SNIPER_DOT)) {
+    if (entity == nullptr || entity->is_dormant() || entity->get_owner_entity() != player) {
+      continue;
+    }
+
+    const Vec3 dot_origin = entity->get_origin();
+    if (aimbot_vec3_is_finite(dot_origin)) {
+      return dot_origin;
+    }
+  }
+  return {};
 }
 
 [[nodiscard]] inline resolver_mode detect_mode(Player* player, const anim_state_snapshot& snapshot)
@@ -669,23 +793,27 @@ inline void add_history_yaws(Player* player, yaw_candidate_list* list)
   add_pitch(&list, base_pitch, 0.0f);
   add_pitch(&list, brute_pitches[static_cast<std::size_t>(std::abs(brute_index) % static_cast<int>(brute_pitches.size()))], -1.0f);
 
-  for (Entity* entity : entity_cache_entities(class_id::SNIPER_DOT)) {
-    if (entity == nullptr || entity->is_dormant() || entity->get_owner_entity() != player) {
-      continue;
-    }
-
-    const Vec3 dot_origin = entity->get_origin();
-    const Vec3 eye_origin = player->get_origin() + player->get_view_offset();
+  if (settings.sniper_dot_pitch) {
+    const Vec3 dot_origin = owned_sniper_dot_origin(player);
+    const Vec3 eye_origin = player != nullptr ? player->get_origin() + player->get_view_offset() : Vec3{};
     if (aimbot_vec3_is_finite(dot_origin) && aimbot_vec3_is_finite(eye_origin)) {
       add_pitch(&list, aimbot_calculate_angles_to_position(eye_origin, dot_origin).x, -3.0f);
-      break;
     }
   }
 
-  if (finite_angle(raw_pitch) && std::fabs(raw_pitch) >= 89.0f) {
-    add_pitch(&list, -base_pitch, 1.0f);
-    add_pitch(&list, raw_pitch > 0.0f ? -89.0f : 89.0f, 1.5f);
-    add_pitch(&list, 0.0f, 2.0f);
+  if (finite_angle(raw_pitch) && std::fabs(raw_pitch) >= 89.0f && settings.pitch_fold_recovery) {
+    const bool pitch_down = raw_pitch > 0.0f;
+    if (settings.sniper_dot_pitch) {
+      const Vec3 dot_origin = owned_sniper_dot_origin(player);
+      const Vec3 eye_origin = player->get_origin() + player->get_view_offset();
+      if (aimbot_vec3_is_finite(dot_origin) && aimbot_vec3_is_finite(eye_origin)) {
+        add_pitch(&list, aimbot_calculate_angles_to_position(eye_origin, dot_origin).x, 0.5f);
+      }
+    }
+    add_pitch(&list, pitch_down ? 89.0f : -89.0f, 1.0f);
+    add_pitch(&list, 0.0f, 1.5f);
+    add_pitch(&list, pitch_down ? -89.0f : 89.0f, 2.0f);
+    add_pitch(&list, -base_pitch, 2.5f);
   }
 
   if (list.count <= 0) {
@@ -814,21 +942,24 @@ inline void sort_pitch_candidates(pitch_candidate_list* list)
     ? std::abs(state->brute_pitch_index) % pitch_candidates.count
     : 0;
 
-  const float resolved_yaw = yaw_candidates.values[yaw_index].yaw;
-  const float resolved_pitch = pitch_candidates.values[pitch_index].pitch;
-  if (!finite_angle(resolved_yaw) || !finite_angle(resolved_pitch)) {
+  float applied_yaw = yaw_candidates.values[yaw_index].yaw;
+  float applied_pitch = pitch_candidates.values[pitch_index].pitch;
+  if (!finite_angle(applied_yaw) || !finite_angle(applied_pitch)) {
     return false;
   }
 
+  apply_yaw_offset(state, &applied_yaw);
+  apply_pitch_flags(state, &applied_pitch);
+
   if (state != nullptr) {
     state->yaw_candidates = yaw_count;
-    state->selected_yaw = resolved_yaw;
-    state->selected_pitch = resolved_pitch;
+    state->selected_yaw = applied_yaw;
+    state->selected_pitch = applied_pitch;
   }
 
   guard->player = player;
   guard->original_angles = original_angles;
-  guard->resolved_angles = Vec3{resolved_pitch, resolved_yaw, original_angles.z};
+  guard->resolved_angles = Vec3{applied_pitch, applied_yaw, original_angles.z};
   guard->active = true;
   player->set_eye_angles(guard->resolved_angles);
 
@@ -892,16 +1023,25 @@ inline void update_pending_shots()
   }
 
   for (player_resolver_state& state : g_resolver_state) {
-    if (!state.shot.active || global_vars->curtime < state.shot.expire_time) {
+    const bool expired_by_deadline = state.brute_armed && global_vars->curtime >= state.brute_deadline;
+    if (!state.shot.active && !expired_by_deadline) {
+      continue;
+    }
+    if (!expired_by_deadline && global_vars->curtime < state.shot.expire_time) {
       continue;
     }
 
     state.shot.active = false;
+    state.brute_armed = false;
     state.misses = std::min(state.misses + 1, 64);
+    if (settings.auto_brute && settings.yaw_step_degrees > 0.0f) {
+      state.yaw_offset = normalize_yaw(state.yaw_offset + settings.yaw_step_degrees);
+    }
     const int max_yaws = std::clamp(config.aimbot.resolver_max_yaws, 1, max_yaw_candidates);
     state.brute_yaw_index = (state.brute_yaw_index + 1) % max_yaws;
     if ((state.misses % 2) == 0) {
       state.brute_pitch_index = (state.brute_pitch_index + 1) % max_pitch_candidates;
+      state.inverse_pitch = !state.inverse_pitch;
     }
   }
 }
@@ -920,13 +1060,39 @@ inline void note_shot(Player* player, int hitbox, float sim_time, bool backtrack
   pending_shot shot{};
   shot.active = true;
   shot.time = global_vars->curtime;
-  shot.expire_time = global_vars->curtime + (backtrack ? 0.55f : 0.35f);
+  const float deadline = std::max(outgoing_latency_seconds() * settings.brute_latency_scale +
+    settings.brute_grace_seconds, backtrack ? 0.55f : 0.35f);
+  shot.expire_time = global_vars->curtime + deadline;
   shot.sim_time = sim_time;
   shot.yaw = state->selected_yaw;
   shot.pitch = state->selected_pitch;
   shot.hitbox = hitbox;
   shot.backtrack = backtrack;
   state->shot = shot;
+  state->brute_armed = true;
+  state->brute_deadline = shot.expire_time;
+}
+
+inline void on_local_weapon_fire(Player* shooter)
+{
+  if (shooter == nullptr || entity_list == nullptr || global_vars == nullptr) {
+    return;
+  }
+
+  Player* localplayer = entity_list->get_localplayer();
+  if (shooter != localplayer) {
+    return;
+  }
+
+  for (player_resolver_state& state : g_resolver_state) {
+    if (state.brute_armed && state.shot.active) {
+      const float deadline = std::max(
+        outgoing_latency_seconds() * settings.brute_latency_scale + settings.brute_grace_seconds,
+        state.shot.backtrack ? 0.55f : 0.35f);
+      state.brute_deadline = std::max(state.brute_deadline, global_vars->curtime + deadline);
+      state.shot.expire_time = state.brute_deadline;
+    }
+  }
 }
 
 inline void note_player_hurt(Player* attacker, Player* victim)
@@ -946,8 +1112,60 @@ inline void note_player_hurt(Player* attacker, Player* victim)
   }
 
   state->shot.active = false;
+  state->brute_armed = false;
   state->hits = std::min(state->hits + 1, 64);
   state->misses = std::max(state->misses - 1, 0);
+}
+
+[[nodiscard]] inline bool resolved_eye_angles(Player* player, Vec3* angles)
+{
+  if (player == nullptr || angles == nullptr || player->is_dormant() || !player->is_alive()) {
+    return false;
+  }
+
+  const Vec3 original_angles = player->get_eye_angles();
+  if (!config.aimbot.resolver || !aimbot_vec3_is_finite(original_angles)) {
+    *angles = original_angles;
+    return aimbot_vec3_is_finite(original_angles);
+  }
+
+  anim_state_snapshot snapshot{};
+  if (!read_anim_state_snapshot(player, &snapshot)) {
+    *angles = original_angles;
+    return false;
+  }
+
+  player_resolver_state* state = state_for_player(player);
+  const resolver_mode mode = detect_mode(player, snapshot);
+  if (state != nullptr) {
+    state->mode = mode;
+    state->minwalk = minwalk_active(player);
+  }
+
+  yaw_candidate_list yaw_candidates = build_yaw_candidates(nullptr, player, snapshot, mode, state);
+  pitch_candidate_list pitch_candidates = build_pitch_candidates(player, snapshot, state);
+  sort_yaw_candidates(&yaw_candidates);
+  sort_pitch_candidates(&pitch_candidates);
+  if (yaw_candidates.count <= 0 || pitch_candidates.count <= 0) {
+    *angles = original_angles;
+    return false;
+  }
+
+  float applied_yaw = yaw_candidates.values[0].yaw;
+  float applied_pitch = pitch_candidates.values[0].pitch;
+  apply_yaw_offset(state, &applied_yaw);
+  apply_pitch_flags(state, &applied_pitch);
+  if (!finite_angle(applied_yaw) || !finite_angle(applied_pitch)) {
+    *angles = original_angles;
+    return false;
+  }
+
+  if (state != nullptr) {
+    state->selected_yaw = applied_yaw;
+    state->selected_pitch = applied_pitch;
+  }
+  *angles = Vec3{applied_pitch, applied_yaw, 0.0f};
+  return true;
 }
 
 [[nodiscard]] inline bool setup_record_bones(Player* player, matrix_3x4* bones, int max_bones, float sim_time)

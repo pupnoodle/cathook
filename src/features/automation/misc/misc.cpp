@@ -34,7 +34,9 @@ V  o o  V  file: src/features/automation/misc/misc.cpp
 #include "core/player_manager.hpp"
 #include "features/menu/config.hpp"
 #include "features/automation/autoitem/autoitem.hpp"
+#include "features/automation/mvm_queue/mvm_queue.hpp"
 #include "features/automation/nographics/nographics.hpp"
+#include "features/automation/profile_stalker_api.hpp"
 #include "features/automation/navbot/navbot_mesh.hpp"
 #include "games/tf2/sdk/netvars.hpp"
 #include "games/tf2/sdk/entities/player.hpp"
@@ -1312,7 +1314,9 @@ void automation_controller::on_frame_stage_notify()
   run_ping_reducer();
   run_mvm_actions();
   autoitem::on_tick();
+  mvm_queue::tick();
   run_queueing();
+  profile_stalker::tick();
 }
 
 void automation_controller::on_paint()
@@ -1332,7 +1336,9 @@ void automation_controller::on_paint()
   }
 
   autoitem::on_tick();
+  mvm_queue::tick();
   run_queueing();
+  profile_stalker::tick();
 }
 
 void automation_controller::run_startup_sound()
@@ -1404,7 +1410,9 @@ void automation_controller::on_menu_tick()
   }
 
   autoitem::on_tick();
+  mvm_queue::tick();
   run_queueing();
+  profile_stalker::tick();
 #endif
 
 }
@@ -1591,7 +1599,8 @@ void automation_controller::apply_misc_convars()
     return;
   }
 
-  static Convar* no_push = convar_system->find_var("tf_avoidteammates_pushaway");
+  static Convar* no_push = nullptr;
+  if (no_push == nullptr) no_push = convar_system->find_var("tf_avoidteammates_pushaway");
   if (no_push != nullptr)
   {
     const int wanted_value = config.misc.movement.no_push ? 0 : 1;
@@ -1601,7 +1610,8 @@ void automation_controller::apply_misc_convars()
     }
   }
 
-  static Convar* engine_no_focus_sleep = convar_system->find_var("engine_no_focus_sleep");
+  static Convar* engine_no_focus_sleep = nullptr;
+  if (engine_no_focus_sleep == nullptr) engine_no_focus_sleep = convar_system->find_var("engine_no_focus_sleep");
   if (engine_no_focus_sleep != nullptr)
   {
     const int wanted_value = config.misc.exploits.no_engine_sleep ? 0 : 50;
@@ -1635,7 +1645,8 @@ void automation_controller::apply_misc_convars()
     }
   }
 
-  static Convar* weapon_allow_inspect = convar_system->find_var("weapon_allow_inspect");
+  static Convar* weapon_allow_inspect = nullptr;
+  if (weapon_allow_inspect == nullptr) weapon_allow_inspect = convar_system->find_var("weapon_allow_inspect");
   if (weapon_allow_inspect != nullptr)
   {
     const int wanted_value = config.misc.automation.allow_mvm_inspect ? 1 : 0;
@@ -1643,6 +1654,36 @@ void automation_controller::apply_misc_convars()
     {
       weapon_allow_inspect->set_int(wanted_value);
     }
+  }
+
+  if (!nographics::is_enabled())
+  {
+    return;
+  }
+
+  static Convar* mat_queue_mode = nullptr;
+  if (mat_queue_mode == nullptr) mat_queue_mode = convar_system->find_var("mat_queue_mode");
+  if (mat_queue_mode != nullptr && mat_queue_mode->get_int() != 0)
+  {
+    mat_queue_mode->set_int(0);
+  }
+
+  static Convar* volume = nullptr;
+  if (volume == nullptr) volume = convar_system->find_var("volume");
+  if (volume != nullptr && volume->get_float() != 0.0f)
+  {
+    volume->set_float(0.0f);
+  }
+
+  static Convar* fps_max = nullptr;
+  if (fps_max == nullptr) fps_max = convar_system->find_var("fps_max");
+  if (fps_max != nullptr && fps_max->get_int() != 30)
+  {
+    fps_max->set_int(30);
+  }
+  static Convar* cl_interp = convar_system->find_var("cl_interp");
+  if (cl_interp != nullptr && cl_interp->get_float() > 0.152f) {
+    cl_interp->set_float(0.152f);
   }
 }
 
@@ -2165,14 +2206,15 @@ void automation_controller::run_noisemaker_spam()
     return;
   }
 
-  if (localplayer == nullptr || !localplayer->is_alive() || localplayer->is_using_action_slot() ||
-      global_vars->realtime < next_noisemaker_time_)
+  if (localplayer == nullptr || !localplayer->is_alive() || global_vars->realtime < next_noisemaker_time_)
   {
     return;
   }
 
-  engine->client_cmd_unrestricted("+use_action_slot_item_server");
-  engine->client_cmd_unrestricted("-use_action_slot_item_server");
+  KeyValues* press = new KeyValues("+use_action_slot_item_server");
+  engine->server_cmd_keyvalues(press);
+  KeyValues* release = new KeyValues("-use_action_slot_item_server");
+  engine->server_cmd_keyvalues(release);
   next_noisemaker_time_ = global_vars->realtime + noisemaker_interval;
 }
 

@@ -24,7 +24,10 @@ V  o o  V  file: src/features/automation/navbot/navbot_mesh.cpp
 #include <vector>
 #include "core/logger.hpp"
 #include "core/math/math.hpp"
+#include "games/tf2/sdk/entities/player.hpp"
 #include "games/tf2/sdk/interfaces/engine.hpp"
+#include "games/tf2/sdk/interfaces/engine_trace.hpp"
+#include "games/tf2/sdk/interfaces/entity_list.hpp"
 
 namespace navbot
 {
@@ -424,6 +427,244 @@ bool point_inside_area_2d(const nav_area_data& area, const Vec3& point)
 {
   return point.x >= area.mins.x && point.x <= area.maxs.x
       && point.y >= area.mins.y && point.y <= area.maxs.y;
+}
+
+bool area_overlaps_player_xy_expanded(const nav_area_data& area, const Vec3& world, float pad)
+{
+  return world.x + pad >= area.mins.x && world.x - pad <= area.maxs.x
+      && world.y + pad >= area.mins.y && world.y - pad <= area.maxs.y;
+}
+
+float area_z_at_world_clamped(const nav_area_data& area, const Vec3& world)
+{
+  float clamped_x = clampf(world.x, area.nw_corner.x, area.se_corner.x);
+  float clamped_y = clampf(world.y, area.nw_corner.y, area.se_corner.y);
+  return area_z_at(area, clamped_x, clamped_y);
+}
+
+bool hull_can_fall_to_area(const Vec3& world, const nav_area_data& area)
+{
+  if (engine_trace == nullptr)
+  {
+    return true;
+  }
+
+  float clamped_x = clampf(world.x, area.nw_corner.x, area.se_corner.x);
+  float clamped_y = clampf(world.y, area.nw_corner.y, area.se_corner.y);
+  float area_z = area_z_at(area, clamped_x, clamped_y);
+
+  Vec3 start{world.x, world.y, world.z + 4.0f};
+  Vec3 end{clamped_x, clamped_y, area_z + 5.0f};
+
+  if (start.z <= end.z + 1.0f)
+  {
+    return true;
+  }
+
+  Vec3 mins{-half_player_width, -half_player_width, 0.0f};
+  Vec3 maxs{half_player_width, half_player_width, 72.0f};
+
+  trace_t trace{};
+  engine_trace->trace_hull(&start, &end, &mins, &maxs, MASK_PLAYERSOLID, &trace);
+
+  if (trace.start_solid || trace.all_solid)
+  {
+    return false;
+  }
+
+  return trace.fraction >= 0.99f;
+}
+
+nav_area_id try_find_overlapping_area_below_linear(const Vec3& world, const std::vector<nav_area_data>& areas)
+{
+  const float xy_pad = half_player_width;
+  nav_area_id best{};
+  float best_dz = std::numeric_limits<float>::max();
+  float best_dist_sq = std::numeric_limits<float>::max();
+  bool found = false;
+
+  for (const auto& area : areas)
+  {
+    if (!area_overlaps_player_xy_expanded(area, world, xy_pad))
+    {
+      continue;
+    }
+
+    float area_z = area_z_at_world_clamped(area, world);
+    float dz = world.z - area_z;
+
+    if (dz < -player_step_height)
+    {
+      continue;
+    }
+
+    if (!hull_can_fall_to_area(world, area))
+    {
+      continue;
+    }
+
+    float dist_sq = distance_to_area_sq(area, world);
+
+    if (!found || dz < best_dz - 0.01f || (std::fabs(dz - best_dz) < 0.01f && dist_sq < best_dist_sq))
+    {
+      found = true;
+      best = area.id;
+      best_dz = dz;
+      best_dist_sq = dist_sq;
+    }
+  }
+
+  if (found)
+  {
+    return best;
+  }
+
+  return nav_area_id{};
+}
+
+nav_area_id try_find_overlapping_area_below_grid(const Vec3& world, const nav_mesh_cache& cache)
+{
+  const auto& grid = cache.grid;
+  if (!grid.valid() || cache.areas.empty())
+  {
+    return nav_area_id{};
+  }
+
+  const float xy_pad = half_player_width;
+
+  float search_min_x = world.x - xy_pad;
+  float search_max_x = world.x + xy_pad;
+  float search_min_y = world.y - xy_pad;
+  float search_max_y = world.y + xy_pad;
+
+  int cx0 = std::clamp(static_cast<int>((search_min_x - grid.min_x) / grid.cell_size), 0, grid.columns - 1);
+  int cx1 = std::clamp(static_cast<int>((search_max_x - grid.min_x) / grid.cell_size), 0, grid.columns - 1);
+  int cy0 = std::clamp(static_cast<int>((search_min_y - grid.min_y) / grid.cell_size), 0, grid.rows - 1);
+  int cy1 = std::clamp(static_cast<int>((search_max_y - grid.min_y) / grid.cell_size), 0, grid.rows - 1);
+
+  nav_area_id best{};
+  float best_dz = std::numeric_limits<float>::max();
+  float best_dist_sq = std::numeric_limits<float>::max();
+  bool found = false;
+
+  std::vector<uint32_t> seen;
+  seen.reserve(32);
+
+  for (int cy = cy0; cy <= cy1; ++cy)
+  {
+    for (int cx = cx0; cx <= cx1; ++cx)
+    {
+      for (uint32_t index : grid.cells[static_cast<size_t>(cy) * grid.columns + cx])
+      {
+        if (std::find(seen.begin(), seen.end(), index) != seen.end())
+        {
+          continue;
+        }
+        seen.push_back(index);
+
+        const auto& area = cache.areas[index];
+        if (!area_overlaps_player_xy_expanded(area, world, xy_pad))
+        {
+          continue;
+        }
+
+        float area_z = area_z_at_world_clamped(area, world);
+        float dz = world.z - area_z;
+
+        if (dz < -player_step_height)
+        {
+          continue;
+        }
+
+        if (!hull_can_fall_to_area(world, area))
+        {
+          continue;
+        }
+
+        float dist_sq = distance_to_area_sq(area, world);
+
+        if (!found || dz < best_dz - 0.01f || (std::fabs(dz - best_dz) < 0.01f && dist_sq < best_dist_sq))
+        {
+          found = true;
+          best = area.id;
+          best_dz = dz;
+          best_dist_sq = dist_sq;
+        }
+      }
+    }
+  }
+
+  if (found)
+  {
+    return best;
+  }
+
+  const float fallback_pad = half_player_width + player_clearance_margin + 12.0f;
+  for (int ring = 1; ring <= 2; ++ring)
+  {
+    int query_column = std::clamp(static_cast<int>((world.x - grid.min_x) / grid.cell_size), 0, grid.columns - 1);
+    int query_row = std::clamp(static_cast<int>((world.y - grid.min_y) / grid.cell_size), 0, grid.rows - 1);
+    int row_begin = query_row - ring;
+    int row_end = query_row + ring;
+    int column_begin = query_column - ring;
+    int column_end = query_column + ring;
+
+    for (int cy = row_begin; cy <= row_end; ++cy)
+    {
+      if (cy < 0 || cy >= grid.rows)
+      {
+        continue;
+      }
+      for (int cx = column_begin; cx <= column_end; ++cx)
+      {
+        if (cx < 0 || cx >= grid.columns)
+        {
+          continue;
+        }
+        if (std::max(std::abs(cx - query_column), std::abs(cy - query_row)) != ring)
+        {
+          continue;
+        }
+        for (uint32_t index : grid.cells[static_cast<size_t>(cy) * grid.columns + cx])
+        {
+          if (std::find(seen.begin(), seen.end(), index) != seen.end())
+          {
+            continue;
+          }
+          seen.push_back(index);
+          const auto& area = cache.areas[index];
+          if (!area_overlaps_player_xy_expanded(area, world, fallback_pad))
+          {
+            continue;
+          }
+          float area_z = area_z_at_world_clamped(area, world);
+          float dz = world.z - area_z;
+          if (dz < -player_step_height || dz > 120.0f)
+          {
+            continue;
+          }
+          if (!hull_can_fall_to_area(world, area))
+          {
+            continue;
+          }
+          float dist_sq = distance_to_area_sq(area, world);
+          if (!found || dz < best_dz - 0.01f || (std::fabs(dz - best_dz) < 0.01f && dist_sq < best_dist_sq))
+          {
+            found = true;
+            best = area.id;
+            best_dz = dz;
+            best_dist_sq = dist_sq;
+          }
+        }
+      }
+    }
+    if (found)
+    {
+      return best;
+    }
+  }
+
+  return nav_area_id{};
 }
 
 std::vector<float> build_axis_samples(float min_value, float max_value, float center_value)
@@ -964,6 +1205,15 @@ const nav_area_data* navbot_mesh::find_area(nav_area_id id) const
 
 nav_area_id navbot_mesh::find_closest_area_linear(const Vec3& world) const
 {
+  if (!cache_->areas.empty())
+  {
+    auto overlapping = try_find_overlapping_area_below_linear(world, cache_->areas);
+    if (overlapping.valid())
+    {
+      return overlapping;
+    }
+  }
+
   nav_area_id best{};
   auto best_distance = 0.0f;
   auto found = false;
@@ -988,6 +1238,19 @@ nav_area_id navbot_mesh::find_closest_area(const Vec3& world) const
   if (!grid.valid())
   {
     return find_closest_area_linear(world);
+  }
+
+  {
+    auto overlapping = try_find_overlapping_area_below_grid(world, *cache_);
+    if (overlapping.valid())
+    {
+      return overlapping;
+    }
+    auto linear_overlap = try_find_overlapping_area_below_linear(world, cache_->areas);
+    if (linear_overlap.valid())
+    {
+      return linear_overlap;
+    }
   }
 
   const int query_column =

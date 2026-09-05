@@ -170,15 +170,9 @@ inline decision resolve(Player* localplayer, Weapon* weapon, const aimbot_candid
   const int desired_state = should_scope ? 1 : 0;
 
   constexpr float scope_toggle_retry_seconds = 0.35f;
-  constexpr float scope_toggle_debounce_seconds = 1.0f;
   if (pending_scope_state == desired_state &&
       now >= pending_scope_request_time &&
       now - pending_scope_request_time < scope_toggle_retry_seconds) {
-    return {};
-  }
-  if (last_scope_transition_state != -1 &&
-      last_scope_transition_state != desired_state &&
-      now - last_scope_transition_time < scope_toggle_debounce_seconds) {
     return {};
   }
 
@@ -218,7 +212,7 @@ inline bool fire_ready(Player* localplayer, Weapon* weapon) {
 
   if (last_scope_transition_state == 0 &&
       global_vars != nullptr &&
-      global_vars->curtime - last_scope_transition_time < 1.0f) {
+      global_vars->curtime - last_scope_transition_time < 0.35f) {
     return false;
   }
 
