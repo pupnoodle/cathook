@@ -164,10 +164,15 @@ bool empty_shader_api_is_active()
          !module_is_loaded("togl.so");
 }
 
+std::string_view basename_of(std::string_view path)
+{
+  const auto slash = path.find_last_of('/');
+  return slash == std::string_view::npos ? path : path.substr(slash + 1);
+}
+
 bool is_shaderapivk_path(std::string_view library_path)
 {
-  const auto slash = library_path.find_last_of('/');
-  const std::string_view name = slash == std::string_view::npos ? library_path : library_path.substr(slash + 1);
+  const std::string_view name = basename_of(library_path);
   return name == "shaderapivk.so" || name == "shaderapivk";
 }
 
@@ -178,14 +183,7 @@ std::string_view library_basename(const char* library_path)
     return {};
   }
 
-  const std::string_view path{ library_path };
-  const auto slash = path.find_last_of('/');
-  if (slash == std::string_view::npos)
-  {
-    return path;
-  }
-
-  return path.substr(slash + 1);
+  return basename_of(std::string_view{ library_path });
 }
 
 bool is_startup_patch_module(const char* library_path)

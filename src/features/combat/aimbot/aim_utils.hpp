@@ -1170,30 +1170,7 @@ inline unsigned int aimbot_visibility_trace_mask() {
 }
 
 inline unsigned int aimbot_hitscan_trace_mask() {
-  unsigned int trace_mask = MASK_SHOT | CONTENTS_GRATE;
-  if (config.aimbot.shoot_through_glass) {
-    trace_mask &= ~CONTENTS_WINDOW;
-  }
-
-  return trace_mask;
-}
-
-inline bool is_player_visible(Player* localplayer, Player* entity, int bone) {
-  if (localplayer == nullptr || entity == nullptr || engine_trace == nullptr) return false;
-
-  Vec3 start_pos = localplayer->get_shoot_pos();
-  Vec3 target_pos{};
-  if (!aimbot_get_bone_position(entity, bone, &target_pos)) {
-    return false;
-  }
-
-  struct ray_t ray = engine_trace->init_ray(&start_pos, &target_pos);
-  struct trace_filter filter;
-  engine_trace->init_hitscan_trace_filter(&filter, localplayer, entity);
-
-  struct trace_t trace_world{};
-  engine_trace->trace_ray(&ray, aimbot_visibility_trace_mask(), &filter, &trace_world);
-  return trace_world.entity == entity || (!trace_world.all_solid && !trace_world.start_solid && trace_world.fraction >= 0.999f);
+  return aimbot_visibility_trace_mask();
 }
 
 inline bool aimbot_trace_visible_to_position(Player* localplayer,
@@ -2417,21 +2394,6 @@ inline aimbot_player_skip_reason aimbot_player_skip_reason_for(
   if (aimbot_ignore_enabled(Aim::ignore_disguised) && player->is_disguised()) return aimbot_player_skip_reason::ignored;
   if (aimbot_ignore_enabled(Aim::ignore_taunting) && player->is_taunting()) return aimbot_player_skip_reason::ignored;
   if (aimbot_ignore_enabled(Aim::ignore_sentry_busters) && player->is_sentry_buster()) return aimbot_player_skip_reason::ignored;
-  if (false && aimbot_ignore_enabled(Aim::ignore_unsimulated) && global_vars != nullptr &&
-      config.aimbot.ignore_unsimulated_ticks > 0 && global_vars->interval_per_tick > 0.0f &&
-      global_vars->curtime - player->get_simulation_time() >
-        global_vars->interval_per_tick * static_cast<float>(config.aimbot.ignore_unsimulated_ticks)) {
-    return aimbot_player_skip_reason::ignored;
-  }
-  player_info pinfo{};
-  if (false && aimbot_ignore_enabled(Aim::ignore_ipc_bots) &&
-      engine != nullptr &&
-      engine->get_player_info(player->get_index(), &pinfo) &&
-      pinfo.friends_id != 0 &&
-      pinfo.fakeplayer != true &&
-      cat_ipc::client::is_local_ipc_friend(static_cast<std::uint32_t>(pinfo.friends_id))) {
-    return aimbot_player_skip_reason::ipc_bot;
-  }
   if (player->get_team() == localplayer->get_team() &&
       (!aimbot_is_friendlyfire_enabled() || aimbot_ignore_enabled(Aim::ignore_team)) &&
       !aimbot_should_extinguish_team(localplayer, player, weapon) &&
@@ -2977,16 +2939,10 @@ inline float aimbot_assist_strength(const Vec3& original_view_angles,
     return 0.0f;
   }
 
-  const float aim_fov = std::max(config.aimbot.fov, 1.0f);
-  const float fov_ratio = std::clamp(
-    aimbot_calculate_fov(target_view_angles, original_view_angles) / aim_fov,
-    0.0f,
-    1.0f);
-  const float close_ratio = 1.0f - fov_ratio;
-  const float curve = 1.0f - (1.0f - 1.0f) * close_ratio;
-
+  (void)original_view_angles;
+  (void)target_view_angles;
   (void)motion_scale;
-  return std::clamp(assist_strength * std::clamp(curve, 0.05f, 1.0f), 0.0f, 1.0f);
+  return std::clamp(assist_strength, 0.0f, 1.0f);
 }
 
 inline Vec3 aimbot_lerp_angles(const Vec3& source_angles, const Vec3& target_angles, float amount) {

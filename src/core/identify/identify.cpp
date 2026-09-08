@@ -261,16 +261,7 @@ void tick()
   const std::string server_id = current_server_id();
   const std::string player_hash_val = local_player_hash();
 
-  int head_scale = 12;
-  if (!server_id.empty() && !player_hash_val.empty())
-  {
-    double temp = 0.0;
-    for (char c : player_hash_val)
-    {
-      temp += static_cast<double>(c);
-    }
-    head_scale = static_cast<int>(temp) % 10 + 12 - (static_cast<int>(temp) % 10);
-  }
+  const int head_scale = 12;
 
   client->update_identity(server_id, player_hash_val, compute_signature(server_id, player_hash_val), head_scale);
   drain_chat();

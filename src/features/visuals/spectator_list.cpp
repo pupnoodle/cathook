@@ -25,18 +25,6 @@ namespace spectator_list
 namespace
 {
 
-ImU32 to_imgui_color(const RGBA_float& color)
-{
-  auto mutable_color = color;
-  const auto rgba = mutable_color.to_RGBA();
-  return IM_COL32(rgba.r, rgba.g, rgba.b, rgba.a);
-}
-
-const char* mode_text(const spectator_entry& entry)
-{
-  return entry.firstperson ? "1st" : "3rd";
-}
-
 Player* get_observed_target(Player* localplayer)
 {
   if (localplayer == nullptr) {
@@ -112,12 +100,6 @@ std::vector<spectator_entry> collect_spectators(Player** target_player_out)
     return left.name < right.name;
   });
   return spectators;
-}
-
-void draw_imgui()
-{
-  (void)to_imgui_color;
-  (void)mode_text;
 }
 
 }

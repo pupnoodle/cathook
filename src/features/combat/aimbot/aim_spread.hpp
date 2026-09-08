@@ -20,69 +20,7 @@ inline bullet_spread_fn get_bullet_spread = nullptr;
 inline bool bullet_spread_initialized = false;
 inline bool bullet_spread_signature_found = false;
 
-struct valve_random_stream {
-  static constexpr int table_size = 32;
-  static constexpr int ia = 16807;
-  static constexpr int im = 2147483647;
-  static constexpr int iq = 127773;
-  static constexpr int ir = 2836;
-  static constexpr int ndiv = 1 + ((im - 1) / table_size);
-  static constexpr double am = 1.0 / static_cast<double>(im);
-  static constexpr double rnmx = 1.0 - 1.2e-7;
-
-  int seed_value = 0;
-  int shuffle_value = 0;
-  int table[table_size]{};
-
-  void set_seed(int seed) {
-    seed_value = seed < 0 ? seed : -seed;
-    shuffle_value = 0;
-  }
-
-  int generate_random_number() {
-    int j = 0;
-    int k = 0;
-
-    if (seed_value <= 0 || shuffle_value == 0) {
-      seed_value = -seed_value < 1 ? 1 : -seed_value;
-
-      for (j = table_size + 7; j >= 0; --j) {
-        k = seed_value / iq;
-        seed_value = ia * (seed_value - (k * iq)) - (ir * k);
-        if (seed_value < 0) {
-          seed_value += im;
-        }
-        if (j < table_size) {
-          table[j] = seed_value;
-        }
-      }
-      shuffle_value = table[0];
-    }
-
-    k = seed_value / iq;
-    seed_value = ia * (seed_value - (k * iq)) - (ir * k);
-    if (seed_value < 0) {
-      seed_value += im;
-    }
-
-    j = shuffle_value / ndiv;
-    if (j >= table_size || j < 0) {
-      j &= table_size - 1;
-    }
-
-    shuffle_value = table[j];
-    table[j] = seed_value;
-    return shuffle_value;
-  }
-
-  float random_float(float lo, float hi) {
-    double value = am * static_cast<double>(generate_random_number());
-    if (value > rnmx) {
-      value = rnmx;
-    }
-    return static_cast<float>((value * static_cast<double>(hi - lo)) + static_cast<double>(lo));
-  }
-};
+using valve_random_stream = valve_random;
 
 inline bool init_bullet_spread() {
   if (bullet_spread_initialized) {

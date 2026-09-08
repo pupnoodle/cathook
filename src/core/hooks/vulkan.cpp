@@ -57,7 +57,7 @@ static VkFormat active_swapchain_format = VK_FORMAT_UNDEFINED;
 static uint32_t active_queue_family = invalid_queue_family;
 static bool vulkan_renderer_initialized = false;
 static bool vulkan_platform_initialized = false;
-static bool warned_late_swapchain_format = false;
+static std::atomic_bool warned_late_swapchain_format = false;
 static bool logged_swapchain_resources = false;
 static bool logged_first_overlay_submit = false;
 static bool logged_overlay_fence_timeout = false;
@@ -636,9 +636,8 @@ static bool ensure_swapchain_resources(VkSwapchainKHR swapchain, const render_qu
 
   if (active_swapchain_format == VK_FORMAT_UNDEFINED) {
     active_swapchain_format = VK_FORMAT_B8G8R8A8_UNORM;
-    if (!warned_late_swapchain_format) {
+    if (!warned_late_swapchain_format.exchange(true)) {
       print("Vulkan swapchain was created before hook install; using B8G8R8A8_UNORM fallback\n");
-      warned_late_swapchain_format = true;
     }
   }
 

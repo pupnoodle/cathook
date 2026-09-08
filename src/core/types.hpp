@@ -55,8 +55,12 @@ struct Vec3 {
     return Vec3{x - v.x, y - v.y, z - v.z};
   }
 
+  bool operator==(const Vec3 v) const {
+    return (this->x == v.x && this->y == v.y && this->z == v.z);
+  }
+
   bool operator!=(const Vec3 v) const {
-    return (this->x != v.x && this->y != v.y && this->z != v.z);
+    return !(*this == v);
   }
 };
 
@@ -102,9 +106,6 @@ struct RGBA_float {
     };
   }
 
-  float* to_arr() {
-    return (float*)this;
-  }
 };
 
 typedef float VMatrix[4][4];

@@ -25,7 +25,7 @@ namespace
 
 using dlopen_fn = void* (*)(const char*, int);
 
-bool is_launcher_path(const char* file)
+bool is_module_filename(const char* file, std::string_view name)
 {
   if (file == nullptr || file[0] == '\0')
   {
@@ -34,21 +34,18 @@ bool is_launcher_path(const char* file)
 
   const std::string_view path{ file };
   const auto slash = path.find_last_of('/');
-  const auto name = slash == std::string_view::npos ? path : path.substr(slash + 1);
-  return name == "launcher.so";
+  const auto base = slash == std::string_view::npos ? path : path.substr(slash + 1);
+  return base == name;
+}
+
+bool is_launcher_path(const char* file)
+{
+  return is_module_filename(file, "launcher.so");
 }
 
 bool is_gameoverlayrenderer_path(const char* file)
 {
-  if (file == nullptr || file[0] == '\0')
-  {
-    return false;
-  }
-
-  const std::string_view path{ file };
-  const auto slash = path.find_last_of('/');
-  const auto name = slash == std::string_view::npos ? path : path.substr(slash + 1);
-  return name == "gameoverlayrenderer.so";
+  return is_module_filename(file, "gameoverlayrenderer.so");
 }
 
 void patch_launcher_source_lock()

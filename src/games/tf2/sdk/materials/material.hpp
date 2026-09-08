@@ -109,14 +109,6 @@ public:
     auto is_precached_fn = (bool (*)(const void*))vtable[56];
     return is_precached_fn(this);
   }
-
-  void delete_if_unreferenced(void) {
-    void** vtable = *(void***)this;
-
-    void (*delete_if_unreferenced_fn)(void*) = (void (*)(void*))vtable[50];
-
-    delete_if_unreferenced_fn(this);
-  }
 };
 
 #endif

@@ -27,13 +27,6 @@ public:
     auto decrement_reference_count_fn = (void (*)(void*))vtable[11];
     decrement_reference_count_fn(this);
   }
-
-  void delete_if_unreferenced(void) {
-    void** vtable = *(void***)this;
-
-    auto delete_if_unreferenced_fn = (void (*)(void*))vtable[25];
-    delete_if_unreferenced_fn(this);
-  }
 };
 
 #endif

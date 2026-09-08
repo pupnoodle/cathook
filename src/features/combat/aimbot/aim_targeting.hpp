@@ -104,11 +104,6 @@ inline bool target_hint_better(const target_hint& candidate, const target_hint& 
 
   switch (config.aimbot.target_type) {
   case Aim::TargetType::DISTANCE:
-    if (candidate.distance * (candidate.preferred ? 0.35f : 1.0f) ==
-        best.distance * (best.preferred ? 0.35f : 1.0f)) {
-      return candidate.fov * (candidate.preferred ? 0.2f : 1.0f) <
-        best.fov * (best.preferred ? 0.2f : 1.0f);
-    }
     return candidate.distance * (candidate.preferred ? 0.35f : 1.0f) <
       best.distance * (best.preferred ? 0.35f : 1.0f);
   case Aim::TargetType::LEAST_HEALTH:

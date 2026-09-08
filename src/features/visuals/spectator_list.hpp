@@ -25,7 +25,6 @@ struct spectator_entry
 };
 
 std::vector<spectator_entry> collect_spectators(Player** target_player_out = nullptr);
-void draw_imgui();
 
 }
 #endif

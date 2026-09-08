@@ -71,19 +71,7 @@ struct movement_path {
   bool failed = false;
 };
 
-struct movesim_guard {
-  movesim::storage* storage = nullptr;
-  bool owned = false;
-
-  explicit movesim_guard(movesim::storage& value) : storage(&value), owned(true) {}
-  ~movesim_guard() {
-    if (owned && storage != nullptr) {
-      movesim::restore(*storage);
-    }
-  }
-  movesim_guard(const movesim_guard&) = delete;
-  movesim_guard& operator=(const movesim_guard&) = delete;
-};
+using movesim_guard = movesim::guard;
 
 enum class calc_state : std::uint8_t {
   pending,

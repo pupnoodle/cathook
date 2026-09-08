@@ -29,8 +29,6 @@ constexpr int tf_stun_loser_state = 1 << 6;
 constexpr float thirdperson_trace_length = 8192.0f;
 constexpr float thirdperson_crosshair_size = 5.0f;
 
-bool was_forcing_taunt_camera = false;
-
 struct render_angle_state
 {
   Player* player = nullptr;
@@ -128,7 +126,6 @@ void update_taunt_camera()
   const bool force_thirdperson = is_enabled_for(localplayer) || should_keep_game_taunt_camera(localplayer);
 
   if (localplayer == nullptr) {
-    was_forcing_taunt_camera = false;
     return;
   }
 
@@ -141,8 +138,6 @@ void update_taunt_camera()
   }
 
   localplayer->set_taunt_cam(force_thirdperson);
-
-  was_forcing_taunt_camera = force_thirdperson;
 }
 
 void update_camera(view_setup* setup)

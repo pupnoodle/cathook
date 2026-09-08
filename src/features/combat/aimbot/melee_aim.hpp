@@ -211,19 +211,7 @@ inline user_cmd straight_input_command(Player* local) {
   return command;
 }
 
-struct movesim_guard {
-  movesim::storage* storage = nullptr;
-  bool owned = false;
-
-  explicit movesim_guard(movesim::storage& value) : storage(&value), owned(true) {}
-  ~movesim_guard() {
-    if (owned && storage != nullptr) {
-      movesim::restore(*storage);
-    }
-  }
-  movesim_guard(const movesim_guard&) = delete;
-  movesim_guard& operator=(const movesim_guard&) = delete;
-};
+using movesim_guard = movesim::guard;
 
 inline float measured_latency() {
   if (client_state == nullptr || client_state->m_NetChannel == nullptr) {

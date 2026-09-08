@@ -21,9 +21,6 @@ namespace hitscan {
 struct settings {
   bool scan_records = true;
   int max_records_scanned = 12;
-  bool perfect_window_gate = false;
-  float perfect_window_multi_pellet_seconds = 0.25f;
-  float perfect_window_single_shot_seconds = 1.25f;
 };
 
 inline settings settings{};
@@ -235,12 +232,7 @@ inline uint32_t hitscan_aim_effective_hitbox_mask(Weapon* weapon) {
 }
 
 inline unsigned int hitscan_aim_trace_mask() {
-  unsigned int trace_mask = MASK_SHOT | CONTENTS_GRATE;
-  if (config.aimbot.shoot_through_glass) {
-    trace_mask &= ~CONTENTS_WINDOW;
-  }
-
-  return trace_mask;
+  return aimbot_visibility_trace_mask();
 }
 
 inline hitscan_settings_view hitscan_aim_settings(Weapon* weapon) {
@@ -486,21 +478,8 @@ inline int hitscan_aim_priority_hitbox(Player* localplayer,
   return hitscan_aim_first_hitbox_for_mask(settings_view.hitbox_mask, body_order);
 }
 
-inline bool hitscan_aim_perfect_window_ready(Weapon* weapon) {
-  if (!hitscan::settings.perfect_window_gate || weapon == nullptr || global_vars == nullptr) {
-    return true;
-  }
-
-  const float last_attack = weapon->get_last_attack();
-  const float elapsed = global_vars->curtime - last_attack;
-  if (!std::isfinite(last_attack) || !std::isfinite(elapsed) || elapsed < 0.0f) {
-    return true;
-  }
-
-  const float ready_time = weapon->get_bullets_per_shot() > 1
-    ? hitscan::settings.perfect_window_multi_pellet_seconds
-    : hitscan::settings.perfect_window_single_shot_seconds;
-  return elapsed > ready_time;
+inline bool hitscan_aim_perfect_window_ready(Weapon*) {
+  return true;
 }
 
 struct hitscan_found {

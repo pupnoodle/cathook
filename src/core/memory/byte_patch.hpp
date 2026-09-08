@@ -59,7 +59,7 @@ public:
 
     if (applied_)
     {
-      return restore_page_protections();
+      return true;
     }
 
     if (!capture_page_protections()) {

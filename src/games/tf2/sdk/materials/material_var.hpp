@@ -34,14 +34,6 @@ public:
 
     set_vec_value_fn(this, color.r, color.g, color.b);
   }
-
-  void set_texture_value(Texture* texture) {
-    void** vtable = *(void***)this;
-
-    void (*set_texture_value_fn)(void*, Texture*) = (void (*)(void*, Texture*))vtable[14];
-
-    set_texture_value_fn(this, texture);
-  }
 };
 
 #endif

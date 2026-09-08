@@ -433,11 +433,10 @@ bool install_steam_networking_utils_hooks()
 
   if (!steam_api_ready_for_interfaces())
   {
-    static bool warned_not_ready = false;
-    if (!warned_not_ready)
+    static std::atomic_bool warned_not_ready = false;
+    if (!warned_not_ready.exchange(true))
     {
       print("SteamAPI is not ready; deferring SteamNetworkingUtils hooks\n");
-      warned_not_ready = true;
     }
     return false;
   }
@@ -449,11 +448,10 @@ bool install_steam_networking_utils_hooks()
 
   if (steam_networking_utils_interface == nullptr)
   {
-    static bool warned_missing = false;
-    if (!warned_missing)
+    static std::atomic_bool warned_missing = false;
+    if (!warned_missing.exchange(true))
     {
       print("SteamNetworkingUtils interface missing; region selector ping hooks disabled\n");
-      warned_missing = true;
     }
     return false;
   }
@@ -631,8 +629,8 @@ void stop_attach_worker();
 
 std::thread& attach_worker_thread()
 {
-  static auto* thread = new std::thread{};
-  return *thread;
+  static std::thread thread{};
+  return thread;
 }
 
 std::chrono::seconds attach_ready_delay()
@@ -918,82 +916,35 @@ bool unload_module_runtime() {
   print("Unhooking VMT functions\n");
   bool hooks_restored = backtrack::restore_net_channel_hook();
 
-  if (client_mode_vtable != nullptr && client_mode_create_move_original != nullptr && !write_to_table(client_mode_vtable, 22, (void*)client_mode_create_move_original)) {
-    print("ClientMode::CreateMove failed to restore hook\n");
-    hooks_restored = false;
-  }
-
-  if (client_mode_vtable != nullptr && client_mode_post_screen_space_effects_original != nullptr &&
-      !write_to_table(client_mode_vtable, 40, (void*)client_mode_post_screen_space_effects_original)) {
-    print("ClientMode::DoPostScreenSpaceEffects failed to restore hook\n");
-    hooks_restored = false;
-  }
-
-  if (client_vtable != nullptr && client_create_move_original != nullptr && !write_to_table(client_vtable, 21, (void*)client_create_move_original)) {
-    print("Client::CreateMove failed to restore hook\n");
-    hooks_restored = false;
-  }
-
-  if (model_render_vtable != nullptr && model_render_draw_model_execute_original != nullptr &&
-      !write_to_table(model_render_vtable, 19, (void*)model_render_draw_model_execute_original)) {
-    print("ModelRender::DrawModelExecute failed to restore hook\n");
-    hooks_restored = false;
-  }
-
-  if (model_render_vtable != nullptr && model_render_forced_material_override_original != nullptr &&
-      !write_to_table(model_render_vtable, 1, (void*)model_render_forced_material_override_original)) {
-    print("ModelRender::ForcedMaterialOverride failed to restore hook\n");
-    hooks_restored = false;
-  }
-
-  if (client_mode_vtable != nullptr && override_view_original != nullptr && !write_to_table(client_mode_vtable, 17, (void*)override_view_original)) {
-    print("OverrideView failed to restore hook\n");
-    hooks_restored = false;
-  }
-
-  if (client_mode_vtable != nullptr && draw_view_model_original != nullptr && !write_to_table(client_mode_vtable, 25, (void*)draw_view_model_original)) {
-    print("ShouldDrawViewModel failed to restore hook\n");
-    hooks_restored = false;
-  }
-
-  if (vgui_vtable != nullptr && paint_traverse_original != nullptr && !write_to_table(vgui_vtable, 42, (void*)paint_traverse_original)) {
-    print("PaintTraverse failed to restore hook\n");
-    hooks_restored = false;
-  }
-
-  if (game_event_manager_vtable != nullptr && fire_event_client_side_original != nullptr && !write_to_table(game_event_manager_vtable, 9, (void*)fire_event_client_side_original)) {
-    print("FireEventClientSide failed to restore hook\n");
-    hooks_restored = false;
-  }
-
-  if (client_vtable != nullptr && frame_stage_notify_original != nullptr && !write_to_table(client_vtable, 35, (void*)frame_stage_notify_original)) {
-    print("FrameStageNotify failed to restore hook\n");
-    hooks_restored = false;
-  }
-
-  if (client_vtable != nullptr && dispatch_user_message_original != nullptr && !write_to_table(client_vtable, 36, (void*)dispatch_user_message_original)) {
-    print("DispatchUserMessage failed to restore hook\n");
-    hooks_restored = false;
-  }
-
-  if (steam_networking_utils_vtable != nullptr &&
-      steam_networking_utils_get_ping_to_data_center_original != nullptr &&
-      !write_to_table(
-        steam_networking_utils_vtable,
-        steam_networking_utils_get_ping_to_data_center_index,
-        (void*)steam_networking_utils_get_ping_to_data_center_original)) {
-    print("ISteamNetworkingUtils::GetPingToDataCenter failed to restore hook\n");
-    hooks_restored = false;
-  }
-
-  if (steam_networking_utils_vtable != nullptr &&
-      steam_networking_utils_get_direct_ping_to_pop_original != nullptr &&
-      !write_to_table(
-        steam_networking_utils_vtable,
-        steam_networking_utils_get_direct_ping_to_pop_index,
-        (void*)steam_networking_utils_get_direct_ping_to_pop_original)) {
-    print("ISteamNetworkingUtils::GetDirectPingToPOP failed to restore hook\n");
-    hooks_restored = false;
+  struct vmt_restore_entry {
+    void** vtable;
+    int index;
+    void* original;
+    const char* name;
+  };
+  const vmt_restore_entry vmt_restore_table[] = {
+    {client_mode_vtable, 22, (void*)client_mode_create_move_original, "ClientMode::CreateMove"},
+    {client_mode_vtable, 40, (void*)client_mode_post_screen_space_effects_original, "ClientMode::DoPostScreenSpaceEffects"},
+    {client_vtable, 21, (void*)client_create_move_original, "Client::CreateMove"},
+    {model_render_vtable, 19, (void*)model_render_draw_model_execute_original, "ModelRender::DrawModelExecute"},
+    {model_render_vtable, 1, (void*)model_render_forced_material_override_original, "ModelRender::ForcedMaterialOverride"},
+    {client_mode_vtable, 17, (void*)override_view_original, "OverrideView"},
+    {client_mode_vtable, 25, (void*)draw_view_model_original, "ShouldDrawViewModel"},
+    {vgui_vtable, 42, (void*)paint_traverse_original, "PaintTraverse"},
+    {game_event_manager_vtable, 9, (void*)fire_event_client_side_original, "FireEventClientSide"},
+    {client_vtable, 35, (void*)frame_stage_notify_original, "FrameStageNotify"},
+    {client_vtable, 36, (void*)dispatch_user_message_original, "DispatchUserMessage"},
+    {steam_networking_utils_vtable, steam_networking_utils_get_ping_to_data_center_index, (void*)steam_networking_utils_get_ping_to_data_center_original, "ISteamNetworkingUtils::GetPingToDataCenter"},
+    {steam_networking_utils_vtable, steam_networking_utils_get_direct_ping_to_pop_index, (void*)steam_networking_utils_get_direct_ping_to_pop_original, "ISteamNetworkingUtils::GetDirectPingToPOP"},
+  };
+  for (const auto& entry : vmt_restore_table) {
+    if (entry.vtable == nullptr || entry.original == nullptr) {
+      continue;
+    }
+    if (!write_to_table(entry.vtable, entry.index, entry.original)) {
+      print("%s failed to restore hook\n", entry.name);
+      hooks_restored = false;
+    }
   }
 
   print("Unhooking Non-VMT functions\n");

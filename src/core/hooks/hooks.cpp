@@ -327,10 +327,6 @@ bool write_to_table(void** vtable, int index, void* func) {
   return write_to_table_impl(vtable, index, func, true);
 }
 
-bool write_to_table_quiet(void** vtable, int index, void* func) {
-  return write_to_table_impl(vtable, index, func, false);
-}
-
 bool write_pointer_slot(void** slot, void* value)
 {
   memory_page_permissions page_permissions{};
@@ -397,23 +393,6 @@ bool sdl_hook(void* lib_handle, const char* func_name, void* hook, void** origin
   }
 
   return true;
-}
-
-bool restore_sdl_hook(void* lib_handle, const char* func_name, void* original) {
-  void *func = dlsym(lib_handle, func_name);
-
-  if (!func) {
-    print("Failed to get %s\n", func_name);
-    return false;
-  }
-
-  void** ptr_to_func = nullptr;
-  if (!get_sdl_wrapper_target(func, func_name, &ptr_to_func) || ptr_to_func == nullptr) {
-    print("Failed to resolve %s wrapper target\n", func_name);
-    return false;
-  }
-
-  return write_pointer_slot(ptr_to_func, original);
 }
 
 bool restore_sdl_hook_target(void** target, void* original)

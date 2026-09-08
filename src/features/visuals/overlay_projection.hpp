@@ -119,7 +119,7 @@ inline void update_screen_size(const view_setup* view, screen_space_t screen_spa
   auto screen_height = 0.0f;
 
   if (screen_space == screen_space_t::surface) {
-    use_imgui_size(&screen_width, &screen_height);
+    use_surface_size(&screen_width, &screen_height);
     use_engine_size(&screen_width, &screen_height);
     use_view_size(view, &screen_width, &screen_height);
   } else if (screen_space == screen_space_t::engine) {

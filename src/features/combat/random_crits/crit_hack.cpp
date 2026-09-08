@@ -7,6 +7,7 @@
 #include "games/tf2/sdk/interfaces/client_state.hpp"
 #include "games/tf2/sdk/net_messages.hpp"
 #include "core/ipc/ipc_client.hpp"
+#include "core/math/math.hpp"
 #include "core/player_manager.hpp"
 #include "external/MD5/MD5.hpp"
 #include <algorithm>
@@ -22,71 +23,7 @@ inline float math_remap(float val, float a, float b, float c, float d) {
   return c + (val - a) * (d - c) / (b - a);
 }
 
-class c_valve_random {
-public:
-  void set_seed(int seed) {
-    idum = (seed < 0 ? seed : -seed);
-    iy = 0;
-  }
-
-  int generate_random_number() {
-    int j;
-    int k;
-
-    if (idum <= 0 || !iy) {
-      if (-idum < 1)
-        idum = 1;
-      else
-        idum = -idum;
-
-      for (j = 32 + 7; j >= 0; j--) {
-        k = idum / 127773;
-        idum = 16807 * (idum - k * 127773) - 2836 * k;
-        if (idum < 0)
-          idum += 2147483647;
-        if (j < 32)
-          iv[j] = idum;
-      }
-      iy = iv[0];
-    }
-    k = idum / 127773;
-    idum = 16807 * (idum - k * 127773) - 2836 * k;
-    if (idum < 0)
-      idum += 2147483647;
-    j = iy / (1 + (2147483646) / 32);
-
-    if (j >= 32 || j < 0) {
-      j &= 32 - 1;
-    }
-
-    iy = iv[j];
-    iv[j] = idum;
-
-    return iy;
-  }
-
-  int random_int(int low, int high) {
-    unsigned int max_acceptable;
-    unsigned int x = high - low + 1;
-    unsigned int n;
-
-    if (x <= 1 || 0x7FFFFFFFUL < x - 1) {
-      return low;
-    }
-
-    max_acceptable = 0x7FFFFFFFUL - ((0x7FFFFFFFUL + 1) % x);
-    do {
-      n = generate_random_number();
-    } while (n > max_acceptable);
-
-    return low + (n % x);
-  }
-
-private:
-  int idum = 0;
-  int iy = 0;
-  int iv[32]{};
-};
+using c_valve_random = valve_random;
 
 c_valve_random valve_rand;
 
@@ -834,22 +771,6 @@ bool weapon_can_crit(Weapon* weapon, bool weapon_only) {
   }
 
   return true;
-}
-
-int predict_command_number(user_cmd* cmd) {
-  return cmd != nullptr ? cmd->command_number : 0;
-}
-
-bool should_hold_attack(user_cmd* cmd) {
-  return false;
-}
-
-bool wants_queued_force(user_cmd* cmd) {
-  return false;
-}
-
-bool has_pending_queued_force() {
-  return false;
 }
 
 bool is_command_crit(user_cmd* cmd, int command_number) {

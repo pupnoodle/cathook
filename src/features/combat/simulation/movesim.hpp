@@ -101,6 +101,20 @@ inline bool initialize(Player* player, storage& state, const init_options& optio
 inline bool run_tick(storage& state);
 inline void restore(storage& state);
 
+struct guard {
+  storage* storage = nullptr;
+  bool owned = false;
+
+  explicit guard(storage& value) : storage(&value), owned(true) {}
+  ~guard() {
+    if (owned && storage != nullptr) {
+      restore(*storage);
+    }
+  }
+  guard(const guard&) = delete;
+  guard& operator=(const guard&) = delete;
+};
+
 namespace detail {
 
 inline constexpr std::size_t max_records = 66;

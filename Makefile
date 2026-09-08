@@ -48,7 +48,7 @@ OBJ_FILES =  src/cathook.cpp.o # Unity build
 OBJ_FILES += src/core/logger.cpp.o src/core/config/config_store.cpp.o src/core/diagnostics/exception_handler.cpp.o # Core systems
 OBJ_FILES += src/external/MD5/MD5.cpp.o # MD5 helpers
 OBJ_FILES += src/external/libsigscan/libsigscan.c.o # Sigscan library
-OBJ_FILES += src/external/imgui/imgui_tables.cpp.o src/external/imgui/imgui_draw.cpp.o src/external/imgui/imgui_impl_sdl2.cpp.o src/external/imgui/imgui_demo.cpp.o src/external/imgui/imgui_impl_opengl3.cpp.o src/external/imgui/imgui_impl_vulkan.cpp.o src/external/imgui/imgui_widgets.cpp.o src/external/imgui/imgui.cpp.o src/external/imgui/imgui_stdlib.cpp.o # GUI library and OpenGL wrapper
+OBJ_FILES += src/external/imgui/imgui_tables.cpp.o src/external/imgui/imgui_draw.cpp.o src/external/imgui/imgui_impl_sdl2.cpp.o src/external/imgui/imgui_impl_opengl3.cpp.o src/external/imgui/imgui_impl_vulkan.cpp.o src/external/imgui/imgui_widgets.cpp.o src/external/imgui/imgui.cpp.o src/external/imgui/imgui_stdlib.cpp.o # GUI library and OpenGL wrapper
 OBJ_FILES += src/external/mono/bindings.cpp.o src/external/mono/entity_esp.cpp.o src/external/mono/menu_shell.cpp.o src/external/mono/overlays.cpp.o src/external/mono/runtime.cpp.o src/external/mono/theme.cpp.o src/external/mono/window_chrome.cpp.o src/external/mono/widgets.cpp.o # Local Mono UI framework
 
 OBJS = $(addprefix $(OBJ_DIR)/, $(OBJ_FILES))

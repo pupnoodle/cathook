@@ -203,43 +203,6 @@ static void* do_scan(int pid, uintptr_t start, uintptr_t end, const char* ida) {
     return ret;
 }
 
-int sigscan_pidof(const char* process_name) {
-    static char filename[50];
-    static char cmdline[256];
-
-    DIR* dir = opendir("/proc");
-    if (dir == NULL)
-        return SIGSCAN_PID_INVALID;
-
-    struct dirent* de;
-    while ((de = readdir(dir)) != NULL) {
-
-        const int pid = atoi(de->d_name);
-        if (pid <= 0)
-            continue;
-
-        sprintf(filename, "/proc/%d/cmdline", pid);
-
-        FILE* fd = fopen(filename, "r");
-        if (fd == NULL)
-            continue;
-
-        char* fgets_ret = fgets(cmdline, sizeof(cmdline), fd);
-        fclose(fd);
-
-        if (fgets_ret == NULL)
-            continue;
-
-        if (strstr(cmdline, process_name)) {
-            closedir(dir);
-            return pid;
-        }
-    }
-
-    closedir(dir);
-    return SIGSCAN_PID_INVALID;
-}
-
 SigscanModuleBounds* sigscan_get_module_bounds(int pid, const char* regex) {
 
     char maps_path[50] = "/proc/self/maps";

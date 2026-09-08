@@ -411,9 +411,8 @@ bool should_pop_uber(medic_controller& controller, Player* localplayer, Player* 
     return false;
   }
 
-  const auto now = global_vars != nullptr ? global_vars->curtime : 0.0f;
   int recent_damage_type = vacc_resist_index(damage_type::bullet);
-  if (controller.recent_danger_matches(localplayer, patient, &recent_damage_type) && now > 0.0f)
+  if (controller.recent_danger_matches(localplayer, patient, &recent_damage_type))
   {
     if (desired_type != nullptr)
     {

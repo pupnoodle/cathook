@@ -14,6 +14,6 @@ V  o o  V  file: src/core/random_seed.hpp
 
 #include <cstdint>
 
-static uint32_t* random_seed;
+inline uint32_t* random_seed = nullptr;
 
 #endif

@@ -57,12 +57,8 @@ public:
 
 private:
   static constexpr int max_args = 64;
-  static constexpr int max_length = 512;
 
   int argc_ = 0;
-  int argv0_size_ = 0;
-  char args_buffer_[max_length]{};
-  char argv_buffer_[max_length]{};
   const char* argv_[max_args]{};
 };
 

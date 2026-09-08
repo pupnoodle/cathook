@@ -18,8 +18,6 @@ typedef struct SigscanModuleBounds {
     struct SigscanModuleBounds* next;
 } SigscanModuleBounds;
 
-int sigscan_pidof(const char* process_name);
-
 SigscanModuleBounds* sigscan_get_module_bounds(int pid, const char* regex);
 
 void sigscan_free_module_bounds(SigscanModuleBounds* bounds);

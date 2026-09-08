@@ -18,39 +18,27 @@ V  o o  V  file: src/core/memory/memory.hpp
 
 #include "../print.hpp"
 
-static void* get_module_base_address(std::string module_name) {
-  std::ifstream file;
-  file.open("/proc/self/maps");
-
-  bool found = false;
-
+static void* get_module_base_address(const std::string& module_name) {
+  std::ifstream file{"/proc/self/maps"};
   std::string line;
-  std::string concat_line;
   while (std::getline(file, line)) {
-    for (int i = 0; i < line.length(); i++) {
-      concat_line = "";
-      for (int h = 0; i+h < line.length() && h < module_name.length(); h++) {
-	concat_line += line[i+h];
-      }
-      if (concat_line == module_name) { found = true; break; }
+    if (line.find(module_name) == std::string::npos) {
+      continue;
     }
-
-    if (found == true) {break;}
+    const auto dash = line.find('-');
+    if (dash == std::string::npos || dash == 0) {
+      continue;
+    }
+    unsigned long result = 0;
+    std::stringstream ss;
+    ss << std::hex << line.substr(0, dash);
+    ss >> result;
+    if (result != 0) {
+      return (void*)result;
+    }
+    return nullptr;
   }
-
-  concat_line = "";
-  for (int i = 0; i <= line.length(); i++) {
-    if (line[i] == '-') { break; }
-    concat_line += line[i];
-  }
-
-  std::stringstream ss;
-  ss << std::hex << "0x"+concat_line;
-
-  unsigned long result;
-  ss >> result;
-
-  return (void*)result;
+  return nullptr;
 }
 
 #endif
