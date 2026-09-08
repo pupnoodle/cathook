@@ -271,13 +271,30 @@ run_repo_git() {
     fi
 }
 
+allow_discard_enabled() {
+    case "${CATHOOK_ALLOW_DISCARD:-${CAT_ALLOW_DISCARD:-0}}" in
+        1|true|TRUE|yes|YES|on|ON|force|FORCE)
+            return 0
+            ;;
+    esac
+
+    return 1
+}
+
 discard_local_tracked_changes() {
     if [ -z "$(run_repo_git status --porcelain --untracked-files=no)" ]; then
+        return 0
+    fi
+
+    if allow_discard_enabled; then
+        echo "Discarding local tracked changes before updating (CATHOOK_ALLOW_DISCARD is set)..."
+        run_repo_git reset --hard
         return
     fi
 
-    echo "Discarding local tracked changes before updating..."
-    run_repo_git reset --hard
+    echo "Local tracked changes found; refusing to discard them. Skipping auto update." >&2
+    echo "Commit, stash, or set CATHOOK_ALLOW_DISCARD=1 to allow discarding." >&2
+    return 1
 }
 
 rebuild_after_update() {
@@ -331,7 +348,10 @@ check_for_updates() {
 
     if run_repo_git merge-base --is-ancestor "$local_rev" "$upstream_rev"; then
         echo "Update found. Downloading latest changes..."
-        discard_local_tracked_changes
+        if ! discard_local_tracked_changes; then
+            echo "Auto update skipped to preserve local changes."
+            return 0
+        fi
         if ! run_repo_git pull --ff-only --quiet; then
             echo "Auto update failed: could not fast-forward from $upstream."
             return 1
@@ -351,7 +371,13 @@ check_for_updates() {
         return 0
     fi
 
-    echo "Local checkout has diverged from $upstream; resetting to upstream."
+    echo "Local checkout has diverged from $upstream; refusing to reset."
+    echo "Rebase or merge manually, or set CATHOOK_ALLOW_DISCARD=1 to reset to upstream."
+    if ! allow_discard_enabled; then
+        echo "Auto update skipped to preserve local commits."
+        return 0
+    fi
+    echo "Resetting to $upstream (CATHOOK_ALLOW_DISCARD is set)."
     if ! run_repo_git reset --hard "$upstream"; then
         echo "Auto update failed: could not reset to $upstream."
         return 1

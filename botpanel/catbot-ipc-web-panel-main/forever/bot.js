@@ -34,8 +34,7 @@ const BOT_XAUTHORITY = process.env.XAUTHORITY || path.join(process.env.HOME || '
 const XPRA_LOG = process.env.CAT_XPRA_LOG || '/tmp/cat-catbot-xpra.log';
 const TEXTMODE_GAME = process.env.CAT_TEXTMODE_GAME !== '0';
 const BOT_TF2_OVERLAY_ENABLED = process.env.CAT_BOT_TF2_OVERLAY !== '0';
-const STEAM_TXTMODE_ENABLED = process.env.CAT_STEAM_TXTMODE === '1'
-    || (process.env.CAT_STEAM_TXTMODE !== '0' && TEXTMODE_GAME);
+const STEAM_TXTMODE_ENABLED = process.env.CAT_STEAM_TXTMODE === '1';
 const STEAM_TXTMODE_HIDE_WINDOWS = process.env.CAT_STEAM_TXTMODE_HIDE_WINDOWS === '0' ? '0' : '1';
 const STEAM_TXTMODE_DROP_DRAWS = process.env.CAT_STEAM_TXTMODE_DROP_DRAWS === '0' ? '0' : '1';
 const STEAM_TXTMODE_TRIM_WEBHELPER = process.env.CAT_STEAM_TXTMODE_TRIM_WEBHELPER === '1' ? '1' : '0';

@@ -1798,27 +1798,33 @@ void install_net_channel_hook()
   }
 }
 
-void restore_net_channel_hook()
+bool restore_net_channel_hook()
 {
   if (g_hooked_net_channel_vtable == nullptr || g_send_datagram_original == nullptr) {
     g_hooked_net_channel_vtable = nullptr;
     g_send_datagram_original = nullptr;
-    return;
+    return true;
   }
 
   void* const entry = read_vtable_entry(
     g_hooked_net_channel_vtable,
     net_channel_send_datagram_index,
     "INetChannel::SendDatagram restore");
+  if (entry == nullptr) {
+    return false;
+  }
   if (entry == reinterpret_cast<void*>(send_datagram_hook)) {
-    write_to_table(
+    if (!write_to_table(
       g_hooked_net_channel_vtable,
       net_channel_send_datagram_index,
-      reinterpret_cast<void*>(g_send_datagram_original));
+      reinterpret_cast<void*>(g_send_datagram_original))) {
+      return false;
+    }
   }
 
   g_hooked_net_channel_vtable = nullptr;
   g_send_datagram_original = nullptr;
+  return true;
 }
 
 }

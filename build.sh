@@ -185,15 +185,6 @@ run_git() {
     fi
 }
 
-discard_local_tracked_changes() {
-    if [ -z "$(run_git status --porcelain --untracked-files=no)" ]; then
-        return
-    fi
-
-    echo "Discarding local tracked changes before updating..."
-    run_git reset --hard
-}
-
 update_project_if_needed() {
     if is_dev_mode; then
         echo "Dev mode enabled; skipping repository update check."
@@ -233,12 +224,14 @@ update_project_if_needed() {
     fi
 
     if [ "$merge_base" != "$local_commit" ]; then
-        echo "Local branch has diverged from $upstream_branch; resetting to upstream."
-        run_git reset --hard '@{u}'
+        echo "Local branch has diverged from $upstream_branch; skipping update."
         return
     fi
 
-    discard_local_tracked_changes
+    if [ -n "$(run_git status --porcelain)" ]; then
+        echo "Local changes found; skipping update."
+        return
+    fi
     echo "Updating from $upstream_branch..."
     run_git pull --ff-only
 }

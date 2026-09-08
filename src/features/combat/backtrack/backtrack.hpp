@@ -150,7 +150,7 @@ void backtrack_to_crosshair(user_cmd* user_cmd, Player* localplayer, Weapon* wea
 [[nodiscard]] const backtrack_record* latest_dormant_record(Player* player);
 
 void install_net_channel_hook();
-void restore_net_channel_hook();
+bool restore_net_channel_hook();
 
 }
 #endif

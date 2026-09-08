@@ -24,5 +24,10 @@ V  o o  V  file: src/core/assert.hpp
     cathook::core::log_raw("fatal error: ");				\
     cathook::core::log_raw(message);					\
     error_box(message);							\
-    exit(1);								\
+    if (cathook::core::game_hooks_installed.load(std::memory_order_acquire)) { \
+      cathook::core::request_detach();					\
+    } else {								\
+      cathook::core::abort_module_runtime_init();			\
+    }									\
+    return false;							\
   }

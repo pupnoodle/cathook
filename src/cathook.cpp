@@ -916,53 +916,64 @@ bool unload_module_runtime() {
       || is_environment_enabled("CATHOOK_DETACH_RELEASE_GRAPHICS");
 
   print("Unhooking VMT functions\n");
-  backtrack::restore_net_channel_hook();
+  bool hooks_restored = backtrack::restore_net_channel_hook();
 
   if (client_mode_vtable != nullptr && client_mode_create_move_original != nullptr && !write_to_table(client_mode_vtable, 22, (void*)client_mode_create_move_original)) {
     print("ClientMode::CreateMove failed to restore hook\n");
+    hooks_restored = false;
   }
 
   if (client_mode_vtable != nullptr && client_mode_post_screen_space_effects_original != nullptr &&
       !write_to_table(client_mode_vtable, 40, (void*)client_mode_post_screen_space_effects_original)) {
     print("ClientMode::DoPostScreenSpaceEffects failed to restore hook\n");
+    hooks_restored = false;
   }
 
   if (client_vtable != nullptr && client_create_move_original != nullptr && !write_to_table(client_vtable, 21, (void*)client_create_move_original)) {
     print("Client::CreateMove failed to restore hook\n");
+    hooks_restored = false;
   }
 
   if (model_render_vtable != nullptr && model_render_draw_model_execute_original != nullptr &&
       !write_to_table(model_render_vtable, 19, (void*)model_render_draw_model_execute_original)) {
     print("ModelRender::DrawModelExecute failed to restore hook\n");
+    hooks_restored = false;
   }
 
   if (model_render_vtable != nullptr && model_render_forced_material_override_original != nullptr &&
       !write_to_table(model_render_vtable, 1, (void*)model_render_forced_material_override_original)) {
     print("ModelRender::ForcedMaterialOverride failed to restore hook\n");
+    hooks_restored = false;
   }
 
   if (client_mode_vtable != nullptr && override_view_original != nullptr && !write_to_table(client_mode_vtable, 17, (void*)override_view_original)) {
     print("OverrideView failed to restore hook\n");
+    hooks_restored = false;
   }
 
   if (client_mode_vtable != nullptr && draw_view_model_original != nullptr && !write_to_table(client_mode_vtable, 25, (void*)draw_view_model_original)) {
     print("ShouldDrawViewModel failed to restore hook\n");
+    hooks_restored = false;
   }
 
   if (vgui_vtable != nullptr && paint_traverse_original != nullptr && !write_to_table(vgui_vtable, 42, (void*)paint_traverse_original)) {
     print("PaintTraverse failed to restore hook\n");
+    hooks_restored = false;
   }
 
   if (game_event_manager_vtable != nullptr && fire_event_client_side_original != nullptr && !write_to_table(game_event_manager_vtable, 9, (void*)fire_event_client_side_original)) {
     print("FireEventClientSide failed to restore hook\n");
+    hooks_restored = false;
   }
 
   if (client_vtable != nullptr && frame_stage_notify_original != nullptr && !write_to_table(client_vtable, 35, (void*)frame_stage_notify_original)) {
     print("FrameStageNotify failed to restore hook\n");
+    hooks_restored = false;
   }
 
   if (client_vtable != nullptr && dispatch_user_message_original != nullptr && !write_to_table(client_vtable, 36, (void*)dispatch_user_message_original)) {
     print("DispatchUserMessage failed to restore hook\n");
+    hooks_restored = false;
   }
 
   if (steam_networking_utils_vtable != nullptr &&
@@ -972,6 +983,7 @@ bool unload_module_runtime() {
         steam_networking_utils_get_ping_to_data_center_index,
         (void*)steam_networking_utils_get_ping_to_data_center_original)) {
     print("ISteamNetworkingUtils::GetPingToDataCenter failed to restore hook\n");
+    hooks_restored = false;
   }
 
   if (steam_networking_utils_vtable != nullptr &&
@@ -981,11 +993,16 @@ bool unload_module_runtime() {
         steam_networking_utils_get_direct_ping_to_pop_index,
         (void*)steam_networking_utils_get_direct_ping_to_pop_original)) {
     print("ISteamNetworkingUtils::GetDirectPingToPOP failed to restore hook\n");
+    hooks_restored = false;
   }
 
   print("Unhooking Non-VMT functions\n");
   if (funchook != nullptr) {
-    funchook_uninstall(funchook, 0);
+    const int result = funchook_uninstall(funchook, 0);
+    if (result != 0 && result != FUNCHOOK_ERROR_NOT_INSTALLED) {
+      print("Failed to uninstall inline hooks: %d\n", result);
+      hooks_restored = false;
+    }
   }
 
   print("Unhooking SDL functions\n");
@@ -995,28 +1012,35 @@ bool unload_module_runtime() {
 
     if (swap_window_original != nullptr && !restore_sdl_hook_target(swap_window_target, (void*)swap_window_original)) {
       print("Failed to restore SDL_GL_SwapWindow\n");
+    hooks_restored = false;
     }
 
     if (poll_event_original != nullptr && !restore_sdl_hook_target(poll_event_target, (void*)poll_event_original)) {
       print("Failed to restore SDL_PollEvent\n");
+    hooks_restored = false;
     }
 
     if (get_window_flags_original != nullptr && !restore_sdl_hook_target(get_window_flags_target, (void*)get_window_flags_original)) {
       print("Failed to restore SDL_GetWindowFlags\n");
+    hooks_restored = false;
     }
 
     if (get_window_WM_info_original != nullptr && !restore_sdl_hook_target(get_window_WM_info_target, (void*)get_window_WM_info_original)) {
       print("Failed to restore SDL_GetWindowWMInfo\n");
+    hooks_restored = false;
     }
 
     if (get_window_size_original != nullptr && !restore_sdl_hook_target(get_window_size_target, (void*)get_window_size_original)) {
       print("Failed to restore SDL_GetWindowSize\n");
+    hooks_restored = false;
     }
 
-    finish_sdl_hook_uninstall();
+    if (hooks_restored) {
+      finish_sdl_hook_uninstall();
+    }
   }
 
-  if (!wait_for_other_hook_calls()) {
+  if (!hooks_restored || !wait_for_other_hook_calls()) {
     unload_started.store(false, std::memory_order_release);
     detach_started.store(false, std::memory_order_release);
     detach_complete.store(false, std::memory_order_release);
@@ -1024,6 +1048,7 @@ bool unload_module_runtime() {
     return false;
   }
 
+  restore_frame_stage_state();
   cathook::core::unregister_commands();
   cathook::core::identify::stop();
   cat_ipc::client::shutdown();
@@ -1077,6 +1102,7 @@ bool unload_module_runtime() {
   detach_started.store(false, std::memory_order_release);
   detach_complete.store(true, std::memory_order_release);
   runtime_initialized.store(false, std::memory_order_release);
+  game_hooks_installed.store(false, std::memory_order_release);
   unload_started.store(false, std::memory_order_release);
   return true;
 }
@@ -1100,6 +1126,7 @@ bool initialize_module_runtime() {
   detach_requested.store(false, std::memory_order_release);
   detach_started.store(false, std::memory_order_release);
   detach_complete.store(false, std::memory_order_release);
+  game_hooks_installed.store(false, std::memory_order_release);
 
   print("initialize_module_runtime create directories\n");
   std::error_code error{};
@@ -1118,6 +1145,19 @@ bool initialize_module_runtime() {
   cat_bind::load(cathook::core::get_config_store());
   print("cathook bootstrap started\n");
   return true;
+}
+
+void abort_module_runtime_init() {
+  runtime_initialized.store(false, std::memory_order_release);
+  game_hooks_installed.store(false, std::memory_order_release);
+  detach_complete.store(false, std::memory_order_release);
+  detach_started.store(false, std::memory_order_release);
+  detach_requested.store(false, std::memory_order_release);
+  unload_started.store(false, std::memory_order_release);
+  restore_client_crashfix_patches();
+  cathook::core::exception_handler::uninstall();
+  cathook::core::shutdown_config_store();
+  cathook::core::shutdown_logger();
 }
 
 }
@@ -1324,6 +1364,7 @@ bool initialize_game_runtime() {
   print("initialize_game_runtime module runtime initialized\n");
 
   if (!cathook::core::wait_for_module("engine.so")) {
+    cathook::core::abort_module_runtime_init();
     return false;
   }
 
@@ -1345,6 +1386,7 @@ bool initialize_game_runtime() {
   }
 
   if (!cathook::core::wait_for_module("vphysics.so")) {
+    cathook::core::abort_module_runtime_init();
     return false;
   }
 
@@ -1362,7 +1404,7 @@ bool initialize_game_runtime() {
 
   std::uintptr_t rcon_addr_change_address = 0;
   if (!cathook::core::require_signature("engine.so", "CClientState", sigs::client_state, rcon_addr_change_address)) {
-    cathook::core::runtime_initialized.store(false, std::memory_order_release);
+    cathook::core::abort_module_runtime_init();
     return false;
   }
 
@@ -1372,6 +1414,7 @@ bool initialize_game_runtime() {
   error_assert(client_state == nullptr, "CClientState is missing");
 
   if (!cathook::core::wait_for_module("vgui2.so")) {
+    cathook::core::abort_module_runtime_init();
     return false;
   }
 
@@ -1379,6 +1422,7 @@ bool initialize_game_runtime() {
   error_assert(vgui == nullptr, "VGUI_Panel009 is missing");
 
   if (!cathook::core::wait_for_module("vguimatsurface.so")) {
+    cathook::core::abort_module_runtime_init();
     return false;
   }
 
@@ -1386,6 +1430,7 @@ bool initialize_game_runtime() {
   error_assert(surface == nullptr, "VGUI_Surface030 is missing");
 
   if (!cathook::core::wait_for_module("materialsystem.so")) {
+    cathook::core::abort_module_runtime_init();
     return false;
   }
 
@@ -1393,6 +1438,7 @@ bool initialize_game_runtime() {
   error_assert(material_system == nullptr, "VMaterialSystem082 is missing");
 
   if (!cathook::core::wait_for_module("libvstdlib.so")) {
+    cathook::core::abort_module_runtime_init();
     return false;
   }
 
@@ -1406,10 +1452,12 @@ bool initialize_game_runtime() {
   error_assert(key_values_system_original == nullptr, "KeyValuesSystem is missing");
 
   if (!cathook::core::wait_for_module("steamclient.so")) {
+    cathook::core::abort_module_runtime_init();
     return false;
   }
 
   if (!cathook::core::wait_for_module("client.so")) {
+    cathook::core::abort_module_runtime_init();
     return false;
   }
 
@@ -1420,7 +1468,7 @@ bool initialize_game_runtime() {
 
   std::uintptr_t func_address = 0;
   if (!cathook::core::require_signature("client.so", "CInput", sigs::input, func_address)) {
-    cathook::core::runtime_initialized.store(false, std::memory_order_release);
+    cathook::core::abort_module_runtime_init();
     return false;
   }
 
@@ -1431,7 +1479,7 @@ bool initialize_game_runtime() {
 
   std::uintptr_t check_stuck_address = 0;
   if (!cathook::core::require_signature("client.so", "CMoveHelper", sigs::move_helper, check_stuck_address)) {
-    cathook::core::runtime_initialized.store(false, std::memory_order_release);
+    cathook::core::abort_module_runtime_init();
     return false;
   }
 
@@ -1502,6 +1550,7 @@ bool initialize_game_runtime() {
   model_render_draw_model_execute_original = reinterpret_cast<void (*)(void*, const DrawModelState&, const ModelRenderInfo&, matrix_3x4*)>(
     read_vtable_entry(model_render_vtable, 19, "ModelRender::DrawModelExecute"));
   entity_visuals::draw_model_execute_original = model_render_draw_model_execute_original;
+  cathook::core::game_hooks_installed.store(true, std::memory_order_release);
   if (model_render_draw_model_execute_original == nullptr || !write_to_table(
         model_render_vtable, 19, (void*)model_render_draw_model_execute_hook)) {
     print("ModelRender::DrawModelExecute hook failed\n");
@@ -2027,7 +2076,8 @@ bool initialize_game_runtime() {
 
   std::uintptr_t func_address_2 = 0;
   if (!cathook::core::require_signature("client.so", "random seed", sigs::random_seed, func_address_2)) {
-    cathook::core::runtime_initialized.store(false, std::memory_order_release);
+    cathook::core::request_detach();
+    cathook::core::service_detach_request();
     return false;
   }
 

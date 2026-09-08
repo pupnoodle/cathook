@@ -19,6 +19,7 @@ V  o o  V  file: src/features/movement/engine_prediction/engine_prediction.cpp
 #include "games/tf2/sdk/interfaces/entity_list.hpp"
 #include "games/tf2/sdk/interfaces/game_movement.hpp"
 #include "games/tf2/sdk/interfaces/global_vars.hpp"
+#include "games/tf2/sdk/interfaces/input.hpp"
 #include "games/tf2/sdk/interfaces/move_helper.hpp"
 #include "games/tf2/sdk/interfaces/prediction.hpp"
 
@@ -56,6 +57,7 @@ struct engine_prediction_global_snapshot {
 
 struct engine_prediction_weapon_snapshot {
   bool valid = false;
+  void* weapon_instance = nullptr;
   float crit_token_bucket = 0.0f;
   int crit_checks = 0;
   int crit_seed_requests = 0;
@@ -81,20 +83,33 @@ engine_prediction_state prediction_state{};
 int engine_prediction_tickbase(user_cmd* current_user_cmd, Player* localplayer) {
   static int predicted_tickbase = 0;
   static int last_command_number = 0;
-  static bool last_command_was_predicted = false;
+  static int last_player_handle = 0;
+  static int last_player_tickbase = 0;
 
   if (current_user_cmd == nullptr || localplayer == nullptr) {
+    last_command_number = 0;
     return predicted_tickbase;
   }
 
-  if (last_command_number <= 0 || last_command_was_predicted) {
-    predicted_tickbase = localplayer->get_tickbase();
-  } else {
+  const int player_handle = localplayer->get_ref_handle();
+  const int player_tickbase = localplayer->get_tickbase();
+  const auto* previous_command = input != nullptr && last_command_number > 0
+    ? input->get_user_cmd(last_command_number) : nullptr;
+  const bool same_command = current_user_cmd->command_number == last_command_number;
+  const bool consecutive_command = last_command_number > 0 &&
+    current_user_cmd->command_number > last_command_number &&
+    current_user_cmd->command_number - last_command_number == 1;
+  if (last_command_number <= 0 || player_handle != last_player_handle ||
+      player_tickbase != last_player_tickbase || current_user_cmd->has_been_predicted ||
+      (!same_command && (!consecutive_command || previous_command == nullptr || !previous_command->has_been_predicted))) {
+    predicted_tickbase = player_tickbase;
+  } else if (!same_command && predicted_tickbase < INT_MAX) {
     ++predicted_tickbase;
   }
 
   last_command_number = current_user_cmd->command_number;
-  last_command_was_predicted = current_user_cmd->has_been_predicted;
+  last_player_handle = player_handle;
+  last_player_tickbase = player_tickbase;
   return predicted_tickbase;
 }
 
@@ -138,6 +153,7 @@ bool engine_prediction_capture(Player* localplayer) {
     }
 
     state.valid = true;
+    state.weapon_instance = weapon;
     state.crit_token_bucket = weapon->crit_token_bucket();
     state.crit_checks = weapon->crit_checks();
     state.crit_seed_requests = weapon->crit_seed_requests();
@@ -194,7 +210,7 @@ void engine_prediction_restore(Player* localplayer) {
     }
 
     auto* weapon = localplayer->get_weapon_at(slot);
-    if (weapon == nullptr) {
+    if (weapon == nullptr || weapon != state.weapon_instance) {
       continue;
     }
 
@@ -217,13 +233,18 @@ void engine_prediction_restore(Player* localplayer) {
 }
 
 void start_engine_prediction(user_cmd* user_cmd) {
-  if (prediction_state.active || user_cmd == nullptr || prediction == nullptr || game_movement == nullptr ||
-      move_helper == nullptr || global_vars == nullptr) {
+  if (prediction_state.active) {
+    return;
+  }
+  if (user_cmd == nullptr || prediction == nullptr || game_movement == nullptr ||
+      move_helper == nullptr || global_vars == nullptr || entity_list == nullptr) {
+    engine_prediction_tickbase(nullptr, nullptr);
     return;
   }
 
   Player* localplayer = entity_list->get_localplayer();
   if (localplayer == nullptr || !localplayer->is_alive()) {
+    engine_prediction_tickbase(nullptr, nullptr);
     return;
   }
 
@@ -233,14 +254,15 @@ void start_engine_prediction(user_cmd* user_cmd) {
 
   prediction_state.active = true;
 
-  struct user_cmd predicted_command = *user_cmd;
+  static thread_local struct user_cmd predicted_command{};
+  predicted_command = *user_cmd;
   predicted_command.buttons &= ~(IN_ATTACK | IN_ATTACK2 | IN_ATTACK3);
   predicted_command.impulse = 0;
   predicted_command.weapon_select = 0;
   predicted_command.weapon_subtype = 0;
   predicted_command.has_been_predicted = false;
 
-  int predicted_tickbase = engine_prediction_tickbase(&predicted_command, localplayer);
+  int predicted_tickbase = engine_prediction_tickbase(user_cmd, localplayer);
   localplayer->set_tickbase(predicted_tickbase);
   localplayer->set_current_cmd(&predicted_command);
 

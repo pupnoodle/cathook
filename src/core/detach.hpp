@@ -21,6 +21,7 @@ namespace cathook::core
 inline std::atomic_bool detach_requested = false;
 inline std::atomic_bool detach_started = false;
 inline std::atomic_bool detach_complete = false;
+inline std::atomic_bool game_hooks_installed = false;
 inline std::atomic_uint active_hook_calls = 0;
 inline thread_local unsigned hook_call_depth = 0;
 

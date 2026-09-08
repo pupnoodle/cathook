@@ -53,6 +53,11 @@ bool process_base_is(const char* name)
   return length > 0 && path_base_matches(path, name);
 }
 
+bool is_steam_ui_process()
+{
+  return process_base_is("steam") || process_base_is("steamwebhelper");
+}
+
 bool should_throttle_process()
 {
   const int cached = g_should_throttle.load(std::memory_order_relaxed);
@@ -61,7 +66,7 @@ bool should_throttle_process()
     return cached == 1;
   }
 
-  const bool throttle = process_base_is("steam") || process_base_is("steamwebhelper");
+  const bool throttle = is_steam_ui_process();
   g_should_throttle.store(throttle ? 1 : 0, std::memory_order_relaxed);
   return throttle;
 }
@@ -93,13 +98,13 @@ void sleep_loop_if(bool condition)
 bool should_hide_x11()
 {
   const config& cfg = settings();
-  return !cfg.disabled && cfg.hide_x11;
+  return !cfg.disabled && cfg.hide_x11 && !is_steam_ui_process();
 }
 
 bool should_drop_gl()
 {
   const config& cfg = settings();
-  return !cfg.disabled && cfg.no_gl;
+  return !cfg.disabled && cfg.no_gl && !is_steam_ui_process();
 }
 
 int swap_interval(int requested)
@@ -558,7 +563,7 @@ __attribute__((constructor)) void cat_steamtxtmode_init()
   cfg.no_gl = env_flag("CAT_STM_NO_GL", env_flag("CAT_STEAM_TXTMODE_DROP_DRAWS", true));
   cfg.no_vsync = env_flag("CAT_STM_NO_VSYNC", true);
   cfg.no_audio = env_flag("CAT_STM_NO_AUDIO", true);
-  cfg.webhelper_trim = env_flag("CAT_STM_WEBHELPER_TRIM", env_flag("CAT_STEAM_TXTMODE_TRIM_WEBHELPER", true));
+  cfg.webhelper_trim = env_flag("CAT_STM_WEBHELPER_TRIM", env_flag("CAT_STEAM_TXTMODE_TRIM_WEBHELPER", false));
   cfg.webhelper_single = env_flag("CAT_STM_WEBHELPER_SINGLE", false);
   cfg.loop_sleep = env_flag("CAT_STM_LOOP_SLEEP", true);
   cfg.loop_sleep_us = std::clamp(env_int("CAT_STM_LOOP_SLEEP_US", env_int("CAT_STEAM_TXTMODE_FRAME_INTERVAL_US", 100000)), 0, 1000000);

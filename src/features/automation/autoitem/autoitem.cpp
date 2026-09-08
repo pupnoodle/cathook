@@ -116,6 +116,7 @@ struct slot_task_state
   std::string raw{};
   parsed_spec spec{};
   int attempts = 0;
+  std::size_t alternative_index = 0;
 };
 
 enum task_id : std::size_t
@@ -143,7 +144,6 @@ struct equip_request_record
 inventory_api g_inventory_api{};
 float g_next_auto_item_time = 0.0f;
 std::array<slot_task_state, task_count> g_task_states{};
-int g_hat_rotation_offset = 0;
 std::unordered_map<int, std::vector<std::uint64_t>> g_item_ids_by_def{};
 bool g_item_ids_valid = false;
 std::unordered_map<std::uint32_t, equip_request_record> g_last_equip_requests{};
@@ -377,6 +377,21 @@ parsed_spec parse_spec(std::string_view raw)
   {
     if (result_separator == std::string::npos)
     {
+      std::string as_alternatives = cleaned;
+      for (auto& ch : as_alternatives)
+      {
+        if (ch == ',' || ch == ';')
+        {
+          ch = '/';
+        }
+      }
+      auto alt_defs = parse_item_def_list(as_alternatives, '/');
+      if (!alt_defs.empty())
+      {
+        parsed.kind = spec_kind::alternatives;
+        parsed.defs = std::move(alt_defs);
+        return parsed;
+      }
       debug_log("craft spec '%s' has no result item\n", cleaned.c_str());
       return parsed;
     }
@@ -548,6 +563,7 @@ std::uint64_t read_item_id(std::uint8_t* item)
 
 void rebuild_inventory_index()
 {
+  g_last_equip_requests.clear();
   g_item_ids_by_def.clear();
   g_item_ids_valid = false;
 
@@ -785,6 +801,7 @@ void reset_runtime_caches()
   for (auto& state : g_task_states)
   {
     state.attempts = 0;
+    state.alternative_index = 0;
   }
 }
 
@@ -909,6 +926,15 @@ bool get_item(const int item_def_id, const bool allow_rent)
 
 void acquire_item(const int item_def_id, const bool allow_rent, slot_task_state& state)
 {
+  if (!g_item_ids_valid)
+  {
+    rebuild_inventory_index();
+    if (!g_item_ids_valid)
+    {
+      return;
+    }
+  }
+
   if (state.attempts >= fallback_attempt_limit)
   {
     debug_log("stopping acquisition of item def %d after %d attempt(s)\n", item_def_id, state.attempts);
@@ -921,6 +947,11 @@ void acquire_item(const int item_def_id, const bool allow_rent, slot_task_state&
 
 void run_craft_task(slot_task_state& state, const int class_id, const int slot)
 {
+  if (g_pending_pickup_ack_attempts > 0)
+  {
+    return;
+  }
+
   const int result_def = state.spec.craft_result;
   if (auto item_id = first_owned_item_id(result_def))
   {
@@ -980,6 +1011,7 @@ void run_slot_task(
     state.raw = raw;
     state.spec = parse_spec(raw);
     state.attempts = 0;
+    state.alternative_index = 0;
   }
 
   switch (state.spec.kind)
@@ -1017,8 +1049,18 @@ void run_slot_task(
         }
       }
 
-      const int wanted_def = state.attempts >= fallback_attempt_limit && defs.size() > 1 ? defs.back() : defs.front();
-      acquire_item(wanted_def, true, state);
+      if (defs.empty()) {
+        return;
+      }
+      if (state.attempts >= fallback_attempt_limit)
+      {
+        state.alternative_index = (state.alternative_index + 1) % defs.size();
+        state.attempts = 0;
+      }
+      if (state.alternative_index >= defs.size()) {
+        state.alternative_index = 0;
+      }
+      acquire_item(defs[state.alternative_index], allow_rent, state);
       return;
     }
 
@@ -1120,8 +1162,6 @@ void on_tick()
     return;
   }
 
-  g_next_auto_item_time = global_vars->realtime + (static_cast<float>(interval_ms) / 1000.0f);
-
   auto* localplayer = entity_list->get_localplayer();
   if (localplayer == nullptr)
   {
@@ -1136,8 +1176,11 @@ void on_tick()
 
   if (!api_ready())
   {
+    g_next_auto_item_time = global_vars->realtime + 1.0f;
     return;
   }
+
+  g_next_auto_item_time = global_vars->realtime + (static_cast<float>(interval_ms) / 1000.0f);
 
   refresh_runtime_caches(class_id);
   rebuild_inventory_index();
@@ -1169,15 +1212,14 @@ void on_tick()
     };
     for (int index = 0; index < 3; ++index)
     {
-      const int rotated_slot = hat_slots[static_cast<std::size_t>((g_hat_rotation_offset + index) % 3)];
+      const int hat_slot = hat_slots[static_cast<std::size_t>(index)];
       const auto task = static_cast<std::size_t>(task_hat1 + index);
-      run_slot_task(task, *hat_specs[static_cast<std::size_t>(index)], class_id, rotated_slot, false);
+      run_slot_task(task, *hat_specs[static_cast<std::size_t>(index)], class_id, hat_slot, false);
     }
-    g_hat_rotation_offset = (g_hat_rotation_offset + 1) % 3;
   }
 
   const bool action_slot_claimed =
-    settings.auto_item_equipment && g_task_states[task_action].spec.kind != spec_kind::skip;
+    settings.auto_item_equipment && parse_spec(settings.auto_item_action).kind != spec_kind::skip;
   if (settings.auto_item_noisemaker && !action_slot_claimed)
   {
     const int item_def = seasonal_noisemaker_item_def();

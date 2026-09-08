@@ -100,11 +100,12 @@ void end_lerp_removal()
   interpolation_amount_overridden = false;
 }
 
+Convar* zoom_sensitivity_ratio = nullptr;
+float user_zoom_sensitivity_ratio = 1.0f;
+bool ratio_overridden = false;
+
 void update_zoom_sensitivity()
 {
-  static Convar* zoom_sensitivity_ratio = nullptr;
-  static float user_zoom_sensitivity_ratio = 1.0f;
-  static bool ratio_overridden = false;
 
   if (zoom_sensitivity_ratio == nullptr && convar_system != nullptr) {
     zoom_sensitivity_ratio = convar_system->find_var("zoom_sensitivity_ratio");
@@ -183,6 +184,22 @@ void run_skybox_changer()
 
 }
 
+void restore_frame_stage_state()
+{
+  thirdperson::end_render_angles();
+  end_lerp_removal();
+  if (cl_interpolate != nullptr && cl_interpolate_overridden) {
+    cl_interpolate->set_int(saved_cl_interpolate);
+  }
+  if (zoom_sensitivity_ratio != nullptr && ratio_overridden) {
+    zoom_sensitivity_ratio->set_float(user_zoom_sensitivity_ratio);
+  }
+  cl_interpolate_overridden = false;
+  ratio_overridden = false;
+  cl_interpolate = nullptr;
+  zoom_sensitivity_ratio = nullptr;
+}
+
 void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
   CATHOOK_HOOK_GUARD();
   if (cathook::core::is_detach_pending()) {
@@ -235,12 +252,14 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
       const bool refresh_friend_cache = steam_friends != nullptr && global_vars->curtime - last_time >= 1;
       const bool cache_player_info = config.aimbot.master || refresh_friend_cache;
 
-      for (unsigned int i = 1; i <= entity_list->get_max_entities(); ++i) {
+      const unsigned int max_entities = entity_list->get_max_entities();
+      for (unsigned int i = 1; i <= max_entities; ++i) {
 	Entity* entity = entity_list->entity_from_index(i);
 	if (entity == nullptr) continue;
 
+        const class_id entity_class = entity->get_class_id();
         const char* network_name = entity->get_network_name();
-        if (network_name != nullptr &&
+        if (network_name != nullptr && network_name[0] != '\0' &&
             (std::strstr(network_name, "Boss") != nullptr ||
              std::strstr(network_name, "Merasmus") != nullptr ||
              std::strstr(network_name, "Eyeball") != nullptr ||
@@ -250,25 +269,21 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
           g_entity_cache_npcs.push_back(entity);
         }
 
-        if (entity->is_network_class("CTFPumpkinBomb")) {
-          entity_cache[class_id::PUMPKIN].push_back(entity);
+        if (network_name != nullptr) {
+          if (std::strcmp(network_name, "CTFPumpkinBomb") == 0) {
+            entity_cache[class_id::PUMPKIN].push_back(entity);
+          } else if (std::strcmp(network_name, "CTFProjectile_SentryRocket") == 0) {
+            entity_cache[class_id::SENTRY_ROCKET].push_back(entity);
+          } else if (std::strcmp(network_name, "CCurrencyPack") == 0) {
+            entity_cache[class_id::MVM_CURRENCY].push_back(entity);
+          } else if (std::strcmp(network_name, "CFuncUpgrades") == 0
+            || std::strcmp(network_name, "CUpgrades") == 0
+            || std::strcmp(network_name, "CFuncUpgradeStation") == 0) {
+            entity_cache[class_id::MVM_UPGRADE_STATION].push_back(entity);
+          }
         }
 
-        if (entity->is_network_class("CTFProjectile_SentryRocket")) {
-          entity_cache[class_id::SENTRY_ROCKET].push_back(entity);
-        }
-
-        if (entity->is_network_class("CCurrencyPack")) {
-          entity_cache[class_id::MVM_CURRENCY].push_back(entity);
-        }
-
-        if (entity->is_network_class("CFuncUpgrades")
-          || entity->is_network_class("CUpgrades")
-          || entity->is_network_class("CFuncUpgradeStation")) {
-          entity_cache[class_id::MVM_UPGRADE_STATION].push_back(entity);
-        }
-
-	switch (entity->get_class_id()) {
+	switch (entity_class) {
 	case class_id::PLAYER:
 	  {
             auto* player = static_cast<Player*>(entity);
@@ -288,8 +303,11 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
                 .friends_id = player_info_valid ? pinfo.friends_id : 0,
                 .alive = true,
                 .dormant = false,
-                .friendly = player->is_friend(),
-                .ignored = player->is_ignored(),
+                .friendly = player_info_valid && pinfo.friends_id != 0 && pinfo.fakeplayer != true &&
+                    (cathook::core::players::is_friendly(static_cast<std::uint32_t>(pinfo.friends_id)) ||
+                     friend_cache_lookup(pinfo.friends_id)),
+                .ignored = player_info_valid && pinfo.friends_id != 0 && pinfo.fakeplayer != true &&
+                    cathook::core::players::is_ignored(static_cast<std::uint32_t>(pinfo.friends_id)),
                 .fakeplayer = player_info_valid && pinfo.fakeplayer,
                 .player_info_valid = player_info_valid
               });
@@ -310,9 +328,10 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
 
 	case class_id::AMMO_OR_HEALTH_PACK:
 	  {
-	    if (entity->get_pickup_type() == pickup_type::AMMOPACK)
+	    const enum pickup_type pickup = entity->get_pickup_type();
+	    if (pickup == pickup_type::AMMOPACK)
 	      entity_cache[class_id::AMMO].push_back(entity);
-	    else if (entity->get_pickup_type() == pickup_type::MEDKIT)
+	    else if (pickup == pickup_type::MEDKIT)
 	      entity_cache[class_id::HEALTH_PACK].push_back(entity);
 
 	    break;
@@ -328,7 +347,7 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
 	case class_id::OBJECT_CART_DISPENSER:
 	case class_id::DISPENSER:
 	case class_id::TELEPORTER:
-	  entity_cache[entity->get_class_id()].push_back(entity); break;
+	  entity_cache[entity_class].push_back(entity); break;
 
 	case class_id::SNIPER_DOT:
 	  entity_cache[class_id::SNIPER_DOT].push_back(entity); break;
@@ -338,7 +357,7 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
         case class_id::FLARE:
         case class_id::ARROW:
         case class_id::CROSSBOW_BOLT:
-          entity_cache[entity->get_class_id()].push_back(entity);
+          entity_cache[entity_class].push_back(entity);
 
 	}
 

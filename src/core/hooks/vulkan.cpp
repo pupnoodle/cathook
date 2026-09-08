@@ -900,49 +900,6 @@ VkResult queue_present_hook(VkQueue queue, const VkPresentInfoKHR* present_info)
   const auto native_result = queue_present_original(queue, present_info);
   cathook::core::service_detach_request();
   return native_result;
-
-  if (steam_vulkan_overlay_loaded()) {
-    if (!logged_steam_overlay_fallback.exchange(true, std::memory_order_acq_rel)) {
-      print("Steam Vulkan overlay detected; using native present path for compatibility\n");
-    }
-
-    vulkan_overlay_disabled.store(true, std::memory_order_release);
-    const auto result = queue_present_original(queue, present_info);
-    return result;
-  }
-
-  if (vulkan_overlay_disabled.load(std::memory_order_acquire) ||
-      cathook::core::is_detach_pending() ||
-      nographics::should_skip_rendering_hooks() ||
-      present_info == nullptr ||
-      present_info->swapchainCount != 1 ||
-      present_info->pSwapchains == nullptr ||
-      present_info->pImageIndices == nullptr) {
-    const auto result = queue_present_original(queue, present_info);
-    cathook::core::service_detach_request();
-    return result;
-  }
-
-  const auto swapchain = present_info->pSwapchains[0];
-  const auto image_index = present_info->pImageIndices[0];
-  const auto render_queue = select_render_queue(queue);
-
-  if (vk_device == VK_NULL_HANDLE || sdl_window == nullptr || !ensure_imgui_context() ||
-      !ensure_swapchain_resources(swapchain, render_queue) || !ensure_vulkan_renderer(render_queue) ||
-      !record_overlay_commands(image_index) || !submit_overlay_commands(render_queue.queue, present_info, image_index)) {
-    const auto result = queue_present_original(queue, present_info);
-    cathook::core::service_detach_request();
-    return result;
-  }
-
-  auto overlay_present_info = *present_info;
-  auto overlay_complete = frame_semaphores[image_index].RenderCompleteSemaphore;
-  overlay_present_info.waitSemaphoreCount = 1;
-  overlay_present_info.pWaitSemaphores = &overlay_complete;
-
-  const auto result = queue_present_original(queue, &overlay_present_info);
-  cathook::core::service_detach_request();
-  return result;
 }
 
 VkResult create_swapchain_hook(VkDevice device, const VkSwapchainCreateInfoKHR* create_info, const VkAllocationCallbacks* allocator, VkSwapchainKHR* swapchain)

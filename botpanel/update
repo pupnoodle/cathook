@@ -19,6 +19,7 @@ Use --dev to skip repository/navmesh update checks and never reset local changes
 
 Environment:
   CATHOOK_DEV_MODE=1
+  CATHOOK_ALLOW_DISCARD=1   Allow discarding local changes during updates.
   CATHOOK_ROOT=/opt/cathook       Copy navmeshes into CATHOOK_ROOT/navmeshes.
   CAT_UPDATE_HOST_NAVMESHES=1  Copy navmeshes into the host TF2 maps directory.
   CAT_STEAMAPPS_PATH=/path/to/steamapps
@@ -222,13 +223,30 @@ update_origin_url() {
     fi
 }
 
+allow_discard_enabled() {
+    case "${CATHOOK_ALLOW_DISCARD:-${CAT_ALLOW_DISCARD:-0}}" in
+        1|true|TRUE|yes|YES|on|ON|force|FORCE)
+            return 0
+            ;;
+    esac
+
+    return 1
+}
+
 discard_local_tracked_changes() {
     if [ -z "$(run_repo_git status --porcelain --untracked-files=no)" ]; then
-        return
+        return 0
     fi
 
-    echo "Discarding local tracked changes before updating..."
-    run_repo_git reset --hard
+    if allow_discard_enabled; then
+        echo "Discarding local tracked changes before updating (CATHOOK_ALLOW_DISCARD is set)..."
+        run_repo_git reset --hard
+        return 0
+    fi
+
+    echo "Local tracked changes found; refusing to discard them. Skipping repository update." >&2
+    echo "Commit, stash, or set CATHOOK_ALLOW_DISCARD=1 to allow discarding." >&2
+    return 1
 }
 
 update_repo() {
@@ -243,7 +261,10 @@ update_repo() {
     if run_repo_git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
         old_script="$(run_repo_git rev-parse HEAD:botpanel/update 2>/dev/null || true)"
         update_origin_url
-        discard_local_tracked_changes
+        if ! discard_local_tracked_changes; then
+            echo "Skipping git pull to preserve local changes."
+            return 0
+        fi
         run_repo_git pull --ff-only
         run_repo_git submodule update --init --recursive
         new_script="$(run_repo_git rev-parse HEAD:botpanel/update 2>/dev/null || true)"
@@ -318,7 +339,20 @@ fetch_navmesh_database() {
     echo "Fetching navmeshes..."
     if [ -d "$database_root/.git" ]; then
         git -C "$database_root" fetch --depth 1
-        git -C "$database_root" reset --hard origin/master
+        if [ -n "$(git -C "$database_root" status --porcelain --untracked-files=no)" ] && ! allow_discard_enabled; then
+            echo "$database_root has local changes; refusing to reset. Set CATHOOK_ALLOW_DISCARD=1 to allow." >&2
+            return 1
+        fi
+        if git -C "$database_root" merge-base --is-ancestor HEAD origin/master 2>/dev/null; then
+            git -C "$database_root" reset --hard origin/master
+        elif [ "$(git -C "$database_root" rev-parse HEAD)" = "$(git -C "$database_root" rev-parse origin/master)" ]; then
+            :
+        elif allow_discard_enabled; then
+            git -C "$database_root" reset --hard origin/master
+        else
+            echo "$database_root has local commits ahead of origin/master; refusing to reset. Set CATHOOK_ALLOW_DISCARD=1 to allow." >&2
+            return 1
+        fi
     elif [ -d "$database_root" ]; then
         echo "$database_root exists but is not a git checkout; skipping navmesh update." >&2
         return 1

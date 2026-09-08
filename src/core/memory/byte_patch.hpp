@@ -15,6 +15,10 @@ V  o o  V  file: src/core/memory/byte_patch.hpp
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <cstdio>
+#include <fstream>
+#include <limits>
+#include <string>
 #include <initializer_list>
 #include <utility>
 #include <vector>
@@ -55,22 +59,25 @@ public:
 
     if (applied_)
     {
-      return true;
+      return restore_page_protections();
+    }
+
+    if (!capture_page_protections()) {
+      return false;
     }
 
     original_bytes_.resize(patch_bytes_.size());
     std::memcpy(original_bytes_.data(), target_, original_bytes_.size());
 
-    if (!set_page_protection(PROT_READ | PROT_WRITE | PROT_EXEC))
+    if (!make_pages_writable())
     {
       return false;
     }
 
     std::memcpy(target_, patch_bytes_.data(), patch_bytes_.size());
     __builtin___clear_cache(reinterpret_cast<char*>(target_), reinterpret_cast<char*>(target_ + patch_bytes_.size()));
-    set_page_protection(PROT_READ | PROT_EXEC);
     applied_ = true;
-    return true;
+    return restore_page_protections();
   }
 
   bool restore()
@@ -80,31 +87,94 @@ public:
       return true;
     }
 
-    if (!set_page_protection(PROT_READ | PROT_WRITE | PROT_EXEC))
+    if (!make_pages_writable())
     {
       return false;
     }
 
     std::memcpy(target_, original_bytes_.data(), original_bytes_.size());
     __builtin___clear_cache(reinterpret_cast<char*>(target_), reinterpret_cast<char*>(target_ + original_bytes_.size()));
-    set_page_protection(PROT_READ | PROT_EXEC);
+    if (!restore_page_protections()) {
+      return false;
+    }
     applied_ = false;
     return true;
   }
 
 private:
-  bool set_page_protection(int protection) const
+  struct page_protection
   {
-    const auto page_size = static_cast<std::uintptr_t>(sysconf(_SC_PAGESIZE));
-    auto* page = reinterpret_cast<void*>(reinterpret_cast<std::uintptr_t>(target_) & ~(page_size - 1));
-    if (mprotect(page, page_size, protection) != 0)
-    {
-      print("[nographics] mprotect failed for %p\n", target_);
+    void* address;
+    int protection;
+  };
+
+  bool capture_page_protections()
+  {
+    if (!page_protections_.empty()) {
+      return true;
+    }
+    const long page_size = sysconf(_SC_PAGESIZE);
+    const auto address = reinterpret_cast<std::uintptr_t>(target_);
+    if (page_size <= 0 || patch_bytes_.size() - 1 > std::numeric_limits<std::uintptr_t>::max() - address) {
       return false;
     }
+    page_size_ = static_cast<std::size_t>(page_size);
+    const auto first = address - address % page_size_;
+    const auto last = address + patch_bytes_.size() - 1;
+    std::ifstream maps{ "/proc/self/maps" };
+    std::string line;
+    auto page = first;
+    while (std::getline(maps, line)) {
+      unsigned long long start = 0;
+      unsigned long long end = 0;
+      char permissions[5]{};
+      if (std::sscanf(line.c_str(), "%llx-%llx %4s", &start, &end, permissions) != 3) {
+        continue;
+      }
+      while (page >= start && page < end) {
+        if (permissions[0] != 'r') {
+          page_protections_.clear();
+          return false;
+        }
+        const int protection = PROT_READ | (permissions[1] == 'w' ? PROT_WRITE : 0) |
+          (permissions[2] == 'x' ? PROT_EXEC : 0);
+        page_protections_.push_back({ reinterpret_cast<void*>(page), protection });
+        if (last - page < page_size_) {
+          return true;
+        }
+        page += page_size_;
+      }
+    }
+    page_protections_.clear();
+    return false;
+  }
 
+  bool restore_page_protections() const
+  {
+    bool restored = true;
+    for (const auto& page : page_protections_) {
+      if (mprotect(page.address, page_size_, page.protection) != 0) {
+        print("[byte_patch] failed to restore protection for %p\n", page.address);
+        restored = false;
+      }
+    }
+    return restored;
+  }
+
+  bool make_pages_writable() const
+  {
+    for (const auto& page : page_protections_) {
+      if (mprotect(page.address, page_size_, page.protection | PROT_WRITE) != 0) {
+        print("[byte_patch] mprotect failed for %p\n", page.address);
+        restore_page_protections();
+        return false;
+      }
+    }
     return true;
   }
+
+  std::vector<page_protection> page_protections_{};
+  std::size_t page_size_ = 0;
 
   std::uint8_t* target_ = nullptr;
   std::vector<std::uint8_t> patch_bytes_{};

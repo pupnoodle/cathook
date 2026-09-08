@@ -49,7 +49,6 @@ bool argv_has_key(char* const argv[], const char* key)
 }
 
 const char* const trim_switches[] = {
-  "--renderer-process-limit=1",
   "--disable-gpu",
   "--disable-gpu-compositing",
   "--disable-extensions",
