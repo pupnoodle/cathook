@@ -127,12 +127,13 @@ funchook-libs: prepare-permissions
 	else \
 		command -v cmake >/dev/null 2>&1 || { echo "Error: cmake is required to build $(FUNCHOOK_DIR)." >&2; exit 1; }; \
 		echo "Building missing Funchook/diStorm static libraries..."; \
-		cmake -S "$(FUNCHOOK_DIR)" -B "$(FUNCHOOK_BUILD_DIR)" -DFUNCHOOK_BUILD_STATIC=ON -DFUNCHOOK_DEFAULT_DISASM=distorm -DCMAKE_BUILD_TYPE=Release; \
-		cmake --build "$(FUNCHOOK_BUILD_DIR)" --config Release --parallel; \
-		test -f "$(FUNCHOOK_BUILD_DIR)/libfunchook.a" || { echo "Error: CMake did not produce libfunchook.a." >&2; exit 1; }; \
-		test -f "$(FUNCHOOK_BUILD_DIR)/libdistorm.a" || { echo "Error: CMake did not produce libdistorm.a." >&2; exit 1; }; \
-		cp "$(FUNCHOOK_BUILD_DIR)/libfunchook.a" "$(FUNCHOOK_DIR)/libfunchook.a"; \
-		cp "$(FUNCHOOK_BUILD_DIR)/libdistorm.a" "$(FUNCHOOK_DIR)/libdistorm.a"; \
+		cmake -S "$(FUNCHOOK_DIR)" -B "$(FUNCHOOK_BUILD_DIR)" -DFUNCHOOK_BUILD_STATIC=ON -DFUNCHOOK_DEFAULT_DISASM=distorm -DCMAKE_BUILD_TYPE=Release && \
+		cmake --build "$(FUNCHOOK_BUILD_DIR)" --config Release --parallel && \
+		test -f "$(FUNCHOOK_BUILD_DIR)/libfunchook.a" && \
+		test -f "$(FUNCHOOK_BUILD_DIR)/libdistorm.a" && \
+		cp "$(FUNCHOOK_BUILD_DIR)/libfunchook.a" "$(FUNCHOOK_DIR)/libfunchook.a" && \
+		cp "$(FUNCHOOK_BUILD_DIR)/libdistorm.a" "$(FUNCHOOK_DIR)/libdistorm.a" && \
+		test -f "$(FUNCHOOK_DIR)/libfunchook.a" && test -f "$(FUNCHOOK_DIR)/libdistorm.a"; \
 	fi
 
 $(BIN): $(OBJS) $(BUILD_MAKEFILE) funchook-libs

@@ -230,7 +230,7 @@ public:
   }
 
   void* get_networkable(void) {
-    return (void*)(this + 0x10);
+    return this == nullptr ? nullptr : reinterpret_cast<void*>(reinterpret_cast<std::uintptr_t>(this) + 0x10);
   }
 
   void* get_renderable(void) {
@@ -420,11 +420,20 @@ public:
 
   void* get_client_class(void) {
     void* networkable = get_networkable();
+    if (networkable == nullptr) return nullptr;
     void** vtable = *(void ***)networkable;
+    if (vtable == nullptr || vtable[2] == nullptr) return nullptr;
 
     void* (*get_client_class_fn)(void*) = (void* (*)(void*))vtable[2];
 
-    return get_client_class_fn(networkable);
+    void* client_class = get_client_class_fn(networkable);
+    if (client_class == nullptr) return nullptr;
+    const auto client_class_address = reinterpret_cast<std::uintptr_t>(client_class);
+    if (client_class_address < 0x10000 || client_class_address >= 0x0000800000000000ULL) return nullptr;
+    const auto class_id_value = *reinterpret_cast<const int*>(reinterpret_cast<std::uintptr_t>(client_class) + 0x28);
+    const auto* network_name = *reinterpret_cast<const char* const*>(reinterpret_cast<std::uintptr_t>(client_class) + 0x10);
+    if (class_id_value < 0 || class_id_value > 512 || network_name == nullptr || network_name[0] == '\0') return nullptr;
+    return client_class;
   }
 
   const char* get_network_name(void) {
@@ -443,7 +452,8 @@ public:
 
   class_id get_class_id(void) {
     void* client_class = get_client_class();
-    return *(class_id*)((unsigned long)(client_class) + 0x28);
+    return client_class == nullptr ? static_cast<class_id>(-1) :
+      static_cast<class_id>(*reinterpret_cast<const int*>(reinterpret_cast<std::uintptr_t>(client_class) + 0x28));
   }
 
   int get_tickbase(void) {
@@ -523,7 +533,7 @@ inline Entity* EntityList::get_game_rules_proxy() {
     }
     cached_index = -1;
   }
-  for (unsigned int i = 1; i <= get_max_entities(); ++i) {
+  for (unsigned int i = 1; i < get_max_entities(); ++i) {
     Entity* ent = entity_from_index(i);
     if (ent != nullptr && ent->is_network_class("CTFGameRulesProxy")) {
       cached_index = i;

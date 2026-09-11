@@ -13,15 +13,29 @@ V  o o  V  file: src/games/tf2/sdk/netvars.hpp
 #define TF2_SDK_NETVARS_HPP
 
 #include <cstring>
+#include <algorithm>
 #include <initializer_list>
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <mutex>
 
 #include "games/tf2/sdk/interfaces/client.hpp"
 
 namespace tf2_netvars
 {
+
+inline auto offset_cache() -> std::unordered_map<std::string, int>&
+{
+  static std::unordered_map<std::string, int> cache{};
+  return cache;
+}
+
+inline auto offset_cache_mutex() -> std::mutex&
+{
+  static std::mutex mutex{};
+  return mutex;
+}
 
 struct recv_prop;
 
@@ -64,11 +78,14 @@ struct client_class
   int class_id = 0;
 };
 
-inline int find_offset_in_table(recv_table* table, const std::vector<const char*>& path, std::size_t depth, int accumulated_offset)
+inline int find_offset_in_table(recv_table* table, const std::vector<const char*>& path, std::size_t depth, int accumulated_offset,
+  std::vector<recv_table*>& visiting, int recursion_depth = 0)
 {
-  if (table == nullptr || table->props == nullptr || depth >= path.size()) {
+  if (table == nullptr || table->props == nullptr || depth >= path.size() || recursion_depth > 64 ||
+      std::find(visiting.begin(), visiting.end(), table) != visiting.end()) {
     return 0;
   }
+  visiting.push_back(table);
 
   for (int index = 0; index < table->prop_count; ++index) {
     auto* prop = &table->props[index];
@@ -79,23 +96,25 @@ inline int find_offset_in_table(recv_table* table, const std::vector<const char*
     const int current_offset = accumulated_offset + prop->offset;
     if (std::strcmp(prop->var_name, path[depth]) == 0) {
       if (depth + 1 >= path.size()) {
+        visiting.pop_back();
         return current_offset;
       }
 
       if (prop->data_table != nullptr) {
-        if (const int nested_offset = find_offset_in_table(prop->data_table, path, depth + 1, current_offset)) {
+        if (const int nested_offset = find_offset_in_table(prop->data_table, path, depth + 1, current_offset, visiting, recursion_depth + 1)) {
           return nested_offset;
         }
       }
     }
 
     if (prop->data_table != nullptr) {
-      if (const int nested_offset = find_offset_in_table(prop->data_table, path, depth, current_offset)) {
+        if (const int nested_offset = find_offset_in_table(prop->data_table, path, depth, current_offset, visiting, recursion_depth + 1)) {
         return nested_offset;
       }
     }
   }
 
+  visiting.pop_back();
   return 0;
 }
 
@@ -111,7 +130,8 @@ inline int find_offset(const char* table_name, std::initializer_list<const char*
     cache_key += prop_name != nullptr ? prop_name : "";
   }
 
-  static std::unordered_map<std::string, int> cache{};
+  std::scoped_lock lock{offset_cache_mutex()};
+  auto& cache = offset_cache();
   if (const auto found = cache.find(cache_key); found != cache.end()) {
     return found->second;
   }
@@ -127,13 +147,19 @@ inline int find_offset(const char* table_name, std::initializer_list<const char*
       continue;
     }
 
-    const int offset = find_offset_in_table(current->recv_table_ptr, path, 0, 0);
-    cache.emplace(cache_key, offset);
+    std::vector<recv_table*> visiting{};
+    const int offset = find_offset_in_table(current->recv_table_ptr, path, 0, 0, visiting);
+    if (offset != 0) cache.emplace(cache_key, offset);
     return offset;
   }
 
-  cache.emplace(cache_key, 0);
   return 0;
+}
+
+inline void clear_cache()
+{
+  std::scoped_lock lock{offset_cache_mutex()};
+  offset_cache().clear();
 }
 
 }

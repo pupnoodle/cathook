@@ -61,7 +61,8 @@ static void* read_mem(pid_t pid, void* dst, uintptr_t src, size_t sz) {
     remote[0].iov_base = (void*)src;
     remote[0].iov_len  = sz;
 
-    if (process_vm_readv(pid, local, 1, remote, 1, 0) == -1) {
+    const ssize_t read_size = process_vm_readv(pid, local, 1, remote, 1, 0);
+    if (read_size != (ssize_t)sz) {
         ERR("Error reading address %p: %s", (void*)src, strerror(errno));
         return NULL;
     }
@@ -69,138 +70,181 @@ static void* read_mem(pid_t pid, void* dst, uintptr_t src, size_t sz) {
     return dst;
 }
 
-static uint8_t hex2byte(const char* hex) {
-    int result = 0;
+static int hex_digit(const char c) {
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
 
-    while (isspace(*hex))
-        hex++;
+static bool ida2code(
+  const char* ida,
+  uint8_t** code_ptr,
+  char** mask_ptr,
+  size_t* pattern_size) {
+    if (ida == NULL || code_ptr == NULL || mask_ptr == NULL || pattern_size == NULL) {
+        return false;
+    }
 
-    for (int i = 0; i < 2 && hex[i] != '\0'; i++) {
-        const char c = hex[i];
+    *code_ptr = NULL;
+    *mask_ptr = NULL;
+    *pattern_size = 0;
 
-        if (c == ' ')
+    size_t capacity = 16;
+    uint8_t* code = (uint8_t*)malloc(capacity);
+    char* mask = (char*)malloc(capacity + 1);
+    if (code == NULL || mask == NULL) {
+        free(code);
+        free(mask);
+        ERR("malloc() returned NULL");
+        return false;
+    }
+
+    size_t fixed_bytes = 0;
+    const char* cursor = ida;
+    while (*cursor != '\0') {
+        while (*cursor != '\0' && isspace((unsigned char)*cursor))
+            cursor++;
+
+        if (*cursor == '\0')
             break;
 
-        uint8_t n = 0;
-        if (c >= '0' && c <= '9')
-            n = c - '0';
-        else if (c >= 'a' && c <= 'f')
-            n = 10 + c - 'a';
-        else if (c >= 'A' && c <= 'F')
-            n = 10 + c - 'A';
-
-        result <<= 4;
-        result |= n & 0xF;
-    }
-
-    return result & 0xFF;
-}
-
-static void ida2code(const char* ida, uint8_t** code_ptr, char** mask_ptr) {
-
-    size_t dst_sz = 100;
-    *code_ptr     = (uint8_t*)malloc(dst_sz);
-    *mask_ptr     = (char*)malloc(dst_sz);
-    if (*code_ptr == NULL || *mask_ptr == NULL) {
-        ERR("malloc() returned NULL");
-        return;
-    }
-
-    while (isspace(*ida))
-        ida++;
-
-    size_t dst_i;
-    for (dst_i = 0; *ida != '\0'; dst_i++) {
-        if (dst_i >= dst_sz - 1) {
-            dst_sz += 100;
-            *code_ptr = (uint8_t*)realloc(*code_ptr, dst_sz);
-            *mask_ptr = (char*)realloc(*mask_ptr, dst_sz);
-        }
-
-        if (*ida == '?') {
-            (*code_ptr)[dst_i] = 0x00;
-            (*mask_ptr)[dst_i] = '?';
-
-#ifdef LIBSIGSCAN_MULTIPLE_WILDCARDS
-
-            while (*ida == '?')
-#endif
-                ida++;
-        } else {
-
-            (*code_ptr)[dst_i] = hex2byte(ida);
-            (*mask_ptr)[dst_i] = 'x';
-
-            while (!isspace(*ida) && *ida != '\0')
-                ida++;
-        }
-
-        while (isspace(*ida))
-            ida++;
-    }
-
-    (*mask_ptr)[dst_i] = '\0';
-}
-
-static void* do_scan(int pid, uintptr_t start, uintptr_t end, const char* ida) {
-    if (!start || !end) {
-        ERR("do_scan() got invalid start or end pointers");
-        return NULL;
-    }
-
-    uint8_t* pattern;
-    char* mask;
-    ida2code(ida, &pattern, &mask);
-
-    size_t buf_sz = strlen(mask);
-    uint8_t* buf  = (uint8_t*)malloc(buf_sz);
-    if (read_mem(pid, buf, start, buf_sz) == NULL)
-        return NULL;
-
-    uintptr_t chunk_start = start;
-
-    size_t pat_pos     = 0;
-    size_t buf_pos     = 0;
-    size_t match_start = 0;
-
-    while ((chunk_start + buf_pos) < end && mask[pat_pos] != '\0') {
-        if (buf_pos >= buf_sz) {
-            if (match_start == buf_pos) {
-                chunk_start += buf_sz;
-                buf_pos = 0;
-                pat_pos = 0;
-            } else {
-                chunk_start += match_start;
-                buf_pos = pat_pos;
+        if (*pattern_size == capacity) {
+            if (capacity > (size_t)-1 / 2) {
+                free(code);
+                free(mask);
+                return false;
             }
 
-            match_start = 0;
-
-            if (chunk_start + buf_sz > end)
-                buf_sz = end - chunk_start;
-
-            if (read_mem(pid, buf, chunk_start, buf_sz) == NULL)
-                return NULL;
+            const size_t new_capacity = capacity * 2;
+            uint8_t* new_code = (uint8_t*)realloc(code, new_capacity);
+            char* new_mask = (char*)realloc(mask, new_capacity + 1);
+            if (new_code == NULL || new_mask == NULL) {
+                free(new_code != NULL ? new_code : code);
+                free(new_mask != NULL ? new_mask : mask);
+                ERR("realloc() returned NULL");
+                return false;
+            }
+            code = new_code;
+            mask = new_mask;
+            capacity = new_capacity;
         }
 
-        if (mask[pat_pos] == '?' || buf[buf_pos] == pattern[pat_pos]) {
-            buf_pos++;
-            pat_pos++;
+        if (*cursor == '?') {
+            cursor++;
+            if (*cursor == '?')
+                cursor++;
+            code[*pattern_size] = 0;
+            mask[*pattern_size] = '?';
         } else {
-            match_start++;
-            buf_pos = match_start;
-            pat_pos = 0;
+            const int high = hex_digit(cursor[0]);
+            const int low = hex_digit(cursor[1]);
+            if (high < 0 || low < 0) {
+                free(code);
+                free(mask);
+                ERR("invalid signature byte");
+                return false;
+            }
+            code[*pattern_size] = (uint8_t)((high << 4) | low);
+            mask[*pattern_size] = 'x';
+            fixed_bytes++;
+            cursor += 2;
         }
+
+        (*pattern_size)++;
+        while (*cursor != '\0' && isspace((unsigned char)*cursor))
+            cursor++;
     }
 
-    void* ret =
-      (mask[pat_pos] == '\0') ? (void*)(chunk_start + match_start) : NULL;
+    mask[*pattern_size] = '\0';
+    if (*pattern_size == 0 || fixed_bytes == 0) {
+        free(code);
+        free(mask);
+        ERR("signature must contain a fixed byte");
+        return false;
+    }
 
-    free(buf);
-    free(mask);
-    free(pattern);
+    *code_ptr = code;
+    *mask_ptr = mask;
+    return true;
+}
 
-    return ret;
+static int do_scan(
+  int pid,
+  uintptr_t start,
+  uintptr_t end,
+  const uint8_t* pattern,
+  const char* mask,
+  size_t pattern_size,
+  void** match) {
+    if (!start || end <= start || pattern == NULL || mask == NULL || pattern_size == 0 || match == NULL) {
+        ERR("do_scan() got invalid start or end pointers");
+        return -1;
+    }
+
+    const uintptr_t region_size = end - start;
+    if (pattern_size > region_size)
+        return 0;
+
+    const size_t chunk_size = 64 * 1024;
+    const size_t overlap = pattern_size - 1;
+    if (overlap > (size_t)-1 - chunk_size)
+        return -1;
+
+    uint8_t* buffer = (uint8_t*)malloc(chunk_size + overlap);
+    if (buffer == NULL) {
+        ERR("malloc() returned NULL");
+        return -1;
+    }
+
+    *match = NULL;
+    size_t match_count = 0;
+    uintptr_t chunk_start = start;
+    while (chunk_start < end) {
+        const uintptr_t remaining = end - chunk_start;
+        const size_t chunk_length = remaining > chunk_size ? chunk_size : (size_t)remaining;
+        size_t read_size = chunk_length;
+        if (remaining > chunk_length) {
+            const uintptr_t after_chunk = remaining - chunk_length;
+            const size_t extra = after_chunk > overlap ? overlap : (size_t)after_chunk;
+            read_size += extra;
+        }
+
+        if (read_mem(pid, buffer, chunk_start, read_size) == NULL) {
+            free(buffer);
+            return -1;
+        }
+
+        const size_t scan_size = read_size >= pattern_size ? read_size - pattern_size + 1 : 0;
+        for (size_t position = 0; position < scan_size; ++position) {
+            bool matches = true;
+            for (size_t pattern_index = 0; pattern_index < pattern_size; ++pattern_index) {
+                if (mask[pattern_index] != '?' && buffer[position + pattern_index] != pattern[pattern_index]) {
+                    matches = false;
+                    break;
+                }
+            }
+
+            if (matches) {
+                if (match_count == 0)
+                    *match = (void*)(chunk_start + position);
+                if (++match_count > 1) {
+                    free(buffer);
+                    return 2;
+                }
+            }
+        }
+
+        if (remaining <= chunk_length)
+            break;
+        chunk_start += chunk_length;
+    }
+
+    free(buffer);
+    return (int)match_count;
 }
 
 SigscanModuleBounds* sigscan_get_module_bounds(int pid, const char* regex) {
@@ -235,6 +279,7 @@ SigscanModuleBounds* sigscan_get_module_bounds(int pid, const char* regex) {
             ERR("sscanf() didn't match the minimum fields (4) for "
                 "line:\n%s",
                 line_buf);
+            sigscan_free_module_bounds(dummy.next);
             dummy.next = NULL;
             goto done;
         }
@@ -242,26 +287,27 @@ SigscanModuleBounds* sigscan_get_module_bounds(int pid, const char* regex) {
         void* start_addr = (void*)start_num;
         void* end_addr   = (void*)end_num;
 
-        const bool is_readable = (rwxp[0] == 'r');
+        const bool is_executable = rwxp[0] == 'r' && rwxp[2] == 'x';
 
         const bool name_matches =
           fmt_match_num == 5 && pathname[0] != '\0' && pathname[0] != '[' &&
           does_module_match(regex, pathname);
 
-        if (is_readable && name_matches) {
-            if (cur != NULL && cur->end == start_addr && cur->end < end_addr) {
-
-                cur->end = end_addr;
-            } else {
-
-                cur->next =
-                  (SigscanModuleBounds*)malloc(sizeof(SigscanModuleBounds));
-                cur = cur->next;
-
-                cur->start = start_addr;
-                cur->end   = end_addr;
-                cur->next  = NULL;
+        if (is_executable && name_matches) {
+            SigscanModuleBounds* next =
+              (SigscanModuleBounds*)malloc(sizeof(SigscanModuleBounds));
+            if (next == NULL) {
+                ERR("malloc() returned NULL");
+                sigscan_free_module_bounds(dummy.next);
+                dummy.next = NULL;
+                goto done;
             }
+            cur->next = next;
+            cur = cur->next;
+
+            cur->start = start_addr;
+            cur->end   = end_addr;
+            cur->next  = NULL;
         }
     }
 
@@ -280,7 +326,13 @@ void sigscan_free_module_bounds(SigscanModuleBounds* bounds) {
 }
 
 void* sigscan_pid_module(int pid, const char* regex, const char* ida_pattern) {
-    if (pid == SIGSCAN_PID_INVALID)
+    if (pid == SIGSCAN_PID_INVALID || ida_pattern == NULL)
+        return NULL;
+
+    uint8_t* pattern = NULL;
+    char* mask = NULL;
+    size_t pattern_size = 0;
+    if (!ida2code(ida_pattern, &pattern, &mask, &pattern_size))
         return NULL;
 
     SigscanModuleBounds* bounds = sigscan_get_module_bounds(pid, regex);
@@ -288,22 +340,46 @@ void* sigscan_pid_module(int pid, const char* regex, const char* ida_pattern) {
     if (bounds == NULL) {
         ERR("Couldn't get any module bounds matching regex \"%s\" "
             "in /proc/%d/maps",
-            regex, pid);
+            regex != NULL ? regex : "<all>", pid);
+        free(mask);
+        free(pattern);
         return NULL;
     }
 
     void* ret = NULL;
+    size_t match_count = 0;
+    bool scan_failed = false;
     for (SigscanModuleBounds* cur = bounds; cur != NULL; cur = cur->next) {
-        void* cur_result =
-          do_scan(pid, (uintptr_t)cur->start, (uintptr_t)cur->end, ida_pattern);
-
-        if (cur_result != NULL) {
-            ret = cur_result;
+        void* cur_result = NULL;
+        const int cur_match_count = do_scan(
+          pid,
+          (uintptr_t)cur->start,
+          (uintptr_t)cur->end,
+          pattern,
+          mask,
+          pattern_size,
+          &cur_result);
+        if (cur_match_count < 0) {
+            scan_failed = true;
             break;
         }
+        if (cur_match_count > 0 && match_count == 0)
+            ret = cur_result;
+        match_count += (size_t)cur_match_count;
+        if (match_count > 1)
+            break;
     }
 
     sigscan_free_module_bounds(bounds);
+    free(mask);
+    free(pattern);
+
+    if (scan_failed || match_count == 0)
+        return NULL;
+    if (match_count != 1) {
+        ERR("signature is ambiguous; found %zu matches", match_count);
+        return NULL;
+    }
 
     return ret;
 }

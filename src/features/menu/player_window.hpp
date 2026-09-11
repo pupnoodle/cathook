@@ -59,7 +59,7 @@ inline Entity* get_player_resource_entity()
   }
 
   const int max_entities = entity_list->get_max_entities();
-  for (int index = 1; index <= max_entities; ++index)
+  for (int index = 1; index < max_entities; ++index)
   {
     auto* entity = entity_list->entity_from_index(index);
     if (entity != nullptr && entity->get_class_id() == class_id::PLAYER_RESOURCE)

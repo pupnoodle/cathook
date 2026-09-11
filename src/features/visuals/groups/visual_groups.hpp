@@ -33,6 +33,7 @@ struct visual_group_match
 };
 
 void ensure_defaults();
+[[nodiscard]] std::uint32_t allocate_group_id();
 void store(Player* localplayer);
 void begin_fake_angle_model();
 void end_fake_angle_model();

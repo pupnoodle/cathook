@@ -78,6 +78,7 @@ logger::logger(std::filesystem::path file_path)
 
 void logger::write(const std::string_view message)
 {
+    std::lock_guard<std::mutex> lock{ m_mutex };
     if (!m_stream.is_open())
     {
         return;
@@ -88,6 +89,7 @@ void logger::write(const std::string_view message)
 
 void logger::write_raw(const std::string_view message)
 {
+    std::lock_guard<std::mutex> lock{ m_mutex };
     if (!m_stream.is_open())
     {
         return;
@@ -98,6 +100,7 @@ void logger::write_raw(const std::string_view message)
 
 bool logger::is_open() const
 {
+    std::lock_guard<std::mutex> lock{ m_mutex };
     return m_stream.is_open();
 }
 

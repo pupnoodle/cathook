@@ -310,7 +310,7 @@ void on_player_death(int attacker_user_id)
 
   Entity* player_resource = nullptr;
   const int max_entities = entity_list->get_max_entities();
-  for (int i = 1; i <= max_entities; ++i)
+  for (int i = 1; i < max_entities; ++i)
   {
     auto* entity = entity_list->entity_from_index(i);
     if (entity != nullptr && entity->get_class_id() == class_id::PLAYER_RESOURCE)

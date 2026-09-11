@@ -23,20 +23,11 @@ prediction_run_simulation_fn prediction_run_simulation_original = nullptr;
 namespace
 {
 
-auto resolve_rip_relative(std::uint8_t* instruction, int displacement_offset, int instruction_size) -> std::uint8_t*
-{
-  const auto displacement = *reinterpret_cast<std::int32_t*>(instruction + displacement_offset);
-  return instruction + instruction_size + displacement;
-}
-
 auto resolve_cl_move_lea(void* cl_move, int offset) -> std::uint8_t*
 {
-  auto* instruction = reinterpret_cast<std::uint8_t*>(cl_move) + offset;
-  if (instruction[0] != 0x48 || instruction[1] != 0x8D || instruction[2] != 0x05) {
-    return nullptr;
-  }
-
-  return resolve_rip_relative(instruction, 3, 7);
+  if (cl_move == nullptr || offset < 0) return nullptr;
+  auto instruction = reinterpret_cast<std::uintptr_t>(cl_move) + static_cast<std::uintptr_t>(offset);
+  return reinterpret_cast<std::uint8_t*>(resolve_checked_rip_relative(instruction, 3, 7, {0x48, 0x8D, 0x05}));
 }
 
 }
@@ -68,7 +59,9 @@ void prediction_run_simulation_hook(void* prediction_instance, int current_comma
     }
   }
 
-  prediction_run_simulation_original(prediction_instance, current_command, cmd, localplayer, curtime);
+  if (prediction_run_simulation_original != nullptr) {
+    prediction_run_simulation_original(prediction_instance, current_command, cmd, localplayer, curtime);
+  }
 
   if (restore_tick && cmd != nullptr) {
     cmd->tick_count = original_tick_count;
@@ -91,5 +84,8 @@ void initialize_cl_move_globals(tickbase::host_should_run_fn host_should_run)
   auto* host_frametime_std_deviation =
     reinterpret_cast<float*>(resolve_cl_move_lea(reinterpret_cast<void*>(cl_move_original), host_frametime_std_deviation_lea_offset));
 
+  if (net_time == nullptr || host_frametime_unbounded == nullptr || host_frametime_std_deviation == nullptr) {
+    return;
+  }
   tickbase::initialize_engine_globals(net_time, host_frametime_unbounded, host_frametime_std_deviation, host_should_run);
 }

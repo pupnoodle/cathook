@@ -52,6 +52,7 @@ namespace
 std::atomic<std::shared_ptr<const visual_groups::visual_group_snapshot>> g_group_snapshot{};
 thread_local bool g_fake_angle_model = false;
 thread_local bool g_viewmodel_model = false;
+std::uint32_t next_group_id = 1;
 
 [[nodiscard]] bool text_contains(std::string_view text, std::string_view needle)
 {
@@ -769,6 +770,7 @@ thread_local bool g_viewmodel_model = false;
 [[nodiscard]] visual_group make_group(const char* name, uint32_t targets, uint32_t conditions, RGBA_float color, uint32_t esp_mask)
 {
   visual_group group{};
+  group.bind_id = visual_groups::allocate_group_id();
   group.name = name;
   group.targets = targets;
   group.conditions = conditions;
@@ -824,11 +826,36 @@ void update_snapshot_capabilities(visual_groups::visual_group_snapshot& snapshot
 namespace visual_groups
 {
 
+std::uint32_t allocate_group_id()
+{
+  for (;;) {
+    const std::uint32_t candidate = next_group_id++;
+    if (candidate == 0) {
+      continue;
+    }
+
+    const bool used = std::ranges::any_of(config.visual_groups.groups, [candidate](const visual_group& group) {
+      return group.bind_id == candidate;
+    });
+    if (!used) {
+      return candidate;
+    }
+  }
+}
+
 void ensure_defaults()
 {
   if (!config.visual_groups.groups.empty()) {
     if (config.visual_groups.groups.size() > visual_group_config::max_groups) {
       config.visual_groups.groups.resize(visual_group_config::max_groups);
+    }
+    std::vector<std::uint32_t> used_ids{};
+    used_ids.reserve(config.visual_groups.groups.size());
+    for (visual_group& group : config.visual_groups.groups) {
+      if (group.bind_id == 0 || std::ranges::find(used_ids, group.bind_id) != used_ids.end()) {
+        group.bind_id = allocate_group_id();
+      }
+      used_ids.push_back(group.bind_id);
     }
     config.visual_groups.active_group_mask &= config.visual_groups.groups.size() >= visual_group_config::max_groups ? 0xFFFFFFFFu : ((1u << config.visual_groups.groups.size()) - 1u);
     return;
@@ -891,7 +918,7 @@ void store(Player* localplayer)
     next_snapshot->model_groups.reserve(static_cast<std::size_t>(max_entities));
   }
 
-  for (int index = 1; index <= max_entities; ++index) {
+  for (int index = 1; index < max_entities; ++index) {
     auto* entity = entity_list->entity_from_index(static_cast<unsigned int>(index));
     if (entity == nullptr) {
       continue;

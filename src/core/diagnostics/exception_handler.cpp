@@ -10,7 +10,6 @@ V  o o  V  file: src/core/diagnostics/exception_handler.cpp
 */
 #include "exception_handler.hpp"
 #include <array>
-#include <atomic>
 #include <cerrno>
 #include <csignal>
 #include <cstdlib>
@@ -21,7 +20,6 @@ V  o o  V  file: src/core/diagnostics/exception_handler.cpp
 #include <execinfo.h>
 #include <fcntl.h>
 #include <string>
-#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <ucontext.h>
 #include <unistd.h>
@@ -32,7 +30,9 @@ namespace cathook::core
 namespace
 {
 
-std::atomic<int> s_log_fd{ -1 };
+volatile sig_atomic_t s_log_fd{ -1 };
+volatile sig_atomic_t s_in_handler{ 0 };
+alignas(16) static char s_alt_stack[65536]{};
 std::string s_log_file_path{};
 std::string s_fallback_log_file_path{};
 
@@ -56,25 +56,46 @@ signal_state& state()
     return instance;
 }
 
-long current_thread_id()
+void write_bytes(const int fd, const char* data, std::size_t length)
 {
-    return static_cast<long>(::syscall(SYS_gettid));
+    if (fd < 0 || data == nullptr)
+    {
+        return;
+    }
+
+    while (length > 0)
+    {
+        const ssize_t write_result{ ::write(fd, data, length) };
+        if (write_result > 0)
+        {
+            data += write_result;
+            length -= static_cast<std::size_t>(write_result);
+        }
+        else if (write_result < 0 && errno == EINTR)
+        {
+            continue;
+        }
+        else
+        {
+            break;
+        }
+    }
 }
 
 void write_literal(const int fd, const char* const text)
 {
-    if (fd < 0 || !text)
+    if (fd < 0 || text == nullptr)
     {
         return;
     }
 
-    const std::size_t length{ std::strlen(text) };
-    if (length == 0)
+    std::size_t length{};
+    while (text[length] != '\0')
     {
-        return;
+        ++length;
     }
 
-    [[maybe_unused]] const ssize_t write_result{ ::write(fd, text, length) };
+    write_bytes(fd, text, length);
 }
 
 void write_unsigned_decimal(const int fd, std::uint64_t value)
@@ -89,7 +110,7 @@ void write_unsigned_decimal(const int fd, std::uint64_t value)
     }
     while (value != 0 && index > 0);
 
-    [[maybe_unused]] const ssize_t write_result{ ::write(fd, buffer + index, std::size(buffer) - index) };
+    write_bytes(fd, buffer + index, std::size(buffer) - index);
 }
 
 void write_signed_decimal(const int fd, const std::int64_t value)
@@ -114,7 +135,7 @@ void write_byte_hex(const int fd, const std::uint8_t value)
     char buffer[2]{};
     buffer[0] = k_hex_digits[(value >> 4) & 0xF];
     buffer[1] = k_hex_digits[value & 0xF];
-    [[maybe_unused]] const ssize_t write_result{ ::write(fd, buffer, sizeof(buffer)) };
+    write_bytes(fd, buffer, sizeof(buffer));
 }
 
 void write_hex(const int fd, const std::uint64_t value)
@@ -128,7 +149,7 @@ void write_hex(const int fd, const std::uint64_t value)
         buffer[2 + index] = k_hex_digits[(value >> shift) & 0xF];
     }
 
-    [[maybe_unused]] const ssize_t write_result{ ::write(fd, buffer, sizeof(buffer)) };
+    write_bytes(fd, buffer, sizeof(buffer));
 }
 
 void write_register(const int fd, const char* const name, const std::uint64_t value)
@@ -1016,27 +1037,26 @@ void dump_stack_symbol_candidates(const int fd, ucontext_t* const context)
 
     write_literal(fd, "\nstack_executable_candidates\n");
     constexpr std::size_t k_stack_words = 48;
-    const auto* const stack_words = reinterpret_cast<const std::uintptr_t*>(stack_pointer);
-    int candidate_index{};
-
+    module_mapping stack_mapping{};
+    if (!find_mapping_for_address(stack_pointer, false, stack_mapping))
+    {
+        return;
+    }
+    write_literal(fd, "\nstack_words\n");
     for (std::size_t index{}; index < k_stack_words; ++index)
     {
-        const std::uintptr_t candidate = stack_words[index];
-        module_mapping mapping{};
-        if (!find_mapping_for_address(candidate, true, mapping))
+        const std::uintptr_t word_address = stack_pointer + index * sizeof(std::uintptr_t);
+        if (word_address < stack_mapping.start || word_address + sizeof(std::uintptr_t) > stack_mapping.end)
         {
-            continue;
+            break;
         }
-
+        std::uintptr_t word_value{};
+        __builtin_memcpy(&word_value, reinterpret_cast<const void*>(word_address), sizeof(word_value));
         write_literal(fd, "rsp+");
         write_unsigned_decimal(fd, static_cast<std::uint64_t>(index * sizeof(std::uintptr_t)));
         write_literal(fd, " ");
-        write_symbolized_address(fd, candidate_index++, candidate);
-    }
-
-    if (candidate_index == 0)
-    {
-        write_literal(fd, "none\n");
+        write_hex(fd, static_cast<std::uint64_t>(word_value));
+        write_literal(fd, "\n");
     }
 #else
 
@@ -1122,23 +1142,12 @@ void dump_registers(const int fd, ucontext_t* const context)
 
 void dump_backtrace(const int fd)
 {
-    write_literal(fd, "\nbacktrace\n");
-
-    void* frames[64]{};
-    const int frame_count{ ::backtrace(frames, static_cast<int>(std::size(frames))) };
-    if (frame_count <= 0)
-    {
-        write_literal(fd, "unavailable\n");
-        return;
-    }
-
-    ::backtrace_symbols_fd(frames, frame_count, fd);
-    dump_symbolized_frames(fd, frames, frame_count);
+    write_literal(fd, "\nbacktrace\ndeferred to post-crash tool\n");
 }
 
 int open_exception_log()
 {
-    int fd{ s_log_fd.load(std::memory_order_acquire) };
+    int fd{ static_cast<int>(s_log_fd) };
     if (fd >= 0)
     {
         return fd;
@@ -1165,24 +1174,25 @@ int open_exception_log()
         return -1;
     }
 
-    int expected{ -1 };
-    if (!s_log_fd.compare_exchange_strong(
-        expected,
-        fd,
-        std::memory_order_release,
-        std::memory_order_acquire))
+    if (s_log_fd >= 0)
     {
         ::close(fd);
-        return expected;
+        return static_cast<int>(s_log_fd);
     }
 
+    s_log_fd = static_cast<sig_atomic_t>(fd);
     return fd;
 }
 
 void signal_handler(const int signal_number, siginfo_t* const info, void* const context_ptr)
 {
+    if (s_in_handler != 0)
+    {
+        ::_exit(128 + signal_number);
+    }
+    s_in_handler = 1;
 
-    const int fd{ open_exception_log() };
+    const int fd{ static_cast<int>(s_log_fd) };
     if (fd >= 0)
     {
         write_literal(fd, "\n================ crash ================\n");
@@ -1190,8 +1200,6 @@ void signal_handler(const int signal_number, siginfo_t* const info, void* const 
         write_unsigned_decimal(fd, static_cast<std::uint64_t>(signal_number));
         write_literal(fd, " pid=");
         write_unsigned_decimal(fd, static_cast<std::uint64_t>(::getpid()));
-        write_literal(fd, " tid=");
-        write_unsigned_decimal(fd, static_cast<std::uint64_t>(current_thread_id()));
         write_literal(fd, "\n");
 
         if (info)
@@ -1203,12 +1211,24 @@ void signal_handler(const int signal_number, siginfo_t* const info, void* const 
             write_literal(fd, "\n");
         }
 
-        dump_fault_context(fd, signal_number, info, static_cast<ucontext_t*>(context_ptr));
-        dump_fault_frame(fd, static_cast<ucontext_t*>(context_ptr));
-        dump_registers(fd, static_cast<ucontext_t*>(context_ptr));
-        dump_stack_symbol_candidates(fd, static_cast<ucontext_t*>(context_ptr));
-        dump_backtrace(fd);
-        dump_memory_map(fd);
+#if defined(__x86_64__)
+        if (context_ptr != nullptr)
+        {
+            const auto& registers{ static_cast<ucontext_t*>(context_ptr)->uc_mcontext.gregs };
+            write_register(fd, "rip", static_cast<std::uint64_t>(registers[REG_RIP]));
+            write_register(fd, "rsp", static_cast<std::uint64_t>(registers[REG_RSP]));
+            write_register(fd, "rbp", static_cast<std::uint64_t>(registers[REG_RBP]));
+        }
+#elif defined(__i386__)
+        if (context_ptr != nullptr)
+        {
+            const auto& registers{ static_cast<ucontext_t*>(context_ptr)->uc_mcontext.gregs };
+            write_register(fd, "eip", static_cast<std::uint64_t>(registers[REG_EIP]));
+            write_register(fd, "esp", static_cast<std::uint64_t>(registers[REG_ESP]));
+            write_register(fd, "ebp", static_cast<std::uint64_t>(registers[REG_EBP]));
+        }
+#endif
+
         write_literal(fd, "\n=======================================\n");
         static_cast<void>(::fsync(fd));
     }
@@ -1231,12 +1251,20 @@ void exception_handler::install(const std::filesystem::path& log_file_path)
 
     s_log_file_path = log_file_path.string();
     s_fallback_log_file_path = "/tmp/cathook-exception.log";
-    s_log_fd.store(-1, std::memory_order_release);
+    s_log_fd = -1;
+    s_in_handler = 0;
+    open_exception_log();
+
+    stack_t alt_stack{};
+    alt_stack.ss_sp = s_alt_stack;
+    alt_stack.ss_size = sizeof(s_alt_stack);
+    alt_stack.ss_flags = 0;
+    ::sigaltstack(&alt_stack, nullptr);
 
     struct sigaction action{};
     action.sa_sigaction = &signal_handler;
-    action.sa_flags = SA_SIGINFO | SA_RESETHAND;
-    ::sigemptyset(&action.sa_mask);
+    action.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    ::sigfillset(&action.sa_mask);
 
     constexpr int k_signals[]{
         SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE,
@@ -1251,11 +1279,11 @@ void exception_handler::install(const std::filesystem::path& log_file_path)
                 static_cast<void>(::sigaction(k_signals[restore_index], &handler_state.previous_actions[restore_index], nullptr));
             }
 
-            const int installed_fd{ s_log_fd.load() };
+            const int installed_fd{ static_cast<int>(s_log_fd) };
             if (installed_fd >= 0)
             {
                 ::close(installed_fd);
-                s_log_fd.store(-1);
+                s_log_fd = -1;
             }
             return;
         }
@@ -1282,11 +1310,17 @@ void exception_handler::uninstall()
         static_cast<void>(::sigaction(k_signals[index], &handler_state.previous_actions[index], nullptr));
     }
 
-    const int fd{ s_log_fd.exchange(-1) };
+    const int fd{ static_cast<int>(s_log_fd) };
+    s_log_fd = -1;
     if (fd >= 0)
     {
         ::close(fd);
     }
+
+    stack_t disable_stack{};
+    disable_stack.ss_flags = SS_DISABLE;
+    ::sigaltstack(&disable_stack, nullptr);
+    s_in_handler = 0;
 
     handler_state.installed = false;
 }

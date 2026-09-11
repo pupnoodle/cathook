@@ -14,6 +14,7 @@ V  o o  V  file: src/games/tf2/sdk/entities/player.hpp
 #include "games/tf2/sdk/interfaces/entity_list.hpp"
 #include "games/tf2/sdk/interfaces/attribute_manager.hpp"
 #include "games/tf2/sdk/interfaces/model_info.hpp"
+#include "games/tf2/sdk/interfaces/global_vars.hpp"
 #include "games/tf2/sdk/interfaces/utl_vector.hpp"
 #include "games/tf2/sdk/netvars.hpp"
 #include "core/entity_cache.hpp"
@@ -563,41 +564,33 @@ public:
       return false;
     }
 
-    const std::uintptr_t cached_bone_data_offset = static_cast<std::uintptr_t>(tf2_player_offsets::cached_bone_data());
-    if (cached_bone_data_offset == 0) return false;
-    const auto base = reinterpret_cast<std::uintptr_t>(this);
-    const auto* cached = reinterpret_cast<const CUtlVector<matrix_3x4>*>(
-      base + cached_bone_data_offset);
-    const matrix_3x4* source = cached->Base();
-    const int count = cached->Count();
-    const int allocation_count = cached->memory.allocation_count;
-    const std::uintptr_t source_address = reinterpret_cast<std::uintptr_t>(source);
-    if (source == nullptr ||
-        source_address < 0x10000 ||
-        source_address >= 0x0000800000000000ULL ||
-        count <= 0 || count > 128 || count > max_bones ||
-        allocation_count < count || allocation_count > 256) {
+    if (global_vars == nullptr || !std::isfinite(global_vars->curtime)) {
       return false;
     }
 
-    std::memcpy(bone_to_world_out, source, sizeof(matrix_3x4) * static_cast<std::size_t>(count));
-
-    if (cached->Base() != source || cached->Count() != count) {
+    if (model_info == nullptr) {
+      return false;
+    }
+    const auto* model = get_model();
+    const auto* studio = model != nullptr ? model_info->get_studio_model(model) : nullptr;
+    if (studio == nullptr || studio->num_bones <= 0 || studio->num_bones > max_bones) {
+      return false;
+    }
+    const int bone_count = studio->num_bones;
+    if (!setup_bones(bone_to_world_out, bone_count, 0x7FF00, global_vars->curtime)) {
       return false;
     }
 
-    for (int bone = 0; bone < count; ++bone) {
+    for (int bone = 0; bone < bone_count; ++bone) {
       for (int row = 0; row < 3; ++row) {
         for (int column = 0; column < 4; ++column) {
-          if (!std::isfinite(bone_to_world_out[bone].mat[row][column])) {
-            return false;
-          }
+          if (!std::isfinite(bone_to_world_out[bone].mat[row][column])) return false;
         }
       }
     }
 
     if (bone_count_out != nullptr) {
-      *bone_count_out = count;
+      *bone_count_out = bone_count;
     }
     return true;
   }

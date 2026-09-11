@@ -2,13 +2,16 @@
 
 #include "json.hpp"
 
+#include <cerrno>
 #include <csignal>
+#include <cstring>
 #include <ctime>
 #include <functional>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <sys/syscall.h>
 #include <unordered_map>
 #include <unistd.h>
 #include <vector>
@@ -27,16 +30,6 @@ std::unordered_map<std::string, std::function<json(const json&)>> commands{};
   return object.find(key) != object.end();
 }
 
-void replace_string(std::string& input, const std::string& what, const std::string& with_what)
-{
-  auto index = input.find(what);
-  while (index != std::string::npos)
-  {
-    input.replace(index, what.size(), with_what);
-    index = input.find(what, index + with_what.size());
-  }
-}
-
 void require_connected()
 {
   if (ipc_state == nullptr)
@@ -47,7 +40,55 @@ void require_connected()
 
 [[nodiscard]] auto peer_dead(unsigned int id) -> bool
 {
-  return id >= cat_ipc::max_peers || !cat_ipc::peer_alive(ipc_state->peer_data[id]);
+  if (id >= cat_ipc::max_peers)
+  {
+    return true;
+  }
+
+  cat_ipc::try_scoped_lock lock{ipc_state};
+  return !lock.locked() || !cat_ipc::peer_alive(ipc_state->peer_data[id]);
+}
+
+[[nodiscard]] auto bounded_string(const char* value, std::size_t size) -> std::string
+{
+  return value == nullptr ? std::string{} : std::string{value, strnlen(value, size)};
+}
+
+[[nodiscard]] auto kill_peer(const cat_ipc::peer_data_s& peer) -> bool
+{
+#if defined(SYS_pidfd_open) && defined(SYS_pidfd_send_signal)
+  const auto pidfd = static_cast<int>(::syscall(SYS_pidfd_open, peer.pid, 0));
+  if (pidfd >= 0)
+  {
+    if (cat_ipc::read_process_start_time(peer.pid) != peer.starttime)
+    {
+      ::close(pidfd);
+      return false;
+    }
+
+    const auto result = ::syscall(SYS_pidfd_send_signal, pidfd, SIGKILL, nullptr, 0);
+    const auto saved_errno = errno;
+    ::close(pidfd);
+    if (result == 0)
+    {
+      return true;
+    }
+    errno = saved_errno;
+    return false;
+  }
+
+  if (errno != ENOSYS)
+  {
+    return false;
+  }
+#endif
+
+  if (cat_ipc::read_process_start_time(peer.pid) != peer.starttime)
+  {
+    return false;
+  }
+
+  return ::kill(peer.pid, SIGKILL) == 0;
 }
 
 [[nodiscard]] auto query_peer(unsigned int id) -> json
@@ -58,8 +99,14 @@ void require_connected()
     throw std::out_of_range("peer out of range");
   }
 
+  cat_ipc::try_scoped_lock lock{ipc_state};
+  if (!lock.locked())
+  {
+    throw std::runtime_error("ipc state is busy");
+  }
+
   json result{};
-  if (peer_dead(id))
+  if (!cat_ipc::peer_alive(ipc_state->peer_data[id]))
   {
     result["dead"] = true;
     return result;
@@ -68,7 +115,7 @@ void require_connected()
   const auto& peer = ipc_state->peer_data[id];
   const auto& data = ipc_state->peer_user_data[id];
 
-  result["name"] = std::string(data.name);
+  result["name"] = bounded_string(data.name, sizeof(data.name));
   result["friendid"] = data.friendid;
   result["connected"] = data.connected;
   result["heartbeat"] = data.heartbeat;
@@ -104,8 +151,8 @@ void require_connected()
     {"z", data.ingame.z},
     {"player_count", data.ingame.player_count},
     {"bot_count", data.ingame.bot_count},
-    {"server", std::string(data.ingame.server)},
-    {"mapname", std::string(data.ingame.mapname)},
+    {"server", bounded_string(data.ingame.server, sizeof(data.ingame.server))},
+    {"mapname", bounded_string(data.ingame.mapname, sizeof(data.ingame.mapname))},
   };
 
   result["pid"] = peer.pid;
@@ -139,12 +186,18 @@ auto exec(const json& args) -> json
   }
 
   auto command = args["cmd"].get<std::string>();
-  replace_string(command, " && ", " ; ");
-  cat_ipc::queue_command(
+  if (!cat_ipc::allowed_console_command(command))
+  {
+    throw std::runtime_error("command is not allowlisted");
+  }
+  if (!cat_ipc::queue_command(
     ipc_state,
     target_id,
     command.size() >= cat_ipc::command_data_size - 1 ? cat_ipc::commands::execute_client_cmd_long : cat_ipc::commands::execute_client_cmd,
-    command);
+    command))
+  {
+    throw std::runtime_error("peer is unavailable or command exceeds the IPC payload limit");
+  }
   return json{};
 }
 
@@ -157,12 +210,18 @@ auto exec_all(const json& args) -> json
   }
 
   auto command = args["cmd"].get<std::string>();
-  replace_string(command, " && ", " ; ");
-  cat_ipc::queue_command(
+  if (!cat_ipc::allowed_console_command(command))
+  {
+    throw std::runtime_error("command is not allowlisted");
+  }
+  if (!cat_ipc::queue_command(
     ipc_state,
     -1,
     command.size() >= cat_ipc::command_data_size - 1 ? cat_ipc::commands::execute_client_cmd_long : cat_ipc::commands::execute_client_cmd,
-    command);
+    command))
+  {
+    throw std::length_error("command exceeds the IPC payload limit");
+  }
   return json{};
 }
 
@@ -200,6 +259,11 @@ auto query(const json& args) -> json
 auto squery(const json&) -> json
 {
   require_connected();
+  cat_ipc::try_scoped_lock lock{ipc_state};
+  if (!lock.locked())
+  {
+    throw std::runtime_error("ipc state is busy");
+  }
   return json{{"count", ipc_state->peer_count}, {"command_count", ipc_state->command_count}};
 }
 
@@ -220,12 +284,22 @@ auto kill(const json& args) -> json
   {
     throw std::out_of_range("peer out of range");
   }
-  if (peer_dead(static_cast<unsigned int>(id)))
+  cat_ipc::try_scoped_lock lock{ipc_state};
+  if (!lock.locked())
+  {
+    throw std::runtime_error("ipc state is busy");
+  }
+
+  const auto& peer = ipc_state->peer_data[id];
+  if (!cat_ipc::peer_alive(peer))
   {
     throw std::runtime_error("already dead");
   }
 
-  ::kill(ipc_state->peer_data[id].pid, SIGKILL);
+  if (!kill_peer(peer))
+  {
+    throw std::runtime_error("peer is no longer the registered process");
+  }
   return json{};
 }
 

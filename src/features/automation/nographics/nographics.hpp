@@ -23,7 +23,7 @@ void prepare_startup_patches();
 void prepare_render_patches();
 void on_library_loaded(const char* library_path);
 void update();
-void shutdown();
+bool shutdown();
 bool is_enabled();
 bool should_skip_rendering_hooks();
 bool is_noshaderapi();

@@ -16,6 +16,7 @@ V  o o  V  file: src/games/tf2/sdk/interfaces/steam_runtime.hpp
 #include <dlfcn.h>
 
 #include "games/tf2/sdk/interfaces/steam_client.hpp"
+#include "games/tf2/sdk/interfaces/steam_friends.hpp"
 #include "games/tf2/sdk/interfaces/steam_game_coordinator.hpp"
 #include "games/tf2/sdk/interfaces/steam_user.hpp"
 #include "games/tf2/sdk/interfaces/steam_user_stats.hpp"
@@ -49,7 +50,6 @@ function_type resolve_loaded_symbol(const char* symbol_name)
 
     auto* symbol = dlsym(handle, symbol_name);
     dlclose(handle);
-
     if (symbol != nullptr)
     {
       return reinterpret_cast<function_type>(symbol);
@@ -139,6 +139,26 @@ inline auto steam_user_handle() -> int
   }
 
   return steam_user;
+}
+
+inline SteamFriends* resolve_steam_friends()
+{
+  if (steam_friends != nullptr)
+  {
+    return steam_friends;
+  }
+
+  using steam_user_handle_fn = int (*)();
+  using find_interface_fn = void* (*)(int, const char*);
+  const auto get_steam_user = resolve_loaded_symbol<steam_user_handle_fn>("SteamAPI_GetHSteamUser");
+  const auto find_interface = resolve_loaded_symbol<find_interface_fn>("SteamInternal_FindOrCreateUserInterface");
+  if (get_steam_user == nullptr || find_interface == nullptr)
+  {
+    return nullptr;
+  }
+
+  steam_friends = static_cast<SteamFriends*>(find_interface(get_steam_user(), "SteamFriends017"));
+  return steam_friends;
 }
 
 inline steam_user* resolve_steam_user_from_api()

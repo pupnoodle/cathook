@@ -534,7 +534,10 @@ void compute_readiness(aimbot_run_context& ctx) {
       hitscan_aim_head_only_fire_ready(ctx.local, ctx.weapon, ctx.target) &&
       hitscan_aim_headshot_ready(ctx.local, ctx.weapon, ctx.target));
   ctx.readiness.charge = !ctx.hitscan || hitscan_aim_charge_ready(ctx.local, ctx.weapon, ctx.target);
-  ctx.readiness.trace = (!ctx.hitscan || ctx.hitscan_fire.ready) && melee_ready(ctx);
+  const Vec3 simple_shot_angles = aimbot_mode_uses_visible_steering() ? ctx.applied_angles : ctx.target_angles;
+  const bool simple_visible = !ctx.hitscan || ctx.hitscan_fire.ready ||
+    hitscan_aim_trace_candidate(ctx.local, ctx.weapon, ctx.target, simple_shot_angles);
+  ctx.readiness.trace = simple_visible && melee_ready(ctx);
   ctx.readiness.settled = hitscan_settled(ctx);
   ctx.readiness.primary = weapon_allows_primary_fire(ctx.local, ctx.weapon) &&
     (ctx.cmd->buttons & IN_ATTACK2) == 0 &&

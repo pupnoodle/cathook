@@ -51,6 +51,9 @@ struct pending_command
 shared_memory ipc_memory{};
 shared_state* ipc_state = nullptr;
 int local_peer_id = -1;
+std::uint32_t connected_state_version = 0;
+pid_t connected_server_pid = 0;
+unsigned long connected_server_starttime = 0;
 unsigned long last_command = 0;
 std::time_t injected_time = 0;
 std::atomic_bool ipc_enabled = true;
@@ -67,8 +70,9 @@ std::shared_mutex local_ipc_friends_mutex{};
 constexpr std::size_t max_local_ipc_friends = static_cast<std::size_t>(max_peers);
 std::array<std::uint32_t, max_local_ipc_friends> local_ipc_friends{};
 std::size_t local_ipc_friend_count = 0;
-std::vector<pending_command> deferred_commands{};
-constexpr std::size_t max_deferred_commands = command_ring_size;
+std::mutex pending_commands_mutex{};
+std::vector<pending_command> pending_commands{};
+constexpr std::size_t max_pending_commands = command_ring_size;
 
 [[nodiscard]] auto textmode_build() -> bool
 {
@@ -354,7 +358,6 @@ void mark_peer_free()
   data.textmode = textmode_build();
   data.heartbeat = now;
   data.ts_injected = now;
-  data.friendid = local_account_id_from_steam();
   copy_cstr(data.name, sizeof(data.name), bot_name_from_environment());
   return true;
 }
@@ -381,54 +384,64 @@ void try_connect()
     if (ipc_state == nullptr)
     {
       ipc_memory.close();
+      ipc_state = nullptr;
       local_peer_id = -1;
+      connected_state_version = 0;
+      connected_server_pid = 0;
+      connected_server_starttime = 0;
       return;
     }
 
+    auto connection_failed = false;
     auto no_available_slot = false;
     {
       try_scoped_lock lock{ipc_state};
       if (!lock.locked())
       {
-        ipc_memory.close();
-        ipc_state = nullptr;
-        local_peer_id = -1;
-        return;
-      }
-
-      local_peer_id = find_free_peer_slot_locked();
-      if (local_peer_id < 0)
-      {
-        no_available_slot = true;
+        connection_failed = true;
       }
       else
       {
-        if (!store_initial_peer_data_locked())
+        local_peer_id = find_free_peer_slot_locked();
+        if (local_peer_id < 0)
         {
-          ipc_memory.close();
-          ipc_state = nullptr;
-          local_peer_id = -1;
-          return;
+          no_available_slot = true;
         }
-
-        last_command = ipc_state->command_count;
-        refresh_local_ipc_friends_locked();
+        else if (!store_initial_peer_data_locked())
+        {
+          connection_failed = true;
+        }
+        else
+        {
+          last_command = ipc_state->command_count;
+          connected_state_version = ipc_state->global_data.state_version;
+          connected_server_pid = ipc_state->global_data.pid;
+          connected_server_starttime = ipc_state->global_data.starttime;
+          refresh_local_ipc_friends_locked();
+        }
       }
     }
 
-    if (no_available_slot)
+    if (connection_failed || no_available_slot)
     {
       ipc_memory.close();
       ipc_state = nullptr;
       local_peer_id = -1;
-      print("[ipc] no available catbot peer slots\n");
+      connected_state_version = 0;
+      connected_server_pid = 0;
+      connected_server_starttime = 0;
+      if (no_available_slot)
+      {
+        print("[ipc] no available catbot peer slots\n");
+      }
       return;
     }
 
     injected_time = now_seconds();
+    const auto connected_pid = ipc_state->peer_data[local_peer_id].pid;
     print("[ipc] connected to catbot ipc as peer %d host_pid=%d ns_pid=%d\n",
       local_peer_id,
-      static_cast<int>(ipc_state->peer_data[local_peer_id].pid),
+      static_cast<int>(connected_pid),
       static_cast<int>(getpid()));
   }
   catch (const std::exception& error)
@@ -437,6 +450,9 @@ void try_connect()
     ipc_memory.close();
     ipc_state = nullptr;
     local_peer_id = -1;
+    connected_state_version = 0;
+    connected_server_pid = 0;
+    connected_server_starttime = 0;
   }
 }
 
@@ -473,7 +489,8 @@ void update_peer_count_locked()
   }
 
   const auto& peer = ipc_state->peer_data[local_peer_id];
-  return !peer.free && peer.pid == read_host_pid();
+  return peer_identity_valid(peer) && peer.pid == read_host_pid() &&
+    peer.starttime == read_process_start_time(getpid());
 }
 
 void update_telemetry_locked()
@@ -606,19 +623,6 @@ void update_basic_telemetry_locked()
     data.ts_queue_started = 0;
   }
 
-  if (data.friendid == 0)
-  {
-    const auto account_id = local_account_id_from_steam();
-    if (account_id != 0)
-    {
-      data.friendid = static_cast<unsigned int>(account_id);
-    }
-  }
-
-  if (data.name[0] == '\0')
-  {
-    copy_cstr(data.name, sizeof(data.name), bot_name_from_environment());
-  }
 }
 
 void collect_commands(std::vector<pending_command>& commands_out)
@@ -662,25 +666,44 @@ void collect_commands(std::vector<pending_command>& commands_out)
       continue;
     }
 
+    if (command.sender >= 0 && (command.sender >= static_cast<int>(max_peers) ||
+        !peer_identity_valid(ipc_state->peer_data[command.sender])))
+    {
+      continue;
+    }
+
+    if (command.sender >= 0 &&
+        (command.sender_pid != ipc_state->peer_data[command.sender].pid ||
+         command.sender_starttime != ipc_state->peer_data[command.sender].starttime))
+    {
+      continue;
+    }
+    if (command.sender < 0 &&
+        (command.sender_pid != ipc_state->global_data.pid ||
+         command.sender_starttime != ipc_state->global_data.starttime))
+    {
+      continue;
+    }
+
     if (command.cmd_type == commands::execute_client_cmd_long)
     {
-      if (const auto* payload = command_payload(ipc_state, command); payload != nullptr)
+      if (const auto payload = command_payload(ipc_state, command); payload.has_value())
       {
-        commands_out.emplace_back(pending_command{command.cmd_type, payload});
+        commands_out.emplace_back(pending_command{command.cmd_type, payload->as_string()});
       }
 
       continue;
     }
 
-    const auto* command_text = reinterpret_cast<const char*>(command.cmd_data);
-    if (command_text == nullptr || command_text[0] == '\0')
+    const auto command_length = strnlen(reinterpret_cast<const char*>(command.cmd_data), command_data_size);
+    if (command_length == 0 || command_length >= command_data_size)
     {
       continue;
     }
 
     commands_out.emplace_back(pending_command{
       command.cmd_type,
-      std::string{command_text, strnlen(command_text, command_data_size)}
+      std::string{reinterpret_cast<const char*>(command.cmd_data), command_length}
     });
   }
 
@@ -711,68 +734,51 @@ void process_follow_target_command(const pending_command& command)
   }
 }
 
-void defer_commands(const std::vector<pending_command>& commands_to_defer)
+void queue_commands_for_game_thread(std::vector<pending_command>& commands_to_queue)
 {
-  if (commands_to_defer.empty())
+  if (commands_to_queue.empty())
   {
     return;
   }
 
-  deferred_commands.reserve(std::min(max_deferred_commands, deferred_commands.size() + commands_to_defer.size()));
-  for (const auto& command : commands_to_defer)
+  std::lock_guard lock{pending_commands_mutex};
+  pending_commands.reserve(std::min(max_pending_commands, pending_commands.size() + commands_to_queue.size()));
+  for (auto& command : commands_to_queue)
   {
-    if (executable_command(command))
-    {
-      deferred_commands.emplace_back(command);
-    }
+    pending_commands.emplace_back(std::move(command));
   }
 
-  if (deferred_commands.size() > max_deferred_commands)
+  if (pending_commands.size() > max_pending_commands)
   {
-    deferred_commands.erase(
-      deferred_commands.begin(),
-      deferred_commands.begin() + static_cast<std::ptrdiff_t>(deferred_commands.size() - max_deferred_commands));
+    pending_commands.erase(
+      pending_commands.begin(),
+      pending_commands.begin() + static_cast<std::ptrdiff_t>(pending_commands.size() - max_pending_commands));
   }
 }
 
-void prepend_deferred_commands(std::vector<pending_command>& commands_to_process)
+void clear_pending_commands()
 {
-  if (deferred_commands.empty())
-  {
-    return;
-  }
-
-  std::vector<pending_command> ordered_commands{};
-  ordered_commands.reserve(deferred_commands.size() + commands_to_process.size());
-  for (auto& command : deferred_commands)
-  {
-    ordered_commands.emplace_back(std::move(command));
-  }
-  deferred_commands.clear();
-
-  for (auto& command : commands_to_process)
-  {
-    ordered_commands.emplace_back(std::move(command));
-  }
-
-  commands_to_process = std::move(ordered_commands);
+  std::lock_guard lock{pending_commands_mutex};
+  pending_commands.clear();
 }
 
-void process_collected_commands(const std::vector<pending_command>& commands_to_process)
+void process_pending_commands()
 {
-  if (commands_to_process.empty())
-  {
-    return;
-  }
-
   if (engine == nullptr)
   {
-    for (const auto& command : commands_to_process)
-    {
-      process_follow_target_command(command);
-    }
-    defer_commands(commands_to_process);
     return;
+  }
+
+  std::vector<pending_command> commands_to_process{};
+  {
+    std::lock_guard lock{pending_commands_mutex};
+    if (pending_commands.empty())
+    {
+      return;
+    }
+
+    commands_to_process = std::move(pending_commands);
+    pending_commands.clear();
   }
 
   for (const auto& command : commands_to_process)
@@ -802,17 +808,17 @@ void service_ipc_locked(bool full_telemetry, bool process_commands)
     return;
   }
 
-  auto needs_reconnect = false;
-  if (!ipc_memory.owns_valid_state() || !ipc_memory.maps_current_object())
-  {
-    needs_reconnect = true;
-  }
+  auto needs_reconnect = !ipc_memory.maps_current_object();
   if (!needs_reconnect)
   {
     try_scoped_lock lock{ipc_state};
     if (lock.locked())
     {
-      if (!local_peer_registered_locked())
+      if (!ipc_memory.owns_valid_state() ||
+          ipc_state->global_data.state_version != connected_state_version ||
+          ipc_state->global_data.pid != connected_server_pid ||
+          ipc_state->global_data.starttime != connected_server_starttime ||
+          !local_peer_registered_locked())
       {
         needs_reconnect = true;
       }
@@ -838,8 +844,12 @@ void service_ipc_locked(bool full_telemetry, bool process_commands)
     ipc_memory.close();
     ipc_state = nullptr;
     local_peer_id = -1;
+    connected_state_version = 0;
+    connected_server_pid = 0;
+    connected_server_starttime = 0;
     last_command = 0;
     clear_local_ipc_friends();
+    clear_pending_commands();
     try_connect();
     return;
   }
@@ -849,8 +859,7 @@ void service_ipc_locked(bool full_telemetry, bool process_commands)
   {
     collect_commands(commands_to_process);
   }
-  prepend_deferred_commands(commands_to_process);
-  process_collected_commands(commands_to_process);
+  queue_commands_for_game_thread(commands_to_process);
 }
 
 void ipc_worker_main()
@@ -882,10 +891,7 @@ void start_ipc_worker()
 
 void stop_ipc_worker()
 {
-  if (!ipc_worker_running.exchange(false))
-  {
-    return;
-  }
+  ipc_worker_running.store(false, std::memory_order_release);
 
   if (ipc_worker.joinable() && ipc_worker.get_id() != std::this_thread::get_id())
   {
@@ -935,13 +941,14 @@ void tick()
 
   set_enabled(config.ipc.enabled);
   set_auto_ignore_enabled(config.ipc.auto_ignore_local_bots);
+  std::lock_guard lock{ipc_mutex};
   if (ipc_state == nullptr && !config.ipc.auto_connect)
   {
     return;
   }
 
-  std::lock_guard lock{ipc_mutex};
   service_ipc_locked(true, true);
+  process_pending_commands();
 }
 
 [[nodiscard]] bool event_user_is_local(GameEvent* event, const char* key)
@@ -1021,7 +1028,13 @@ void update_stats_for_event_locked(GameEvent* event, const char* event_name)
 
 void on_game_event(GameEvent* event)
 {
-  if (event == nullptr || ipc_state == nullptr || !valid_local_peer_id())
+  if (event == nullptr)
+  {
+    return;
+  }
+
+  std::lock_guard ipc_lock{ipc_mutex};
+  if (ipc_state == nullptr || !valid_local_peer_id())
   {
     return;
   }
@@ -1085,23 +1098,30 @@ void shutdown()
   ipc_memory.close();
   ipc_state = nullptr;
   local_peer_id = -1;
+  connected_state_version = 0;
+  connected_server_pid = 0;
+  connected_server_starttime = 0;
   last_command = 0;
   game_telemetry_ready_since = {};
   clear_local_ipc_friends();
+  clear_pending_commands();
 }
 
 bool connected()
 {
+  std::lock_guard lock{ipc_mutex};
   return ipc_state != nullptr && local_peer_id >= 0;
 }
 
 int peer_id()
 {
+  std::lock_guard lock{ipc_mutex};
   return local_peer_id;
 }
 
 int local_ipc_peer_count_on_current_server()
 {
+  std::lock_guard ipc_lock{ipc_mutex};
   if (ipc_state == nullptr || !valid_local_peer_id())
   {
     return 0;
@@ -1146,6 +1166,7 @@ int local_ipc_peer_count_on_current_server()
 
 bool is_first_local_ipc_peer_on_current_server()
 {
+  std::lock_guard ipc_lock{ipc_mutex};
   if (ipc_state == nullptr || !valid_local_peer_id())
   {
     return false;
@@ -1217,6 +1238,7 @@ bool is_local_ipc_friend(std::uint32_t friend_id)
 
 bool is_excess_ipc_bot_on_current_server(int max_bots)
 {
+  std::lock_guard ipc_lock{ipc_mutex};
   if (max_bots <= 0 || ipc_state == nullptr || !valid_local_peer_id())
   {
     return false;

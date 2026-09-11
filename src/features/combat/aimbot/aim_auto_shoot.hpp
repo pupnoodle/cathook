@@ -25,7 +25,7 @@ inline bool weapon_has_primary_ammo(Weapon* weapon) {
 
 inline bool weapon_has_release_shot_ready(Weapon* weapon, bool hitscan_solution) {
   return hitscan_solution && weapon != nullptr &&
-    weapon->get_weapon_id() == TF_WEAPON_SNIPERRIFLE_CLASSIC &&
+    weapon->get_def_id() == Sniper_m_TheClassic &&
     weapon->get_charged_damage() > 0.0f;
 }
 
@@ -53,7 +53,7 @@ inline result apply(user_cmd* user_cmd,
       global_vars != nullptr) {
     const float time_since_last_shot = global_vars->curtime - weapon->get_last_attack();
     const float tapfire_delay = weapon->get_bullets_per_shot() > 1 ? 0.25f : 1.25f;
-    if (time_since_last_shot <= tapfire_delay) {
+    if (std::isfinite(time_since_last_shot) && time_since_last_shot >= 0.0f && time_since_last_shot <= tapfire_delay) {
       user_cmd->buttons &= ~IN_ATTACK;
       return r;
     }

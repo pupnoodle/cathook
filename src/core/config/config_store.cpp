@@ -16,12 +16,18 @@ V  o o  V  file: src/core/config/config_store.cpp
 #include <array>
 #include <cctype>
 #include <charconv>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <memory>
 #include <sstream>
+#include <random>
+#include <system_error>
+#include <unistd.h>
+#include <sys/stat.h>
 
 namespace cathook::core
 {
@@ -98,7 +104,9 @@ config_store::config_store(std::filesystem::path root_directory, std::filesystem
 
 bool config_store::load_file(const std::string_view name)
 {
-    std::ifstream input{ config_path(name) };
+    const auto path = config_path(name);
+    if (path.empty()) return false;
+    std::ifstream input{ path };
     if (!input.is_open())
     {
         return false;
@@ -135,10 +143,13 @@ bool config_store::load_file(const std::string_view name)
 
 bool config_store::save_file(const std::string_view name)
 {
+    const auto path = config_path(name);
+    if (path.empty()) return false;
     std::error_code error{};
     std::filesystem::create_directories(config_directory(), error);
 
-    std::ofstream output{ config_path(name), std::ios::trunc };
+    const auto temporary = path.string() + ".tmp-" + std::to_string(static_cast<unsigned long long>(::getpid())) + "-" + std::to_string(static_cast<unsigned long long>(std::chrono::steady_clock::now().time_since_epoch().count())) + "-" + std::to_string(static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(this)));
+    std::ofstream output{ temporary, std::ios::binary | std::ios::trunc };
     if (!output.is_open())
     {
         return false;
@@ -162,13 +173,31 @@ bool config_store::save_file(const std::string_view name)
         output << key << '=' << value << '\n';
     }
 
+    output.flush();
+    const bool written = output.good();
+    output.close();
+    if (!written)
+    {
+        std::filesystem::remove(temporary, error);
+        return false;
+    }
+    ::chmod(temporary.c_str(), 0600);
+    std::filesystem::rename(temporary, path, error);
+    if (error)
+    {
+        std::filesystem::remove(temporary, error);
+        return false;
+    }
+
     m_current_name = std::string{ name };
-    return output.good();
+    return true;
 }
 
 bool config_store::delete_file(const std::string_view name)
 {
-    const bool removed{ std::filesystem::remove(config_path(name)) };
+    const auto path = config_path(name);
+    if (path.empty()) return false;
+    const bool removed{ std::filesystem::remove(path) };
     if (removed && m_current_name == name)
     {
         m_current_name = "default";
@@ -337,11 +366,12 @@ void config_store::import_config(const Config& config)
 
     const std::size_t visual_group_count = std::min(config.visual_groups.groups.size(), visual_group_config::max_groups);
     set_int("visuals.groups.count", static_cast<int>(visual_group_count));
-    set_int("visuals.groups.active_mask", static_cast<int>(config.visual_groups.active_group_mask));
+    set_uint("visuals.groups.active_mask", config.visual_groups.active_group_mask);
     for (std::size_t index = 0; index < visual_group_count; ++index)
     {
         const visual_group& group = config.visual_groups.groups[index];
         const std::string prefix = "visuals.groups." + std::to_string(index) + ".";
+        set_uint(prefix + "id", group.bind_id);
         set_string(prefix + "name", group.name);
         set_color(prefix + "color", group.color);
         set_bool(prefix + "tags_override_color", group.tags_override_color);
@@ -949,6 +979,7 @@ void config_store::export_config(Config& config) const
     {
         const std::string prefix = "visuals.groups." + std::to_string(index) + ".";
         visual_group group{};
+        group.bind_id = get_uint(prefix + "id", 0);
         group.name = get_string(prefix + "name", group.name);
         group.color = get_color(prefix + "color", group.color);
         group.tags_override_color = get_bool(prefix + "tags_override_color", group.tags_override_color);
@@ -1044,13 +1075,14 @@ void config_store::export_config(Config& config) const
         group.sightlines = static_cast<uint32_t>(std::max(0, get_int(prefix + "sightlines", static_cast<int>(group.sightlines))));
         config.visual_groups.groups.emplace_back(group);
     }
-    config.visual_groups.active_group_mask = static_cast<uint32_t>(std::max(0, get_int("visuals.groups.active_mask", static_cast<int>(config.visual_groups.active_group_mask))));
+    config.visual_groups.active_group_mask = get_uint("visuals.groups.active_mask", config.visual_groups.active_group_mask);
     if (config.visual_groups.groups.empty()) {
         visual_groups::ensure_defaults();
     } else {
         const uint32_t valid_mask = config.visual_groups.groups.size() >= visual_group_config::max_groups ? 0xFFFFFFFFu : ((1u << config.visual_groups.groups.size()) - 1u);
         config.visual_groups.active_group_mask &= valid_mask;
     }
+    visual_groups::ensure_defaults();
 
     config.visuals.world.modulation_mask = static_cast<uint32_t>(std::max(0, get_int(
         "visuals.world.modulation_mask", static_cast<int>(config.visuals.world.modulation_mask)))) &
@@ -1673,10 +1705,15 @@ void config_store::set_int(std::string key, const int value)
     m_values[std::move(key)] = std::to_string(value);
 }
 
+void config_store::set_uint(std::string key, const std::uint32_t value)
+{
+    m_values[std::move(key)] = std::to_string(value);
+}
+
 void config_store::set_float(std::string key, const float value)
 {
     std::ostringstream stream{};
-    stream << std::fixed << std::setprecision(2) << value;
+    stream << std::setprecision(std::numeric_limits<float>::max_digits10) << value;
     m_values[std::move(key)] = stream.str();
 }
 
@@ -1688,7 +1725,7 @@ void config_store::set_string(std::string key, const std::string_view value)
 void config_store::set_color(std::string key, const RGBA_float& value)
 {
     std::ostringstream stream{};
-    stream << std::fixed << std::setprecision(3)
+    stream << std::setprecision(std::numeric_limits<float>::max_digits10)
            << value.r << ',' << value.g << ',' << value.b << ',' << value.a << ',' << (value.rainbow ? "true" : "false");
     m_values[std::move(key)] = stream.str();
 }
@@ -1725,7 +1762,9 @@ bool config_store::get_bool(const std::string_view key, const bool fallback) con
         return fallback;
     }
 
-    return found->second == "true";
+    if (found->second == "true" || found->second == "1" || found->second == "on") return true;
+    if (found->second == "false" || found->second == "0" || found->second == "off") return false;
+    return fallback;
 }
 
 int config_store::get_int(const std::string_view key, const int fallback) const
@@ -1738,7 +1777,22 @@ int config_store::get_int(const std::string_view key, const int fallback) const
 
     int parsed_value{ fallback };
     const auto result{ std::from_chars(found->second.data(), found->second.data() + found->second.size(), parsed_value) };
-    return result.ec == std::errc{} ? parsed_value : fallback;
+    return result.ec == std::errc{} && result.ptr == found->second.data() + found->second.size() ? parsed_value : fallback;
+}
+
+std::uint32_t config_store::get_uint(const std::string_view key, const std::uint32_t fallback) const
+{
+    const auto found{ m_values.find(std::string{ key }) };
+    if (found == m_values.end()) return fallback;
+
+    std::uint32_t parsed_value{};
+    const auto result{ std::from_chars(found->second.data(), found->second.data() + found->second.size(), parsed_value) };
+    if (result.ec == std::errc{} && result.ptr == found->second.data() + found->second.size()) return parsed_value;
+
+    int legacy_value{};
+    const auto legacy_result{ std::from_chars(found->second.data(), found->second.data() + found->second.size(), legacy_value) };
+    return legacy_result.ec == std::errc{} && legacy_result.ptr == found->second.data() + found->second.size()
+        ? static_cast<std::uint32_t>(legacy_value) : fallback;
 }
 
 float config_store::get_float(const std::string_view key, const float fallback) const
@@ -1751,7 +1805,7 @@ float config_store::get_float(const std::string_view key, const float fallback) 
 
     float parsed_value{ fallback };
     const auto result{ std::from_chars(found->second.data(), found->second.data() + found->second.size(), parsed_value) };
-    return result.ec == std::errc{} ? parsed_value : fallback;
+    return result.ec == std::errc{} && result.ptr == found->second.data() + found->second.size() ? parsed_value : fallback;
 }
 
 std::string config_store::get_string(const std::string_view key, const std::string_view fallback) const
@@ -1788,6 +1842,15 @@ std::filesystem::path config_store::config_directory() const
 
 std::filesystem::path config_store::config_path(const std::string_view name) const
 {
+    if (name.empty() || name.size() > 64 || name == "." || name == "..") return {};
+    for (const char character : name)
+    {
+        if (!(std::isalnum(static_cast<unsigned char>(character)) || character == '_' || character == '-'))
+        {
+            return {};
+        }
+    }
+
     return config_directory() / (std::string{ name } + ".cat");
 }
 
@@ -1832,7 +1895,7 @@ std::optional<RGBA_float> config_store::parse_color(const std::string_view value
 
         float parsed{};
         const auto result{ std::from_chars(component.data(), component.data() + component.size(), parsed) };
-        if (result.ec != std::errc{})
+        if (result.ec != std::errc{} || result.ptr != component.data() + component.size())
         {
             return std::nullopt;
         }

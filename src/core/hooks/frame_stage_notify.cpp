@@ -208,14 +208,38 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
     return;
   }
 
-  if (current_stage == FRAME_RENDER_START) {
+  const bool runtime_ready = global_vars != nullptr && entity_list != nullptr && engine != nullptr &&
+    engine->is_connected() && engine->is_in_game();
+
+  if (runtime_ready && current_stage == FRAME_RENDER_START) {
     thirdperson::begin_render_angles();
     update_interpolation_removals();
     begin_lerp_removal();
     update_zoom_sensitivity();
   }
 
+  if (frame_stage_notify_original == nullptr) {
+    restore_frame_stage_state();
+    return;
+  }
   frame_stage_notify_original(me, current_stage);
+
+  if (!runtime_ready) {
+    entity_cache_clear_lists();
+    entity_cache_clear_snapshot();
+    last_time = 0.0f;
+    run_match_exec_on_level_change();
+    run_skybox_changer();
+    restore_frame_stage_state();
+    return;
+  }
+  if (cathook::core::is_detach_pending() || engine == nullptr || entity_list == nullptr || global_vars == nullptr ||
+      !engine->is_connected() || !engine->is_in_game()) {
+    entity_cache_clear_lists();
+    entity_cache_clear_snapshot();
+    restore_frame_stage_state();
+    return;
+  }
 
   // Inventory changer frame-stage handler temporarily disabled.
 
@@ -252,12 +276,21 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
       const bool refresh_friend_cache = steam_friends != nullptr && global_vars->curtime - last_time >= 1;
       const bool cache_player_info = config.aimbot.master || refresh_friend_cache;
 
-      const unsigned int max_entities = entity_list->get_max_entities();
-      for (unsigned int i = 1; i <= max_entities; ++i) {
+      const int max_entities_value = entity_list->get_max_entities();
+      if (max_entities_value <= 0 || max_entities_value > 8192) {
+        entity_cache_clear_lists();
+        entity_cache_clear_snapshot();
+        break;
+      }
+      const unsigned int max_entities = static_cast<unsigned int>(max_entities_value);
+      for (unsigned int i = 1; i < max_entities; ++i) {
 	Entity* entity = entity_list->entity_from_index(i);
 	if (entity == nullptr) continue;
 
         const class_id entity_class = entity->get_class_id();
+        if (static_cast<int>(entity_class) < 0 || static_cast<int>(entity_class) > 512) {
+          continue;
+        }
         const char* network_name = entity->get_network_name();
         if (network_name != nullptr && network_name[0] != '\0' &&
             (std::strstr(network_name, "Boss") != nullptr ||

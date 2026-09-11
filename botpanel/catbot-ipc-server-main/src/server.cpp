@@ -40,6 +40,12 @@ void signal_handler(int)
 
 void print_status(cat_ipc::shared_state* state)
 {
+  cat_ipc::try_scoped_lock lock{state};
+  if (!lock.locked())
+  {
+    return;
+  }
+
   std::printf("\033[1;1H\033[2J");
   std::printf("\033[2;2H\033[1mcatbot IPC panel server\033[0m");
   std::printf("\033[3;4H\033[1mconnected: \033[0m%u / %u", state->peer_count, cat_ipc::max_peers);
@@ -58,8 +64,10 @@ void print_status(cat_ipc::shared_state* state)
     }
 
     const auto& data = state->peer_user_data[index];
-    std::printf("\033[2;%dH%-2u %-5d %-12u %-21s %s\n",
-      row, index, state->peer_data[index].pid, data.friendid, data.ingame.server, data.name);
+    std::printf("\033[%d;1H%-2u %-5d %-12u %-21.*s %.*s\n",
+      row, index, state->peer_data[index].pid, data.friendid,
+      static_cast<int>(sizeof(data.ingame.server)), data.ingame.server,
+      static_cast<int>(sizeof(data.name)), data.name);
 
     if (data.connected && data.ingame.good)
     {

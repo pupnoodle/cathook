@@ -506,7 +506,7 @@ bool is_enemy_close_to_local(float safety_distance)
 
   const Vec3 local_origin = localplayer->get_origin();
   const int max_entities = entity_list->get_max_entities();
-  for (int index = 1; index <= max_entities; ++index)
+  for (int index = 1; index < max_entities; ++index)
   {
     auto* player = entity_list->player_from_index(index);
     if (player == nullptr || player == localplayer || player->get_class_id() != class_id::PLAYER || !player->is_alive() || player->is_dormant())
@@ -805,7 +805,7 @@ Entity* get_player_resource_entity()
   }
 
   const int max_entities = entity_list->get_max_entities();
-  for (int index = 1; index <= max_entities; ++index)
+  for (int index = 1; index < max_entities; ++index)
   {
     auto* entity = entity_list->entity_from_index(index);
     if (entity == nullptr)
@@ -861,7 +861,7 @@ int count_requeue_players()
 
   int human_players = 0;
   const int max_entities = entity_list->get_max_entities();
-  for (int index = 1; index <= max_entities; ++index)
+  for (int index = 1; index < max_entities; ++index)
   {
     auto* player = entity_list->player_from_index(index);
     if (player == nullptr || player->get_class_id() != class_id::PLAYER)
@@ -1816,7 +1816,7 @@ void automation_controller::run_auto_report()
 
   const int local_index = engine->get_localplayer_index();
   const int max_entities = entity_list->get_max_entities();
-  for (int index = 1; index <= max_entities; ++index)
+  for (int index = 1; index < max_entities; ++index)
   {
     if (index == local_index)
     {

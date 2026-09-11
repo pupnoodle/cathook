@@ -29,6 +29,7 @@ const STATE = [
 	'ACCOUNT DISABLED E43',
 	'PENDING'
 ];
+const MAX_BOT_QUOTA = 254;
 
 const classes = [
 	"Unknown", "Scout",
@@ -302,8 +303,8 @@ function load_bot_quota() {
 
 function apply_bot_quota() {
 	const value_text = String($('#bot-quota').val()).trim();
-	if (!/^[0-9]+$/.test(value_text)) {
-		status.error('Bot quota must be 0 or higher');
+	if (!/^[0-9]+$/.test(value_text) || Number(value_text) > MAX_BOT_QUOTA) {
+		status.error('Bot quota must be between 0 and ' + MAX_BOT_QUOTA);
 		load_bot_quota();
 		return;
 	}
@@ -407,8 +408,14 @@ function update_ban_tracker_data(row, data) {
 		.text(text);
 }
 
+function clearIPCId(row) {
+	row.removeAttr('data-ipc-id').removeAttr('data-pid');
+	row.find('.client-pid, .client-id, .client-name, .client-status').text('N/A');
+}
+
 function updateIPCData(row, id, data, state, ipc_observed_at) {
 	if (!data) {
+		clearIPCId(row);
 		return;
 	}
 	var accumulated = data.accumulated || {};
@@ -499,8 +506,10 @@ function updateUserData(bot, data) {
 	row.toggleClass('stopped', data.state != 5);
 	row.find('.client-state').text(STATE[data.state]);
 	row.find('.client-restarts').text(data.restarts);
-	if (data.state === 5 && data.ipc) {
-		row.attr('data-ipc-id', data.ipcID);
+	const ipc_id = data.ipcID;
+	const has_ipc = data.state === 5 && data.ipc && Number.isInteger(ipc_id) && ipc_id >= 0;
+	if (has_ipc) {
+		row.attr('data-ipc-id', ipc_id);
 		row.attr('data-pid', data.ipc.pid);
 		row.find('.client-pid').text(data.ipc.pid);
 		const profile_url = data.profile_url || steam_id.profile_url_from_account_id32(data.ipc.friendid);
@@ -515,11 +524,12 @@ function updateUserData(bot, data) {
 			}
 		}
 	}
-	if (data.state != 5 || !data.ipc) {
+	if (!has_ipc) {
+		clearIPCId(row);
 		row.find('.active').text('N/A');
 	}
 	update_ban_tracker_data(row, data.ban_tracker);
-	updateIPCData(row, data.ipcID, data.ipc, data.state, data.ipc_observed_at);
+	updateIPCData(row, has_ipc ? ipc_id : -1, has_ipc ? data.ipc : null, data.state, data.ipc_observed_at);
 }
 
 function addClientRow(botid, data) {

@@ -723,16 +723,18 @@ bool apply_render_patch_if_valid(byte_patch& patch, const char* patch_name)
   return true;
 }
 
-void restore_render_patch_objects()
+bool restore_render_patch_objects()
 {
-  particle_create_patch.restore();
-  play_sequence_patch.restore();
-  particle_precache_patch.restore();
-  particle_effect_create_patch.restore();
-  view_render_patch.restore();
-  v_render_view_patch.restore();
-  material_system_swap_buffers_patch.restore();
-  video_mode_setup_startup_graphic_patch.restore();
+  bool ok = true;
+  ok = particle_create_patch.restore() && ok;
+  ok = play_sequence_patch.restore() && ok;
+  ok = particle_precache_patch.restore() && ok;
+  ok = particle_effect_create_patch.restore() && ok;
+  ok = view_render_patch.restore() && ok;
+  ok = v_render_view_patch.restore() && ok;
+  ok = material_system_swap_buffers_patch.restore() && ok;
+  ok = video_mode_setup_startup_graphic_patch.restore() && ok;
+  return ok;
 }
 
 bool initialize_render_patches()
@@ -819,18 +821,24 @@ void apply_cathook2017_render_patches()
   render_patches_applied = render_patches_applied || any_patch;
 }
 
-void restore_render_patches()
+bool restore_render_patches()
 {
   if (!render_patches_applied)
   {
-    return;
+    return true;
   }
 
-  restore_render_patch_objects();
+  if (!restore_render_patch_objects())
+  {
+    print("[nographics] render patch restore failed\n");
+    return false;
+  }
+
   render_patches_applied = false;
+  return true;
 }
 
-void disable_file_system_hooks();
+bool disable_file_system_hooks();
 
 void enable_file_system_hooks()
 {
@@ -865,22 +873,44 @@ void enable_file_system_hooks()
   file_system_hooked = true;
 }
 
-void disable_file_system_hooks()
+bool disable_file_system_hooks()
 {
   if (!file_system_hooked)
   {
-    return;
+    return true;
   }
 
-  if (find_first_original != nullptr) write_to_table(file_system_vtable, file_system_find_first_index, reinterpret_cast<void*>(find_first_original));
-  if (find_next_original != nullptr) write_to_table(file_system_vtable, file_system_find_next_index, reinterpret_cast<void*>(find_next_original));
-  if (async_read_multiple_original != nullptr) write_to_table(file_system_vtable, file_system_async_read_multiple_index, reinterpret_cast<void*>(async_read_multiple_original));
-  if (open_ex_original != nullptr) write_to_table(file_system_vtable, file_system_open_ex_index, reinterpret_cast<void*>(open_ex_original));
-  if (read_file_ex_original != nullptr) write_to_table(file_system_vtable, file_system_read_file_ex_index, reinterpret_cast<void*>(read_file_ex_original));
-  if (add_files_to_cache_original != nullptr) write_to_table(file_system_vtable, file_system_add_files_to_cache_index, reinterpret_cast<void*>(add_files_to_cache_original));
-  if (open_original != nullptr) write_to_table(base_file_system_vtable, base_file_system_open_index, reinterpret_cast<void*>(open_original));
-  if (precache_original != nullptr) write_to_table(base_file_system_vtable, base_file_system_precache_index, reinterpret_cast<void*>(precache_original));
-  if (read_file_original != nullptr) write_to_table(base_file_system_vtable, base_file_system_read_file_index, reinterpret_cast<void*>(read_file_original));
+  const auto restore = [](void** vtable, int index, void* original, const char* name)
+  {
+    if (original == nullptr)
+    {
+      return true;
+    }
+
+    if (write_to_table(vtable, index, original))
+    {
+      return true;
+    }
+
+    print("[nographics] failed to restore %s\n", name);
+    return false;
+  };
+
+  bool ok = true;
+  ok = restore(file_system_vtable, file_system_find_first_index, reinterpret_cast<void*>(find_first_original), "IFileSystem::FindFirst") && ok;
+  ok = restore(file_system_vtable, file_system_find_next_index, reinterpret_cast<void*>(find_next_original), "IFileSystem::FindNext") && ok;
+  ok = restore(file_system_vtable, file_system_async_read_multiple_index, reinterpret_cast<void*>(async_read_multiple_original), "IFileSystem::AsyncReadMultiple") && ok;
+  ok = restore(file_system_vtable, file_system_open_ex_index, reinterpret_cast<void*>(open_ex_original), "IFileSystem::OpenEx") && ok;
+  ok = restore(file_system_vtable, file_system_read_file_ex_index, reinterpret_cast<void*>(read_file_ex_original), "IFileSystem::ReadFileEx") && ok;
+  ok = restore(file_system_vtable, file_system_add_files_to_cache_index, reinterpret_cast<void*>(add_files_to_cache_original), "IFileSystem::AddFilesToCache") && ok;
+  ok = restore(base_file_system_vtable, base_file_system_open_index, reinterpret_cast<void*>(open_original), "CBaseFileSystem::Open") && ok;
+  ok = restore(base_file_system_vtable, base_file_system_precache_index, reinterpret_cast<void*>(precache_original), "CBaseFileSystem::Precache") && ok;
+  ok = restore(base_file_system_vtable, base_file_system_read_file_index, reinterpret_cast<void*>(read_file_original), "CBaseFileSystem::ReadFile") && ok;
+
+  if (!ok)
+  {
+    return false;
+  }
 
   file_system_hooked = false;
 
@@ -911,6 +941,7 @@ void disable_file_system_hooks()
   read_file_original = nullptr;
   file_system_vtable = nullptr;
   base_file_system_vtable = nullptr;
+  return true;
 }
 
 using hud_update_fn = void (*)(void*, bool);
@@ -945,17 +976,24 @@ void hud_update_hook(void* this_ptr, bool active)
   hud_update_original(this_ptr, active);
 }
 
-void disable_hud_update_hook()
+bool disable_hud_update_hook()
 {
   if (hud_update_funchook != nullptr)
   {
-    funchook_uninstall(hud_update_funchook, 0);
+    const int result = funchook_uninstall(hud_update_funchook, 0);
+    if (result != FUNCHOOK_ERROR_SUCCESS && result != FUNCHOOK_ERROR_NOT_INSTALLED)
+    {
+      print("[nographics] failed to restore HudUpdate hook: %d\n", result);
+      return false;
+    }
+
     funchook_destroy(hud_update_funchook);
     hud_update_funchook = nullptr;
   }
 
   hud_update_original = nullptr;
   hud_update_frame_counter = 0;
+  return true;
 }
 
 void enable_hud_update_hook()
@@ -1161,18 +1199,24 @@ void update()
   nographics_next_maintenance = now + nographics_maintenance_interval;
 }
 
-void shutdown()
+bool shutdown()
 {
-  restore_render_patches();
+  const bool render_patches_restored = restore_render_patches();
   update_material_stub(false);
-  disable_file_system_hooks();
-  disable_hud_update_hook();
+  const bool file_system_hooks_disabled = disable_file_system_hooks();
+  const bool hud_update_hook_disabled = disable_hud_update_hook();
+  if (!render_patches_restored || !file_system_hooks_disabled || !hud_update_hook_disabled)
+  {
+    return false;
+  }
+
   nographics_runtime_enabled = false;
   nographics_next_maintenance = {};
   initialized = false;
   render_patches_initialized = false;
   render_patches_ready = false;
   game_file_system = nullptr;
+  return true;
 }
 
 bool is_enabled()

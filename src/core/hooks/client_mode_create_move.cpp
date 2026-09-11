@@ -19,6 +19,7 @@ V  o o  V  file: src/core/hooks/client_mode_create_move.cpp
 #include "core/ui/mono_ui.hpp"
 #include "features/menu/config.hpp"
 #include "features/combat/backtrack/backtrack.hpp"
+#include "features/combat/anti_aim/anti_aim.hpp"
 #include "features/combat/auto_detonate/auto_detonate.hpp"
 #include "features/combat/auto_reflect/auto_reflect.hpp"
 #include "features/combat/aimbot/aimbot.cpp"
@@ -28,11 +29,15 @@ V  o o  V  file: src/core/hooks/client_mode_create_move.cpp
 #include "features/automation/medic_automation/medic_automation.hpp"
 #include "features/automation/misc/misc.hpp"
 #include "features/automation/navbot/navbot_controller.hpp"
+#include "features/visuals/thirdperson.hpp"
 #include "features/visuals/esp/esp.hpp"
 #include "core/detach.hpp"
 
 bool (*client_mode_create_move_original)(void*, float, user_cmd*);
 bool g_client_create_move_owns_features = false;
+thread_local bool g_client_mode_pipeline_ran = false;
+
+void refresh_prediction_state();
 
 static void movement_fix(user_cmd* user_cmd, Vec3 original_view_angle, float original_forward_move, float original_side_move) {
   if (user_cmd == nullptr) {
@@ -229,25 +234,47 @@ static move_features_result run_move_features(user_cmd* user_cmd) {
   return result;
 }
 
+static void run_post_create_move_features(user_cmd* user_cmd) {
+  if (user_cmd == nullptr) {
+    return;
+  }
+
+  Player* localplayer = entity_list != nullptr ? entity_list->get_localplayer() : nullptr;
+  if (localplayer == nullptr || !localplayer->is_taunting()) {
+    tickbase::on_create_move(user_cmd);
+    anti_aim::on_create_move(user_cmd);
+  }
+  aimbot::update_local_client_side_animation();
+}
+
 bool client_mode_create_move_hook(void* me, float sample_time, user_cmd* user_cmd) {
   CATHOOK_HOOK_GUARD();
+  g_client_mode_pipeline_ran = false;
   if (cathook::core::is_detach_pending()) {
     const bool rc = client_mode_create_move_original(me, sample_time, user_cmd);
     cathook::core::service_detach_request();
     return rc;
   }
 
-  if (g_client_create_move_owns_features) {
-    Player* localplayer = entity_list != nullptr ? entity_list->get_localplayer() : nullptr;
-    return call_client_mode_create_move(me, sample_time, user_cmd, localplayer);
+  const bool called_from_client_create_move = g_client_create_move_owns_features;
+  if (called_from_client_create_move) {
+    g_client_mode_pipeline_ran = true;
   }
 
-  cat_bind::run();
-  automation::controller().on_create_move(user_cmd);
+  Player* localplayer = entity_list != nullptr ? entity_list->get_localplayer() : nullptr;
+  if (!called_from_client_create_move) {
+    cat_bind::run();
+    automation::controller().on_create_move(user_cmd);
+  }
+  const bool rc = call_client_mode_create_move(me, sample_time, user_cmd, localplayer);
+  if (called_from_client_create_move) {
+    refresh_prediction_state();
+    cat_bind::run();
+    automation::controller().on_create_move(user_cmd);
+    thirdperson::update_taunt_camera();
+  }
 
   const bool can_run_features = can_run_move_features(user_cmd);
-  Player* localplayer = entity_list != nullptr ? entity_list->get_localplayer() : nullptr;
-  const bool rc = call_client_mode_create_move(me, sample_time, user_cmd, localplayer);
   const bool taunting = localplayer != nullptr && localplayer->is_taunting();
   const bool taunt_slide = should_run_taunt_slide(localplayer);
 
@@ -255,12 +282,14 @@ bool client_mode_create_move_hook(void* me, float sample_time, user_cmd* user_cm
     if (taunt_slide) {
       apply_taunt_slide(localplayer, user_cmd);
     }
+    run_post_create_move_features(user_cmd);
     return rc;
   }
 
   update_player_head_emoji_cache();
 
   const move_features_result move_result = run_move_features(user_cmd);
+  run_post_create_move_features(user_cmd);
   if (move_result.use_psilent || navbot::controller().has_silent_path_look()) {
     return false;
   }

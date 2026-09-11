@@ -8,16 +8,6 @@
 namespace
 {
 
-void replace_string(std::string& input, const std::string& what, const std::string& with_what)
-{
-  auto index = input.find(what);
-  while (index != std::string::npos)
-  {
-    input.replace(index, what.size(), with_what);
-    index = input.find(what, index + with_what.size());
-  }
-}
-
 }
 
 int main(int argc, const char** argv)
@@ -41,12 +31,20 @@ int main(int argc, const char** argv)
   try
   {
     auto memory = cat_ipc::shared_memory::open_client();
-    replace_string(command, " && ", " ; ");
-    cat_ipc::queue_command(
+    if (!cat_ipc::allowed_console_command(command))
+    {
+      std::cerr << "command is not allowlisted\n";
+      return EXIT_FAILURE;
+    }
+    if (!cat_ipc::queue_command(
       memory.state(),
       -1,
       command.size() >= cat_ipc::command_data_size - 1 ? cat_ipc::commands::execute_client_cmd_long : cat_ipc::commands::execute_client_cmd,
-      command);
+      command))
+    {
+      std::cerr << "command is empty or exceeds the IPC payload limit\n";
+      return EXIT_FAILURE;
+    }
   }
   catch (const std::exception& error)
   {

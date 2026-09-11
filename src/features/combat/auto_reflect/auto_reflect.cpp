@@ -29,7 +29,7 @@ namespace
 {
 
 constexpr int max_tracked_entities = 4096;
-constexpr float min_projectile_speed = 50.0f;
+constexpr float min_projectile_speed_per_second = 50.0f;
 constexpr int prediction_ticks = 2;
 
 float vec_length(const Vec3& value)
@@ -46,6 +46,7 @@ struct projectile_motion
 {
   int tick_count = 0;
   Vec3 origin{};
+  int serial = -1;
   bool valid = false;
 };
 
@@ -96,6 +97,11 @@ Vec3 estimated_velocity(Entity* projectile)
   }
 
   projectile_motion& motion = g_motions[static_cast<std::size_t>(index)];
+  const int serial = projectile->get_ref_ehandle().GetSerialNumber();
+  if (motion.serial != serial) {
+    motion = {};
+    motion.serial = serial;
+  }
   const Vec3 origin = projectile->get_origin();
   const int tick_count = global_vars != nullptr ? global_vars->tickcount : 0;
 
@@ -103,7 +109,12 @@ Vec3 estimated_velocity(Entity* projectile)
   if (motion.valid && tick_count > motion.tick_count)
   {
     const int elapsed_ticks = tick_count - motion.tick_count;
-    velocity = (origin - motion.origin) * (1.0f / static_cast<float>(elapsed_ticks));
+    const float elapsed_seconds = static_cast<float>(elapsed_ticks) *
+      (global_vars != nullptr ? std::max(global_vars->interval_per_tick, 0.001f) : 0.0f);
+    if (elapsed_seconds > 0.0f && std::isfinite(elapsed_seconds))
+    {
+      velocity = (origin - motion.origin) * (1.0f / elapsed_seconds);
+    }
   }
   else
   {
@@ -112,6 +123,7 @@ Vec3 estimated_velocity(Entity* projectile)
 
   motion.origin = origin;
   motion.tick_count = tick_count;
+  motion.serial = serial;
   motion.valid = true;
   return velocity;
 }
@@ -223,7 +235,7 @@ void on_create_move(user_cmd* cmd)
     }
 
     const Vec3 velocity = estimated_velocity(projectile);
-    if (vec_length(velocity) < min_projectile_speed)
+    if (vec_length(velocity) < min_projectile_speed_per_second)
     {
       return false;
     }
@@ -261,12 +273,13 @@ void on_create_move(user_cmd* cmd)
     return true;
   };
 
-  constexpr std::array<enum class_id, 5> projectile_ids{
+  constexpr std::array<enum class_id, 6> projectile_ids{
     class_id::ROCKET,
     class_id::SENTRY_ROCKET,
     class_id::PILL_OR_STICKY,
     class_id::FLARE,
-    class_id::ARROW
+    class_id::ARROW,
+    class_id::CROSSBOW_BOLT
   };
   for (const enum class_id projectile_id : projectile_ids)
   {

@@ -5,6 +5,7 @@
 #include "imgui/imgui.h"
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstdio>
 #include <mutex>
 #include <ranges>
@@ -29,6 +30,7 @@ enum class value_type
   integer,
   floating,
   color,
+  mask,
   string
 };
 
@@ -39,6 +41,7 @@ enum class widget_type
   slider_int,
   slider_float,
   color_picker,
+  multi_select,
   string_input
 };
 
@@ -65,7 +68,10 @@ enum class bind_visibility
   hidden
 };
 
-using bind_value = std::variant<bool, int, float, RGBA_float, std::string>;
+using bind_value = std::variant<bool, int, float, RGBA_float, uint32_t, std::string>;
+
+inline constexpr std::size_t max_entries = 512;
+inline constexpr std::size_t max_overrides = 256;
 
 struct target_entry
 {
@@ -85,7 +91,7 @@ struct target_entry
   float float_min{};
   float float_max{};
   std::string format{};
-  std::vector<std::pair<std::string, int>> options{};
+  std::vector<std::pair<std::string, uint32_t>> options{};
 };
 
 struct bind_entry
@@ -143,9 +149,11 @@ inline std::unordered_map<void*, std::string>& pointer_to_key()
 }
 
 inline bool& targets_warmed();
+inline std::recursive_mutex& bind_mutex();
 
 inline void clear_registered_targets()
 {
+  std::lock_guard lock{ bind_mutex() };
   targets().clear();
   pointer_to_key().clear();
   targets_warmed() = false;
@@ -402,10 +410,25 @@ inline std::string make_target_key_from_label(const char* label)
   return key;
 }
 
+inline std::string target_path_component(std::string_view value)
+{
+  std::string result{};
+  result.reserve(value.size());
+  for (const unsigned char character : value) {
+    if (std::isalnum(character) || character == '_' || character == '-') {
+      result.push_back(static_cast<char>(std::tolower(character)));
+    } else {
+      result.push_back('_');
+    }
+  }
+  return result.empty() ? "_" : result;
+}
+
 inline value_type get_value_type(bool*) { return value_type::boolean; }
 inline value_type get_value_type(int*) { return value_type::integer; }
 inline value_type get_value_type(float*) { return value_type::floating; }
 inline value_type get_value_type(RGBA_float*) { return value_type::color; }
+inline value_type get_value_type(uint32_t*) { return value_type::mask; }
 inline value_type get_value_type(std::string*) { return value_type::string; }
 
 inline bind_value read_value(const target_entry& target)
@@ -415,6 +438,7 @@ inline bind_value read_value(const target_entry& target)
   case value_type::integer: return *static_cast<int*>(target.target);
   case value_type::floating: return *static_cast<float*>(target.target);
   case value_type::color: return *static_cast<RGBA_float*>(target.target);
+  case value_type::mask: return *static_cast<uint32_t*>(target.target);
   case value_type::string: return *static_cast<std::string*>(target.target);
   }
   return false;
@@ -427,6 +451,7 @@ inline bind_value read_value(void* target, const value_type type)
   case value_type::integer: return *static_cast<int*>(target);
   case value_type::floating: return *static_cast<float*>(target);
   case value_type::color: return *static_cast<RGBA_float*>(target);
+  case value_type::mask: return *static_cast<uint32_t*>(target);
   case value_type::string: return *static_cast<std::string*>(target);
   }
   return false;
@@ -482,6 +507,10 @@ inline void write_value(target_entry& target, const bind_value& value)
   case value_type::color:
     if (const RGBA_float* item = std::get_if<RGBA_float>(&value)) *static_cast<RGBA_float*>(target.target) = *item;
     break;
+  case value_type::mask:
+    if (const uint32_t* item = std::get_if<uint32_t>(&value)) *static_cast<uint32_t*>(target.target) = *item;
+    else if (const int* item = std::get_if<int>(&value)) *static_cast<uint32_t*>(target.target) = static_cast<uint32_t>(*item);
+    break;
   case value_type::string:
     if (const std::string* item = std::get_if<std::string>(&value)) *static_cast<std::string*>(target.target) = *item;
     break;
@@ -498,6 +527,7 @@ inline bool values_equal(const bind_value& left, const bind_value& right)
     const RGBA_float& other = std::get<RGBA_float>(right);
     return item->r == other.r && item->g == other.g && item->b == other.b && item->a == other.a && item->rainbow == other.rainbow;
   }
+  if (const auto* item = std::get_if<uint32_t>(&left)) return *item == std::get<uint32_t>(right);
   return std::get<std::string>(left) == std::get<std::string>(right);
 }
 
@@ -569,6 +599,7 @@ inline void register_target_metadata(value_t* target, const char* label, const w
 inline uint32_t add(std::string name = "new bind", const uint32_t parent_id = 0)
 {
   std::lock_guard lock{ bind_mutex() };
+  if (entries().size() >= max_entries) return 0;
   bind_entry entry{};
   entry.id = next_id()++;
   entry.parent_id = find_entry(parent_id) != nullptr ? parent_id : 0;
@@ -646,8 +677,10 @@ inline std::string editing_name()
 inline bool set_override(const uint32_t id, const std::string_view target_key, const bind_value& value)
 {
   std::lock_guard lock{ bind_mutex() };
-  if (find_entry(id) == nullptr || find_target(target_key) == nullptr) return false;
-  find_entry(id)->overrides[std::string{ target_key }] = value;
+  bind_entry* entry = find_entry(id);
+  if (entry == nullptr || find_target(target_key) == nullptr) return false;
+  if (entry->overrides.find(std::string{ target_key }) == entry->overrides.end() && entry->overrides.size() >= max_overrides) return false;
+  entry->overrides[std::string{ target_key }] = value;
   mark_dirty();
   return true;
 }
@@ -982,8 +1015,7 @@ inline void draw_popup()
         bind_value value = read_value(*target);
 
         if (const bool* boolean = std::get_if<bool>(&value)) value = !*boolean;
-        entry->overrides[target->target_key] = std::move(value);
-        mark_dirty();
+        set_override(entry->id, target->target_key, value);
       }
     }
   }
@@ -1022,8 +1054,13 @@ inline void draw_popup()
         (target->type == value_type::integer && std::holds_alternative<int>(iterator->second)) ||
         (target->type == value_type::floating && std::holds_alternative<float>(iterator->second)) ||
         (target->type == value_type::color && std::holds_alternative<RGBA_float>(iterator->second)) ||
+        (target->type == value_type::mask && (std::holds_alternative<uint32_t>(iterator->second) || std::holds_alternative<int>(iterator->second))) ||
         (target->type == value_type::string && std::holds_alternative<std::string>(iterator->second));
-      if (!type_matches) iterator->second = read_value(*target);
+      if (target->type == value_type::mask && std::holds_alternative<int>(iterator->second)) {
+        iterator->second = static_cast<uint32_t>(std::get<int>(iterator->second));
+      } else if (!type_matches) {
+        iterator->second = read_value(*target);
+      }
       if (target->type == value_type::boolean) {
         bool value = std::get<bool>(iterator->second);
         if (ImGui::Checkbox("When active", &value)) { iterator->second = value; mark_dirty(); }
@@ -1031,10 +1068,10 @@ inline void draw_popup()
         int value = std::get<int>(iterator->second);
         if (target->widget == widget_type::combo_int && !target->options.empty()) {
           int selected{};
-          for (size_t index{}; index < target->options.size(); ++index) if (target->options[index].second == value) selected = static_cast<int>(index);
+          for (size_t index{}; index < target->options.size(); ++index) if (target->options[index].second == static_cast<uint32_t>(value)) selected = static_cast<int>(index);
           std::vector<const char*> names{};
           for (const auto& option : target->options) names.push_back(option.first.c_str());
-          if (ImGui::Combo("When active", &selected, names.data(), static_cast<int>(names.size()))) { iterator->second = target->options[static_cast<size_t>(selected)].second; mark_dirty(); }
+          if (ImGui::Combo("When active", &selected, names.data(), static_cast<int>(names.size()))) { iterator->second = static_cast<int>(target->options[static_cast<size_t>(selected)].second); mark_dirty(); }
         } else if (ImGui::SliderInt("When active", &value, target->int_min, target->int_max, target->format.c_str())) { iterator->second = value; mark_dirty(); }
       } else if (target->type == value_type::floating) {
         float value = std::get<float>(iterator->second);
@@ -1050,6 +1087,17 @@ inline void draw_popup()
         if (ImGui::Checkbox("Rainbow", &value.rainbow)) {
           iterator->second = value;
           mark_dirty();
+        }
+      } else if (target->type == value_type::mask) {
+        uint32_t value = std::get<uint32_t>(iterator->second);
+        for (const auto& [name, bit] : target->options) {
+          bool enabled = (value & bit) != 0;
+          if (ImGui::Checkbox(name.c_str(), &enabled)) {
+            if (enabled) value |= bit;
+            else value &= ~bit;
+            iterator->second = value;
+            mark_dirty();
+          }
         }
       } else {
         static std::string editing_target{};
@@ -1129,9 +1177,28 @@ inline void bindable_string(const char* label, std::string* target, const bool c
   bindable_target(target, label, changed, hovered, widget_type::string_input);
 }
 
-inline void multi_select_target(uint32_t* target, const char* label, const bool changed, const bool hovered)
+inline void multi_select_target(uint32_t* target, const char* label, const bool changed, const bool hovered,
+                                const char* const items[] = nullptr, const uint32_t item_bits[] = nullptr,
+                                const int item_count = 0)
 {
-  bindable_target(reinterpret_cast<int*>(target), label, changed, hovered, widget_type::combo_int);
+  std::lock_guard lock{ bind_mutex() };
+  target_entry* entry = ensure_entry(target, label);
+  if (entry == nullptr) return;
+  entry->widget = widget_type::multi_select;
+  entry->format = "%u";
+  if (items != nullptr && item_bits != nullptr && item_count > 0) {
+    entry->options.clear();
+    for (int index = 0; index < item_count; ++index) {
+      entry->options.emplace_back(items[index] != nullptr ? items[index] : "", item_bits[index]);
+    }
+  }
+  if (changed) {
+    entry->baseline = read_value(*entry);
+    entry->last_effective = entry->baseline;
+    entry->baseline_initialized = true;
+    entry->overridden = false;
+    entry->changed_in_menu = true;
+  }
 }
 
 inline std::vector<indicator_row> collect_indicator_rows()
@@ -1197,8 +1264,9 @@ inline void save_to_store(cathook::core::config_store* store)
   std::lock_guard lock{ bind_mutex() };
   if (store == nullptr || disabled()) return;
   store->set_int("binds.version", 2);
-  store->set_int("binds.count", static_cast<int>(entries().size()));
-  for (size_t index{}; index < entries().size(); ++index) {
+  const std::size_t entry_count = std::min(entries().size(), max_entries);
+  store->set_int("binds.count", static_cast<int>(entry_count));
+  for (size_t index{}; index < entry_count; ++index) {
     const bind_entry& entry = entries()[index];
     const std::string prefix = "binds." + std::to_string(index) + ".";
     store->set_int(prefix + "id", static_cast<int>(entry.id));
@@ -1211,9 +1279,11 @@ inline void save_to_store(cathook::core::config_store* store)
     store->set_bool(prefix + "enabled", entry.enabled);
     store->set_bool(prefix + "inverted", entry.inverted);
     store->set_int(prefix + "visibility", static_cast<int>(entry.visibility));
-    store->set_int(prefix + "overrides.count", static_cast<int>(entry.overrides.size()));
+    const std::size_t override_count = std::min(entry.overrides.size(), max_overrides);
+    store->set_int(prefix + "overrides.count", static_cast<int>(override_count));
     size_t override_index{};
     for (const auto& [target_key, value] : entry.overrides) {
+      if (override_index >= override_count) break;
       const std::string override_prefix = prefix + "overrides." + std::to_string(override_index++) + ".";
       store->set_string(override_prefix + "target_key", target_key);
       if (std::holds_alternative<bool>(value)) {
@@ -1228,6 +1298,9 @@ inline void save_to_store(cathook::core::config_store* store)
       } else if (std::holds_alternative<RGBA_float>(value)) {
         store->set_int(override_prefix + "type", 3);
         store->set_color(override_prefix + "color", std::get<RGBA_float>(value));
+      } else if (std::holds_alternative<uint32_t>(value)) {
+        store->set_int(override_prefix + "type", 5);
+        store->set_uint(override_prefix + "mask", std::get<uint32_t>(value));
       } else {
         store->set_int(override_prefix + "type", 4);
         store->set_string(override_prefix + "string", std::get<std::string>(value));
@@ -1267,7 +1340,7 @@ inline void load_from_store(cathook::core::config_store* store)
   clear_registered_targets();
   next_id() = 1;
   editing_id() = 0;
-  const int count = std::clamp(store->get_int("binds.count", 0), 0, 512);
+  const int count = std::clamp(store->get_int("binds.count", 0), 0, static_cast<int>(max_entries));
   for (int index{}; index < count; ++index) {
     const std::string prefix = "binds." + std::to_string(index) + ".";
     bind_entry entry{};
@@ -1284,16 +1357,17 @@ inline void load_from_store(cathook::core::config_store* store)
     entry.inverted = store->get_bool(prefix + "inverted", false);
     entry.visibility = static_cast<bind_visibility>(std::clamp(store->get_int(prefix + "visibility", 0), 0, 2));
 
-    const int override_count = std::clamp(store->get_int(prefix + "overrides.count", 0), 0, 256);
+    const int override_count = std::clamp(store->get_int(prefix + "overrides.count", 0), 0, static_cast<int>(max_overrides));
     for (int override_index{}; override_index < override_count; ++override_index) {
       const std::string override_prefix = prefix + "overrides." + std::to_string(override_index) + ".";
       const std::string target_key = store->get_string(override_prefix + "target_key", "");
       if (target_key.empty()) continue;
-      const int type = std::clamp(store->get_int(override_prefix + "type", 0), 0, 4);
+      const int type = std::clamp(store->get_int(override_prefix + "type", 0), 0, 5);
       if (type == 0) entry.overrides[target_key] = store->get_bool(override_prefix + "bool", false);
       else if (type == 1) entry.overrides[target_key] = store->get_int(override_prefix + "int", 0);
       else if (type == 2) entry.overrides[target_key] = store->get_float(override_prefix + "float", 0.0f);
       else if (type == 3) entry.overrides[target_key] = store->get_color(override_prefix + "color", {});
+      else if (type == 5) entry.overrides[target_key] = store->get_uint(override_prefix + "mask", 0);
       else entry.overrides[target_key] = store->get_string(override_prefix + "string", "");
     }
 

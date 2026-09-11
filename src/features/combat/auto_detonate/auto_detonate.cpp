@@ -13,6 +13,7 @@ V  o o  V  file: src/features/combat/auto_detonate/auto_detonate.cpp
 #include <cmath>
 #include "core/entity_cache.hpp"
 #include "core/math/math.hpp"
+#include "core/player_manager.hpp"
 #include "features/menu/config.hpp"
 #include "games/tf2/sdk/base_handle.hpp"
 #include "games/tf2/sdk/entities/player.hpp"
@@ -21,6 +22,7 @@ V  o o  V  file: src/features/combat/auto_detonate/auto_detonate.cpp
 #include "games/tf2/sdk/interfaces/engine.hpp"
 #include "games/tf2/sdk/interfaces/entity_list.hpp"
 #include "games/tf2/sdk/interfaces/engine_trace.hpp"
+#include "games/tf2/sdk/interfaces/steam_friends.hpp"
 #include "games/tf2/sdk/netvars.hpp"
 
 namespace auto_detonate
@@ -134,12 +136,36 @@ bool target_player_valid(Player* localplayer, Player* player, bool ignore_cloake
   return true;
 }
 
+bool target_is_excluded(const entity_cache_player_entry& entry)
+{
+  if (entry.friendly || entry.ignored)
+  {
+    return true;
+  }
+
+  player_info info{};
+  const bool info_valid = entry.player_info_valid ||
+    (engine != nullptr && entry.index > 0 && engine->get_player_info(entry.index, &info));
+  const unsigned long friends_id = entry.player_info_valid ? entry.friends_id : info.friends_id;
+  const bool fakeplayer = entry.player_info_valid ? entry.fakeplayer : info.fakeplayer;
+  if (!info_valid || fakeplayer || friends_id == 0)
+  {
+    return false;
+  }
+
+  const auto account_id = static_cast<std::uint32_t>(friends_id);
+  return cathook::core::players::is_friendly(account_id) ||
+    cathook::core::players::is_ignored(account_id) ||
+    friend_cache_lookup(friends_id) ||
+    (steam_friends != nullptr && steam_friends->is_friend(static_cast<int>(friends_id)));
+}
+
 template <typename callback>
 bool for_each_enemy_target(Player* localplayer, bool include_buildings, bool ignore_cloaked, callback&& visit)
 {
   for (const auto& entry : entity_cache_players())
   {
-    if (!entry.alive || entry.dormant || entry.friendly || entry.player == nullptr)
+    if (!entry.alive || entry.dormant || entry.player == nullptr || target_is_excluded(entry))
     {
       continue;
     }

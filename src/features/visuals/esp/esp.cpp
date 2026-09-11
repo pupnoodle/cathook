@@ -1236,6 +1236,10 @@ void reset_head_emoji_atlas()
   if (player_resource == nullptr || player_index <= 0) {
     return {};
   }
+  if (global_vars == nullptr || global_vars->max_clients <= 0 ||
+      player_index > global_vars->max_clients || player_index > 2048) {
+    return {};
+  }
 
   const int score = read_player_resource_value<int>(player_resource, player_resource_score_offset, player_index);
   const int deaths = read_player_resource_value<int>(player_resource, player_resource_deaths_offset, player_index);
@@ -1712,7 +1716,7 @@ void draw_entity_trajectory(ImDrawList* draw_list, Entity* entity, const visual_
     return nullptr;
   }
 
-  for (unsigned int index = 1; index <= static_cast<unsigned int>(entity_list->get_max_entities()); ++index) {
+  for (unsigned int index = 1; index < static_cast<unsigned int>(entity_list->get_max_entities()); ++index) {
     auto* entity = entity_list->entity_from_index(index);
     if (entity == nullptr) {
       continue;
@@ -3367,7 +3371,7 @@ void update_player_head_emoji_cache()
   }
 
   const auto max_entities = entity_list->get_max_entities();
-  for (unsigned int index = 1; index <= max_entities && index < g_head_emoji_positions.size(); ++index) {
+  for (unsigned int index = 1; index < max_entities && index < g_head_emoji_positions.size(); ++index) {
     auto* player = entity_list->player_from_index(index);
     if (!should_draw_player(player, localplayer) && !should_draw_teammate_head_emoji(player, localplayer)) {
       continue;
@@ -3439,7 +3443,7 @@ void draw_players_imgui()
 
   auto* player_resource = get_player_resource_entity();
 
-  for (unsigned int index = 1; index <= entity_list->get_max_entities(); ++index) {
+  for (unsigned int index = 1; index < entity_list->get_max_entities(); ++index) {
     auto* entity = entity_list->entity_from_index(index);
     if (entity == nullptr) {
       continue;
@@ -3513,7 +3517,7 @@ void draw_backtrack_visualizer_imgui()
   }
 
   const int max_draw_ticks = std::clamp(config.backtrack.visualizer_ticks, 1, backtrack::max_records);
-  for (unsigned int index = 1; index <= entity_list->get_max_entities(); ++index) {
+  for (unsigned int index = 1; index < entity_list->get_max_entities(); ++index) {
     auto* player = entity_list->player_from_index(index);
     if (player == nullptr || player == localplayer) continue;
 

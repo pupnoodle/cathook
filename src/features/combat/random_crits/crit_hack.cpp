@@ -104,7 +104,7 @@ inline Entity* get_player_resource_entity() {
   }
 
   const int max_entities = entity_list->get_max_entities();
-  for (int index = 1; index <= max_entities; ++index) {
+  for (int index = 1; index < max_entities; ++index) {
     auto* entity = entity_list->entity_from_index(index);
     if (entity != nullptr && entity->get_class_id() == class_id::PLAYER_RESOURCE) {
       return entity;
@@ -568,17 +568,18 @@ create_move_result on_create_move(user_cmd* cmd, bool aimbot_requested_shot) {
       is_melee_weapon);
 
     if (selected_command > 0) {
-      queued_crit_command = selected_command;
-      queued_ticks = std::max(0, selected_command - cmd->command_number);
-      current_queue_state = queue_state::releasing;
-
-      cmd->command_number = selected_command;
-      cmd->random_seed = MD5_PseudoRandom(static_cast<unsigned int>(selected_command)) & INT_MAX;
+      if (selected_command == cmd->command_number) {
+        cmd->random_seed = MD5_PseudoRandom(static_cast<unsigned int>(selected_command)) & INT_MAX;
+        current_queue_state = queue_state::releasing;
+        result.attack_allowed = true;
+      } else {
+        current_queue_state = queue_state::blocked;
+        result.attack_allowed = false;
+      }
     } else {
       current_queue_state = queue_state::blocked;
+      result.attack_allowed = false;
     }
-
-    result.attack_allowed = true;
     return result;
   }
 

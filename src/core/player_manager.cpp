@@ -236,7 +236,7 @@ void set_runtime_state(std::uint32_t account_id, player_state state, std::string
   }
 
   const int max_entities = entity_list->get_max_entities();
-  for (int index = 1; index <= max_entities; ++index)
+  for (int index = 1; index < max_entities; ++index)
   {
     auto* entity = entity_list->entity_from_index(index);
     if (entity != nullptr && entity->get_class_id() == class_id::PLAYER_RESOURCE)

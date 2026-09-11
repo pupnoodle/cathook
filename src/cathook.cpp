@@ -1,3 +1,7 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 /*
 /^-----^\   data: 2026-04-30
 V  o o  V  file: src/cathook.cpp
@@ -24,6 +28,8 @@ V  o o  V  file: src/cathook.cpp
 #include <string_view>
 #include <thread>
 #include <vector>
+#include <initializer_list>
+#include <mutex>
 #include <unistd.h>
 #include <csignal>
 #include "core/logger.hpp"
@@ -73,6 +79,10 @@ V  o o  V  file: src/cathook.cpp
 #include "funchook/funchook.h"
 
 bool (*in_cond_original)(void*, int) = nullptr;
+
+std::uintptr_t resolve_checked_rip_relative(std::uintptr_t instruction, std::ptrdiff_t displacement_offset,
+  std::ptrdiff_t instruction_size, std::initializer_list<std::uint8_t> opcode);
+
 #include "core/hooks/sdl.cpp"
 #include "core/hooks/vulkan.cpp"
 #include "core/overwrite_dlopen.cpp"
@@ -524,10 +534,12 @@ std::atomic_bool process_exiting = false;
 std::atomic_bool attach_worker_started = false;
 std::atomic_bool attach_worker_complete = false;
 std::atomic_bool attach_worker_stop = false;
+std::mutex attach_worker_mutex{};
 
 constexpr auto attach_wait_step = std::chrono::milliseconds(100);
 constexpr long attach_ready_delay_default_seconds = 0;
 constexpr long attach_ready_delay_max_seconds = 300;
+constexpr auto attach_module_wait_timeout = std::chrono::seconds(30);
 
 constexpr std::string_view steamclient_module = "steamclient.so";
 #if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
@@ -607,6 +619,10 @@ bool wait_for_module(const char* module_name)
     }
 
     const auto now = std::chrono::steady_clock::now();
+    if (now - wait_start >= attach_module_wait_timeout) {
+      print("cathook attach worker timed out waiting for %s\n", module_name);
+      return false;
+    }
     if (now >= next_missing_modules_log) {
       const auto waited_seconds = std::chrono::duration_cast<std::chrono::seconds>(now - wait_start).count();
       print("cathook attach worker waiting for %s waited_seconds=%lld",
@@ -625,9 +641,9 @@ bool wait_for_module(const char* module_name)
   return false;
 }
 
-void stop_attach_worker();
+bool stop_attach_worker();
 
-std::thread& attach_worker_thread()
+  std::thread& attach_worker_thread()
 {
   static std::thread thread{};
   return thread;
@@ -698,6 +714,7 @@ void attach_worker_main()
     if (attach_worker_stop.load(std::memory_order_acquire)
         || process_exiting.load(std::memory_order_acquire)) {
       attach_worker_complete.store(true, std::memory_order_release);
+      attach_worker_started.store(false, std::memory_order_release);
       return;
     }
 
@@ -705,40 +722,46 @@ void attach_worker_main()
     nographics::prepare_startup_patches();
     const bool initialized = ::initialize_game_runtime();
     print("cathook attach worker initialize_game_runtime returned %d\n", initialized ? 1 : 0);
+    if (!initialized) {
+      cathook::core::request_detach();
+      cathook::core::service_detach_request();
+    }
   }
 
   attach_worker_complete.store(true, std::memory_order_release);
+  attach_worker_started.store(false, std::memory_order_release);
 }
 
 bool start_attach_worker()
 {
+  std::scoped_lock lock{attach_worker_mutex};
   if (runtime_initialized.load(std::memory_order_acquire)) {
     return true;
   }
 
-  if (attach_worker_started.load(std::memory_order_acquire)
-      && attach_worker_complete.load(std::memory_order_acquire)) {
-    stop_attach_worker();
-  }
-
-  if (attach_worker_started.exchange(true, std::memory_order_acq_rel)) {
+  if (attach_worker_started.load(std::memory_order_acquire)) {
     return true;
   }
 
+  auto& thread = attach_worker_thread();
+  if (thread.joinable()) thread.join();
+
+  attach_worker_started.store(true, std::memory_order_release);
   attach_worker_stop.store(false, std::memory_order_release);
   attach_worker_complete.store(false, std::memory_order_release);
   attach_worker_thread() = std::thread{ attach_worker_main };
   return true;
 }
 
-void stop_attach_worker()
+bool stop_attach_worker()
 {
+  std::scoped_lock lock{attach_worker_mutex};
   attach_worker_stop.store(true, std::memory_order_release);
 
   auto& thread = attach_worker_thread();
   if (thread.joinable()) {
     if (std::this_thread::get_id() == thread.get_id()) {
-      thread.detach();
+      return false;
     } else {
       thread.join();
     }
@@ -746,6 +769,7 @@ void stop_attach_worker()
 
   attach_worker_started.store(false, std::memory_order_release);
   attach_worker_complete.store(true, std::memory_order_release);
+  return true;
 }
 
 void shutdown_imgui_runtime(const bool release_graphics_resources)
@@ -888,7 +912,13 @@ void clear_runtime_pointer_state()
 }
 
 bool unload_module_runtime() {
-  stop_attach_worker();
+  if (!stop_attach_worker()) {
+    return false;
+  }
+
+  if (!wait_for_other_hook_calls()) {
+    return false;
+  }
 
   if (process_exiting.load(std::memory_order_acquire)) {
     runtime_initialized.store(false, std::memory_order_release);
@@ -914,7 +944,8 @@ bool unload_module_runtime() {
       || is_environment_enabled("CATHOOK_DETACH_RELEASE_GRAPHICS");
 
   print("Unhooking VMT functions\n");
-  bool hooks_restored = backtrack::restore_net_channel_hook();
+  bool hooks_restored = nographics::shutdown();
+  hooks_restored = backtrack::restore_net_channel_hook() && hooks_restored;
 
   struct vmt_restore_entry {
     void** vtable;
@@ -1004,7 +1035,6 @@ bool unload_module_runtime() {
   cathook::core::identify::stop();
   cat_ipc::client::shutdown();
   cathook::core::players::shutdown();
-  nographics::shutdown();
   surface_runtime::reset_ready();
   restore_client_crashfix_patches();
   backtrack::clear();
@@ -1113,16 +1143,27 @@ void abort_module_runtime_init() {
 
 }
 
-void* resolve_rip_relative_address(void* instruction, std::ptrdiff_t displacement_offset, std::ptrdiff_t instruction_size)
+std::uintptr_t resolve_checked_rip_relative(std::uintptr_t instruction, std::ptrdiff_t displacement_offset,
+  std::ptrdiff_t instruction_size, std::initializer_list<std::uint8_t> opcode)
 {
-  if (instruction == nullptr) {
-    return nullptr;
+  if (instruction == 0 || opcode.size() == 0) return 0;
+  memory_page_permissions instruction_page{};
+  if (!query_page_permissions(reinterpret_cast<void*>(instruction), instruction_page) ||
+      (instruction_page.protection & PROT_EXEC) == 0) return 0;
+  const auto* bytes = reinterpret_cast<const std::uint8_t*>(instruction);
+  std::size_t index = 0;
+  for (const auto expected : opcode) {
+    if (bytes[index++] != expected) return 0;
   }
-
-  auto* bytes = static_cast<std::uint8_t*>(instruction);
+  if (displacement_offset < 0 || instruction_size < 0 ||
+      displacement_offset + static_cast<std::ptrdiff_t>(sizeof(std::int32_t)) > instruction_size) return 0;
   std::int32_t displacement = 0;
   std::memcpy(&displacement, bytes + displacement_offset, sizeof(displacement));
-  return bytes + instruction_size + displacement;
+  const auto target = instruction + instruction_size + static_cast<std::intptr_t>(displacement);
+  memory_page_permissions target_page{};
+  if (!query_page_permissions(reinterpret_cast<void*>(target), target_page) ||
+      (target_page.protection & PROT_READ) == 0) return 0;
+  return target;
 }
 
 void** find_client_mode_storage_from_signature()
@@ -1141,7 +1182,8 @@ void** find_client_mode_storage_from_signature()
     return nullptr;
   }
 
-  client_mode_storage = static_cast<void**>(resolve_rip_relative_address(instruction, 3, 7));
+  client_mode_storage = reinterpret_cast<void**>(resolve_checked_rip_relative(
+    reinterpret_cast<std::uintptr_t>(instruction), 3, 7, {0x48, 0x8D, 0x05}));
   print("ClientModeShared storage found at %p\n", static_cast<void*>(client_mode_storage));
   return client_mode_storage;
 }
@@ -1158,7 +1200,8 @@ void** find_client_mode_storage_from_client()
     return nullptr;
   }
 
-  return static_cast<void**>(resolve_rip_relative_address(instruction, 3, 7));
+  return reinterpret_cast<void**>(resolve_checked_rip_relative(
+    reinterpret_cast<std::uintptr_t>(instruction), 3, 7, {0x48, 0x8D, 0x05}));
 }
 
 void* read_client_mode_interface()
@@ -1179,6 +1222,7 @@ void* read_client_mode_interface()
 void* wait_for_client_mode_interface()
 {
   auto next_log = std::chrono::steady_clock::now();
+  const auto wait_start = next_log;
 
   while (!cathook::core::attach_worker_stop.load(std::memory_order_acquire)
       && !cathook::core::process_exiting.load(std::memory_order_acquire)) {
@@ -1187,6 +1231,10 @@ void* wait_for_client_mode_interface()
     }
 
     const auto now = std::chrono::steady_clock::now();
+    if (now - wait_start >= cathook::core::attach_module_wait_timeout) {
+      print("cathook attach worker timed out waiting for ClientModeShared\n");
+      return nullptr;
+    }
     if (now >= next_log) {
       print("Waiting for ClientModeShared\n");
       next_log = now + std::chrono::seconds(2);
@@ -1359,9 +1407,7 @@ bool initialize_game_runtime() {
     return false;
   }
 
-  unsigned int client_state_eaddr = *(unsigned int*)(rcon_addr_change_address + 0x3);
-  unsigned long rcon_addr_change_next_instruction = (unsigned long)(rcon_addr_change_address + 0x7);
-  client_state = (ClientState*)((void*)(rcon_addr_change_next_instruction + client_state_eaddr));
+  client_state = reinterpret_cast<ClientState*>(resolve_checked_rip_relative(rcon_addr_change_address, 3, 7, {0x48, 0x8D, 0x05}));
   error_assert(client_state == nullptr, "CClientState is missing");
 
   if (!cathook::core::wait_for_module("vgui2.so")) {
@@ -1423,9 +1469,8 @@ bool initialize_game_runtime() {
     return false;
   }
 
-  unsigned int input_eaddr = *(unsigned int*)(func_address + 0x3);
-  unsigned long next_instruction = (unsigned long)(func_address + 0x7);
-  input = (Input*)(*(void**)(next_instruction + input_eaddr));
+  const auto input_storage = resolve_checked_rip_relative(func_address, 3, 7, {0x48, 0x8D, 0x05});
+  input = input_storage != 0 ? *reinterpret_cast<Input**>(input_storage) : nullptr;
   error_assert(input == nullptr, "CInput is missing");
 
   std::uintptr_t check_stuck_address = 0;
@@ -1434,9 +1479,8 @@ bool initialize_game_runtime() {
     return false;
   }
 
-  unsigned int move_helper_eaddr = *(unsigned int*)(check_stuck_address + 0x3);
-  unsigned long check_stuck_next_instruction = (unsigned long)(check_stuck_address + 0x7);
-  move_helper = (MoveHelper*)(*(void**)(check_stuck_next_instruction + move_helper_eaddr));
+  const auto move_helper_storage = resolve_checked_rip_relative(check_stuck_address, 3, 7, {0x48, 0x8D, 0x05});
+  move_helper = move_helper_storage != 0 ? *reinterpret_cast<MoveHelper**>(move_helper_storage) : nullptr;
   error_assert(move_helper == nullptr, "CMoveHelper is missing");
 
   prediction = (Prediction*)get_interface("./tf/bin/linux64/client.so", "VClientPrediction001");
@@ -1474,9 +1518,14 @@ bool initialize_game_runtime() {
   game_event_manager = (GameEventManager*)get_interface("./bin/linux64/engine.so", "GAMEEVENTSMANAGER002");
   error_assert(game_event_manager == nullptr, "GAMEEVENTSMANAGER002 is missing");
 
-  steam_client = nullptr;
-  steam_friends = nullptr;
-  print("Steam interfaces disabled during startup\n");
+  if (steam_api_ready_for_interfaces()) {
+    steam_friends = steam_runtime::resolve_steam_friends();
+    if (steam_friends == nullptr) {
+      print("SteamFriends017 interface is unavailable\n");
+    }
+  } else {
+    print("Steam runtime is not ready; SteamFriends017 is unavailable\n");
+  }
 
   install_steam_networking_utils_hooks();
 
@@ -1485,9 +1534,8 @@ bool initialize_game_runtime() {
   error_assert(client_mode_interface == nullptr, "ClientModeShared is missing");
 
   unsigned long hud_update = (unsigned long)client_vtable[11];
-  unsigned int global_vars_eaddr = *(unsigned int *)(hud_update + 0x16);
-  unsigned long global_vars_next_instruction = (unsigned long)(hud_update + 0x1A);
-  global_vars = (GlobalVars*)(*(void **)(global_vars_next_instruction + global_vars_eaddr));
+  const auto global_vars_storage = resolve_checked_rip_relative(hud_update + 0x13, 3, 7, {0x48, 0x8B, 0x0D});
+  global_vars = global_vars_storage != 0 ? *reinterpret_cast<GlobalVars**>(global_vars_storage) : nullptr;
   error_assert(global_vars == nullptr, "CGlobalVars is missing");
 
   in_cond_original = (bool (*)(void*, int))sigscan_module("client.so", sigs::in_cond);
@@ -1501,7 +1549,6 @@ bool initialize_game_runtime() {
   model_render_draw_model_execute_original = reinterpret_cast<void (*)(void*, const DrawModelState&, const ModelRenderInfo&, matrix_3x4*)>(
     read_vtable_entry(model_render_vtable, 19, "ModelRender::DrawModelExecute"));
   entity_visuals::draw_model_execute_original = model_render_draw_model_execute_original;
-  cathook::core::game_hooks_installed.store(true, std::memory_order_release);
   if (model_render_draw_model_execute_original == nullptr || !write_to_table(
         model_render_vtable, 19, (void*)model_render_draw_model_execute_hook)) {
     print("ModelRender::DrawModelExecute hook failed\n");
@@ -2032,10 +2079,14 @@ bool initialize_game_runtime() {
     return false;
   }
 
-  unsigned int random_seed_eaddr = *(unsigned int*)(func_address_2 + 0x3);
-  unsigned long func_address_2_next_instruction = (unsigned long)(func_address_2 + 0x7);
-  random_seed = (uint32_t*)((void*)(func_address_2_next_instruction + random_seed_eaddr));
+  random_seed = reinterpret_cast<uint32_t*>(resolve_checked_rip_relative(func_address_2, 3, 7, {0x48, 0x8D, 0x05}));
+  if (random_seed == nullptr) {
+    cathook::core::request_detach();
+    cathook::core::service_detach_request();
+    return false;
+  }
 
+  cathook::core::game_hooks_installed.store(true, std::memory_order_release);
   return true;
 }
 

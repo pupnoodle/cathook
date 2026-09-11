@@ -418,7 +418,7 @@ const Misc::InventorySlot* slot_for_entity(Entity* entity)
 
   std::array<Entity*, 3> wearables{{ nullptr, nullptr, nullptr }};
   int count = 0;
-  for (unsigned int index = 1; index <= entity_list->get_max_entities() && count < 3; ++index) {
+  for (unsigned int index = 1; index < entity_list->get_max_entities() && count < 3; ++index) {
     Entity* candidate = entity_list->entity_from_index(index);
     if (candidate != nullptr && candidate->is_wearable() && candidate->get_owner_entity() == reinterpret_cast<Entity*>(local)) {
       wearables[static_cast<std::size_t>(count++)] = candidate;
@@ -509,7 +509,7 @@ void on_frame_stage(const int stage)
     &config.misc.inventory_changer.hat1, &config.misc.inventory_changer.hat2, &config.misc.inventory_changer.hat3
   }};
   int hat_index = 0;
-  for (unsigned int index = 1; index <= entity_list->get_max_entities() && hat_index < 3; ++index) {
+  for (unsigned int index = 1; index < entity_list->get_max_entities() && hat_index < 3; ++index) {
     Entity* entity = entity_list->entity_from_index(index);
     if (entity == nullptr || !entity->is_wearable() || entity->get_owner_entity() != reinterpret_cast<Entity*>(local)) continue;
     write_definition(entity, static_cast<std::uint16_t>(std::clamp(

@@ -313,6 +313,7 @@ struct visual_group_backtrack_settings {
 };
 
 struct visual_group {
+  uint32_t bind_id = 0;
   enum target_flags : uint32_t {
     target_players = 1u << 0,
     target_buildings = 1u << 1,

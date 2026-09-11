@@ -3,6 +3,15 @@ const Bot = require('./bot');
 const BanTracker = require('./ban_tracker');
 const steam_id = require('../steam_id');
 
+const MIN_BOT_ID = 1;
+const MAX_NAMESPACE_BOT_ID = 254;
+const MAX_IPC_PEERS = 255;
+const MAX_BOT_QUOTA = Math.min(MAX_NAMESPACE_BOT_ID, MAX_IPC_PEERS);
+
+function wait_ms(delay) {
+    return new Promise((resolve) => setTimeout(resolve, delay));
+}
+
 class BotManager {
     constructor(cc) {
         var self = this;
@@ -57,7 +66,7 @@ class BotManager {
     }
 
     schedule_update(delay) {
-        if (this.updateTimeout)
+        if (this.stopping || this.updateTimeout)
             return;
 
         this.updateTimeout = setTimeout(() => {
@@ -85,7 +94,7 @@ class BotManager {
     }
 
     schedule_ipc_query(delay) {
-        if (this.ipc_query_timeout)
+        if (this.stopping || this.ipc_query_timeout)
             return;
 
         this.ipc_query_timeout = setTimeout(() => {
@@ -507,6 +516,8 @@ class BotManager {
         try {
             this.cc.command('query', query_args, function (data) {
                 self.query_in_progress = false;
+                if (self.stopping)
+                    return;
                 try {
                     const query_time = Date.now();
                     if (!self.apply_ipc_query_result(data, query_time))
@@ -515,14 +526,16 @@ class BotManager {
                     self.record_ipc_query_failure(error.message);
                     self.log_exception('IPC query callback failed', error);
                 }
-                if (!self.stopping || self.bots.length)
+                if (!self.stopping)
                     self.schedule_ipc_query(self.ipc_query_interval_ms());
             });
         } catch (error) {
             self.query_in_progress = false;
+            if (self.stopping)
+                return;
             self.record_ipc_query_failure(error.message);
             self.log_exception('IPC query command failed', error);
-            if (!self.stopping || self.bots.length)
+            if (!self.stopping)
                 self.schedule_ipc_query(self.ipc_query_interval_ms());
         }
     }
@@ -535,7 +548,8 @@ class BotManager {
             await this.update_bots();
         } catch (error) {
             this.log_exception('bot update failed', error);
-            this.schedule_update(1000);
+            if (!this.stopping)
+                this.schedule_update(1000);
         } finally {
             this.update_in_progress = false;
         }
@@ -566,6 +580,8 @@ class BotManager {
 
         Bot.set_process_table_cache_ms(this.process_table_cache_ms());
         const process_table = await Bot.refresh_process_table();
+        if (this.stopping)
+            return;
         const children_by_parent = Bot.build_process_children_by_parent(process_table);
         this.granted_starts_this_tick = 0;
         this.refresh_start_lane();
@@ -626,11 +642,15 @@ class BotManager {
             }
         }
 
-        if (!this.stopping || self.bots.length)
+        if (!this.stopping)
             self.schedule_update(completed_cycle ? this.update_interval_ms() : this.update_slice_yield_ms);
     }
 
     enforceQuota() {
+        if (this.quota > MAX_BOT_QUOTA) {
+            this.quota = MAX_BOT_QUOTA;
+            this.wanted_quota = MAX_BOT_QUOTA;
+        }
         if (this.bots.length < this.quota)
             this.schedule_quota_creation(10);
         this.sort_bots_by_id_desc();
@@ -674,14 +694,17 @@ class BotManager {
         for (const bot of this.bots)
             used_ids.add(bot.botid);
 
-        for (let botid = this.quota - 1; botid >= 0; botid--) {
+        for (let botid = Math.min(this.quota, MAX_NAMESPACE_BOT_ID); botid >= MIN_BOT_ID; botid--) {
             if (!used_ids.has(botid))
                 return botid;
         }
 
-        let botid = 0;
-        while (used_ids.has(botid))
+        let botid = MIN_BOT_ID;
+        while (botid <= MAX_NAMESPACE_BOT_ID && used_ids.has(botid))
             botid++;
+
+        if (botid > MAX_NAMESPACE_BOT_ID)
+            throw new Error('no bot IDs available');
 
         return botid;
     }
@@ -703,7 +726,7 @@ class BotManager {
             return false;
         }
         quota = Number.parseInt(quota, 10);
-        if (!Number.isSafeInteger(quota))
+        if (!Number.isSafeInteger(quota) || quota > MAX_BOT_QUOTA)
             return false;
 
         this.wanted_quota = quota;
@@ -723,7 +746,32 @@ class BotManager {
     }
 
     stop() {
+        if (this.stop_promise)
+            return this.stop_promise;
+
         this.stopping = true;
+        for (const name of ['updateTimeout', 'quota_creation_timeout', 'ipc_query_timeout']) {
+            if (this[name]) {
+                clearTimeout(this[name]);
+                this[name] = null;
+            }
+        }
+
+        this.stop_promise = (async () => {
+            while (this.update_in_progress)
+                await wait_ms(10);
+
+            await Promise.all(this.bots.map(async (bot) => {
+                try {
+                    await bot.shutdown();
+                } catch (error) {
+                    this.stop_failed_bot(bot, 'bot shutdown failed', error);
+                }
+            }));
+            this.snapshot_dirty = true;
+            this.rebuild_snapshots();
+        })();
+        return this.stop_promise;
     }
 }
 

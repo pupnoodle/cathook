@@ -8,16 +8,6 @@
 namespace
 {
 
-void replace_string(std::string& input, const std::string& what, const std::string& with_what)
-{
-  auto index = input.find(what);
-  while (index != std::string::npos)
-  {
-    input.replace(index, what.size(), with_what);
-    index = input.find(what, index + with_what.size());
-  }
-}
-
 }
 
 int main(int argc, const char** argv)
@@ -59,18 +49,21 @@ int main(int argc, const char** argv)
   {
     auto memory = cat_ipc::shared_memory::open_client();
     auto* state = memory.state();
-    if (!cat_ipc::peer_alive(state->peer_data[target_id]))
+
+    if (!cat_ipc::allowed_console_command(command))
     {
-      std::cerr << "trying to send command to a dead peer\n";
+      std::cerr << "command is not allowlisted\n";
       return EXIT_FAILURE;
     }
-
-    replace_string(command, " && ", " ; ");
-    cat_ipc::queue_command(
+    if (!cat_ipc::queue_command(
       state,
       target_id,
       command.size() >= cat_ipc::command_data_size - 1 ? cat_ipc::commands::execute_client_cmd_long : cat_ipc::commands::execute_client_cmd,
-      command);
+      command))
+    {
+      std::cerr << "peer is unavailable or command exceeds the IPC payload limit\n";
+      return EXIT_FAILURE;
+    }
   }
   catch (const std::exception& error)
   {

@@ -50,6 +50,7 @@ private:
   std::atomic<bool> m_running{false};
 
   std::thread m_worker{};
+  std::mutex m_socket_mutex{};
   std::mutex m_send_mutex{};
   std::mutex m_identity_mutex{};
   std::condition_variable m_cv{};

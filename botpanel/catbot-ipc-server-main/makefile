@@ -4,7 +4,8 @@ BUILD_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 REPO_ROOT ?= ../..
 OUT_DIR = bin
 INSTALL_DIR ?= /opt/cathook/ipc
-TARGETS = server exec undeadlock exec_all console
+TARGETS = server exec exec_all console
+TEST_TARGET = $(OUT_DIR)/ipc_boundary_test
 
 CXXFLAGS ?= -std=c++23 -O2 -g -Wall -Wextra -fmessage-length=0
 CXXFLAGS += -I$(REPO_ROOT)/src -I$(SRC_DIR)
@@ -16,9 +17,12 @@ IPC_SHARED_HEADERS = \
 	$(REPO_ROOT)/src/core/ipc/ipc_protocol.hpp \
 	$(REPO_ROOT)/src/core/ipc/ipc_shared.hpp
 
-.PHONY: all clean install
+.PHONY: all clean install test
 
 all: $(addprefix $(OUT_DIR)/,$(TARGETS))
+
+test: $(TEST_TARGET)
+	$(TEST_TARGET)
 
 install: all
 	install -d -m 0755 "$(INSTALL_DIR)/bin"

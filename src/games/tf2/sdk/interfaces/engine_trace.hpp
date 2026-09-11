@@ -13,6 +13,7 @@ V  o o  V  file: src/games/tf2/sdk/interfaces/engine_trace.hpp
 #define ENGINE_TRACE_HPP
 
 #include "core/types.hpp"
+#include <cstddef>
 
 #include "games/tf2/sdk/entities/entity.hpp"
 #include "games/tf2/sdk/interfaces/utl_vector.hpp"
@@ -46,9 +47,15 @@ struct ray_t
   struct Vec3_aligned delta;
   struct Vec3_aligned start_offset;
   struct Vec3_aligned extents;
+  const void* world_axis_transform = nullptr;
   bool is_ray;
   bool is_swept;
 };
+
+static_assert(offsetof(ray_t, world_axis_transform) == 0x40);
+static_assert(offsetof(ray_t, is_ray) == 0x48);
+static_assert(offsetof(ray_t, is_swept) == 0x49);
+static_assert(sizeof(ray_t) == 0x50);
 
 struct trace_filter {
   void** vtable;
@@ -339,6 +346,7 @@ public:
       .delta = { delta.x, delta.y, delta.z },
       .start_offset = { 0.0f, 0.0f, 0.0f },
       .extents = { 0.0f, 0.0f, 0.0f },
+      .world_axis_transform = nullptr,
       .is_ray = true,
       .is_swept = is_swept
     };
@@ -349,7 +357,11 @@ public:
   struct ray_t init_ray(Vec3* start, Vec3* end, Vec3* mins, Vec3* maxs) {
     struct ray_t ray;
 
+    ray.start = {0.0f, 0.0f, 0.0f, 0.0f};
     ray.delta = Vec3_aligned_subtract(end, start);
+    ray.start_offset = {0.0f, 0.0f, 0.0f, 0.0f};
+    ray.extents = {0.0f, 0.0f, 0.0f, 0.0f};
+    ray.world_axis_transform = nullptr;
     ray.is_swept = (ray.delta.x * ray.delta.x + ray.delta.y * ray.delta.y + ray.delta.z * ray.delta.z) != 0;
     ray.extents = Vec3_aligned_subtract(maxs, mins);
     ray.extents.x *= 0.5f;
@@ -464,6 +476,10 @@ public:
   }
 
   void trace_hull(Vec3* start, Vec3* end, Vec3* hull_min, Vec3* hull_max, unsigned int mask, struct trace_t* trace) {
+    if (start == nullptr || end == nullptr || hull_min == nullptr || hull_max == nullptr || trace == nullptr ||
+        entity_list == nullptr) {
+      return;
+    }
     struct ray_t ray = this->init_ray(start, end, hull_min, hull_max);
     struct trace_filter filter;
     Player* localplayer = entity_list->get_localplayer();

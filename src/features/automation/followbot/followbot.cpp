@@ -21,7 +21,9 @@ struct trail_node
 struct candidate
 {
   Player* player = nullptr;
+  CBaseHandle handle{};
   int index = -1;
+  int serial = 0;
   std::uint32_t account_id = 0;
   int priority = 0;
   int preference = 0;
@@ -197,7 +199,9 @@ struct controller_t::impl
     player_info info{};
     if (engine == nullptr || !engine->get_player_info(player->get_index(), &info) || info.friends_id == 0) return result;
     result.player = player;
+    result.handle = player->get_ref_ehandle();
     result.index = player->get_index();
+    result.serial = player->get_ref_ehandle().GetSerialNumber();
     result.account_id = static_cast<std::uint32_t>(info.friends_id);
     result.exact = exact_account != 0 && result.account_id == exact_account;
     if (!allowed_team(localplayer, player, result.exact) || cathook::core::players::is_ignored(result.account_id)) return {};
@@ -301,6 +305,16 @@ struct controller_t::impl
   void move_to(Player* localplayer, user_cmd* user_cmd, float current_time)
   {
     if (localplayer == nullptr || user_cmd == nullptr || target.player == nullptr) return;
+    if (entity_list == nullptr || !target.handle.IsValid()) {
+      reset(false);
+      return;
+    }
+    auto* target_entity = entity_list->entity_from_handle(target.handle);
+    if (target_entity == nullptr || target_entity->get_class_id() != class_id::PLAYER) {
+      reset(false);
+      return;
+    }
+    target.player = reinterpret_cast<Player*>(target_entity);
     const auto local_origin = localplayer->get_origin();
     const auto target_origin = target.player->get_origin();
     const auto target_distance = distance_2d(local_origin, target_origin);
@@ -426,6 +440,14 @@ bool controller_t::get_nav_target(Vec3* origin, int* entity_index) const
   {
     return false;
   }
+  if (entity_list == nullptr || !state_->target.handle.IsValid()) {
+    return false;
+  }
+  auto* target_entity = entity_list->entity_from_handle(state_->target.handle);
+  if (target_entity == nullptr || target_entity->get_class_id() != class_id::PLAYER) {
+    return false;
+  }
+  state_->target.player = reinterpret_cast<Player*>(target_entity);
   if (origin != nullptr) *origin = state_->target.player->get_origin();
   if (entity_index != nullptr) *entity_index = state_->target.index;
   return true;

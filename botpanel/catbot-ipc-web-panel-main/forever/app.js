@@ -278,7 +278,7 @@ class app {
 
 	stop()
 	{
-		this.manager.stop();
+		return this.manager.stop();
 	}
 }
 

@@ -14,6 +14,7 @@ V  o o  V  file: src/games/tf2/sdk/interfaces/input.hpp
 
 #include <cstddef>
 #include <cstdint>
+#include <climits>
 
 #include "client.hpp"
 
@@ -54,22 +55,29 @@ public:
   }
 
   user_cmd* get_user_cmd(int sequence_number) {
-    auto* command_buffer = commands();
-    if (command_buffer == nullptr) {
+    if (sequence_number <= 0 || sequence_number > INT_MAX - command_buffer_size) {
       return nullptr;
     }
+
+    auto* command_buffer = commands();
+    if (command_buffer == nullptr) return nullptr;
 
     auto* usercmd = &command_buffer[sequence_number % command_buffer_size];
     return usercmd->command_number == sequence_number ? usercmd : nullptr;
   }
 
   verified_user_cmd* get_verified_user_cmd(int sequence_number) {
+    if (sequence_number <= 0 || sequence_number > INT_MAX - command_buffer_size) {
+      return nullptr;
+    }
+
     auto* verified_buffer = verified_commands();
     if (verified_buffer == nullptr) {
       return nullptr;
     }
 
-    return &verified_buffer[sequence_number % command_buffer_size];
+    auto* verified = &verified_buffer[sequence_number % command_buffer_size];
+    return verified;
   }
 
   void to_thirdperson(void) {

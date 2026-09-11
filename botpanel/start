@@ -575,7 +575,7 @@ have_prebuilt_runtime() {
         [ -x "$ipc_server_root/bin/console" ] &&
         [ -x "$ipc_server_root/bin/exec" ] &&
         [ -x "$ipc_server_root/bin/exec_all" ] &&
-        [ -x "$ipc_server_root/bin/undeadlock" ]
+        true
 }
 
 runtime_source_root() {
@@ -773,7 +773,8 @@ install_runtime() {
     local source_root
     source_root="$(runtime_source_root)"
 
-    run_as_root install -d "$install_root/bin" "$install_root/ipc/bin"
+    run_as_root install -d -m 0750 "$install_root/bin" "$install_root/ipc/bin" "$install_root/run"
+    run_as_root chown "$(id -u):$(id -g)" "$install_root/run"
     if [ -f "$source_root/bin/libcathooktextmode.so" ]; then
         run_as_root install -m 0755 "$source_root/bin/libcathook.so" "$install_root/bin/libcathook.so"
         run_as_root install -m 0755 "$source_root/bin/libcathooktextmode.so" "$install_root/bin/libcathooktextmode.so"
@@ -790,7 +791,6 @@ install_runtime() {
     run_as_root install -m 0755 "$ipc_server_root/bin/console" "$install_root/ipc/bin/console"
     run_as_root install -m 0755 "$ipc_server_root/bin/exec" "$install_root/ipc/bin/exec"
     run_as_root install -m 0755 "$ipc_server_root/bin/exec_all" "$install_root/ipc/bin/exec_all"
-    run_as_root install -m 0755 "$ipc_server_root/bin/undeadlock" "$install_root/ipc/bin/undeadlock"
     fix_install_permissions
 }
 
@@ -1175,7 +1175,6 @@ start_ipc_server() {
 
     for _ in 1 2 3 4 5; do
         if ps -p "$ipc_server_pid" >/dev/null 2>&1; then
-            chmod 0666 "$install_root/ipc/cathook_followbot_server" 2>/dev/null || true
             return
         fi
         sleep 1
@@ -1322,30 +1321,11 @@ fast_fix_panel_permissions() {
     chmod 0755 "$web_panel_scripts_dir/ns-inet" "$web_panel_scripts_dir/ns-delete" 2>/dev/null || true
 }
 
-start_panel_permission_loop() {
-    local web_panel_scripts_dir="$web_panel_root/scripts"
-    local fix_interval="${CAT_PERMISSION_FIX_INTERVAL_SECONDS:-30}"
-    local target_uid target_gid
-    target_uid="$(id -u)"
-    target_gid="$(id -g)"
-
-    chmod 0755 "$web_panel_scripts_dir/ns-inet" "$web_panel_scripts_dir/ns-delete" 2>/dev/null || true
-
-    (
-        while :; do
-            sleep "$fix_interval"
-            run_as_root chmod 0755 "$web_panel_scripts_dir/ns-inet" "$web_panel_scripts_dir/ns-delete" 2>/dev/null || true
-            run_as_root chown -h "$target_uid:$target_gid" "$web_panel_scripts_dir/ns-inet" "$web_panel_scripts_dir/ns-delete" 2>/dev/null || true
-        done
-    ) </dev/null >/dev/null 2>&1 &
-    disown 2>/dev/null || true
-}
-
 start_panel() {
     restart_panel_if_running
 
     cd "$web_panel_root"
-    run_as_root rm -f /tmp/cat-webpanel-password
+    run_as_root rm -f "$install_root/run/cat-webpanel-password"
     run_panel_permission_fix
 
     if [ "$(id -u)" -eq 0 ]; then
@@ -1355,6 +1335,7 @@ start_panel() {
             DISPLAY="$display" \
             XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}" \
             CAT_IPC_PORT="$port" \
+            CAT_RUNTIME_DIR="$install_root/run" \
             CAT_VISIBLE_WINDOWS="$visible_windows" \
             CAT_TEXTMODE_GAME="$textmode_game" \
             CAT_TF2_LAUNCH_MODE="${CAT_TF2_LAUNCH_MODE:-direct}" \
@@ -1401,6 +1382,7 @@ start_panel() {
         DISPLAY="$display" \
         XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}" \
         CAT_IPC_PORT="$port" \
+        CAT_RUNTIME_DIR="$install_root/run" \
         CAT_VISIBLE_WINDOWS="$visible_windows" \
         CAT_TEXTMODE_GAME="$textmode_game" \
         CAT_TF2_LAUNCH_MODE="${CAT_TF2_LAUNCH_MODE:-direct}" \
@@ -1442,8 +1424,8 @@ start_panel() {
 
 print_panel_password() {
     for _ in 1 2 3 4 5; do
-        if [ -s /tmp/cat-webpanel-password ]; then
-            echo "IPC Web Panel password: $(cat /tmp/cat-webpanel-password)"
+        if [ -s "$install_root/run/cat-webpanel-password" ]; then
+            echo "IPC Web Panel password: $(cat "$install_root/run/cat-webpanel-password")"
             return
         fi
         sleep 1
@@ -1484,6 +1466,5 @@ warn_if_steam_missing
 configure_steam_txtmode_preload
 print_ready
 start_panel
-start_panel_permission_loop
 print_panel_password
 echo "Open a web browser and go to http://127.0.0.1:$port to see your catbot IPC panel web panel."

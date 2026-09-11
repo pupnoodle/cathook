@@ -12,6 +12,8 @@ V  o o  V  file: src/core/entity_cache.hpp
 #ifndef ENTITY_CACHE_HPP
 #define ENTITY_CACHE_HPP
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <utility>
 #include <vector>
@@ -116,5 +118,28 @@ struct PickupItem {
   float time;
 };
 inline static std::vector<PickupItem> pickup_item_cache;
+
+inline void pickup_item_cache_prune(float current_time) {
+  if (!std::isfinite(current_time)) {
+    return;
+  }
+
+  pickup_item_cache.erase(
+    std::remove_if(pickup_item_cache.begin(), pickup_item_cache.end(), [current_time](const PickupItem& item) {
+      return !std::isfinite(item.time) || item.time < current_time;
+    }),
+    pickup_item_cache.end());
+}
+
+inline void pickup_item_cache_clear() {
+  pickup_item_cache.clear();
+}
+
+inline void pickup_item_cache_record(const Vec3& location, float expires_at, float current_time) {
+  pickup_item_cache_prune(current_time);
+  if (std::isfinite(expires_at) && expires_at > current_time) {
+    pickup_item_cache.push_back(PickupItem{location, expires_at});
+  }
+}
 
 #endif

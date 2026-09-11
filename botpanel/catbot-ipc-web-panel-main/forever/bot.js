@@ -478,6 +478,20 @@ function pid_alive(pid) {
     }
 }
 
+function wait_ms(delay) {
+    return new Promise((resolve) => setTimeout(resolve, delay));
+}
+
+async function wait_for_pids(pids, timeout_ms) {
+    const deadline = Date.now() + timeout_ms;
+    while (Date.now() < deadline) {
+        if (![...pids].some(pid_alive))
+            return true;
+        await wait_ms(100);
+    }
+    return ![...pids].some(pid_alive);
+}
+
 const x_display_pool = new Map();
 
 function x_display_pid_path(display_num) {
@@ -488,8 +502,16 @@ function x_socket_path(display_num) {
     return `/tmp/.X11-unix/X${display_num}`;
 }
 
-function wait_for_x_socket(display_num, timeout_ms) {
-    return fs.existsSync(x_socket_path(display_num));
+function wait_for_x_socket(display_num, timeout_ms, expected_pid) {
+    const deadline = Date.now() + timeout_ms;
+    while (Date.now() < deadline) {
+        if (fs.existsSync(x_socket_path(display_num)) && (!expected_pid || (pid_alive(expected_pid) && read_x_lock_pid(display_num) === expected_pid)))
+            return true;
+        const wait_time = Math.min(50, deadline - Date.now());
+        if (wait_time > 0)
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, wait_time);
+    }
+    return fs.existsSync(x_socket_path(display_num)) && (!expected_pid || (pid_alive(expected_pid) && read_x_lock_pid(display_num) === expected_pid));
 }
 
 function chunked_x_display_entry(display_num) {
@@ -502,6 +524,7 @@ function chunked_x_display_entry(display_num) {
         display: `:${display_num}`,
         proc: null,
         adopted: false,
+        stopping: false,
         unavailable: false,
         users: new Set(),
         log_stream: null
@@ -511,7 +534,7 @@ function chunked_x_display_entry(display_num) {
 }
 
 function ensure_chunked_x_display_entry(entry, bot) {
-    if (entry.unavailable)
+    if (entry.unavailable || entry.stopping)
         return false;
 
     if (entry.proc && pid_alive(entry.proc.pid))
@@ -554,11 +577,14 @@ function ensure_chunked_x_display_entry(entry, bot) {
             bot.log(`Xvfb ${entry.display} exited code=${code} signal=${signal}`);
             entry.proc = null;
             entry.adopted = false;
+            entry.stopping = false;
             if (entry.log_stream) {
                 try { entry.log_stream.end(); } catch (error) { }
                 entry.log_stream = null;
             }
             try { fs.unlinkSync(x_display_pid_path(entry.display_num)); } catch (error) { }
+            if (entry.unavailable && entry.users.size === 0)
+                x_display_pool.delete(entry.display_num);
         });
     } catch (error) {
         bot.log(`[ERROR] Failed to spawn Xvfb on ${entry.display}: ${error.message}`);
@@ -566,8 +592,12 @@ function ensure_chunked_x_display_entry(entry, bot) {
         return false;
     }
 
-    if (!wait_for_x_socket(entry.display_num, 3000))
-        bot.log(`[WARN] X socket ${x_socket_path(entry.display_num)} did not appear within 3s; Steam may fail to connect.`);
+    if (!wait_for_x_socket(entry.display_num, 3000, entry.proc.pid)) {
+        bot.log(`[ERROR] X socket ${x_socket_path(entry.display_num)} did not appear within 3s; stopping Xvfb.`);
+        entry.unavailable = true;
+        stop_chunked_x_display_entry(entry);
+        return false;
+    }
 
     bot.log(`Spawned chunked Xvfb on ${entry.display} pid=${entry.proc.pid} bots_per_display=${CHUNKED_X_DISPLAY_BOTS_PER_DISPLAY}`);
     return true;
@@ -578,6 +608,7 @@ function stop_chunked_x_display_entry(entry) {
         return;
 
     const pid = entry.proc.pid;
+    entry.stopping = true;
     try { entry.proc.kill('SIGTERM'); } catch (error) { }
     setTimeout(() => {
         try { process.kill(pid, 0); } catch (error) { return; }
@@ -1794,6 +1825,8 @@ class Bot extends EventEmitter {
         this.network_namespace_ready = USER.SUPPORTS_FJ_NET;
         this.network_namespace_preparing = false;
         this.network_namespace_failed = false;
+        this.network_namespace_process = null;
+        this.shutdown_promise = null;
 
         // Start timestamp
         this.startTime = null;
@@ -1915,21 +1948,26 @@ class Bot extends EventEmitter {
 
         this.network_namespace_preparing = true;
         this.log('Preparing network namespace');
-        const ns_process = child_process.spawn('./scripts/ns-inet', [String(this.botid)], {
+        const ns_process = child_process.spawn(path.join(__dirname, '..', 'scripts', 'ns-inet'), [String(this.botid)], {
             stdio: ['ignore', 'ignore', 'pipe']
         });
+        this.network_namespace_process = ns_process;
         ns_process.stderr.on('data', (data) => {
             const text = String(data || '').trim();
             if (text)
                 this.log(`[ERROR] ns-inet: ${text}`);
         });
         ns_process.on('error', (error) => {
+            if (this.network_namespace_process === ns_process)
+                this.network_namespace_process = null;
             this.network_namespace_preparing = false;
             this.network_namespace_failed = true;
             this.shouldRun = false;
             this.log(`[ERROR] Failed to prepare network namespace: ${error.message}`);
         });
         ns_process.on('exit', (code, signal) => {
+            if (this.network_namespace_process === ns_process)
+                this.network_namespace_process = null;
             this.network_namespace_preparing = false;
             if (code === 0) {
                 this.network_namespace_ready = true;
@@ -2556,8 +2594,11 @@ class Bot extends EventEmitter {
         this.log(`Spawned per-bot Xvfb on ${this.botDisplay} (pid ${this.procXvfb.pid})`);
 
         const x_socket_path = `/tmp/.X11-unix/X${display_num}`;
-        if (!fs.existsSync(x_socket_path))
-            this.log(`[WARN] X socket ${x_socket_path} did not appear within 3s; Steam may fail to connect.`);
+        if (!wait_for_x_socket(display_num, 3000, this.procXvfb.pid)) {
+            this.log(`[ERROR] X socket ${x_socket_path} did not appear within 3s; stopping Xvfb.`);
+            this.killXvfb();
+            return false;
+        }
 
         return true;
     }
@@ -4635,6 +4676,95 @@ class Bot extends EventEmitter {
     stop() {
         this.shouldRun = false;
     }
+    shutdown() {
+        if (this.shutdown_promise)
+            return this.shutdown_promise;
+
+        this.shutdown_promise = (async () => {
+            this.stopped = true;
+            this.shouldRun = false;
+            this.shouldRestart = false;
+            this.clear_ipc_state();
+
+            const processes = read_process_table(true);
+            const children_by_parent = build_process_children_by_parent(processes);
+            const root_pids = new Set();
+            for (const process of [this.procFirejailSteam, this.procFirejailGame]) {
+                if (process && process.pid > 0)
+                    root_pids.add(process.pid);
+            }
+            for (const marker of [['--name', this.name], ['--join', this.name]]) {
+                const process = find_firejail_root_by_marker(processes, marker[0], marker[1]);
+                if (process)
+                    root_pids.add(process.pid);
+            }
+
+            const runtime_pids = new Set(root_pids);
+            for (const root_pid of root_pids)
+                for (const pid of collect_descendant_pids_from_children(root_pid, children_by_parent))
+                    runtime_pids.add(pid);
+
+            const namespace_process = this.network_namespace_process;
+            const namespace_pids = new Set(namespace_process && namespace_process.pid > 0 ? [namespace_process.pid] : []);
+            const xvfb_pid = this.procXvfb && this.procXvfb.pid > 0 ? this.procXvfb.pid : 0;
+            const xvfb_pids = new Set(xvfb_pid ? [xvfb_pid] : []);
+
+            this.kill_existing_runtime_processes(processes, children_by_parent);
+            if (namespace_process) {
+                try { namespace_process.kill('SIGTERM'); } catch (error) { }
+            }
+            this.killXvfb();
+
+            await wait_for_pids(runtime_pids, 2000);
+            kill_pids([...runtime_pids], 'SIGKILL');
+            if (!await wait_for_pids(runtime_pids, 5000))
+                this.log(`[ERROR] Runtime processes remained after shutdown: ${[...runtime_pids].filter(pid_alive).join(',')}`);
+
+            await wait_for_pids(namespace_pids, 2000);
+            kill_pids([...namespace_pids], 'SIGKILL');
+            if (!await wait_for_pids(namespace_pids, 1000))
+                this.log(`[ERROR] Network namespace setup process remained after shutdown: ${[...namespace_pids].filter(pid_alive).join(',')}`);
+
+            await wait_for_pids(xvfb_pids, 2000);
+            kill_pids([...xvfb_pids], 'SIGKILL');
+            if (!await wait_for_pids(xvfb_pids, 1000))
+                this.log(`[ERROR] Xvfb remained after shutdown: ${[...xvfb_pids].filter(pid_alive).join(',')}`);
+
+            for (const stream of [this.logSteam, this.logGame]) {
+                if (stream) {
+                    try { stream.end(); } catch (error) { }
+                }
+            }
+            this.logSteam = null;
+            this.logGame = null;
+
+            if (STEAM_OVERLAY) {
+                try {
+                    umount_steam_overlay(this.name);
+                    this.loggedSteamOverlay = false;
+                } catch (error) {
+                    this.log(`[WARN] Steam overlay teardown failed: ${error.message}`);
+                }
+            }
+
+            if (!USER.SUPPORTS_FJ_NET) {
+                try {
+                    child_process.execFileSync(path.join(__dirname, '..', 'scripts', 'ns-delete'), [String(this.botid)], {
+                        stdio: 'ignore',
+                        timeout: 5000
+                    });
+                } catch (error) {
+                    this.log(`[ERROR] Network namespace cleanup failed: ${error.message}`);
+                }
+            }
+
+            this.network_namespace_ready = USER.SUPPORTS_FJ_NET;
+            this.network_namespace_preparing = false;
+            this.network_namespace_failed = false;
+            this.state = STATE.INITIALIZED;
+        })();
+        return this.shutdown_promise;
+    }
     terminate(processes, children_by_parent) {
         processes = processes || read_process_table(true);
         children_by_parent = children_by_parent || build_process_children_by_parent(processes);
@@ -4661,9 +4791,8 @@ class Bot extends EventEmitter {
                 }
             }
         }
-        // Delete the network namespace for this bot
-        if (!USER.SUPPORTS_FJ_NET && fs.existsSync(`/var/run/netns/catbotns${this.botid}`))
-            child_process.execSync(`./scripts/ns-delete ${this.botid}`)
+        if (fully_stopped && !USER.SUPPORTS_FJ_NET)
+            child_process.execFileSync(path.join(__dirname, '..', 'scripts', 'ns-delete'), [String(this.botid)], { timeout: 5000 });
         return fully_stopped;
     }
 }

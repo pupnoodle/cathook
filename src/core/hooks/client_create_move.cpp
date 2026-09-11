@@ -26,18 +26,6 @@ V  o o  V  file: src/core/hooks/client_create_move.cpp
 
 void (*client_create_move_original)(void*, int, float, bool);
 
-namespace
-{
-struct scoped_client_create_move_features {
-  scoped_client_create_move_features() {
-    g_client_create_move_owns_features = true;
-  }
-
-  ~scoped_client_create_move_features() {
-    g_client_create_move_owns_features = false;
-  }
-};
-
 void refresh_prediction_state()
 {
   if (prediction == nullptr || client_state == nullptr) {
@@ -50,6 +38,18 @@ void refresh_prediction_state()
     client_state->last_command_ack,
     client_state->lastoutgoingcommand + client_state->chokedcommands);
 }
+
+namespace
+{
+struct scoped_client_create_move_features {
+  scoped_client_create_move_features() {
+    g_client_create_move_owns_features = true;
+  }
+
+  ~scoped_client_create_move_features() {
+    g_client_create_move_owns_features = false;
+  }
+};
 
 unsigned int crc32_process_byte(unsigned int crc, unsigned char value)
 {
@@ -110,6 +110,7 @@ void update_verified_user_cmd(int sequence_number, user_cmd* cmd)
 
 void client_create_move_hook(void* me, int sequence_number, float input_sample_frametime, bool active) {
   CATHOOK_HOOK_GUARD();
+  g_client_mode_pipeline_ran = false;
   {
     scoped_client_create_move_features feature_owner{};
     client_create_move_original(me, sequence_number, input_sample_frametime, active);
@@ -129,12 +130,16 @@ void client_create_move_hook(void* me, int sequence_number, float input_sample_f
     return;
   }
 
-  refresh_prediction_state();
-  cat_bind::run();
-  automation::controller().on_create_move(user_cmd);
-  thirdperson::update_taunt_camera();
+  const bool client_mode_pipeline_ran = g_client_mode_pipeline_ran;
+  g_client_mode_pipeline_ran = false;
+  if (!client_mode_pipeline_ran) {
+    refresh_prediction_state();
+    cat_bind::run();
+    automation::controller().on_create_move(user_cmd);
+    thirdperson::update_taunt_camera();
+  }
 
-  if (can_run_move_features(user_cmd)) {
+  if (!client_mode_pipeline_ran && can_run_move_features(user_cmd)) {
     Player* localplayer = entity_list->get_localplayer();
     const bool taunting = localplayer != nullptr && localplayer->is_taunting();
     if (taunting) {
@@ -145,12 +150,14 @@ void client_create_move_hook(void* me, int sequence_number, float input_sample_f
     }
   }
 
-  Player* localplayer = entity_list->get_localplayer();
-  if (localplayer == nullptr || !localplayer->is_taunting()) {
-    tickbase::on_create_move(user_cmd);
-    anti_aim::on_create_move(user_cmd);
+  if (!client_mode_pipeline_ran) {
+    Player* localplayer = entity_list->get_localplayer();
+    if (localplayer == nullptr || !localplayer->is_taunting()) {
+      tickbase::on_create_move(user_cmd);
+      anti_aim::on_create_move(user_cmd);
+    }
+    aimbot::update_local_client_side_animation();
   }
-  aimbot::update_local_client_side_animation();
   update_verified_user_cmd(sequence_number, user_cmd);
 
 }

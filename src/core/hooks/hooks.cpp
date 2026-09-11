@@ -19,6 +19,8 @@ V  o o  V  file: src/core/hooks/hooks.cpp
 #include <string_view>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <algorithm>
+#include <vector>
 
 #include "core/print.hpp"
 
@@ -118,7 +120,17 @@ bool is_executable_memory_address(const void* address)
 
   memory_page_permissions page_permissions{};
   return query_page_permissions(const_cast<void*>(address), page_permissions) &&
-    (page_permissions.protection & PROT_EXEC) != 0;
+    (page_permissions.protection & (PROT_READ | PROT_EXEC)) == (PROT_READ | PROT_EXEC);
+}
+
+bool is_valid_code_address(const void* address)
+{
+  if (!is_executable_memory_address(address)) {
+    return false;
+  }
+
+  Dl_info info{};
+  return ::dladdr(address, &info) != 0 && info.dli_fname != nullptr;
 }
 
 namespace
@@ -177,6 +189,7 @@ void* open_loaded_library(const char* lib_path)
 }
 
 void* get_interface(const char* lib_path, const char* version) {
+  static std::vector<void*> retained_handles{};
   void* lib_handle = open_loaded_library(lib_path);
   if (!lib_handle) {
     print("Failed to load %s\n", lib_path);
@@ -188,7 +201,15 @@ void* get_interface(const char* lib_path, const char* version) {
   typedef void* (*CreateInterface)(const char*, int*);
 
   CreateInterface create_interface = (CreateInterface)dlsym(lib_handle, "CreateInterface");
-  dlclose(lib_handle);
+  if (create_interface != nullptr) {
+    if (std::find(retained_handles.begin(), retained_handles.end(), lib_handle) == retained_handles.end()) {
+      retained_handles.push_back(lib_handle);
+    } else {
+      dlclose(lib_handle);
+    }
+  } else {
+    dlclose(lib_handle);
+  }
 
   if (!create_interface) {
     print("Failed to get CreateInterface\n");
@@ -228,7 +249,7 @@ void* read_vtable_entry(void** vtable, int index, const char* hook_name)
   }
 
   void* const entry = vtable[index];
-  if (!is_executable_memory_address(entry)) {
+  if (!is_valid_code_address(entry)) {
     print("%s vtable slot %d has non-executable entry %p\n", hook_name, index, entry);
     return nullptr;
   }
@@ -288,7 +309,7 @@ bool write_to_table_impl(void** vtable, int index, void* func, const bool verbos
     return true;
   }
 
-  if (func == nullptr || !is_executable_memory_address(func)) {
+  if (!is_valid_code_address(func)) {
     print("refusing to install non-executable vtable target %p\n", func);
     return false;
   }
@@ -329,8 +350,16 @@ bool write_to_table(void** vtable, int index, void* func) {
 
 bool write_pointer_slot(void** slot, void* value)
 {
+  if (slot == nullptr || !is_valid_code_address(value)) {
+    return false;
+  }
+
   memory_page_permissions page_permissions{};
   if (!query_page_permissions(slot, page_permissions)) {
+    return false;
+  }
+
+  if ((page_permissions.protection & PROT_READ) == 0) {
     return false;
   }
 
@@ -351,6 +380,10 @@ bool write_pointer_slot(void** slot, void* value)
 
 bool get_sdl_wrapper_target(void* func, const char* func_name, void*** ptr_to_func)
 {
+  if (!is_valid_code_address(func) || ptr_to_func == nullptr) {
+    return false;
+  }
+
   auto* bytes = reinterpret_cast<std::uint8_t*>(func);
   if (bytes[0] != 0xff || bytes[1] != 0x25) {
     print("%s wrapper has unexpected prologue %02x %02x\n", func_name, bytes[0], bytes[1]);
@@ -374,7 +407,8 @@ bool sdl_hook(void* lib_handle, const char* func_name, void* hook, void** origin
   print("%s wrapper found at %p\n", func_name, func);
 
   void** ptr_to_func = nullptr;
-  if (!get_sdl_wrapper_target(func, func_name, &ptr_to_func) || ptr_to_func == nullptr || *ptr_to_func == nullptr) {
+  if (!get_sdl_wrapper_target(func, func_name, &ptr_to_func) || ptr_to_func == nullptr || *ptr_to_func == nullptr ||
+      !is_valid_code_address(*ptr_to_func)) {
     print("Failed to resolve %s wrapper target\n", func_name);
     return false;
   }

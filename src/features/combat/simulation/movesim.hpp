@@ -102,13 +102,13 @@ inline bool run_tick(storage& state);
 inline void restore(storage& state);
 
 struct guard {
-  storage* storage = nullptr;
+  storage* state = nullptr;
   bool owned = false;
 
-  explicit guard(storage& value) : storage(&value), owned(true) {}
+  explicit guard(storage& value) : state(&value), owned(true) {}
   ~guard() {
-    if (owned && storage != nullptr) {
-      restore(*storage);
+    if (owned && state != nullptr) {
+      restore(*state);
     }
   }
   guard(const guard&) = delete;

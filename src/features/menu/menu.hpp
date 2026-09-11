@@ -237,6 +237,7 @@ inline void draw_inventory_definition(const char* label, int* definition, invent
 
 inline bool render_material_layers(const char* title, std::vector<chams_layer>& layers) {
   bool changed = false;
+  bool registry_changed = false;
   ImGui::PushID(title);
   ImGui::TextUnformatted(title);
   const std::vector<std::string> names = materials.selectable_names();
@@ -252,6 +253,7 @@ inline bool render_material_layers(const char* title, std::vector<chams_layer>& 
       if (std::ranges::find_if(layers, [&name](const chams_layer& layer) { return layer.material == name; }) == layers.end()) {
         layers.push_back(chams_layer{.material = name});
         changed = true;
+        registry_changed = true;
       }
     }
   }
@@ -260,10 +262,13 @@ inline bool render_material_layers(const char* title, std::vector<chams_layer>& 
     std::size_t index;
   };
   constexpr const char* payload_type = "cathook_chams_layer";
+  const std::string layer_panel_key = cat_bind::target_path_component(title != nullptr ? title : "layers");
   std::size_t pending_source = layers.size();
   std::size_t pending_destination = layers.size();
   for (std::size_t index = 0; index < layers.size();) {
     ImGui::PushID(static_cast<int>(index));
+    cat_bind::push_panel_label(layer_panel_key);
+    cat_bind::push_panel_label("layer_" + cat_bind::target_path_component(layers[index].material));
     bool remove = false;
     if (ImGui::BeginChild("material_layer_card", {0.0f, 0.0f}, ImGuiChildFlags_Border | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysAutoResize)) {
       ImGui::Text("%s", layers[index].material.c_str());
@@ -295,9 +300,12 @@ inline bool render_material_layers(const char* title, std::vector<chams_layer>& 
       ImGui::EndDragDropTarget();
     }
     ImGui::PopID();
+    cat_bind::pop_panel_label();
+    cat_bind::pop_panel_label();
     if (remove) {
       layers.erase(layers.begin() + static_cast<std::ptrdiff_t>(index));
       changed = true;
+      registry_changed = true;
     } else {
       ++index;
     }
@@ -308,7 +316,9 @@ inline bool render_material_layers(const char* title, std::vector<chams_layer>& 
     const std::size_t destination = std::min(pending_destination, layers.size());
     layers.insert(layers.begin() + static_cast<std::ptrdiff_t>(destination), std::move(moved));
     changed = true;
+    registry_changed = true;
   }
+  if (registry_changed) cat_bind::clear_registered_targets();
   if (layers.empty()) ImGui::TextDisabled("No materials configured.");
   ImGui::PopID();
   return changed;
@@ -738,7 +748,7 @@ inline bool multi_select_combo(const char* label, uint32_t* value_mask, const ch
   if (label == nullptr || value_mask == nullptr || items == nullptr || item_bits == nullptr || item_count <= 0) return false;
 
   if (cat_bind::registering_targets()) {
-    cat_bind::multi_select_target(value_mask, label, false, false);
+    cat_bind::multi_select_target(value_mask, label, false, false, items, item_bits, item_count);
     return false;
   }
 
@@ -758,8 +768,8 @@ inline bool multi_select_combo(const char* label, uint32_t* value_mask, const ch
       else *value_mask &= ~item_bits[index];
     }
   }
-  cat_bind::multi_select_target(value_mask, label, mono_changed, mono::last_item_interaction().hovered);
-  cat_bind::maybe_open_popup(reinterpret_cast<int *>(value_mask), label, mono::last_item_interaction().hovered);
+  cat_bind::multi_select_target(value_mask, label, mono_changed, mono::last_item_interaction().hovered, items, item_bits, item_count);
+  cat_bind::maybe_open_popup(value_mask, label, mono::last_item_interaction().hovered);
   return mono_changed;
 }
 
@@ -767,7 +777,7 @@ inline bool mask_checkbox(const char* label, uint32_t* value_mask, const uint32_
   if (label == nullptr || value_mask == nullptr || bit == 0) return false;
 
   if (cat_bind::registering_targets()) {
-    cat_bind::multi_select_target(value_mask, label, false, false);
+    cat_bind::multi_select_target(value_mask, label, false, false, nullptr, nullptr, 0);
     return false;
   }
 
@@ -778,7 +788,7 @@ inline bool mask_checkbox(const char* label, uint32_t* value_mask, const uint32_
     else *value_mask &= ~bit;
   }
   cat_bind::multi_select_target(value_mask, label, changed, mono::last_item_interaction().hovered);
-  cat_bind::maybe_open_popup(reinterpret_cast<int *>(value_mask), label, mono::last_item_interaction().hovered);
+  cat_bind::maybe_open_popup(value_mask, label, mono::last_item_interaction().hovered);
   return changed;
 }
 
@@ -1299,35 +1309,42 @@ static void draw_visual_groups_content_tfwin() {
   if (cat_menu::accent_button("New", { half_width, 22.0f }) &&
       config.visual_groups.groups.size() < visual_group_config::max_groups) {
     visual_group group{};
+    group.bind_id = visual_groups::allocate_group_id();
     group.name = new_group_name.empty() ? "New profile" : new_group_name;
     group.targets = visual_group::target_players;
     config.visual_groups.groups.emplace_back(std::move(group));
     selected_group = static_cast<int>(config.visual_groups.groups.size()) - 1;
     config.visual_groups.active_group_mask |= group_active_bit(selected_group);
+    cat_bind::clear_registered_targets();
   }
   ImGui::SameLine(0.0f, item_gap);
   if (cat_menu::accent_button("Duplicate", { half_width, 22.0f }) &&
       selected_group >= 0 && selected_group < static_cast<int>(config.visual_groups.groups.size()) &&
       config.visual_groups.groups.size() < visual_group_config::max_groups) {
     visual_group group = config.visual_groups.groups[static_cast<std::size_t>(selected_group)];
+    group.bind_id = visual_groups::allocate_group_id();
     group.name += " copy";
     config.visual_groups.groups.emplace_back(std::move(group));
     selected_group = static_cast<int>(config.visual_groups.groups.size()) - 1;
     config.visual_groups.active_group_mask |= group_active_bit(selected_group);
+    cat_bind::clear_registered_targets();
   }
   const float action_width = ImMax(1.0f, (content_width - item_gap * 2.0f) / 3.0f);
   if (cat_menu::accent_button("Delete", { action_width, cat_menu::k_button_height }, true)) {
     delete_visual_group(selected_group, &selected_group);
+    cat_bind::clear_registered_targets();
   }
   ImGui::SameLine(0.0f, item_gap);
   if (cat_menu::accent_button("Up", { action_width, cat_menu::k_button_height }) && selected_group > 0) {
     visual_groups::move_group(selected_group, selected_group - 1);
+    cat_bind::clear_registered_targets();
     --selected_group;
   }
   ImGui::SameLine(0.0f, item_gap);
   if (cat_menu::accent_button("Down", { action_width, cat_menu::k_button_height }) &&
       selected_group + 1 < static_cast<int>(config.visual_groups.groups.size())) {
     visual_groups::move_group(selected_group, selected_group + 1);
+    cat_bind::clear_registered_targets();
     ++selected_group;
   }
   rebuild_active_profiles();
@@ -1382,6 +1399,7 @@ static void draw_visual_groups_content_tfwin() {
     if (reorder_source < destination) --destination;
     if (destination != reorder_source && destination >= 0 && destination < static_cast<int>(config.visual_groups.groups.size())) {
       visual_groups::move_group(reorder_source, destination);
+      cat_bind::clear_registered_targets();
       if (old_selected == reorder_source) selected_group = destination;
       else if (reorder_source < old_selected && old_selected <= destination) --selected_group;
       else if (destination <= old_selected && old_selected < reorder_source) ++selected_group;
@@ -1399,7 +1417,7 @@ static void draw_visual_groups_content_tfwin() {
 
   selected_group = std::clamp(selected_group, 0, static_cast<int>(config.visual_groups.groups.size()) - 1);
   visual_group& group = config.visual_groups.groups[static_cast<std::size_t>(selected_group)];
-  cat_bind::push_panel_label("group_" + std::to_string(selected_group));
+  cat_bind::push_panel_label("group_" + std::to_string(group.bind_id));
 
   const auto end_panel = [] {
     ImGui::EndChild();
@@ -2917,6 +2935,7 @@ static void draw_settings_content(const cathook_tab_id tab, const int section, c
 
 static void warmup_bind_targets()
 {
+  visual_groups::ensure_defaults();
   if (cat_bind::disabled() || cat_bind::targets_warmed() || ImGui::GetCurrentContext() == nullptr) return;
 
   const ImVec2 display_size = ImGui::GetIO().DisplaySize;

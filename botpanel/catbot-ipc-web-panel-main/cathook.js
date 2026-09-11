@@ -19,6 +19,7 @@ class CathookConsole extends EventEmitter {
         this.in_flight_entry = null;
         this.respawn_timer = null;
         this.respawning = false;
+        this.stopping = false;
         this.stdout_buffer = '';
         this.spawn_process();
         this.on('data', (data) => {
@@ -45,14 +46,15 @@ class CathookConsole extends EventEmitter {
         this.process.on('error', function (error) {
             self.init = false;
             console.log('[!] failed to start cathook console:', error.message);
-            self.schedule_respawn();
+            if (!self.stopping)
+                self.schedule_respawn();
         });
         this.process.on('exit', function (code) {
             self.init = false;
             self.fail_in_flight_command('cathook console exited');
             console.log('[!] cathook console exited with code', code);
             self.emit('exit');
-            if (!self.respawning)
+            if (!self.respawning && !self.stopping)
                 self.schedule_respawn();
         });
         this.process.stdin.on('error', function (error) {
@@ -82,7 +84,7 @@ class CathookConsole extends EventEmitter {
     }
 
     schedule_respawn() {
-        if (this.respawn_timer)
+        if (this.stopping || this.respawn_timer)
             return;
 
         this.respawn_timer = setTimeout(() => {
@@ -93,13 +95,11 @@ class CathookConsole extends EventEmitter {
             this.respawn_timer.unref();
     }
 
-    respawn() {
+    respawn(reason = 'cathook console respawning') {
+        if (this.stopping)
+            return;
         this.respawning = true;
-        const entry = this.in_flight_entry;
-        this.in_flight_entry = null;
-        this.command_in_flight = false;
-        if (entry && entry.callback)
-            entry.callback({ status: 'error', error: 'cathook console respawning' });
+        this.settle_entry(this.in_flight_entry, { status: 'error', error: reason });
         if (this.process) {
             try {
                 this.process.removeAllListeners();
@@ -111,15 +111,11 @@ class CathookConsole extends EventEmitter {
         this.fail_queued_commands('cathook console respawning');
         this.spawn_process();
         this.respawning = false;
+        this.flush_command_queue();
     }
 
     fail_in_flight_command(reason) {
-        const entry = this.in_flight_entry;
-        this.in_flight_entry = null;
-        this.command_in_flight = false;
-        if (entry && entry.callback)
-            entry.callback({ status: 'error', error: reason });
-        this.flush_command_queue();
+        this.settle_entry(this.in_flight_entry, { status: 'error', error: reason });
     }
 
     fail_queued_commands(reason) {
@@ -131,7 +127,7 @@ class CathookConsole extends EventEmitter {
     }
 
     flush_command_queue() {
-        if (this.command_in_flight || !this.pending_commands.length)
+        if (this.stopping || this.respawning || this.command_in_flight || !this.pending_commands.length)
             return;
         if (!this.process || !this.process.stdin || this.process.stdin.destroyed) {
             this.fail_queued_commands('cathook console is not running');
@@ -149,22 +145,14 @@ class CathookConsole extends EventEmitter {
             const handler = (response) => {
                 if (!response || response.cmdid !== cmdid)
                     return;
-
-                this.removeListener('data', handler);
-                clearTimeout(callback_timeout);
-                this.command_in_flight = false;
-                this.in_flight_entry = null;
-                entry.callback(response);
-                this.flush_command_queue();
+                this.settle_entry(entry, response, handler);
             };
+            entry.handler = handler;
             this.on('data', handler);
             callback_timeout = setTimeout(() => {
-                this.removeListener('data', handler);
-                this.command_in_flight = false;
-                this.in_flight_entry = null;
-                entry.callback({ status: 'error', error: 'cathook console command timed out' });
-                this.respawn();
+                this.respawn('cathook console command timed out');
             }, this.ipc_command_timeout_ms());
+            entry.timeout = callback_timeout;
             if (callback_timeout.unref)
                 callback_timeout.unref();
         } else {
@@ -176,29 +164,54 @@ class CathookConsole extends EventEmitter {
             if (!entry.callback)
                 this.flush_command_queue();
         } catch (error) {
-            if (callback_timeout)
-                clearTimeout(callback_timeout);
-            this.command_in_flight = false;
-            this.in_flight_entry = null;
-            if (entry.callback)
-                entry.callback({ status: 'error', error: error.message });
+            this.settle_entry(entry, { status: 'error', error: error.message }, entry.handler);
             console.log('[!] cathook console write failed:', error.message);
             this.flush_command_queue();
         }
     }
 
+    settle_entry(entry, response, handler) {
+        if (!entry || entry.settled)
+            return false;
+        entry.settled = true;
+        if (handler)
+            this.removeListener('data', handler);
+        if (entry.timeout)
+            clearTimeout(entry.timeout);
+        if (this.in_flight_entry === entry) {
+            this.command_in_flight = false;
+            this.in_flight_entry = null;
+        }
+        if (entry.callback)
+            entry.callback(response);
+        this.flush_command_queue();
+        return true;
+    }
+
     command(cmd, data, callback) {
+        if (this.stopping) {
+            if (callback)
+                callback({ status: 'error', error: 'cathook console stopping' });
+            return;
+        }
         this.pending_commands.push({ cmd: cmd, data: data, callback: callback });
         this.flush_command_queue();
     }
 
     stop() {
+        this.stopping = true;
         if (this.respawn_timer) {
             clearTimeout(this.respawn_timer);
             this.respawn_timer = null;
         }
+        this.settle_entry(this.in_flight_entry, { status: 'error', error: 'cathook console stopping' });
         this.fail_queued_commands('cathook console stopping');
-        this.command('exit', {});
+        if (this.process) {
+            try {
+                this.process.kill('SIGTERM');
+            } catch (error) { }
+            this.process = null;
+        }
     }
 }
 

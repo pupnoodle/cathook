@@ -15,6 +15,7 @@ V  o o  V  file: src/core/logger.hpp
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <string_view>
 
 namespace cathook::core
@@ -30,6 +31,7 @@ public:
     [[nodiscard]] bool is_open() const;
 
 private:
+    mutable std::mutex m_mutex{};
     std::ofstream m_stream{};
 };
 

@@ -1,8 +1,15 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "core/identify/identify_client.hpp"
 #include "core/print.hpp"
 #include <arpa/inet.h>
+#include <cerrno>
+#include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -43,12 +50,12 @@ void identify_client::connect(std::string host, int port)
 void identify_client::stop()
 {
   m_running = false;
-  close_socket();
   m_cv.notify_all();
   if (m_worker.joinable())
   {
     m_worker.join();
   }
+  close_socket();
 }
 
 void identify_client::update_identity(std::string_view server_id, std::string_view player_hash, std::string_view signature, int head_scale)
@@ -87,9 +94,11 @@ void identify_client::send_chat(std::string_view message)
 
 void identify_client::close_socket()
 {
+  std::lock_guard<std::mutex> lock{m_socket_mutex};
   int s = m_socket.exchange(-1);
   if (s >= 0)
   {
+    ::shutdown(s, SHUT_RDWR);
     ::close(s);
   }
 }
@@ -99,11 +108,60 @@ bool identify_client::dial()
   addrinfo hints{}, *res = nullptr;
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
+  const std::string service = std::to_string(m_port);
 
-  if (::getaddrinfo(m_host.c_str(), std::to_string(m_port).c_str(), &hints, &res) != 0)
+  gaicb request{};
+  request.ar_name = m_host.c_str();
+  request.ar_service = service.c_str();
+  request.ar_request = &hints;
+  gaicb* requests[] = {&request};
+
+  if (::getaddrinfo_a(GAI_NOWAIT, requests, 1, nullptr) != 0)
   {
     return false;
   }
+
+  while (::gai_error(&request) == EAI_INPROGRESS)
+  {
+    if (!m_running.load(std::memory_order_acquire))
+    {
+      ::gai_cancel(&request);
+    }
+
+    const timespec timeout{0, 100000000};
+    ::gai_suspend(requests, 1, &timeout);
+  }
+
+  int resolution_error = ::gai_error(&request);
+  if (!m_running.load(std::memory_order_acquire))
+  {
+    if (resolution_error == EAI_INPROGRESS)
+    {
+      ::gai_cancel(&request);
+      while ((resolution_error = ::gai_error(&request)) == EAI_INPROGRESS)
+      {
+        const timespec timeout{0, 1000000};
+        ::gai_suspend(requests, 1, &timeout);
+      }
+    }
+
+    if (request.ar_result != nullptr)
+    {
+      ::freeaddrinfo(request.ar_result);
+    }
+    return false;
+  }
+
+  if (resolution_error != 0)
+  {
+    if (request.ar_result != nullptr)
+    {
+      ::freeaddrinfo(request.ar_result);
+    }
+    return false;
+  }
+
+  res = request.ar_result;
 
   int s = -1;
   for (auto* p = res; p != nullptr; p = p->ai_next)
@@ -114,7 +172,49 @@ bool identify_client::dial()
       continue;
     }
 
-    if (::connect(s, p->ai_addr, p->ai_addrlen) == 0)
+    const int flags = ::fcntl(s, F_GETFL, 0);
+    if (flags < 0 || ::fcntl(s, F_SETFL, flags | O_NONBLOCK) < 0)
+    {
+      ::close(s);
+      s = -1;
+      continue;
+    }
+
+    bool connected = ::connect(s, p->ai_addr, p->ai_addrlen) == 0;
+    if (!connected && errno == EINPROGRESS)
+    {
+      while (m_running.load(std::memory_order_acquire))
+      {
+        pollfd poll_descriptor{s, POLLOUT | POLLERR | POLLHUP | POLLNVAL, 0};
+        const int poll_result = ::poll(&poll_descriptor, 1, 100);
+        if (poll_result < 0)
+        {
+          if (errno == EINTR)
+          {
+            continue;
+          }
+          break;
+        }
+        if (poll_result == 0)
+        {
+          continue;
+        }
+        if ((poll_descriptor.revents & POLLNVAL) != 0)
+        {
+          break;
+        }
+
+        int socket_error = 0;
+        socklen_t socket_error_size = sizeof(socket_error);
+        if (::getsockopt(s, SOL_SOCKET, SO_ERROR, &socket_error, &socket_error_size) == 0 && socket_error == 0)
+        {
+          connected = true;
+        }
+        break;
+      }
+    }
+
+    if (connected)
     {
       break;
     }
@@ -130,7 +230,16 @@ bool identify_client::dial()
     return false;
   }
 
-  m_socket = s;
+  {
+    std::lock_guard<std::mutex> lock{m_socket_mutex};
+    if (!m_running.load(std::memory_order_acquire))
+    {
+      ::close(s);
+      return false;
+    }
+    m_socket.store(s, std::memory_order_release);
+  }
+
   return true;
 }
 
@@ -172,9 +281,36 @@ void identify_client::worker_loop()
         break;
       }
 
-      ssize_t n = ::recv(s, chunk, sizeof(chunk), 0);
-      if (n <= 0)
+      pollfd poll_descriptor{s, POLLIN | POLLERR | POLLHUP | POLLNVAL, 0};
+      const int poll_result = ::poll(&poll_descriptor, 1, 100);
+      if (poll_result < 0)
       {
+        if (errno == EINTR)
+        {
+          continue;
+        }
+        break;
+      }
+      if (poll_result == 0)
+      {
+        continue;
+      }
+      if ((poll_descriptor.revents & POLLNVAL) != 0)
+      {
+        break;
+      }
+
+      ssize_t n = ::recv(s, chunk, sizeof(chunk), MSG_DONTWAIT);
+      if (n == 0)
+      {
+        break;
+      }
+      if (n < 0)
+      {
+        if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
+        {
+          continue;
+        }
         break;
       }
 
@@ -203,6 +339,7 @@ void identify_client::worker_loop()
 void identify_client::send_line(std::string line)
 {
   std::lock_guard<std::mutex> lock{m_send_mutex};
+  std::lock_guard<std::mutex> socket_lock{m_socket_mutex};
   int s = m_socket;
   if (s < 0)
   {
@@ -213,13 +350,42 @@ void identify_client::send_line(std::string line)
   size_t offset = 0;
   while (offset < line.size())
   {
-    ssize_t n = ::send(s, line.data() + offset, line.size() - offset, MSG_NOSIGNAL);
+    ssize_t n = ::send(s, line.data() + offset, line.size() - offset, MSG_NOSIGNAL | MSG_DONTWAIT);
+    if (n > 0)
+    {
+      offset += static_cast<size_t>(n);
+      continue;
+    }
+
+    if (n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK))
+    {
+      pollfd poll_descriptor{s, POLLOUT | POLLERR | POLLHUP | POLLNVAL, 0};
+      const int poll_result = ::poll(&poll_descriptor, 1, 100);
+      if (poll_result == 0 || (poll_result < 0 && errno == EINTR))
+      {
+        if (m_running.load(std::memory_order_acquire))
+        {
+          continue;
+        }
+        return;
+      }
+      if (m_running.load(std::memory_order_acquire) && poll_result > 0 &&
+          (poll_descriptor.revents & POLLOUT) != 0)
+      {
+        continue;
+      }
+    }
+
     if (n <= 0)
     {
-      close_socket();
+      if (m_socket.load(std::memory_order_acquire) == s)
+      {
+        m_socket.store(-1, std::memory_order_release);
+        ::shutdown(s, SHUT_RDWR);
+        ::close(s);
+      }
       return;
     }
-    offset += static_cast<size_t>(n);
   }
 }
 

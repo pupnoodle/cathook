@@ -66,7 +66,7 @@ std::vector<spectator_entry> collect_spectators(Player** target_player_out)
 
   spectators.reserve(8);
   const int max_entities = entity_list->get_max_entities();
-  for (int index = 1; index <= max_entities; ++index) {
+  for (int index = 1; index < max_entities; ++index) {
     auto* player = entity_list->player_from_index(index);
     if (player == nullptr || player == localplayer || player->get_class_id() != class_id::PLAYER) {
       continue;

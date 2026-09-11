@@ -46,6 +46,7 @@ public:
 
     void set_bool(std::string key, bool value);
     void set_int(std::string key, int value);
+    void set_uint(std::string key, std::uint32_t value);
     void set_float(std::string key, float value);
     void set_string(std::string key, std::string_view value);
     void set_color(std::string key, const RGBA_float& value);
@@ -53,6 +54,7 @@ public:
     [[nodiscard]] bool has_key(std::string_view key) const;
     [[nodiscard]] bool get_bool(std::string_view key, bool fallback) const;
     [[nodiscard]] int get_int(std::string_view key, int fallback) const;
+    [[nodiscard]] std::uint32_t get_uint(std::string_view key, std::uint32_t fallback) const;
     [[nodiscard]] float get_float(std::string_view key, float fallback) const;
     [[nodiscard]] std::string get_string(std::string_view key, std::string_view fallback) const;
     [[nodiscard]] RGBA_float get_color(std::string_view key, RGBA_float fallback) const;

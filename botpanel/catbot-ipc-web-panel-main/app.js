@@ -5,6 +5,7 @@ const path = require('path');
 const { Forever } = require('./forever/app');
 const fs = require('fs');
 const stoppable = require("stoppable");
+const runtime_dir = process.env.CAT_RUNTIME_DIR || '/opt/cathook/run';
 
 const PORT = Number.parseInt(process.env.CAT_IPC_PORT || '7655', 10);
 const crash_log_path = path.join(__dirname, 'logs', 'main.crash.log');
@@ -59,15 +60,45 @@ app.use(bodyparser.urlencoded({ extended: true }));
 
 const SimpleAuth = require('./auth');
 const basicAuth = new SimpleAuth(app);
-console.log('Login with password', basicAuth.password);
-fs.writeFileSync('/tmp/cat-webpanel-password', basicAuth.password);
+fs.mkdirSync(runtime_dir, { recursive: true, mode: 0o700 });
+fs.chmodSync(runtime_dir, 0o700);
+fs.writeFileSync(path.join(runtime_dir, 'cat-webpanel-password'), basicAuth.password, { mode: 0o600 });
+fs.chmodSync(path.join(runtime_dir, 'cat-webpanel-password'), 0o600);
 
 const cc = new CathookConsole();
 
 var forever = new Forever(app, cc);
+let ipc_connect_generation = 0;
+let ipc_connect_timer = null;
+let shutdown_promise = null;
 
-function connect_ipc_console() {
+function cancel_ipc_console_connect() {
+    ipc_connect_generation++;
+    if (ipc_connect_timer) {
+        clearTimeout(ipc_connect_timer);
+        ipc_connect_timer = null;
+    }
+}
+
+function schedule_ipc_console_connect(generation, delay) {
+    if (generation !== ipc_connect_generation || ipc_connect_timer)
+        return;
+
+    ipc_connect_timer = setTimeout(() => {
+        ipc_connect_timer = null;
+        connect_ipc_console(generation);
+    }, delay);
+    if (ipc_connect_timer.unref)
+        ipc_connect_timer.unref();
+}
+
+function connect_ipc_console(generation) {
+    if (generation !== ipc_connect_generation || shutdown_promise)
+        return;
+
     cc.command('connect', {}, function (data) {
+        if (generation !== ipc_connect_generation || shutdown_promise)
+            return;
         if (data && data.status === 'success') {
             console.log('Connected to cathook IPC server');
             return;
@@ -75,24 +106,32 @@ function connect_ipc_console() {
 
         const reason = data && data.error ? data.error : 'no response';
         console.log(`Failed to connect to cathook IPC server: ${reason}; retrying.`);
-        setTimeout(connect_ipc_console, 1000);
+        schedule_ipc_console_connect(generation, 1000);
     });
 }
 
 cc.on('init', () => {
-    connect_ipc_console();
+    cancel_ipc_console_connect();
+    connect_ipc_console(ipc_connect_generation);
 });
 cc.on('exit', () => {
+    cancel_ipc_console_connect();
     console.log('[!] cathook console disconnected; waiting for automatic respawn');
 });
 
+const direct_commands = new Set(['exec', 'exec_all', 'query', 'connect', 'disconnect', 'squery', 'echo']);
 app.post('/api/direct/:command', function (req, res) {
+    if (!direct_commands.has(req.params.command)) {
+        res.status(404).send({ error: 'unsupported command' });
+        return;
+    }
     cc.command(req.params.command, req.body, function (data) {
         res.send(data);
     });
 });
 
-var server = app.listen(PORT, function () {
+const HOST = process.env.CAT_IPC_BIND || '127.0.0.1';
+var server = app.listen(PORT, HOST, function () {
     console.log("Listening on port", PORT);
 });
 server.on('error', function (error) {
@@ -122,16 +161,23 @@ if (sauce_lock_cleanup_timer.unref)
     sauce_lock_cleanup_timer.unref();
 cleanup_source_engine_locks();
 
-process.on("SIGINT", function () {
-    server.stop();
-    cc.stop();
-    clearInterval(sauce_lock_cleanup_timer);
-    setTimeout(() => process.exit(0), 500).unref();
-});
+async function shutdown() {
+    if (shutdown_promise)
+        return shutdown_promise;
 
-process.on("SIGTERM", function () {
-    server.stop();
-    cc.stop();
+    cancel_ipc_console_connect();
     clearInterval(sauce_lock_cleanup_timer);
-    setTimeout(() => process.exit(0), 500).unref();
-});
+    server.stop();
+    shutdown_promise = Promise.resolve(forever.stop()).finally(() => cc.stop());
+    return shutdown_promise;
+}
+
+function handle_shutdown_signal() {
+    shutdown().then(() => process.exit(0), (error) => {
+        log_process_error('shutdown error', error);
+        process.exit(1);
+    });
+}
+
+process.on("SIGINT", handle_shutdown_signal);
+process.on("SIGTERM", handle_shutdown_signal);

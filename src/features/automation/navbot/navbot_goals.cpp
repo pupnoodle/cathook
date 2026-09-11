@@ -1010,7 +1010,7 @@ bool enemy_close_to_payload_cart(Player* localplayer)
   auto payload_threat_distance_sq = payload_threat_distance * payload_threat_distance;
   auto max_entities = entity_list->get_max_entities();
 
-  for (int entity_index = 1; entity_index <= max_entities; ++entity_index)
+  for (int entity_index = 1; entity_index < max_entities; ++entity_index)
   {
     auto* entity = entity_list->entity_from_index(entity_index);
     if (entity == nullptr || entity->is_dormant() || !is_payload_cart(entity))
@@ -1053,7 +1053,7 @@ goal_candidate choose_payload_goal(const navbot_mesh& mesh, Player* localplayer)
 
   auto local_origin = localplayer->get_origin();
   auto max_entities = entity_list->get_max_entities();
-  for (int entity_index = 1; entity_index <= max_entities; ++entity_index)
+  for (int entity_index = 1; entity_index < max_entities; ++entity_index)
   {
     auto* entity = entity_list->entity_from_index(entity_index);
     if (entity == nullptr || entity->is_dormant())

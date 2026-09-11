@@ -16,12 +16,16 @@ V  o o  V  file: src/core/ipc/ipc_protocol.hpp
 #include <ctime>
 #include <pthread.h>
 #include <sys/types.h>
+#include <cstddef>
+#include <type_traits>
 
 namespace cat_ipc
 {
 
 constexpr const char* ipc_socket_path = "/opt/cathook/ipc/cathook_followbot_server";
 constexpr std::uint32_t cathook_magic_number = 0x0deadca7u;
+constexpr std::uint32_t ipc_protocol_version = 2;
+constexpr std::uint32_t ipc_abi_version = 2;
 constexpr std::uint32_t max_peers = 255;
 constexpr std::uint32_t command_ring_size = max_peers * 2;
 constexpr std::uint32_t command_data_size = 64;
@@ -42,6 +46,11 @@ constexpr std::uint32_t start_moving = 6;
 struct server_data_s
 {
   unsigned int magic_number;
+  std::uint32_t protocol_version;
+  std::uint32_t abi_version;
+  std::uint32_t state_version;
+  pid_t pid;
+  unsigned long starttime;
 };
 
 struct user_data_s
@@ -103,6 +112,8 @@ struct command_s
   unsigned int command_number;
   int target_peer;
   int sender;
+  pid_t sender_pid;
+  unsigned long sender_starttime;
   unsigned long payload_offset;
   unsigned int payload_size;
   unsigned int cmd_type;
@@ -120,6 +131,12 @@ struct shared_state
   server_data_s global_data;
   user_data_s peer_user_data[max_peers];
 };
+
+static_assert(std::is_standard_layout_v<command_s>);
+static_assert(std::is_standard_layout_v<shared_state>);
+static_assert(offsetof(command_s, payload_offset) < sizeof(command_s));
+static_assert(offsetof(command_s, payload_size) < sizeof(command_s));
+static_assert(sizeof(shared_state) > command_pool_size);
 
 }
 

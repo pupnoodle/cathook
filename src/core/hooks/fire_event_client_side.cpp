@@ -63,6 +63,13 @@ bool fire_event_client_side_hook(void* me, GameEvent* event) {
 
   std::string event_name = std::string(raw_event_name);
 
+  if (event_name == "client_beginconnect" || event_name == "client_connect" ||
+      event_name == "client_disconnect" || event_name == "game_newmap") {
+    pickup_item_cache_clear();
+  } else if (global_vars != nullptr) {
+    pickup_item_cache_prune(global_vars->curtime);
+  }
+
   if (event_name == "weapon_fire" || event_name == "player_shoot") {
     Player* shooter = entity_list->get_player_from_id(event->get_int("userid"));
     backtrack::report_shot(shooter);
@@ -95,8 +102,8 @@ bool fire_event_client_side_hook(void* me, GameEvent* event) {
 	  }
 	}
 
-	if (obtained_entity != nullptr)
-	  pickup_item_cache.push_back(PickupItem{obtained_entity->get_origin(), global_vars->curtime + 10});
+	if (obtained_entity != nullptr && global_vars != nullptr)
+	  pickup_item_cache_record(obtained_entity->get_origin(), global_vars->curtime + 10, global_vars->curtime);
       }
     }
   }
