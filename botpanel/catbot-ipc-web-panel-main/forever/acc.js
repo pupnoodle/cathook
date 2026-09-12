@@ -1,10 +1,16 @@
 const fs = require('fs');
 const timestamp = require('time-stamp');
 
+const mafiles = require('./mafile.js');
+
 function account_file_for_generation(generation) {
     if (!generation)
         return "../accounts.txt";
     return `../accounts${generation}.txt`;
+}
+
+function log_mafile(message) {
+    console.log(`[${timestamp('HH:mm:ss')}][Steam Guard] ${message}`);
 }
 
 function parse_accounts(text) {
@@ -30,6 +36,8 @@ function parse_accounts(text) {
 }
 
 module.exports = {
+    account_file_for_generation,
+    parse_accounts,
     get: function get(index, generation) {
         generation = Number.parseInt(generation || 0, 10);
         if (!Number.isFinite(generation) || generation < 0)
@@ -44,7 +52,11 @@ module.exports = {
                 console.log(`[${timestamp('HH:mm:ss')}][Account Database] Index ${index} not in ${account_file} (too few accounts)`);
                 return null;
             }
-            return account_array[index];
+            const account = account_array[index];
+            // Accounts whose Steam Guard is a mobile authenticator need their
+            // .maFile to sign in; accounts without one are unaffected.
+            account.mafile = mafiles.find(account.login, log_mafile);
+            return account;
         }
         catch (error) {
             if (generation > 0 && error && error.code === 'ENOENT') {

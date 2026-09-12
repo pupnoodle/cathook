@@ -10,6 +10,7 @@ const { Tail } = require("tail");
 
 const accounts = require('./acc.js');
 const config = require('./config');
+const steam_auth = require('./steam_auth');
 const steam_id = require('../steam_id');
 
 function positive_integer(value, fallback) {
@@ -51,6 +52,10 @@ const STEAM_TXTMODE_FRAME_INTERVAL_US = Number.isSafeInteger(steam_txtmode_frame
     && steam_txtmode_frame_interval_value <= 10000000
     ? String(steam_txtmode_frame_interval_value)
     : '100000';
+const STEAM_GUARD_AUTO_APPROVE = process.env.CAT_STEAM_GUARD_AUTO_APPROVE !== '0';
+const STEAM_GUARD_POLL_MS = 5000;
+const STEAM_GUARD_ERROR_BACKOFF_MS = 20000;
+const STEAM_GUARD_RATE_LIMIT_BACKOFF_MS = 120000;
 const STEAM_VGUI_TARGET_VERSION = process.env.CAT_STEAM_VGUI_TARGET_VERSION || '1689034492';
 const STEAM_VGUI_REQUIRED = process.env.CAT_STEAM_VGUI === '1' || process.env.CAT_STEAM_VGUI !== '0';
 const SKIP_DBUS_RUN_SESSION = process.env.CAT_SKIP_DBUS_RUN_SESSION === '1'
@@ -1811,6 +1816,7 @@ class Bot extends EventEmitter {
         this.stopped = false;
         this.account = null;
         this.account_generation = 0;
+        this.steam_guard = { mafile: null, busy: false, next_poll: 0, approvals: 0, last_approval: 0, last_error: null };
         this.restarts = 0;
 
         this.log(`Initializing, folder = ${self.name}`);
@@ -3873,6 +3879,7 @@ class Bot extends EventEmitter {
         this.time_steamStatusLog = 0;
         this.time_steam_boot_status_log = 0;
         this.shouldRestart = false;
+        this.steam_guard.next_poll = 0;
         this.steamReadyLogged = false;
         this.steamClientInitialized = false;
         this.steam_quick_exit_count = 0;
@@ -4227,6 +4234,9 @@ class Bot extends EventEmitter {
             this.shouldRestart = false;
             return false;
         }
+        this.steam_guard.mafile = this.account.mafile ? this.account.mafile.file : null;
+        if (this.account.mafile)
+            this.log(`[Steam Guard] ${this.account.login} signs in with maFiles/${this.account.mafile.file}`);
         if (this.state == STATE.NO_ACCOUNT)
             this.state = STATE.INITIALIZED;
         return true;
@@ -4439,6 +4449,49 @@ class Bot extends EventEmitter {
         this.time_steamWorking = this.time_steam_login_timeout_started + timeout;
     }
 
+    poll_steam_guard_approval(time) {
+        const account = this.account;
+        if (!STEAM_GUARD_AUTO_APPROVE || !account || !account.mafile || this.steam_guard.busy)
+            return;
+        if (time < this.steam_guard.next_poll || time < this.time_steam_launch_started + STEAM_GUARD_POLL_MS)
+            return;
+
+        this.steam_guard.busy = true;
+        this.steam_guard.next_poll = time + STEAM_GUARD_POLL_MS;
+        steam_auth.session_for(account).approve_pending_client_logins()
+            .then((result) => {
+                for (const session of result.approved) {
+                    this.steam_guard.approvals++;
+                    this.steam_guard.last_approval = Date.now();
+                    this.log(`[Steam Guard] Confirmed Steam sign-in for ${account.login} by ${session.method}: client_id=${session.client_id} ip=${session.ip} location=${session.location} device=${session.device}`);
+                }
+                for (const session of result.refused)
+                    this.log(`[WARN][Steam Guard] Left a sign-in for ${account.login} unconfirmed: ${session.reason}. client_id=${session.client_id} ip=${session.ip} location=${session.location} device=${session.device}`);
+                this.steam_guard.last_error = null;
+            })
+            .catch((error) => {
+                const rate_limited = error && error.eresult === 84;
+                this.steam_guard.next_poll = Date.now()
+                    + (rate_limited ? STEAM_GUARD_RATE_LIMIT_BACKOFF_MS : STEAM_GUARD_ERROR_BACKOFF_MS);
+                this.steam_guard.last_error = error.message;
+                this.log(`[ERROR][Steam Guard] ${account.login}: ${error.message}`);
+            })
+            .finally(() => {
+                this.steam_guard.busy = false;
+            });
+    }
+
+    steam_guard_status() {
+        if (!this.steam_guard.mafile)
+            return null;
+        return {
+            mafile: this.steam_guard.mafile,
+            approvals: this.steam_guard.approvals,
+            last_approval: this.steam_guard.last_approval,
+            last_error: this.steam_guard.last_error
+        };
+    }
+
     // Apply current state
     update(processes, children_by_parent) {
         var time = Date.now();
@@ -4463,6 +4516,7 @@ class Bot extends EventEmitter {
                 this.warnedBotHomeLost = false;
                 if (!this.isSteamWorking) {
                     this.refresh_steam_login_timeout(time);
+                    this.poll_steam_guard_approval(time);
                     const scan_steam_logs = !this.time_steam_log_scan || time > this.time_steam_log_scan;
                     if (scan_steam_logs) {
                         this.time_steam_log_scan = time + 2000;

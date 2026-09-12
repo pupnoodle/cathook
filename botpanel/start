@@ -8,6 +8,7 @@ start_lock="/tmp/catbot-panel-start.lock"
 ipc_server_root="$setup_root/catbot-ipc-server-main"
 web_panel_root="$setup_root/catbot-ipc-web-panel-main"
 accounts_file="$setup_root/accounts.txt"
+mafiles_dir="$setup_root/maFiles"
 user_instances_dir="$setup_root/user_instances"
 install_root="${CATHOOK_ROOT:-/opt/cathook}"
 requested_visible_windows="${CAT_VISIBLE_WINDOWS:-0}"
@@ -844,6 +845,13 @@ EOF
     echo "Created $accounts_file"
 }
 
+ensure_mafiles_dir() {
+    [ -d "$mafiles_dir" ] && return
+    mkdir -p "$mafiles_dir"
+    chmod 700 "$mafiles_dir" 2>/dev/null || true
+    echo "Created $mafiles_dir (drop Steam Desktop Authenticator .maFile exports here)"
+}
+
 ensure_user_instances() {
     mkdir -p "$user_instances_dir"
 }
@@ -1208,6 +1216,7 @@ print_ready() {
     echo "Launcher: $launcher_version"
     echo "URL: http://127.0.0.1:$port"
     echo "Accounts: $accounts_file"
+    echo "maFiles: $mafiles_dir"
     echo "User instances: $user_instances_dir"
     echo "Display: $display"
     echo "Visible windows: $visible_windows"
@@ -1453,6 +1462,7 @@ install_runtime
 ensure_node_dependencies
 ensure_web_bundle
 ensure_accounts_file
+ensure_mafiles_dir
 ensure_user_instances
 ensure_firejail_config
 ensure_user_namespaces

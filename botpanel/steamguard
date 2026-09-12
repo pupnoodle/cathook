@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$script_dir/catbot-ipc-web-panel-main"
+
+node_path="$(command -v node || command -v nodejs || true)"
+if [ -z "$node_path" ]; then
+    echo "node or nodejs is required." >&2
+    exit 1
+fi
+
+exec "$node_path" forever/steamguard_cli.js "$@"

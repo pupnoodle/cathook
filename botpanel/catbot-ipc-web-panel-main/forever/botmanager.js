@@ -354,7 +354,8 @@ class BotManager {
                 steamid32: steamid32,
                 steamid64: steamid64,
                 profile_url: steamid64 ? `https://steamcommunity.com/profiles/${steamid64}` : null,
-                ban_tracker: this.ban_tracker.status_for_bot(bot)
+                ban_tracker: this.ban_tracker.status_for_bot(bot),
+                steam_guard: bot.steam_guard_status()
             };
         }
 
