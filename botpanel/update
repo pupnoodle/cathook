@@ -315,6 +315,12 @@ build_web_panel() {
 prepare_botpanel_state() {
     mkdir -p "$script_dir/user_instances"
 
+    if [ ! -d "$script_dir/maFiles" ]; then
+        mkdir -p "$script_dir/maFiles"
+        chmod 700 "$script_dir/maFiles" 2>/dev/null || true
+        echo "Created $script_dir/maFiles"
+    fi
+
     if [ ! -f "$script_dir/accounts.txt" ]; then
         cat > "$script_dir/accounts.txt" <<'EOF'
 
