@@ -1534,7 +1534,7 @@ bool initialize_game_runtime() {
   error_assert(client_mode_interface == nullptr, "ClientModeShared is missing");
 
   unsigned long hud_update = (unsigned long)client_vtable[11];
-  const auto global_vars_storage = resolve_checked_rip_relative(hud_update + 0x13, 3, 7, {0x48, 0x8B, 0x0D});
+  const auto global_vars_storage = resolve_checked_rip_relative(hud_update + 0x13, 3, 7, {0x48, 0x8B, 0x05});
   global_vars = global_vars_storage != 0 ? *reinterpret_cast<GlobalVars**>(global_vars_storage) : nullptr;
   error_assert(global_vars == nullptr, "CGlobalVars is missing");
 
