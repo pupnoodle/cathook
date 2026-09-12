@@ -15,45 +15,6 @@ USERNAME:PASSWORD
 USERNAME:PASSWORD
 USERNAME:PASSWORD
 
-# Steam Guard (.maFile) accounts
-
-Accounts whose Steam Guard is a mobile authenticator cannot be signed in with a
-password alone, and the bots' Steam windows are headless, so nobody can type a
-code into them. Copy the Steam Desktop Authenticator exports into
-`botpanel/maFiles` and the panel confirms each bot's pending sign-in the way the
-Steam mobile app does, signing the confirmation with the maFile's shared secret:
-
-```
-botpanel/maFiles/76561198012345678.maFile
-botpanel/maFiles/manifest.json          # only if SDA encrypted the exports
-```
-
-- Accounts are matched by the `account_name` stored inside each maFile, so file
-  names do not matter and `accounts.txt` keeps its `USERNAME:PASSWORD` format.
-  Accounts without a maFile are unaffected.
-- SDA-encrypted exports need the passkey: `CAT_MAFILE_PASSKEY=... ./botpanel/start`,
-  or point `CAT_MAFILE_PASSKEY_FILE` at a file holding it.
-- maFiles can be added or replaced while the panel runs; it rescans every few seconds.
-- Only Steam client sign-ins are confirmed, and only while that bot is signing in.
-  A sign-in Steam reports from a different location than the panel host is left
-  alone; set `CAT_STEAM_GUARD_ALLOW_LOCATION_MISMATCH=1` if bots leave through a
-  different egress IP than the panel.
-- Turn the whole thing off with `CAT_STEAM_GUARD_AUTO_APPROVE=0`, or point it
-  elsewhere with `CAT_MAFILES_DIR=/path/to/maFiles`.
-- The panel's bot table gains a Steam Guard column showing which bots use a maFile
-  and how many sign-ins were confirmed.
-
-`./botpanel/steamguard` reports and exercises the pairing without starting bots:
-
-```sh
-./botpanel/steamguard list             # accounts <-> maFiles, token state, problems
-./botpanel/steamguard code USERNAME    # current Steam Guard code
-./botpanel/steamguard approve USERNAME # confirm pending sign-ins, watching for 90s
-```
-
-`botpanel/accounts.txt` and `botpanel/maFiles` are git-ignored. Treat a maFile
-like a password: it can generate that account's Steam Guard codes.
-
 # Cat botpanel launcher
 
 `./botpanel/start` asks which headless bot display backend to use each time

@@ -495,20 +495,6 @@ function updateIPCData(row, id, data, state, ipc_observed_at) {
 	}
 }
 
-function update_steam_guard_data(row, guard) {
-	const cell = row.find('.client-steam-guard');
-	if (!guard) {
-		cell.text('N/A').attr('title', 'No maFile for this account');
-		return;
-	}
-	if (guard.last_error) {
-		cell.text('Error').attr('title', guard.last_error);
-		return;
-	}
-	const confirmed = guard.last_approval ? ', last confirmed ' + new Date(guard.last_approval).toLocaleTimeString() : '';
-	cell.text(guard.approvals ? 'Confirmed ' + guard.approvals : 'maFile').attr('title', guard.mafile + confirmed);
-}
-
 function updateUserData(bot, data) {
 	var row = bot_rows[bot];
 	if (!row || !row.length) {
@@ -542,7 +528,6 @@ function updateUserData(bot, data) {
 		clearIPCId(row);
 		row.find('.active').text('N/A');
 	}
-	update_steam_guard_data(row, data.steam_guard);
 	update_ban_tracker_data(row, data.ban_tracker);
 	updateIPCData(row, has_ipc ? ipc_id : -1, has_ipc ? data.ipc : null, data.state, data.ipc_observed_at);
 }
@@ -563,7 +548,6 @@ function addClientRow(botid, data) {
 	row.append($('<td></td>').attr('class', 'client-bot-name').text(botid));
 	row.append($('<td></td>').attr('class', 'client-state').text(STATE[data.state] || 'PENDING'));
 	row.append($('<td></td>').attr('class', 'client-steam').text('N/A'));
-	row.append($('<td></td>').attr('class', 'client-steam-guard').text('N/A'));
 	row.append($('<td></td>').attr('class', 'client-ban-tracker active').text('N/A'));
     row.append($('<td></td>').attr('class', 'client-uptime-total active').text('N/A'));
     row.append($('<td></td>').attr('class', 'client-pid active').text('N/A'));
