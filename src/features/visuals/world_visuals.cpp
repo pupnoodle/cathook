@@ -61,18 +61,43 @@ std::unordered_map<Material*, material_restore_state> original_materials{};
   return engine != nullptr && engine->is_drawing_loading_image();
 }
 
-[[nodiscard]] std::string lower(std::string_view value)
+[[nodiscard]] bool ascii_iequals_prefix(const char* value, const char* prefix)
 {
-  std::string result{value};
-  std::ranges::transform(result, result.begin(), [](unsigned char character) {
-    return static_cast<char>(std::tolower(character));
-  });
-  return result;
+  if (value == nullptr || prefix == nullptr) {
+    return false;
+  }
+  while (*prefix != '\0') {
+    const unsigned char left = static_cast<unsigned char>(*value++);
+    const unsigned char right = static_cast<unsigned char>(*prefix++);
+    if (left == 0 || std::tolower(left) != std::tolower(right)) {
+      return false;
+    }
+  }
+  return true;
 }
 
-[[nodiscard]] bool has_prefix(std::string_view value, std::string_view prefix)
+[[nodiscard]] bool ascii_icontains(const char* value, const char* needle)
 {
-  return value.size() >= prefix.size() && value.substr(0, prefix.size()) == prefix;
+  if (value == nullptr || needle == nullptr || *needle == '\0') {
+    return false;
+  }
+  for (const char* start = value; *start != '\0'; ++start) {
+    const char* left = start;
+    const char* right = needle;
+    while (*right != '\0') {
+      const unsigned char a = static_cast<unsigned char>(*left);
+      const unsigned char b = static_cast<unsigned char>(*right);
+      if (a == 0 || std::tolower(a) != std::tolower(b)) {
+        break;
+      }
+      ++left;
+      ++right;
+    }
+    if (*right == '\0') {
+      return true;
+    }
+  }
+  return false;
 }
 
 void set_material_color(Material* material, const RGBA_float& color)
@@ -116,16 +141,16 @@ void apply_materials(const uint32_t mask)
     }
     if (material->is_error_material() || !material->is_precached()) continue;
 
-    const std::string group = lower(material->get_texture_group_name() != nullptr ? material->get_texture_group_name() : "");
-    const std::string name = lower(material->get_name() != nullptr ? material->get_name() : "");
+    const char* group = material->get_texture_group_name() != nullptr ? material->get_texture_group_name() : "";
+    const char* name = material->get_name() != nullptr ? material->get_name() : "";
     const RGBA_float* replacement = nullptr;
-    if (has_prefix(group, "world") && name.find("sky") == std::string::npos && (mask & Visuals::modulation_world)) {
+    if (ascii_iequals_prefix(group, "world") && !ascii_icontains(name, "sky") && (mask & Visuals::modulation_world)) {
       replacement = &world;
-    } else if ((has_prefix(group, "sky") || name.find("sky") != std::string::npos) && (mask & Visuals::modulation_sky)) {
+    } else if ((ascii_iequals_prefix(group, "sky") || ascii_icontains(name, "sky")) && (mask & Visuals::modulation_sky)) {
       replacement = &sky;
-    } else if (group.find("static prop") != std::string::npos || group.find("staticprop") != std::string::npos) {
+    } else if (ascii_icontains(group, "static prop") || ascii_icontains(group, "staticprop")) {
       if (mask & Visuals::modulation_prop) replacement = &prop;
-    } else if (group.find("particle") != std::string::npos && (mask & Visuals::modulation_particle)) {
+    } else if (ascii_icontains(group, "particle") && (mask & Visuals::modulation_particle)) {
       replacement = &particle;
     }
     if (replacement == nullptr) continue;
@@ -143,11 +168,14 @@ void apply_materials(const uint32_t mask)
 void apply_fog()
 {
   if (material_system == nullptr) return;
+  const bool enabled = (config.visuals.world.modulation_mask & Visuals::modulation_fog) != 0 && !clean_render();
+  if (!enabled && !fog_state_valid) {
+    return;
+  }
+
   RenderContext* context = material_system->get_render_context();
   if (context == nullptr) return;
   context->begin_render();
-
-  const bool enabled = (config.visuals.world.modulation_mask & Visuals::modulation_fog) != 0 && !clean_render();
   if (enabled) {
     float start = 0.0f;
     float end = 0.0f;
@@ -259,6 +287,7 @@ const char* replacement_for(const char* original)
 
 void* particle_create_hook(void* instance, const char* name, int attachment, const char* attachment_name)
 {
+  CATHOOK_HOOK_GUARD();
   if (particle_create_original == nullptr) return nullptr;
   if (clean_render()) return particle_create_original(instance, name, attachment, attachment_name);
   const char* replacement = replacement_for(name);
@@ -282,10 +311,14 @@ void on_render_start()
   const char* level = engine != nullptr ? engine->get_level_name() : nullptr;
   const std::string current_level = level != nullptr ? level : "";
   const auto& world = config.visuals.world;
+  const bool level_changed = last_state.valid && last_state.level != current_level;
   const bool changed = !last_state.valid || last_state.mask != world.modulation_mask ||
     !same_color(last_state.world, world.world_color) || !same_color(last_state.sky, world.sky_color) ||
     !same_color(last_state.prop, world.prop_color) || !same_color(last_state.particle, world.particle_color) ||
-    !same_color(last_state.fog, world.fog_color) || last_state.level != current_level;
+    !same_color(last_state.fog, world.fog_color) || level_changed;
+  if (level_changed) {
+    original_materials.clear();
+  }
   const bool refresh_materials = changed || ((++maintenance_tick % 30u) == 0u && world.modulation_mask != 0);
   if (refresh_materials && !clean_render()) {
     apply_materials(world.modulation_mask);

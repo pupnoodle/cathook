@@ -25,16 +25,10 @@ namespace navbot
 namespace
 {
 
-float distance_sq_2d_follow(const Vec3& left, const Vec3& right)
+bool crumb_z_within_reach(float origin_z, float target_z)
 {
-  auto dx = left.x - right.x;
-  auto dy = left.y - right.y;
-  return dx * dx + dy * dy;
-}
-
-float vertical_distance(const Vec3& left, const Vec3& right)
-{
-  return std::fabs(left.z - right.z);
+  return target_z - origin_z <= crumb_reach_up_tolerance
+    && origin_z - target_z <= crumb_reach_drop_tolerance;
 }
 
 float crumb_reach_distance_for(const path_result& path, size_t crumb_index)
@@ -61,7 +55,7 @@ bool is_crumb_reached(const path_result& path, size_t crumb_index, const Vec3& o
 
   const auto& target = path.crumbs[crumb_index].world;
   const auto reach_distance = crumb_reach_distance_for(path, crumb_index);
-  if (distance_sq_2d_follow(origin, target) > reach_distance * reach_distance)
+  if (distance_squared_2d(origin, target) > reach_distance * reach_distance)
   {
     return false;
   }
@@ -71,7 +65,7 @@ bool is_crumb_reached(const path_result& path, size_t crumb_index, const Vec3& o
     return true;
   }
 
-  return vertical_distance(origin, target) <= crumb_reach_vertical_tolerance;
+  return crumb_z_within_reach(origin.z, target.z);
 }
 
 float distance_sq_to_segment_2d(const Vec3& point, const Vec3& start, const Vec3& end, float* fraction_out)
@@ -85,7 +79,7 @@ float distance_sq_to_segment_2d(const Vec3& point, const Vec3& start, const Vec3
     {
       *fraction_out = 0.0f;
     }
-    return distance_sq_2d_follow(point, start);
+    return distance_squared_2d(point, start);
   }
 
   auto point_x = point.x - start.x;
@@ -102,7 +96,7 @@ float distance_sq_to_segment_2d(const Vec3& point, const Vec3& start, const Vec3
     start.y + segment_y * fraction,
     start.z + (end.z - start.z) * fraction
   };
-  return distance_sq_2d_follow(point, closest);
+  return distance_squared_2d(point, closest);
 }
 
 float segment_z_at_fraction(const Vec3& start, const Vec3& end, float fraction)
@@ -164,9 +158,7 @@ bool trace_navigation_ray(Player* localplayer, const Vec3& start, const Vec3& en
     return true;
   }
 
-  if (vertical_delta > player_step_height
-    && vertical_delta <= walkable_ramp_height
-    && planar_distance >= walkable_ramp_run)
+  if (vertical_delta > player_step_height && vertical_delta <= planar_distance)
   {
     return true;
   }
@@ -183,7 +175,13 @@ bool trace_navigation_ray(Player* localplayer, const Vec3& start, const Vec3& en
   auto maxs = localplayer->get_player_maxs(localplayer->is_ducking());
   auto trace = trace_t{};
   engine_trace->trace_hull(&trace_start, &trace_end, &mins, &maxs, MASK_PLAYERSOLID, &trace);
-  return !did_hit_trace(trace);
+  if (!did_hit_trace(trace))
+  {
+    return true;
+  }
+
+  auto* hit_entity = static_cast<Entity*>(trace.entity);
+  return hit_entity != nullptr && hit_entity->get_class_id() == class_id::PLAYER;
 }
 
 bool is_transition_passable(const path_result& path, size_t crumb_index, Player* localplayer)
@@ -216,7 +214,7 @@ bool is_between_crumbs(const path_result& path, size_t crumb_index, const Vec3& 
   }
 
   const auto segment_z = segment_z_at_fraction(start, end, fraction);
-  return std::fabs(origin.z - segment_z) <= crumb_reach_vertical_tolerance;
+  return crumb_z_within_reach(origin.z, segment_z);
 }
 
 bool navbot_requires_jump(Player* localplayer, const Vec3& target)
@@ -338,11 +336,16 @@ void apply_walk_towards(Player* localplayer, user_cmd* user_cmd, const Vec3& tar
   user_cmd->forwardmove = std::cos(yaw_delta) * move_speed;
   user_cmd->sidemove = -std::sin(yaw_delta) * move_speed;
 
+  const auto on_ground = (localplayer->get_flags() & FL_ONGROUND) != 0;
   if (delta.z > jump_trigger_height
     && planar_distance <= jump_trigger_run
-    && (localplayer->get_flags() & FL_ONGROUND) != 0)
+    && on_ground)
   {
     user_cmd->buttons |= IN_JUMP;
+  }
+  else if (!on_ground && delta.z > player_step_height)
+  {
+    user_cmd->buttons |= IN_DUCK;
   }
 }
 
@@ -449,7 +452,7 @@ size_t navbot_follow::find_skip_ahead_crumb(Player* localplayer, const Vec3& loc
     }
 
     const auto segment_z = segment_z_at_fraction(start, end, fraction);
-    if (std::fabs(local_origin.z - segment_z) > crumb_reach_vertical_tolerance)
+    if (!crumb_z_within_reach(local_origin.z, segment_z))
     {
       continue;
     }
@@ -678,8 +681,8 @@ follower_tick_result navbot_follow::tick(Player* localplayer, user_cmd* user_cmd
   {
     auto current_target = active_path_.crumbs[current_crumb_index_].world;
     auto next_target = active_path_.crumbs[current_crumb_index_ + 1].world;
-    auto current_distance_sq = distance_sq_2d_follow(local_origin, current_target);
-    auto next_distance_sq = distance_sq_2d_follow(local_origin, next_target);
+    auto current_distance_sq = distance_squared_2d(local_origin, current_target);
+    auto next_distance_sq = distance_squared_2d(local_origin, next_target);
     if (next_distance_sq + 256.0f < current_distance_sq)
     {
       advance_to_crumb(current_crumb_index_ + 1, current_time);
@@ -692,7 +695,7 @@ follower_tick_result navbot_follow::tick(Player* localplayer, user_cmd* user_cmd
   }
 
   auto current_target = active_path_.crumbs[current_crumb_index_].world;
-  auto current_distance_sq = distance_sq_2d_follow(local_origin, current_target);
+  auto current_distance_sq = distance_squared_2d(local_origin, current_target);
   const auto velocity = localplayer->get_velocity();
   const auto planar_speed = std::sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
   const auto stuck_between_crumbs = planar_speed < stuck_progress_speed_threshold
@@ -707,6 +710,12 @@ follower_tick_result navbot_follow::tick(Player* localplayer, user_cmd* user_cmd
       fill_failure_result(result, follower_failure_reason::hazard_intersection, active_path_, current_crumb_index_);
       return result;
     }
+  }
+
+  const auto on_ground = (localplayer->get_flags() & FL_ONGROUND) != 0;
+  if (!on_ground)
+  {
+    last_progress_time_ = current_time;
   }
 
   const auto making_meaningful_progress = planar_speed >= stuck_progress_speed_threshold;

@@ -1,6 +1,7 @@
 #ifndef VISUAL_GROUPS_HPP
 #define VISUAL_GROUPS_HPP
 #include "features/menu/config.hpp"
+#include <functional>
 #include <memory>
 
 class Entity;
@@ -40,6 +41,7 @@ void end_fake_angle_model();
 void begin_viewmodel_model();
 void end_viewmodel_model();
 [[nodiscard]] visual_group_match group_for_entity(Entity* entity, bool models = true);
+void visit_screen_entities(const std::function<void(Entity*, const visual_group_match&)>& fn);
 [[nodiscard]] bool groups_active();
 [[nodiscard]] bool groups_need_screen_overlay();
 [[nodiscard]] bool groups_need_model_effects();

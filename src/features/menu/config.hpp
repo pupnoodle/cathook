@@ -17,6 +17,7 @@ V  o o  V  file: src/features/menu/config.hpp
 #include <SDL2/SDL_timer.h>
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include "games/tf2/sdk/entities/player.hpp"
 #include "games/tf2/sdk/aim_hitboxes.hpp"
@@ -277,7 +278,7 @@ struct chams_settings {
   std::vector<chams_layer> occluded{};
 
   [[nodiscard]] bool active() const {
-    return visible != std::vector<chams_layer>{chams_layer{}} || !occluded.empty();
+    return !occluded.empty() || visible.size() != 1 || !(visible[0] == chams_layer{});
   }
 };
 
@@ -586,6 +587,30 @@ struct Visuals {
 
   int skybox_changer_index = 0;
 
+  struct SkinChanger {
+    struct Skin {
+      int paintkit = 0;
+      float wear = 0.0f;
+      int seed = 0;
+      int quality = -1;
+      bool festive = false;
+      bool australium = false;
+      int killstreak = 0;
+      int sheen = 0;
+      int unusual = 0;
+
+      bool empty() const {
+        return paintkit == 0 && wear == 0.0f && seed == 0 && quality < 0 &&
+            !festive && !australium && killstreak == 0 && sheen == 0 && unusual == 0;
+      }
+    };
+
+    bool enabled = false;
+    bool reskin = true;
+    Skin defaults{};
+    std::unordered_map<int, Skin> weapons;
+  } skin_changer;
+
   bool override_fov = false;
   float custom_fov = 90;
 
@@ -723,6 +748,7 @@ struct Misc {
     bool anti_aim_anti_overlap = true;
     bool antiwarp = true;
     bool equip_region_unlock = false;
+    bool anti_cheat_compat = false;
     bool ping_reducer = false;
     int ping_target = 60;
     bool no_engine_sleep = false;
@@ -820,6 +846,13 @@ struct Misc {
       AT_TARGET = 3
     };
 
+    enum class mvm_chat_command_mode {
+      OFF = 0,
+      PARTY = 1,
+      FRIENDS = 2,
+      ROLE = 3
+    };
+
     enum class voice_command_spam_mode {
       off = 0,
       random,
@@ -852,9 +885,21 @@ struct Misc {
     bool anti_autobalance = false;
     bool anti_motd = false;
     bool anti_motd_dont_close_during_warmup = false;
+    enum auto_vote_flags : uint32_t {
+      auto_vote_defend = 1u << 0,
+      auto_vote_assist = 1u << 1,
+      auto_vote_kick = 1u << 2,
+      auto_vote_kick_all = 1u << 3
+    };
+
     bool auto_report = false;
     bool auto_vote_map = false;
     int auto_vote_map_option = 2;
+    uint32_t auto_vote = 0;
+    bool auto_vote_delay = false;
+    float auto_vote_delay_min = 3.0f;
+    float auto_vote_delay_max = 10.0f;
+    bool killstreak = false;
     bool noisemaker_spam = false;
     voice_command_spam_mode voice_command_spam = voice_command_spam_mode::off;
     bool micspam = false;
@@ -890,6 +935,18 @@ struct Misc {
     float autotaunt_chance = 100.0f;
     float autotaunt_safety_distance = 1000.0f;
     int autotaunt_weapon_slot = 0;
+    bool autoparty = false;
+    int autoparty_max_party_size = 6;
+    std::string autoparty_party_hosts;
+    bool autoparty_kick_rage = true;
+    bool autoparty_auto_leave = false;
+    bool autoparty_auto_lock = true;
+    bool autoparty_auto_unlock = true;
+    bool autoparty_log = true;
+    bool autoparty_message_kicks = true;
+    bool autoparty_ipc_mode = false;
+    int autoparty_ipc_count = 0;
+    int autoparty_run_frequency = 60;
     chatspam_source chatspam = chatspam_source::OFF;
     bool chatspam_random = false;
     bool chatspam_team = false;
@@ -908,6 +965,8 @@ struct Misc {
     int mvm_buybot_max_cash = 15000;
     bool mvm_buybot_auto_class = false;
     tf_class mvm_buybot_class = tf_class::HEAVYWEAPONS;
+    mvm_chat_command_mode mvm_chat_commands = mvm_chat_command_mode::OFF;
+    int mvm_chat_commands_role = -4;
     bool medic_autoheal = false;
     bool medic_autovacc = false;
     bool medic_autouber = false;
@@ -942,6 +1001,8 @@ struct Misc {
     std::uint32_t bootcamp_mission_bits = 0;
     bool stalker_enabled = false;
     int stalker_interval = 15;
+    float stalker_overlay_x = 24.0f;
+    float stalker_overlay_y = 420.0f;
     bool navbot_enabled = false;
     navbot_mode navbot_behavior = navbot_mode::DEFAULT;
     bool navbot_draw_path = true;
@@ -973,6 +1034,28 @@ struct Misc {
     float followbot_abandon_distance = 1500.0f;
     float followbot_nav_abandon_distance = 1500.0f;
   } automation;
+
+  struct CheatDetection {
+    enum method_flags : uint32_t {
+      method_invalid_pitch = 1u << 0,
+      method_packet_choking = 1u << 1,
+      method_aim_flick = 1u << 2,
+      method_duck_speed = 1u << 3,
+      method_lagcomp_abuse = 1u << 4,
+      method_crit_manipulation = 1u << 5
+    };
+
+    uint32_t methods = 0;
+    int detections_required = 3;
+    float min_flick = 20.0f;
+    float max_noise = 5.0f;
+    int min_choking_ticks = 14;
+    int lagcomp_min_delta = 10;
+    float lagcomp_window = 1.0f;
+    int lagcomp_burst_count = 3;
+    int crit_window = 20;
+    float crit_threshold = 80.0f;
+  } cheat_detection;
 
   struct Menu {
     bool enabled = true;

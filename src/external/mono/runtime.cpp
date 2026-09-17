@@ -50,6 +50,7 @@ void runtime::abandon()
 		return;
 	}
 
+	ImGui::DestroyContext();
 	m_backend = {};
 	m_initialized = false;
 }

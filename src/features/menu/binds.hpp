@@ -334,16 +334,6 @@ inline const char* condition_label(const bind_condition condition)
   return "key";
 }
 
-inline const char* visibility_label(const bind_visibility visibility)
-{
-  switch (visibility) {
-  case bind_visibility::always: return "always";
-  case bind_visibility::while_active: return "while active";
-  case bind_visibility::hidden: return "hidden";
-  }
-  return "always";
-}
-
 inline const char* mode_label(const bind_key_mode mode)
 {
   switch (mode) {
@@ -923,6 +913,10 @@ inline void handle_input(SDL_Event* event)
 inline void run()
 {
   std::lock_guard lock{ bind_mutex() };
+
+  if (targets().empty() && entries().empty()) {
+    return;
+  }
 
   if (disabled()) {
     for (target_entry& target : targets()) {

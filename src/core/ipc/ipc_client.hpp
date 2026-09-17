@@ -13,6 +13,7 @@ V  o o  V  file: src/core/ipc/ipc_client.hpp
 #define CAT_IPC_CLIENT_HPP
 
 #include <cstdint>
+#include <vector>
 
 class GameEvent;
 
@@ -33,6 +34,7 @@ void shutdown();
 [[nodiscard]] bool is_excess_ipc_bot_on_current_server(int max_bots);
 [[nodiscard]] int local_ipc_peer_count_on_current_server();
 [[nodiscard]] bool is_first_local_ipc_peer_on_current_server();
+[[nodiscard]] std::vector<std::uint32_t> ipc_peer_friend_ids_by_injection_time(int max_count);
 
 }
 

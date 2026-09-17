@@ -9,6 +9,7 @@ V  o o  V  file: src/core/hooks/host_is_secure_server_allowed.cpp
   || (___\====
 */
 #include <cstdint>
+#include "core/memory/resolve.hpp"
 #include "core/shared/sigs.hpp"
 #include "features/menu/config.hpp"
 #include "libsigscan/libsigscan.h"
@@ -40,8 +41,7 @@ bool* get_allow_secure_servers_flag()
     return nullptr;
   }
 
-  const auto displacement = *reinterpret_cast<std::int32_t*>(match + 3);
-  allow_secure_servers = reinterpret_cast<bool*>(match + 7 + displacement);
+  allow_secure_servers = static_cast<bool*>(cathook::core::memory::resolve_lea_rip(match));
   return allow_secure_servers;
 }
 

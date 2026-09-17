@@ -8,10 +8,8 @@ V  o o  V  file: src/core/hooks/team_menu_show_panel.cpp
   |     \     )
   || (___\====
 */
-#include <unistd.h>
 #include "features/menu/config.hpp"
 #include "games/tf2/sdk/interfaces/engine.hpp"
-#include "core/print.hpp"
 
 void (*team_menu_show_panel_original)(void*, bool) = NULL;
 

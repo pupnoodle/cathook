@@ -6,7 +6,6 @@
 
 class Player;
 class Weapon;
-struct aimbot_candidate;
 struct user_cmd;
 
 namespace backtrack
@@ -135,13 +134,9 @@ void mark_stale(Player* player);
 [[nodiscard]] backtrack_record_view valid_records(Player* player);
 [[nodiscard]] backtrack_record_view visual_records(Player* player);
 [[nodiscard]] bool is_record_valid(const backtrack_record& record, Player* player);
-[[nodiscard]] bool selected_position(Vec3* position);
+[[nodiscard]] float record_timing_score(const backtrack_timing& timing, const backtrack_record& record);
+[[nodiscard]] float record_capture_gap(const backtrack_record& record);
 void backtrack_to_crosshair(user_cmd* user_cmd, Player* localplayer, Weapon* weapon);
-[[nodiscard]] aimbot_candidate find_hitscan_candidate(Player* localplayer,
-  Weapon* weapon,
-  Player* player,
-  const Vec3& original_view_angles,
-  bool preferred);
 [[nodiscard]] bool dormant_ghost_valid(Player* player);
 [[nodiscard]] bool dormant_origin(Player* player, Vec3* out);
 [[nodiscard]] bool dormant_can_shoot(Player* player);

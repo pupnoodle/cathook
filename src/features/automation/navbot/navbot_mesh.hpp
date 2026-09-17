@@ -79,6 +79,7 @@ struct nav_crumb_edge
   nav_edge_id nav_edge{};
   float cost = 0.0f;
   bool is_dropdown = false;
+  bool requires_jump = false;
   bool has_dropdown_waypoint = false;
   Vec3 dropdown_approach{};
   Vec3 dropdown_landing{};

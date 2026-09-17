@@ -9,6 +9,7 @@ V  o o  V  file: src/features/movement/bhop/bhop.cpp
   || (___\====
 */
 #include "features/movement/bhop/bhop.hpp"
+#include "features/automation/anti_cheat_compat/anti_cheat_compat.hpp"
 #include "features/menu/config.hpp"
 #include "core/math/math.hpp"
 #include "games/tf2/sdk/interfaces/client.hpp"
@@ -31,6 +32,16 @@ struct break_jump_state {
 };
 
 break_jump_state g_break_jump_state{};
+
+struct auto_jump_state {
+  bool jump = false;
+  bool grounded = false;
+  bool attempted = false;
+};
+
+auto_jump_state g_auto_jump_state{};
+bool g_edge_jump_was_grounded = false;
+bool g_reverse_jump_last_attack2 = false;
 
 struct edgebug_solution {
   bool valid = false;
@@ -62,6 +73,9 @@ struct movement_state_guard {
   float fall_velocity = 0.0f;
   int tickbase = 0;
   user_cmd* current_command = nullptr;
+  int move_type = 0;
+  int water_level = 0;
+  Player* previous_host = nullptr;
   float curtime = 0.0f;
   float frametime = 0.0f;
   int tickcount = 0;
@@ -77,7 +91,10 @@ struct movement_state_guard {
       ducking(value->get_ducking_state()), in_duck_jump(value->get_in_duck_jump()),
       duck_time(value->get_duck_time()), duck_jump_time(value->get_duck_jump_time()),
       fall_velocity(value->get_fall_velocity()), tickbase(value->get_tickbase()),
-      current_command(value->get_current_cmd()), curtime(global_vars->curtime),
+      current_command(value->get_current_cmd()), move_type(value->get_move_type()),
+      water_level(value->get_water_level()),
+      previous_host(move_helper != nullptr ? move_helper->get_host() : nullptr),
+      curtime(global_vars->curtime),
       frametime(global_vars->frametime), tickcount(global_vars->tickcount),
       prediction_in_prediction(prediction->in_prediction),
       prediction_first_time_predicted(prediction->first_time_predicted) {}
@@ -105,7 +122,9 @@ struct movement_state_guard {
     player->set_fall_velocity(fall_velocity);
     player->set_tickbase(tickbase);
     player->set_current_cmd(current_command);
-    move_helper->set_host(nullptr);
+    player->set_move_type(move_type);
+    player->set_water_level(water_level);
+    move_helper->set_host(previous_host);
     global_vars->curtime = curtime;
     global_vars->frametime = frametime;
     global_vars->tickcount = tickcount;
@@ -124,11 +143,6 @@ struct movement_state_guard {
   return azimuth_to_signed(yaw);
 }
 
-[[nodiscard]] float vector_yaw(const Vec3& vector)
-{
-  return normalize_2d_yaw(std::atan2(vector.y, vector.x) * radpi);
-}
-
 [[nodiscard]] float vector_length_2d(const Vec3& vector)
 {
   return std::sqrt((vector.x * vector.x) + (vector.y * vector.y));
@@ -140,43 +154,40 @@ void auto_jump(user_cmd* user_cmd, Player* localplayer)
     return;
   }
 
-  static bool static_jump = false;
-  static bool static_grounded = false;
-  static bool last_attempted = false;
+  const bool last_jump = g_auto_jump_state.jump;
+  const bool last_grounded = g_auto_jump_state.grounded;
 
-  const bool last_jump = static_jump;
-  const bool last_grounded = static_grounded;
-
-  const bool current_jump = static_jump = (user_cmd->buttons & IN_JUMP) != 0;
-  const bool current_grounded = static_grounded = localplayer->is_on_ground();
+  const bool current_jump = g_auto_jump_state.jump = (user_cmd->buttons & IN_JUMP) != 0;
+  const bool current_grounded = g_auto_jump_state.grounded = localplayer->is_on_ground();
 
   if (current_jump && last_jump && (current_grounded ? !localplayer->is_ducking() : true)) {
     if (!(current_grounded && !last_grounded)) {
       user_cmd->buttons &= ~IN_JUMP;
     }
 
-    if ((user_cmd->buttons & IN_JUMP) == 0 && current_grounded && !last_attempted) {
+    if ((user_cmd->buttons & IN_JUMP) == 0 && current_grounded && !g_auto_jump_state.attempted) {
       user_cmd->buttons |= IN_JUMP;
     }
   }
 
-  last_attempted = (user_cmd->buttons & IN_JUMP) != 0;
+  g_auto_jump_state.attempted = (user_cmd->buttons & IN_JUMP) != 0;
+
+  anti_cheat_compat::on_auto_jump(user_cmd, localplayer);
 }
 
 void edge_jump(user_cmd* user_cmd, Player* localplayer)
 {
-  static bool was_grounded = false;
   if (user_cmd == nullptr || localplayer == nullptr || !config.misc.movement.edge_jump) {
-    was_grounded = localplayer != nullptr && localplayer->is_on_ground();
+    g_edge_jump_was_grounded = localplayer != nullptr && localplayer->is_on_ground();
     return;
   }
 
   const bool grounded = localplayer->is_on_ground();
   const bool has_movement = (user_cmd->buttons & (IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT)) != 0;
-  if (was_grounded && !grounded && has_movement && (user_cmd->buttons & IN_JUMP) == 0) {
+  if (g_edge_jump_was_grounded && !grounded && has_movement && (user_cmd->buttons & IN_JUMP) == 0) {
     user_cmd->buttons |= IN_JUMP;
   }
-  was_grounded = grounded;
+  g_edge_jump_was_grounded = grounded;
 }
 
 void jumpbug(user_cmd* user_cmd, Player* localplayer)
@@ -244,15 +255,14 @@ void break_jump(user_cmd* user_cmd, Player* localplayer)
 
 void auto_reverse_jump(user_cmd* user_cmd, Player* localplayer)
 {
-  static bool last_attack2 = false;
   if (user_cmd == nullptr || localplayer == nullptr || !config.misc.movement.auto_reverse_jump) {
-    last_attack2 = false;
+    g_reverse_jump_last_attack2 = false;
     return;
   }
 
   const bool current_attack2 = (user_cmd->buttons & IN_ATTACK2) != 0;
-  const bool pressed_attack2 = current_attack2 && !last_attack2;
-  last_attack2 = current_attack2;
+  const bool pressed_attack2 = current_attack2 && !g_reverse_jump_last_attack2;
+  g_reverse_jump_last_attack2 = current_attack2;
 
   if (!pressed_attack2 || !localplayer->is_on_ground() || localplayer->is_ducking()) {
     return;
@@ -308,7 +318,7 @@ bool simulate_edgebug_candidate(
   prediction->first_time_predicted = false;
   move_helper->set_host(localplayer);
 
-  const float interval = global_vars->interval_per_tick > 0.0f ? global_vars->interval_per_tick : TICK_INTERVAL;
+  const float interval = tick_interval();
   static Convar* sv_gravity = nullptr;
   if (sv_gravity == nullptr && convar_system != nullptr) {
     sv_gravity = convar_system->find_var("sv_gravity");
@@ -378,10 +388,12 @@ bool simulate_edgebug_candidate(
         .forwardmove = simulated_command.forwardmove,
         .sidemove = simulated_command.sidemove
       };
+      localplayer->set_current_cmd(state.current_command);
       return true;
     }
   }
 
+  localplayer->set_current_cmd(state.current_command);
   return false;
 }
 
@@ -545,9 +557,7 @@ void fast_stop(user_cmd* user_cmd, Player* localplayer)
 
   const float friction = sv_friction != nullptr ? std::max(0.0f, sv_friction->get_float()) : 4.0f;
   const float stop_speed = sv_stopspeed != nullptr ? std::max(0.0f, sv_stopspeed->get_float()) : 100.0f;
-  const float interval = global_vars != nullptr && global_vars->interval_per_tick > 0.0f
-    ? global_vars->interval_per_tick
-    : static_cast<float>(TICK_INTERVAL);
+  const float interval = tick_interval();
   const float control = std::max(speed, stop_speed);
   const float drop = control * friction * interval;
   const float friction_speed = std::max(speed - drop, 0.0f);
@@ -555,15 +565,7 @@ void fast_stop(user_cmd* user_cmd, Player* localplayer)
     return;
   }
 
-  float view_yaw = user_cmd->view_angles.y;
-  if (engine != nullptr) {
-    Vec3 engine_angles{};
-    engine->get_view_angles(engine_angles);
-    if (std::isfinite(engine_angles.y)) {
-      view_yaw = engine_angles.y;
-    }
-  }
-
+  const float view_yaw = std::isfinite(user_cmd->view_angles.y) ? user_cmd->view_angles.y : 0.0f;
   const float delta = normalize_2d_yaw(view_yaw - vector_yaw(velocity)) * pideg;
   user_cmd->forwardmove = -std::cos(delta) * friction_speed;
   user_cmd->sidemove = -std::sin(delta) * friction_speed;
@@ -653,7 +655,7 @@ bool moonwalk(user_cmd* user_cmd, Player* localplayer)
 
   user_cmd->forwardmove = -boost_length;
   user_cmd->sidemove = 0.0f;
-  user_cmd->view_angles.y = std::fmod(user_cmd->view_angles.y - reverse_yaw, 360.0f);
+  user_cmd->view_angles.y = normalize_2d_yaw(user_cmd->view_angles.y - reverse_yaw);
   user_cmd->view_angles.z = 270.0f;
 
   return true;
@@ -772,4 +774,15 @@ bool moonwalk_create_move(user_cmd* user_cmd)
 bool moonwalk_applied_to_command(int command_number)
 {
   return command_number > 0 && g_moonwalk_applied_command == command_number;
+}
+
+void reset_movement_session_state()
+{
+  g_moonwalk_applied_command = -1;
+  g_fast_stop_command = -1;
+  g_break_jump_state = {};
+  g_edgebug_solution = {};
+  g_auto_jump_state = {};
+  g_edge_jump_was_grounded = false;
+  g_reverse_jump_last_attack2 = false;
 }

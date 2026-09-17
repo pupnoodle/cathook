@@ -120,15 +120,6 @@ void synchronize_session()
   g_state.session_server_count = server_count;
 }
 
-auto interval_per_tick() -> float
-{
-  if (global_vars != nullptr && global_vars->interval_per_tick > 0.0f) {
-    return global_vars->interval_per_tick;
-  }
-
-  return TICK_INTERVAL;
-}
-
 auto get_cl_cmdrate() -> float
 {
   static Convar* cl_cmdrate = nullptr;
@@ -165,7 +156,7 @@ auto host_frame_ticks() -> int
 
 auto time_to_ticks(float time) -> int
 {
-  const float interval = interval_per_tick();
+  const float interval = tick_interval();
   if (interval <= 0.0f || !std::isfinite(time)) {
     return 0;
   }
@@ -175,7 +166,7 @@ auto time_to_ticks(float time) -> int
 
 auto ticks_to_time(int ticks) -> float
 {
-  return static_cast<float>(ticks) * interval_per_tick();
+  return static_cast<float>(ticks) * tick_interval();
 }
 
 auto server_tick() -> int
@@ -244,8 +235,8 @@ void apply_ping_reducer_alignment()
     return;
   }
 
-  const double tick_interval = static_cast<double>(interval_per_tick());
-  if (tick_interval <= 0.0) {
+  const double interval = static_cast<double>(tick_interval());
+  if (interval <= 0.0) {
     return;
   }
 
@@ -261,12 +252,12 @@ void apply_ping_reducer_alignment()
     : 0.0;
 
   const double expected_arrival = natural_next + one_way;
-  const double aligned_arrival = std::ceil(expected_arrival / tick_interval) * tick_interval;
+  const double aligned_arrival = std::ceil(expected_arrival / interval) * interval;
   constexpr double safety_margin = 0.0015;
   const double aligned_send = aligned_arrival - one_way - safety_margin;
 
   const double extra_wait = aligned_send - natural_next;
-  if (extra_wait > 0.0 && extra_wait < tick_interval) {
+  if (extra_wait > 0.0 && extra_wait < interval) {
     client_state->m_flNextCmdTime = aligned_send;
   }
 }
@@ -492,61 +483,6 @@ auto send_move() -> bool
   return true;
 }
 
-unsigned int crc32_process_byte(unsigned int crc, unsigned char value)
-{
-  crc ^= value;
-  for (int bit = 0; bit < 8; ++bit) {
-    const unsigned int mask = 0U - (crc & 1U);
-    crc = (crc >> 1) ^ (0xEDB88320U & mask);
-  }
-
-  return crc;
-}
-
-unsigned int crc32_process_buffer(unsigned int crc, const void* data, int size)
-{
-  const auto* bytes = static_cast<const unsigned char*>(data);
-  for (int i = 0; i < size; ++i) {
-    crc = crc32_process_byte(crc, bytes[i]);
-  }
-
-  return crc;
-}
-
-unsigned int user_cmd_checksum(const user_cmd& cmd)
-{
-  unsigned int crc = 0xFFFFFFFFU;
-  crc = crc32_process_buffer(crc, &cmd.command_number, sizeof(cmd.command_number));
-  crc = crc32_process_buffer(crc, &cmd.tick_count, sizeof(cmd.tick_count));
-  crc = crc32_process_buffer(crc, &cmd.view_angles, sizeof(cmd.view_angles));
-  crc = crc32_process_buffer(crc, &cmd.forwardmove, sizeof(cmd.forwardmove));
-  crc = crc32_process_buffer(crc, &cmd.sidemove, sizeof(cmd.sidemove));
-  crc = crc32_process_buffer(crc, &cmd.upmove, sizeof(cmd.upmove));
-  crc = crc32_process_buffer(crc, &cmd.buttons, sizeof(cmd.buttons));
-  crc = crc32_process_buffer(crc, &cmd.impulse, sizeof(cmd.impulse));
-  crc = crc32_process_buffer(crc, &cmd.weapon_select, sizeof(cmd.weapon_select));
-  crc = crc32_process_buffer(crc, &cmd.weapon_subtype, sizeof(cmd.weapon_subtype));
-  crc = crc32_process_buffer(crc, &cmd.random_seed, sizeof(cmd.random_seed));
-  crc = crc32_process_buffer(crc, &cmd.mouse_dx, sizeof(cmd.mouse_dx));
-  crc = crc32_process_buffer(crc, &cmd.mouse_dy, sizeof(cmd.mouse_dy));
-  return crc ^ 0xFFFFFFFFU;
-}
-
-void update_verified_user_cmd(int sequence_number, user_cmd* cmd)
-{
-  if (input == nullptr || cmd == nullptr) {
-    return;
-  }
-
-  auto* verified_cmd = input->get_verified_user_cmd(sequence_number);
-  if (verified_cmd == nullptr) {
-    return;
-  }
-
-  verified_cmd->cmd = *cmd;
-  verified_cmd->crc = user_cmd_checksum(*cmd);
-}
-
 void send_tick()
 {
   auto* channel = client_state != nullptr ? client_state->m_NetChannel : nullptr;
@@ -570,7 +506,7 @@ void update_next_command_time()
 
   if (client_state->m_nSignonState == signon_state_full) {
     const float command_interval = 1.0f / get_cl_cmdrate();
-    const float max_delta = std::min(interval_per_tick(), command_interval);
+    const float max_delta = std::min(tick_interval(), command_interval);
     const float delta = std::clamp(static_cast<float>(*g_state.net_time - client_state->m_flNextCmdTime), 0.0f, max_delta);
     client_state->m_flNextCmdTime = *g_state.net_time + command_interval - delta;
     apply_ping_reducer_alignment();
@@ -723,6 +659,8 @@ auto create_shifted_command(int command_number) -> user_cmd*
   auto* cmd = &input->commands()[command_number % Input::command_buffer_size];
   *cmd = g_state.first_shot_command;
   cmd->command_number = command_number;
+  cmd->tick_count = g_state.shift_start_tickbase +
+    (command_number - g_state.first_shot_command.command_number);
   cmd->random_seed = static_cast<int>(
     MD5_PseudoRandom(static_cast<unsigned int>(command_number)) & INT_MAX);
   cmd->has_been_predicted = false;
@@ -847,7 +785,7 @@ auto run_rebuilt_move(float accumulated_extra_samples, bool final_tick, bool for
     if (g_state.in_shift_rebuild && force_send) {
       create_shifted_command(next_command);
     } else {
-      client->create_move(next_command, interval_per_tick() - accumulated_extra_samples, true);
+      client->create_move(next_command, tick_interval() - accumulated_extra_samples, true);
     }
     const bool started_shift = previous_mode == shift_mode::none && g_state.mode != shift_mode::none;
     auto* created_cmd = input->get_user_cmd(next_command);
@@ -904,7 +842,7 @@ auto run_rebuilt_move(float accumulated_extra_samples, bool final_tick, bool for
   return flush_packet();
 }
 
-void finish_shift(float accumulated_extra_samples)
+void finish_shift()
 {
   if (g_state.mode == shift_mode::none || g_state.in_shift_rebuild) {
     return;
@@ -942,8 +880,6 @@ void finish_shift(float accumulated_extra_samples)
   g_state.next_shift_command = 0;
   g_state.first_shot_command = {};
   g_state.mode = shift_mode::none;
-
-  (void)accumulated_extra_samples;
 }
 
 }
@@ -981,7 +917,7 @@ void move(bool final_tick, float accumulated_extra_samples, cl_move_fn original)
     return;
   }
 
-  finish_shift(accumulated_extra_samples);
+  finish_shift();
 }
 
 void on_create_move(user_cmd* cmd)
@@ -997,9 +933,8 @@ void on_create_move(user_cmd* cmd)
   apply_anti_aim_choke(cmd);
 }
 
-void apply_prediction_fix(int command_number, user_cmd* cmd, Player* player, float* curtime)
+void apply_prediction_fix(int command_number, Player* player, float* curtime)
 {
-  (void)cmd;
 
   if (player == nullptr || curtime == nullptr) {
     return;
@@ -1011,7 +946,7 @@ void apply_prediction_fix(int command_number, user_cmd* cmd, Player* player, flo
     }
 
     player->set_tickbase(fix.tickbase);
-    *curtime = static_cast<float>(fix.tickbase) * interval_per_tick();
+    *curtime = static_cast<float>(fix.tickbase) * tick_interval();
     return;
   }
 }
@@ -1024,6 +959,11 @@ auto should_rebuild_cl_move() -> bool
 auto should_send_packet() -> bool
 {
   return g_state.send_packet;
+}
+
+void force_send_packet()
+{
+  g_state.send_packet = true;
 }
 
 auto get_indicator_state() -> indicator_state

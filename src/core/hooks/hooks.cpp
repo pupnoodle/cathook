@@ -22,6 +22,8 @@ V  o o  V  file: src/core/hooks/hooks.cpp
 #include <algorithm>
 #include <vector>
 
+#include "core/memory/maps.hpp"
+#include "core/memory/resolve.hpp"
 #include "core/print.hpp"
 
 struct memory_page_permissions
@@ -36,23 +38,6 @@ long cached_page_size()
   return page_size;
 }
 
-int protection_from_maps_permissions(const char* permissions)
-{
-  int protection = PROT_NONE;
-
-  if (permissions[0] == 'r') {
-    protection |= PROT_READ;
-  }
-  if (permissions[1] == 'w') {
-    protection |= PROT_WRITE;
-  }
-  if (permissions[2] == 'x') {
-    protection |= PROT_EXEC;
-  }
-
-  return protection;
-}
-
 bool query_page_permissions(void* address, memory_page_permissions& page_permissions)
 {
   const long page_size_value = cached_page_size();
@@ -65,25 +50,14 @@ bool query_page_permissions(void* address, memory_page_permissions& page_permiss
   const auto address_value = reinterpret_cast<std::uintptr_t>(address);
   page_permissions.page = reinterpret_cast<void*>(address_value & ~(page_size - 1));
 
-  std::ifstream maps{ "/proc/self/maps" };
-  std::string line{};
-  while (std::getline(maps, line)) {
-    unsigned long long region_start = 0;
-    unsigned long long region_end = 0;
-    char permissions[5] = {};
-
-    if (std::sscanf(line.c_str(), "%llx-%llx %4s", &region_start, &region_end, permissions) != 3) {
-      continue;
-    }
-
-    if (address_value >= region_start && address_value < region_end) {
-      page_permissions.protection = protection_from_maps_permissions(permissions);
-      return true;
-    }
+  const int protection = cathook::core::memory::protection_at(address);
+  if (protection < 0) {
+    print("failed to find memory mapping for %p\n", address);
+    return false;
   }
 
-  print("failed to find memory mapping for %p\n", address);
-  return false;
+  page_permissions.protection = protection;
+  return true;
 }
 
 bool set_memory_page_protection(const memory_page_permissions& page_permissions, int protection)
@@ -136,39 +110,13 @@ bool is_valid_code_address(const void* address)
 namespace
 {
 
-std::string_view file_name_from_path(std::string_view path)
-{
-  const auto offset = path.rfind('/');
-  return offset == std::string_view::npos ? path : path.substr(offset + 1);
-}
-
 std::string find_loaded_library_path(const char* lib_path)
 {
   if (lib_path == nullptr || lib_path[0] == '\0') {
     return {};
   }
 
-  const auto target_name = file_name_from_path(lib_path);
-  if (target_name.empty()) {
-    return {};
-  }
-
-  std::ifstream maps{ "/proc/self/maps" };
-  std::string line{};
-
-  while (std::getline(maps, line)) {
-    const auto path_offset = line.find('/');
-    if (path_offset == std::string::npos) {
-      continue;
-    }
-
-    const auto path = std::string_view{ line }.substr(path_offset);
-    if (file_name_from_path(path) == target_name) {
-      return std::string{ path };
-    }
-  }
-
-  return {};
+  return cathook::core::memory::module_path(cathook::core::memory::file_name(lib_path));
 }
 
 }
@@ -384,15 +332,14 @@ bool get_sdl_wrapper_target(void* func, const char* func_name, void*** ptr_to_fu
     return false;
   }
 
-  auto* bytes = reinterpret_cast<std::uint8_t*>(func);
-  if (bytes[0] != 0xff || bytes[1] != 0x25) {
+  auto* slot = static_cast<void**>(cathook::core::memory::resolve_jmp_slot(func));
+  if (slot == nullptr) {
+    const auto* bytes = static_cast<const std::uint8_t*>(func);
     print("%s wrapper has unexpected prologue %02x %02x\n", func_name, bytes[0], bytes[1]);
     return false;
   }
 
-  std::int32_t offset = 0;
-  std::memcpy(&offset, bytes + 2, sizeof(offset));
-  *ptr_to_func = reinterpret_cast<void**>(bytes + 6 + offset);
+  *ptr_to_func = slot;
   return true;
 }
 

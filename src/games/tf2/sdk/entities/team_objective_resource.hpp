@@ -18,57 +18,87 @@ class TeamObjectiveResource {
 public:
 
   int get_mvm_wave_count(void) {
-    static const int offset = tf2_netvars::find_offset(
-      "DT_TeamObjectiveResource", {"m_nMannVsMachineWaveCount"});
+    static tf2_netvars::lazy_offset offset{
+      "DT_TFObjectiveResource", {"m_nMannVsMachineWaveCount"}};
     return offset > 0
       ? *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + offset)
       : 0;
   }
 
   int get_mvm_max_wave_count(void) {
-    static const int offset = tf2_netvars::find_offset(
-      "DT_TeamObjectiveResource", {"m_nMannVsMachineMaxWaveCount"});
+    static tf2_netvars::lazy_offset offset{
+      "DT_TFObjectiveResource", {"m_nMannVsMachineMaxWaveCount"}};
     return offset > 0
       ? *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + offset)
       : 0;
   }
 
   bool is_mvm_between_waves(void) {
-    static const int offset = tf2_netvars::find_offset(
-      "DT_TeamObjectiveResource", {"m_bMannVsMachineBetweenWaves"});
+    static tf2_netvars::lazy_offset offset{
+      "DT_TFObjectiveResource", {"m_bMannVsMachineBetweenWaves"}};
     return offset > 0
       && *reinterpret_cast<bool*>(reinterpret_cast<uintptr_t>(this) + offset);
   }
 
   int get_num_control_points(void) {
-    return *(int*)(this + 0x7B8);
+    static tf2_netvars::lazy_offset offset{
+      "DT_TFObjectiveResource", {"m_iNumControlPoints"}};
+    return offset > 0
+      ? *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + offset)
+      : 0;
   }
 
   bool is_playing_mini_rounds(void) {
-    return *(bool*)(this + 0x7C0);
+    static tf2_netvars::lazy_offset offset{
+      "DT_TFObjectiveResource", {"m_bPlayingMiniRounds"}};
+    return offset > 0
+      && *reinterpret_cast<bool*>(reinterpret_cast<uintptr_t>(this) + offset);
   }
 
   int get_owning_team(int index) {
-    return (((int*)(this + 0x1AE4)))[index];
+    static tf2_netvars::lazy_offset offset{
+      "DT_TFObjectiveResource", {"m_iOwner"}};
+    if (offset <= 0 || index < 0 || index >= MAX_CONTROL_POINTS) {
+      return 0;
+    }
+    return reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + offset)[index];
   }
 
   bool is_in_mini_round(int index) {
-    return ((bool*)(this + 0x10B4))[index];
+    static tf2_netvars::lazy_offset offset{
+      "DT_TFObjectiveResource", {"m_bInMiniRound"}};
+    if (offset <= 0 || index < 0 || index >= MAX_CONTROL_POINTS) {
+      return false;
+    }
+    return reinterpret_cast<bool*>(reinterpret_cast<uintptr_t>(this) + offset)[index];
   }
 
   bool is_locked(int index) {
-    return ((bool*)(this + 0x1914))[index];
-
+    static tf2_netvars::lazy_offset offset{
+      "DT_TFObjectiveResource", {"m_bCPLocked"}};
+    if (offset <= 0 || index < 0 || index >= MAX_CONTROL_POINTS) {
+      return false;
+    }
+    return reinterpret_cast<bool*>(reinterpret_cast<uintptr_t>(this) + offset)[index];
   }
 
   bool can_team_capture(int index, enum tf_team team) {
+    static tf2_netvars::lazy_offset offset{
+      "DT_TFObjectiveResource", {"m_bTeamCanCap"}};
     int array_index = index + ((int)(team) * MAX_CONTROL_POINTS);
-    return ((bool*)(this + 0xF74))[array_index];
+    if (offset <= 0 || array_index < 0 || array_index >= MAX_CONTROL_POINTS * 4) {
+      return false;
+    }
+    return reinterpret_cast<bool*>(reinterpret_cast<uintptr_t>(this) + offset)[array_index];
   }
 
   Vec3 get_origin(int index) {
-
-    return ((Vec3*)(this + 0x7CC))[index];
+    static tf2_netvars::lazy_offset offset{
+      "DT_TFObjectiveResource", {"m_vCPPositions"}};
+    if (offset <= 0 || index < 0 || index >= MAX_CONTROL_POINTS) {
+      return Vec3{};
+    }
+    return reinterpret_cast<Vec3*>(reinterpret_cast<uintptr_t>(this) + offset)[index];
   }
 };
 #endif

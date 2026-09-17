@@ -13,6 +13,7 @@ V  o o  V  file: src/features/movement/engine_prediction/engine_prediction.cpp
 #include <cmath>
 #include "MD5/MD5.hpp"
 #include "engine_prediction.hpp"
+#include "core/print.hpp"
 #include "core/random_seed.hpp"
 #include "games/tf2/sdk/entities/player.hpp"
 #include "games/tf2/sdk/interfaces/client.hpp"
@@ -22,6 +23,7 @@ V  o o  V  file: src/features/movement/engine_prediction/engine_prediction.cpp
 #include "games/tf2/sdk/interfaces/input.hpp"
 #include "games/tf2/sdk/interfaces/move_helper.hpp"
 #include "games/tf2/sdk/interfaces/prediction.hpp"
+#include "features/menu/config.hpp"
 
 namespace
 {
@@ -44,6 +46,10 @@ struct engine_prediction_player_snapshot {
   float duck_time = 0.0f;
   float duck_jump_time = 0.0f;
   float fall_velocity = 0.0f;
+  int move_type = 0;
+  int water_level = 0;
+  Vec3 punch_angles{};
+  float next_attack = 0.0f;
 };
 
 struct engine_prediction_global_snapshot {
@@ -53,6 +59,7 @@ struct engine_prediction_global_snapshot {
   bool first_time_predicted = false;
   bool in_prediction = false;
   int random_seed_value = -1;
+  Player* move_helper_host = nullptr;
 };
 
 struct engine_prediction_weapon_snapshot {
@@ -75,6 +82,7 @@ struct engine_prediction_state {
   engine_prediction_player_snapshot player{};
   engine_prediction_global_snapshot globals{};
   std::array<engine_prediction_weapon_snapshot, Player::max_weapon_count> weapons{};
+  int player_handle = 0;
   bool active = false;
 };
 
@@ -135,6 +143,11 @@ bool engine_prediction_capture(Player* localplayer) {
   prediction_state.player.duck_time = localplayer->get_duck_time();
   prediction_state.player.duck_jump_time = localplayer->get_duck_jump_time();
   prediction_state.player.fall_velocity = localplayer->get_fall_velocity();
+  prediction_state.player.move_type = localplayer->get_move_type();
+  prediction_state.player.water_level = localplayer->get_water_level();
+  prediction_state.player.punch_angles = localplayer->get_punch_angles();
+  prediction_state.player.next_attack = localplayer->get_next_attack();
+  prediction_state.player_handle = localplayer->get_ref_handle();
 
   prediction_state.globals.curtime = global_vars->curtime;
   prediction_state.globals.frametime = global_vars->frametime;
@@ -142,6 +155,7 @@ bool engine_prediction_capture(Player* localplayer) {
   prediction_state.globals.first_time_predicted = prediction->first_time_predicted;
   prediction_state.globals.in_prediction = prediction->in_prediction;
   prediction_state.globals.random_seed_value = random_seed != nullptr ? static_cast<int>(*random_seed) : -1;
+  prediction_state.globals.move_helper_host = move_helper != nullptr ? move_helper->get_host() : nullptr;
 
   for (int slot = 0; slot < Player::max_weapon_count; ++slot) {
     auto& state = prediction_state.weapons[slot];
@@ -170,8 +184,27 @@ bool engine_prediction_capture(Player* localplayer) {
   return true;
 }
 
+void engine_prediction_restore_globals() {
+  if (global_vars != nullptr) {
+    global_vars->curtime = prediction_state.globals.curtime;
+    global_vars->frametime = prediction_state.globals.frametime;
+    global_vars->tickcount = prediction_state.globals.tickcount;
+  }
+  if (prediction != nullptr) {
+    prediction->first_time_predicted = prediction_state.globals.first_time_predicted;
+    prediction->in_prediction = prediction_state.globals.in_prediction;
+  }
+  if (random_seed != nullptr) {
+    *random_seed = prediction_state.globals.random_seed_value;
+  }
+  if (move_helper != nullptr) {
+    move_helper->set_host(prediction_state.globals.move_helper_host);
+  }
+}
+
 void engine_prediction_restore(Player* localplayer) {
-  if (localplayer == nullptr || global_vars == nullptr || prediction == nullptr) {
+  engine_prediction_restore_globals();
+  if (localplayer == nullptr) {
     prediction_state.active = false;
     return;
   }
@@ -193,15 +226,10 @@ void engine_prediction_restore(Player* localplayer) {
   localplayer->set_duck_time(prediction_state.player.duck_time);
   localplayer->set_duck_jump_time(prediction_state.player.duck_jump_time);
   localplayer->set_fall_velocity(prediction_state.player.fall_velocity);
-
-  global_vars->curtime = prediction_state.globals.curtime;
-  global_vars->frametime = prediction_state.globals.frametime;
-  global_vars->tickcount = prediction_state.globals.tickcount;
-  prediction->first_time_predicted = prediction_state.globals.first_time_predicted;
-  prediction->in_prediction = prediction_state.globals.in_prediction;
-  if (random_seed != nullptr) {
-    *random_seed = prediction_state.globals.random_seed_value;
-  }
+  localplayer->set_move_type(prediction_state.player.move_type);
+  localplayer->set_water_level(prediction_state.player.water_level);
+  localplayer->set_punch_angles(prediction_state.player.punch_angles);
+  localplayer->set_next_attack(prediction_state.player.next_attack);
 
   for (int slot = 0; slot < Player::max_weapon_count; ++slot) {
     const auto& state = prediction_state.weapons[slot];
@@ -232,8 +260,24 @@ void engine_prediction_restore(Player* localplayer) {
 
 }
 
+[[nodiscard]] bool engine_prediction_needed() {
+  return config.aimbot.master
+      || config.auto_detonate.stickies
+      || config.auto_detonate.flares
+      || config.auto_reflect.enabled;
+}
+
 void start_engine_prediction(user_cmd* user_cmd) {
   if (prediction_state.active) {
+    static bool nested_warning_logged = false;
+    if (!nested_warning_logged) {
+      nested_warning_logged = true;
+      print("[prediction] nested engine prediction suppressed\n");
+    }
+    return;
+  }
+  if (!engine_prediction_needed()) {
+    engine_prediction_tickbase(nullptr, nullptr);
     return;
   }
   if (user_cmd == nullptr || prediction == nullptr || game_movement == nullptr ||
@@ -270,9 +314,9 @@ void start_engine_prediction(user_cmd* user_cmd) {
     *random_seed = MD5_PseudoRandom(static_cast<unsigned int>(predicted_command.command_number)) & INT_MAX;
   }
 
-  float interval_per_tick = global_vars->interval_per_tick > 0.0f ? global_vars->interval_per_tick : TICK_INTERVAL;
-  global_vars->curtime = static_cast<float>(predicted_tickbase) * interval_per_tick;
-  global_vars->frametime = prediction->engine_paused ? 0.0f : interval_per_tick;
+  const float interval = tick_interval();
+  global_vars->curtime = static_cast<float>(predicted_tickbase) * interval;
+  global_vars->frametime = prediction->engine_paused ? 0.0f : interval;
   global_vars->tickcount = predicted_tickbase;
 
   prediction->first_time_predicted = false;
@@ -289,6 +333,14 @@ void end_engine_prediction() {
     return;
   }
 
-  Player* localplayer = entity_list->get_localplayer();
+  Player* localplayer = entity_list != nullptr ? entity_list->get_localplayer() : nullptr;
+  if (localplayer != nullptr && localplayer->get_ref_handle() != prediction_state.player_handle) {
+    localplayer = nullptr;
+  }
   engine_prediction_restore(localplayer);
+}
+
+void reset_engine_prediction() {
+  prediction_state.active = false;
+  engine_prediction_tickbase(nullptr, nullptr);
 }

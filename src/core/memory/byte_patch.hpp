@@ -26,6 +26,7 @@ V  o o  V  file: src/core/memory/byte_patch.hpp
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include "core/memory/maps.hpp"
 #include "core/print.hpp"
 
 class byte_patch
@@ -87,6 +88,13 @@ public:
       return true;
     }
 
+    if (std::memcmp(target_, patch_bytes_.data(), patch_bytes_.size()) != 0)
+    {
+      print("[byte_patch] %p was patched after us; leaving it alone\n", static_cast<void*>(target_));
+      applied_ = false;
+      return true;
+    }
+
     if (!make_pages_writable())
     {
       return false;
@@ -121,32 +129,27 @@ private:
     page_size_ = static_cast<std::size_t>(page_size);
     const auto first = address - address % page_size_;
     const auto last = address + patch_bytes_.size() - 1;
-    std::ifstream maps{ "/proc/self/maps" };
-    std::string line;
     auto page = first;
-    while (std::getline(maps, line)) {
-      unsigned long long start = 0;
-      unsigned long long end = 0;
-      char permissions[5]{};
-      if (std::sscanf(line.c_str(), "%llx-%llx %4s", &start, &end, permissions) != 3) {
-        continue;
-      }
-      while (page >= start && page < end) {
-        if (permissions[0] != 'r') {
+    bool covered = false;
+    cathook::core::memory::for_each([&](const cathook::core::memory::entry& region) {
+      while (page >= region.start && page < region.end) {
+        if ((region.protection & PROT_READ) == 0) {
           page_protections_.clear();
           return false;
         }
-        const int protection = PROT_READ | (permissions[1] == 'w' ? PROT_WRITE : 0) |
-          (permissions[2] == 'x' ? PROT_EXEC : 0);
-        page_protections_.push_back({ reinterpret_cast<void*>(page), protection });
+        page_protections_.push_back({ reinterpret_cast<void*>(page), region.protection });
         if (last - page < page_size_) {
-          return true;
+          covered = true;
+          return false;
         }
         page += page_size_;
       }
+      return true;
+    });
+    if (!covered) {
+      page_protections_.clear();
     }
-    page_protections_.clear();
-    return false;
+    return covered;
   }
 
   bool restore_page_protections() const

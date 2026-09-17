@@ -377,7 +377,8 @@ void* sigscan_pid_module(int pid, const char* regex, const char* ida_pattern) {
     if (scan_failed || match_count == 0)
         return NULL;
     if (match_count != 1) {
-        ERR("signature is ambiguous; found %zu matches", match_count);
+        fprintf(stderr, "libsigscan: signature is ambiguous; found %zu matches\n",
+                match_count);
         return NULL;
     }
 

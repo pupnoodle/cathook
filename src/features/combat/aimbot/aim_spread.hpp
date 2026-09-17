@@ -351,6 +351,9 @@ inline bool hitscan_candidate_ready_for_selection(Player* localplayer, Weapon* w
   const Vec3 command_angles = candidate.player != nullptr
     ? candidate.command_angles
     : hitscan_aim_command_angles(localplayer, candidate.aim_angles);
+  if (!config.aimbot.spread_compensation || weapon_hitscan_spread(weapon) <= 0.00001f) {
+    return true;
+  }
   return prepare_hitscan_fire_solution(localplayer, weapon, user_cmd, candidate, command_angles).ready;
 }
 

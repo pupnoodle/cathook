@@ -9,6 +9,7 @@ V  o o  V  file: src/features/automation/region_selector/region_selector.cpp
   || (___\====
 */
 #include "features/automation/region_selector/region_selector.hpp"
+#include "core/shared/modules.hpp"
 #include <algorithm>
 #include <cstddef>
 #include "core/hooks/region_selector.hpp"
@@ -26,8 +27,6 @@ using get_matchmaking_client_fn = void* (*)();
 using tf_gc_client_system_ping_think_fn = void (*)(void*);
 
 constexpr std::ptrdiff_t tf_gc_pending_ping_refresh_offset = 0x4cc;
-constexpr const char* tf_client_module_name = "tf/bin/linux64/client.so";
-
 struct tf_gc_client_api
 {
   bool initialized = false;
@@ -56,9 +55,9 @@ void initialize_tf_gc_client_api()
 
   g_tf_gc_client_api.initialized = true;
   g_tf_gc_client_api.get_matchmaking_client =
-    reinterpret_cast<get_matchmaking_client_fn>(sigscan_module(tf_client_module_name, sigs::get_matchmaking_client));
+    reinterpret_cast<get_matchmaking_client_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::get_matchmaking_client));
   g_tf_gc_client_api.ping_think =
-    reinterpret_cast<tf_gc_client_system_ping_think_fn>(sigscan_module(tf_client_module_name, sigs::tf_gc_client_system_ping_think));
+    reinterpret_cast<tf_gc_client_system_ping_think_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::tf_gc_client_system_ping_think));
 }
 
 bool refresh_tf_gc_ping_data()

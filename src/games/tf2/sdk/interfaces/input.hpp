@@ -17,6 +17,7 @@ V  o o  V  file: src/games/tf2/sdk/interfaces/input.hpp
 #include <climits>
 
 #include "client.hpp"
+#include "core/memory/code_scan.hpp"
 
 struct verified_user_cmd {
   user_cmd cmd;
@@ -36,8 +37,6 @@ static user_cmd* (*get_user_cmd_original)(void*, int sequence_number);
 
 class Input {
 public:
-  static constexpr std::ptrdiff_t commands_offset = 0x108;
-  static constexpr std::ptrdiff_t verified_commands_offset = 0x110;
   static constexpr int command_buffer_size = 90;
 
   void create_move(int sequence_number, float input_sample_frametime, bool active) {
@@ -47,11 +46,28 @@ public:
   }
 
   auto commands() -> user_cmd* {
-    return *reinterpret_cast<user_cmd**>(reinterpret_cast<std::uintptr_t>(this) + commands_offset);
+    static const std::ptrdiff_t off = [this] {
+      auto** vtable = *reinterpret_cast<void***>(this);
+      return vtable != nullptr ? decode_commands_offset(vtable) : std::ptrdiff_t{0};
+    }();
+    if (off <= 0) {
+      return nullptr;
+    }
+    return *reinterpret_cast<user_cmd**>(reinterpret_cast<std::uintptr_t>(this) + off);
   }
 
   auto verified_commands() -> verified_user_cmd* {
-    return *reinterpret_cast<verified_user_cmd**>(reinterpret_cast<std::uintptr_t>(this) + verified_commands_offset);
+    static const std::ptrdiff_t off = [this] {
+      auto** vtable = *reinterpret_cast<void***>(this);
+      if (vtable == nullptr) {
+        return std::ptrdiff_t{0};
+      }
+      return decode_verified_offset(vtable, decode_commands_offset(vtable));
+    }();
+    if (off <= 0) {
+      return nullptr;
+    }
+    return *reinterpret_cast<verified_user_cmd**>(reinterpret_cast<std::uintptr_t>(this) + off);
   }
 
   user_cmd* get_user_cmd(int sequence_number) {
@@ -83,7 +99,7 @@ public:
   void to_thirdperson(void) {
     void** vtable = *(void***)this;
 
-    void (*to_thirdperson_fn)(void*) = (void (*)(void*))vtable[32];
+    void (*to_thirdperson_fn)(void*) = (void (*)(void*))vtable[31];
 
     to_thirdperson_fn(this);
   }
@@ -91,7 +107,7 @@ public:
   bool is_thirdperson(void) {
     void** vtable = *(void***)this;
 
-    bool (*is_thirdperson_fn)(void*) = (bool (*)(void*))vtable[31];
+    bool (*is_thirdperson_fn)(void*) = (bool (*)(void*))vtable[30];
 
     return is_thirdperson_fn(this);
   }
@@ -99,13 +115,117 @@ public:
   void to_firstperson(void) {
     void** vtable = *(void***)this;
 
-    void (*to_firstperson_fn)(void*) = (void (*)(void*))vtable[33];
+    void (*to_firstperson_fn)(void*) = (void (*)(void*))vtable[32];
 
     to_firstperson_fn(this);
+  }
+
+private:
+  static std::ptrdiff_t decode_commands_offset(void** vtable) {
+    const auto* p = static_cast<const std::uint8_t*>(vtable[7]);
+    const auto* const end = p + 0x100;
+    while (p < end && *p != 0xC3 && *p != 0xC2) {
+      cathook::core::memory::mem_insn insn{};
+      if (cathook::core::memory::decode_mem_insn(p, end, insn) &&
+          insn.opcode == 0x8B && insn.mod == 2 && insn.base == 7 &&
+          insn.disp > 0x40 && insn.disp < 0x1000) {
+        return insn.disp;
+      }
+      p += cathook::core::memory::insn_length(p, end);
+    }
+    return 0;
+  }
+
+  static std::ptrdiff_t decode_verified_offset(void** vtable, std::ptrdiff_t commands) {
+    if (commands <= 0) {
+      return 0;
+    }
+    const auto* p = static_cast<const std::uint8_t*>(vtable[0]);
+    const auto* const end = p + 0x200;
+    while (p < end && *p != 0xC3 && *p != 0xC2) {
+      cathook::core::memory::mem_insn insn{};
+      if (cathook::core::memory::decode_mem_insn(p, end, insn) &&
+          insn.opcode == 0x8B && insn.mod == 2 && insn.base >= 0 &&
+          insn.disp > 0x40 && insn.disp < 0x1000 &&
+          insn.disp != static_cast<std::int32_t>(commands)) {
+        const auto* q = p + cathook::core::memory::insn_length(p, end);
+        for (int n = 0; n < 8 && q < end; ++n) {
+          if (cathook::core::memory::is_scan_terminator(q, end)) {
+            break;
+          }
+          cathook::core::memory::mem_insn st{};
+          if (cathook::core::memory::decode_mem_insn(q, end, st) &&
+              st.opcode == 0xC7 && st.reg == 0 && st.base == insn.base &&
+              st.disp == static_cast<std::int32_t>(commands) &&
+              q + st.size + 4 <= end &&
+              *reinterpret_cast<const std::int32_t*>(q + st.size) == 0) {
+            return insn.disp;
+          }
+          q += cathook::core::memory::insn_length(q, end);
+        }
+      }
+      p += cathook::core::memory::insn_length(p, end);
+    }
+    return 0;
   }
 };
 
 inline static Input* input;
+
+inline unsigned int crc32_process_byte(unsigned int crc, unsigned char value)
+{
+  crc ^= value;
+  for (int bit = 0; bit < 8; ++bit) {
+    const unsigned int mask = 0U - (crc & 1U);
+    crc = (crc >> 1) ^ (0xEDB88320U & mask);
+  }
+
+  return crc;
+}
+
+inline unsigned int crc32_process_buffer(unsigned int crc, const void* data, int size)
+{
+  const auto* bytes = static_cast<const unsigned char*>(data);
+  for (int i = 0; i < size; ++i) {
+    crc = crc32_process_byte(crc, bytes[i]);
+  }
+
+  return crc;
+}
+
+inline unsigned int user_cmd_checksum(const user_cmd& cmd)
+{
+  unsigned int crc = 0xFFFFFFFFU;
+  crc = crc32_process_buffer(crc, &cmd.command_number, sizeof(cmd.command_number));
+  crc = crc32_process_buffer(crc, &cmd.tick_count, sizeof(cmd.tick_count));
+  crc = crc32_process_buffer(crc, &cmd.view_angles, sizeof(cmd.view_angles));
+  crc = crc32_process_buffer(crc, &cmd.forwardmove, sizeof(cmd.forwardmove));
+  crc = crc32_process_buffer(crc, &cmd.sidemove, sizeof(cmd.sidemove));
+  crc = crc32_process_buffer(crc, &cmd.upmove, sizeof(cmd.upmove));
+  crc = crc32_process_buffer(crc, &cmd.buttons, sizeof(cmd.buttons));
+  crc = crc32_process_buffer(crc, &cmd.impulse, sizeof(cmd.impulse));
+  crc = crc32_process_buffer(crc, &cmd.weapon_select, sizeof(cmd.weapon_select));
+  crc = crc32_process_buffer(crc, &cmd.weapon_subtype, sizeof(cmd.weapon_subtype));
+  crc = crc32_process_buffer(crc, &cmd.random_seed, sizeof(cmd.random_seed));
+  crc = crc32_process_buffer(crc, &cmd.mouse_dx, sizeof(cmd.mouse_dx));
+  crc = crc32_process_buffer(crc, &cmd.mouse_dy, sizeof(cmd.mouse_dy));
+  return crc ^ 0xFFFFFFFFU;
+}
+
+inline void update_verified_user_cmd(int sequence_number, user_cmd* cmd)
+{
+  if (input == nullptr || cmd == nullptr) {
+    return;
+  }
+
+  auto* verified_cmd = input->get_verified_user_cmd(sequence_number);
+  if (verified_cmd == nullptr) {
+    return;
+  }
+
+  verified_cmd->cmd = *cmd;
+  verified_cmd->crc = user_cmd_checksum(*cmd);
+}
 
 static_assert(sizeof(user_cmd) == 0x48, "user_cmd layout mismatch");
 static_assert(sizeof(verified_user_cmd) == 0x50, "verified_user_cmd layout mismatch");

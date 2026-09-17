@@ -41,6 +41,12 @@ struct state_t
 
 inline state_t state{};
 inline std::mutex state_mutex{};
+inline thread_local state_t frame_state{};
+
+inline void copy_state_to_frame()
+{
+  frame_state = state;
+}
 
 inline void invalidate()
 {
@@ -50,6 +56,7 @@ inline void invalidate()
   state.screen_width = 0.0f;
   state.screen_height = 0.0f;
   state.view_fov = 0.0f;
+  copy_state_to_frame();
 }
 
 inline void set_view_fov(float fov)
@@ -137,6 +144,7 @@ inline void update_screen_size(const view_setup* view, screen_space_t screen_spa
     state.screen_width = screen_width;
     state.screen_height = screen_height;
     state.valid = true;
+    copy_state_to_frame();
   }
 }
 
@@ -162,6 +170,7 @@ inline bool copy_view_projection(const view_setup& view)
     }
     state.matrix_valid = true;
     state.valid = true;
+    copy_state_to_frame();
   }
   return true;
 }
@@ -222,27 +231,24 @@ inline bool refresh_projection_state(screen_space_t screen_space)
     return false;
   }
 
-  VMatrix matrix{};
-  float screen_width = 0.0f;
-  float screen_height = 0.0f;
-  {
+  state_t local_state{};
+  if (frame_state.valid && frame_state.matrix_valid) {
+    local_state = frame_state;
+  } else {
     std::scoped_lock lock(state_mutex);
     if (!state.valid || !state.matrix_valid) {
       return false;
     }
-    for (int row = 0; row < 4; ++row) {
-      for (int column = 0; column < 4; ++column) {
-        matrix[row][column] = state.world_to_projection[row][column];
-      }
-    }
-    screen_width = state.screen_width;
-    screen_height = state.screen_height;
+    local_state = state;
   }
 
+  const float screen_width = local_state.screen_width;
+  const float screen_height = local_state.screen_height;
   if (screen_width <= 0.0f || screen_height <= 0.0f) {
     return false;
   }
 
+  const auto& matrix = local_state.world_to_projection;
   const auto w = (matrix[3][0] * point.x) + (matrix[3][1] * point.y) + (matrix[3][2] * point.z) + matrix[3][3];
   screen->z = 0.0f;
   if (w <= 0.001f) {

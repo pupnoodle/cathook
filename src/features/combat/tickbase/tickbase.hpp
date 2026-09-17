@@ -37,9 +37,10 @@ void initialize_engine_globals(double* net_time, float* host_frametime_unbounded
   host_should_run_fn host_should_run);
 void move(bool final_tick, float accumulated_extra_samples, cl_move_fn original);
 void on_create_move(user_cmd* cmd);
-void apply_prediction_fix(int command_number, user_cmd* cmd, Player* player, float* curtime);
+void apply_prediction_fix(int command_number, Player* player, float* curtime);
 auto should_rebuild_cl_move() -> bool;
 auto should_send_packet() -> bool;
+void force_send_packet();
 auto get_indicator_state() -> indicator_state;
 
 }

@@ -10,7 +10,7 @@ class SimpleAuth
         this.apikey = randomstring.generate(64);
         this.failed_logins = new Map();
 
-        app.post('/api/auth', this.handleLogin.bind(this));
+        app.post('/api/auth', require('body-parser').json(), this.handleLogin.bind(this));
         app.use(this.middleware.bind(this));
     }
     middleware(req, res, next)
@@ -23,7 +23,8 @@ class SimpleAuth
 
         if (req.query.key)
         {
-            if (req.query.key === this.apikey)
+            const presented_key = String(req.get('x-api-key') || req.query.key || '');
+            if (this.key_matches(presented_key))
             {
                 req.session.auth = 1;
             }
@@ -40,6 +41,14 @@ class SimpleAuth
             return;
         }
         next();
+    }
+    key_matches(presented_key)
+    {
+        if (typeof presented_key !== 'string' || presented_key.length !== this.apikey.length)
+        {
+            return false;
+        }
+        return crypto.timingSafeEqual(Buffer.from(presented_key), Buffer.from(this.apikey));
     }
     handleLogin(req, res)
     {

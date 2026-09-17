@@ -19,6 +19,8 @@ void initialize();
 void on_tick();
 
 bool rent_item(int item_def_id);
+bool equip_item(int class_id, int slot, int item_def_id);
+void mvm_rent();
 bool craft_items(const std::vector<int>& item_def_ids);
 bool unlock_achievement_by_id(int achievement_id);
 bool lock_achievement_by_id(int achievement_id);

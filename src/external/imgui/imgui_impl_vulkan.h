@@ -2,6 +2,8 @@
 #ifndef IMGUI_DISABLE
 #include "imgui.h"
 
+
+
 #if defined(IMGUI_IMPL_VULKAN_NO_PROTOTYPES) && !defined(VK_NO_PROTOTYPES)
 #define VK_NO_PROTOTYPES
 #endif
@@ -18,7 +20,7 @@
 #define IMGUI_IMPL_VULKAN_HAS_DYNAMIC_RENDERING
 #endif
 
-#define IMGUI_IMPL_VULKAN_MINIMUM_IMAGE_SAMPLER_POOL_SIZE   (1)
+#define IMGUI_IMPL_VULKAN_MINIMUM_IMAGE_SAMPLER_POOL_SIZE   (8)
 
 struct ImGui_ImplVulkan_InitInfo
 {
@@ -53,9 +55,9 @@ IMGUI_IMPL_API bool             ImGui_ImplVulkan_Init(ImGui_ImplVulkan_InitInfo*
 IMGUI_IMPL_API void             ImGui_ImplVulkan_Shutdown();
 IMGUI_IMPL_API void             ImGui_ImplVulkan_NewFrame();
 IMGUI_IMPL_API void             ImGui_ImplVulkan_RenderDrawData(ImDrawData* draw_data, VkCommandBuffer command_buffer, VkPipeline pipeline = VK_NULL_HANDLE);
-IMGUI_IMPL_API bool             ImGui_ImplVulkan_CreateFontsTexture();
-IMGUI_IMPL_API void             ImGui_ImplVulkan_DestroyFontsTexture();
 IMGUI_IMPL_API void             ImGui_ImplVulkan_SetMinImageCount(uint32_t min_image_count);
+
+IMGUI_IMPL_API void             ImGui_ImplVulkan_UpdateTexture(ImTextureData* tex);
 
 IMGUI_IMPL_API VkDescriptorSet  ImGui_ImplVulkan_AddTexture(VkSampler sampler, VkImageView image_view, VkImageLayout image_layout);
 IMGUI_IMPL_API void             ImGui_ImplVulkan_RemoveTexture(VkDescriptorSet descriptor_set);
@@ -68,6 +70,7 @@ struct ImGui_ImplVulkan_RenderState
     VkPipeline          Pipeline;
     VkPipelineLayout    PipelineLayout;
 };
+
 
 struct ImGui_ImplVulkanH_Frame;
 struct ImGui_ImplVulkanH_Window;

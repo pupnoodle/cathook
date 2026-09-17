@@ -48,12 +48,12 @@ bool is_gameoverlayrenderer_path(const char* file)
   return is_module_filename(file, "gameoverlayrenderer.so");
 }
 
+std::atomic_bool source_lock_patch_attempted = false;
+byte_patch source_lock_patch{};
+
 void patch_launcher_source_lock()
 {
-  static std::atomic_bool patch_attempted = false;
-  static byte_patch source_lock_patch{};
-
-  if (patch_attempted.exchange(true, std::memory_order_acq_rel))
+  if (source_lock_patch_attempted.exchange(true, std::memory_order_acq_rel))
   {
     return;
   }
@@ -73,6 +73,18 @@ void patch_launcher_source_lock()
   }
 
   print("[overwrite_dlopen] patched launcher source lock at %p\n", source_lock_check);
+}
+
+void restore_launcher_source_lock()
+{
+  if (!source_lock_patch_attempted.load(std::memory_order_acquire))
+  {
+    return;
+  }
+  if (!source_lock_patch.restore())
+  {
+    print("[overwrite_dlopen] failed to restore launcher source lock\n");
+  }
 }
 
 }

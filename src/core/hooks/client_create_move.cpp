@@ -51,61 +51,6 @@ struct scoped_client_create_move_features {
   }
 };
 
-unsigned int crc32_process_byte(unsigned int crc, unsigned char value)
-{
-  crc ^= value;
-  for (int bit = 0; bit < 8; ++bit) {
-    const unsigned int mask = 0U - (crc & 1U);
-    crc = (crc >> 1) ^ (0xEDB88320U & mask);
-  }
-
-  return crc;
-}
-
-unsigned int crc32_process_buffer(unsigned int crc, const void* data, int size)
-{
-  const auto* bytes = static_cast<const unsigned char*>(data);
-  for (int i = 0; i < size; ++i) {
-    crc = crc32_process_byte(crc, bytes[i]);
-  }
-
-  return crc;
-}
-
-unsigned int user_cmd_checksum(const user_cmd& cmd)
-{
-  unsigned int crc = 0xFFFFFFFFU;
-  crc = crc32_process_buffer(crc, &cmd.command_number, sizeof(cmd.command_number));
-  crc = crc32_process_buffer(crc, &cmd.tick_count, sizeof(cmd.tick_count));
-  crc = crc32_process_buffer(crc, &cmd.view_angles, sizeof(cmd.view_angles));
-  crc = crc32_process_buffer(crc, &cmd.forwardmove, sizeof(cmd.forwardmove));
-  crc = crc32_process_buffer(crc, &cmd.sidemove, sizeof(cmd.sidemove));
-  crc = crc32_process_buffer(crc, &cmd.upmove, sizeof(cmd.upmove));
-  crc = crc32_process_buffer(crc, &cmd.buttons, sizeof(cmd.buttons));
-  crc = crc32_process_buffer(crc, &cmd.impulse, sizeof(cmd.impulse));
-  crc = crc32_process_buffer(crc, &cmd.weapon_select, sizeof(cmd.weapon_select));
-  crc = crc32_process_buffer(crc, &cmd.weapon_subtype, sizeof(cmd.weapon_subtype));
-  crc = crc32_process_buffer(crc, &cmd.random_seed, sizeof(cmd.random_seed));
-  crc = crc32_process_buffer(crc, &cmd.mouse_dx, sizeof(cmd.mouse_dx));
-  crc = crc32_process_buffer(crc, &cmd.mouse_dy, sizeof(cmd.mouse_dy));
-  return crc ^ 0xFFFFFFFFU;
-}
-
-void update_verified_user_cmd(int sequence_number, user_cmd* cmd)
-{
-  if (input == nullptr || cmd == nullptr) {
-    return;
-  }
-
-  auto* verified_cmd = input->get_verified_user_cmd(sequence_number);
-  if (verified_cmd == nullptr) {
-    return;
-  }
-
-  verified_cmd->cmd = *cmd;
-  verified_cmd->crc = user_cmd_checksum(*cmd);
-}
-
 }
 
 void client_create_move_hook(void* me, int sequence_number, float input_sample_frametime, bool active) {
@@ -133,31 +78,15 @@ void client_create_move_hook(void* me, int sequence_number, float input_sample_f
   const bool client_mode_pipeline_ran = g_client_mode_pipeline_ran;
   g_client_mode_pipeline_ran = false;
   if (!client_mode_pipeline_ran) {
-    refresh_prediction_state();
+    if (tickbase::should_rebuild_cl_move()) {
+      refresh_prediction_state();
+    }
     cat_bind::run();
     automation::controller().on_create_move(user_cmd);
     thirdperson::update_taunt_camera();
+    run_move_feature_pipeline(user_cmd, entity_list != nullptr ? entity_list->get_localplayer() : nullptr);
   }
 
-  if (!client_mode_pipeline_ran && can_run_move_features(user_cmd)) {
-    Player* localplayer = entity_list->get_localplayer();
-    const bool taunting = localplayer != nullptr && localplayer->is_taunting();
-    if (taunting) {
-      apply_taunt_slide(localplayer, user_cmd);
-    } else {
-      update_player_head_emoji_cache();
-      run_move_features(user_cmd);
-    }
-  }
-
-  if (!client_mode_pipeline_ran) {
-    Player* localplayer = entity_list->get_localplayer();
-    if (localplayer == nullptr || !localplayer->is_taunting()) {
-      tickbase::on_create_move(user_cmd);
-      anti_aim::on_create_move(user_cmd);
-    }
-    aimbot::update_local_client_side_animation();
-  }
   update_verified_user_cmd(sequence_number, user_cmd);
 
 }

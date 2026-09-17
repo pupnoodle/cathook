@@ -23,6 +23,7 @@ V  o o  V  file: src/features/combat/aimbot/aim_utils.hpp
 #include "core/entity_cache.hpp"
 #include "core/ipc/ipc_client.hpp"
 #include "core/math/math.hpp"
+#include "core/memory/resolve.hpp"
 #include "core/shared/sigs.hpp"
 #include "libsigscan/libsigscan.h"
 #include "features/menu/config.hpp"
@@ -42,11 +43,6 @@ V  o o  V  file: src/features/combat/aimbot/aim_utils.hpp
 namespace aimbot_offsets {
 
 namespace detail {
-inline int extract_disp(const void* p) {
-  int32_t v = 0;
-  std::memcpy(&v, p, sizeof(v));
-  return static_cast<int>(v);
-}
 inline const uint8_t* scan(const char* pat) {
   return reinterpret_cast<const uint8_t*>(sigscan_module("client.so", pat));
 }
@@ -54,11 +50,11 @@ inline const uint8_t* scan(const char* pat) {
 
 inline int bone_cache_handle() {
   static const int v = [] {
-    if (auto* p = detail::scan("55 48 89 E5 41 56 49 89 F6 41 55 49 89 FD 41 54 53 48 83 EC 20 48 8B BF ? ? ? ?")) {
-      int d = detail::extract_disp(p + 24);
+    if (auto* p = detail::scan(sigs::base_animating_bone_handle)) {
+      int d = cathook::core::memory::read_disp32(p, 24);
       if (d > 0x500 && d < 0x2000) return d;
     }
-    return 0xB98;
+    return 0;
   }();
   return v;
 }
@@ -66,7 +62,7 @@ inline int bone_cache_handle() {
 inline int ik_context() {
   static const int offset = [] {
     const std::uint8_t* instruction = detail::scan("F3 0F 10 83 ? ? ? ? 0F 2F 05 ? ? ? ? 4C 8B 83 ? ? ? ? 72");
-    return instruction != nullptr ? detail::extract_disp(instruction + 18) : 0;
+    return instruction != nullptr ? cathook::core::memory::read_disp32(instruction, 18) : 0;
   }();
   return offset;
 }
@@ -193,7 +189,7 @@ inline std::uint64_t aimbot_pose_parameter_hash(Player* target) {
     return 0;
   }
 
-  static const int offset = tf2_netvars::find_offset("DT_BaseAnimating", {"m_flPoseParameter"});
+  static tf2_netvars::lazy_offset offset{"DT_BaseAnimating", {"m_flPoseParameter"}};
   if (offset <= 0) {
     return 0;
   }
@@ -206,7 +202,7 @@ inline std::uint64_t aimbot_pose_parameter_hash(Player* target) {
 }
 
 inline int aimbot_sequence(Player* target) {
-  static const int offset = tf2_netvars::find_offset("DT_BaseAnimating", {"m_nSequence"});
+  static tf2_netvars::lazy_offset offset{"DT_BaseAnimating", {"m_nSequence"}};
   if (target == nullptr || offset <= 0) {
     return -1;
   }
@@ -214,7 +210,7 @@ inline int aimbot_sequence(Player* target) {
 }
 
 inline float aimbot_cycle(Player* target) {
-  static const int offset = tf2_netvars::find_offset("DT_BaseAnimating", {"m_flCycle"});
+  static tf2_netvars::lazy_offset offset{"DT_BaseAnimating", {"m_flCycle"}};
   if (target == nullptr || offset <= 0) {
     return 0.0f;
   }
@@ -356,10 +352,9 @@ inline bool aimbot_update_client_side_animation(Player* target) {
 
   const int index = target->get_index();
   const float sim_time = target->get_simulation_time();
-  const float tick_interval = global_vars->interval_per_tick;
-  static const int anim_time_offset = tf2_netvars::find_offset("DT_BaseEntity", {"m_flAnimTime"});
+  static tf2_netvars::lazy_offset anim_time_offset{"DT_BaseEntity", {"m_flAnimTime"}};
   if (index <= 0 || index >= aimbot_anim_detail::anim_slot_count || anim_time_offset <= 0 ||
-      !std::isfinite(sim_time) || sim_time <= 0.0f || tick_interval <= 0.0f) {
+      !std::isfinite(sim_time) || sim_time <= 0.0f) {
     return false;
   }
 
@@ -374,7 +369,7 @@ inline bool aimbot_update_client_side_animation(Player* target) {
     aimbot_anim_detail::slot_handle[index] == target->get_ref_handle() &&
     aimbot_anim_detail::slot_model[index] == target->get_model();
   const float elapsed = same_identity ? sim_time - aimbot_anim_detail::slot_simtime[index] : 0.0f;
-  const float interval = elapsed > 0.0f && elapsed <= tick_interval * 16.0f ? elapsed : 0.0f;
+  const float interval = elapsed > 0.0f && elapsed <= tick_interval() * 16.0f ? elapsed : 0.0f;
   auto* anim_time = reinterpret_cast<float*>(reinterpret_cast<std::uint8_t*>(target) + anim_time_offset);
   const float saved_anim_time = *anim_time;
   const float saved_curtime = global_vars->curtime;
@@ -569,11 +564,8 @@ inline void aimbot_capture_latest_network_pose(Player* target,
   const float origin_delta_sq = same_identity
     ? aimbot_distance_squared(pose.network_origin, network_origin)
     : FLT_MAX;
-  const float tick_interval = global_vars != nullptr && global_vars->interval_per_tick > 0.0f
-    ? global_vars->interval_per_tick
-    : static_cast<float>(TICK_INTERVAL);
   const bool clear_ik_targets = !same_identity || sample_gap <= 0.0f ||
-    sample_gap > tick_interval * 3.5f || origin_delta_sq > (64.0f * 64.0f);
+    sample_gap > tick_interval() * 3.5f || origin_delta_sq > (64.0f * 64.0f);
 
   pose.valid = false;
   pose.player = target;
@@ -834,21 +826,15 @@ inline bool aimbot_copy_studio_hitboxes(Player* target,
 }
 
 inline bool aimbot_vec3_is_finite(const Vec3& value) {
-  return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+  return vec3_finite(value);
 }
 
 inline Vec3 aimbot_normalize_vector(const Vec3& value) {
-  const float length = std::sqrt((value.x * value.x) + (value.y * value.y) + (value.z * value.z));
-  return length > 0.0001f ? value * (1.0f / length) : Vec3{};
+  return normalized(value);
 }
 
 inline Vec3 aimbot_direction_to_angles(const Vec3& direction) {
-  const float planar_length = std::sqrt((direction.x * direction.x) + (direction.y * direction.y));
-  return Vec3{
-    std::atan2(-direction.z, planar_length) * radpi,
-    std::atan2(direction.y, direction.x) * radpi,
-    0.0f
-  };
+  return direction_to_angles(direction);
 }
 
 inline void reset_aimbot_scope_timing() {
@@ -920,6 +906,7 @@ inline bool aimbot_sniper_scope_time_ready(Player* localplayer) {
 }
 
 inline bool aimbot_body_aim_lethal(Player* localplayer, Weapon* weapon, Player* target);
+inline bool aimbot_is_projectile_weapon(Weapon* weapon);
 
 inline float aimbot_distance_squared(const Vec3& left, const Vec3& right) {
   const Vec3 delta = left - right;
@@ -1192,25 +1179,7 @@ inline bool aimbot_trace_visible_to_position(Player* localplayer,
 }
 
 inline Vec3 aimbot_calculate_angles_to_position(const Vec3& start, const Vec3& target) {
-  Vec3 diff{
-    target.x - start.x,
-    target.y - start.y,
-    target.z - start.z
-  };
-  float yaw_hyp_sq = (diff.x * diff.x) + (diff.y * diff.y);
-  if (yaw_hyp_sq <= 1e-12f) {
-    return Vec3{
-      diff.z > 0.0f ? -89.0f : (diff.z < 0.0f ? 89.0f : 0.0f),
-      0.0f,
-      0.0f
-    };
-  }
-  float yaw_hyp = std::sqrt(yaw_hyp_sq);
-  return Vec3{
-    -std::atan2(diff.z, yaw_hyp) * radpi,
-    std::atan2(diff.y, diff.x) * radpi,
-    0.0f
-  };
+  return angles_to_position(start, target);
 }
 
 inline Vec3 aimbot_normalize_angle_delta(const Vec3& target_angles, const Vec3& source_angles) {
@@ -2360,6 +2329,48 @@ enum class aimbot_player_skip_reason {
   type
 };
 
+inline bool aimbot_truce_active() {
+  void* rules = tf2_netvars::game_rules_object();
+  if (rules == nullptr) {
+    return false;
+  }
+  static tf2_netvars::lazy_offset offset{"DT_TFGameRulesProxy", {"m_bTruceActive"}};
+  return offset > 0 &&
+    *reinterpret_cast<bool*>(reinterpret_cast<std::uintptr_t>(rules) + static_cast<std::uintptr_t>(offset));
+}
+
+inline bool aimbot_vaccinator_blocks(Player* player, Weapon* weapon) {
+  if (player == nullptr || !player->is_vaccinator_resistant()) {
+    return false;
+  }
+  if (weapon == nullptr) {
+    return true;
+  }
+  if (weapon->is_melee()) {
+    return false;
+  }
+  if (attribute_manager != nullptr &&
+      attribute_manager->attrib_hook_value(0, "mod_pierce_resists_absorbs", weapon->to_entity()) > 0) {
+    return false;
+  }
+
+  switch (weapon->get_weapon_id()) {
+  case TF_WEAPON_FLAMETHROWER:
+  case TF_WEAPON_FLAREGUN:
+  case TF_WEAPON_FLAREGUN_REVENGE:
+    return player->in_cond(TF_COND_MEDIGUN_UBER_FIRE_RESIST);
+  case TF_WEAPON_COMPOUND_BOW:
+    return player->in_cond(TF_COND_MEDIGUN_UBER_BULLET_RESIST);
+  default:
+    break;
+  }
+
+  if (aimbot_is_projectile_weapon(weapon)) {
+    return player->in_cond(TF_COND_MEDIGUN_UBER_BLAST_RESIST);
+  }
+  return player->in_cond(TF_COND_MEDIGUN_UBER_BULLET_RESIST);
+}
+
 inline bool aimbot_should_extinguish_team(Player* localplayer, Player* player, Weapon* weapon) {
   return localplayer != nullptr && player != nullptr && weapon != nullptr &&
     player->get_team() == localplayer->get_team() &&
@@ -2390,10 +2401,11 @@ inline aimbot_player_skip_reason aimbot_player_skip_reason_for(
     return aimbot_player_skip_reason::ignored;
   }
   if (aimbot_ignore_enabled(Aim::ignore_dead_ringer) && player->is_dead_ringer_active()) return aimbot_player_skip_reason::ignored;
-  if (aimbot_ignore_enabled(Aim::ignore_vaccinator) && player->is_vaccinator_resistant()) return aimbot_player_skip_reason::ignored;
+  if (aimbot_ignore_enabled(Aim::ignore_vaccinator) && aimbot_vaccinator_blocks(player, weapon)) return aimbot_player_skip_reason::ignored;
   if (aimbot_ignore_enabled(Aim::ignore_disguised) && player->is_disguised()) return aimbot_player_skip_reason::ignored;
   if (aimbot_ignore_enabled(Aim::ignore_taunting) && player->is_taunting()) return aimbot_player_skip_reason::ignored;
   if (aimbot_ignore_enabled(Aim::ignore_sentry_busters) && player->is_sentry_buster()) return aimbot_player_skip_reason::ignored;
+  if (aimbot_truce_active() && player->get_team() != localplayer->get_team()) return aimbot_player_skip_reason::invulnerable;
   if (player->get_team() == localplayer->get_team() &&
       (!aimbot_is_friendlyfire_enabled() || aimbot_ignore_enabled(Aim::ignore_team)) &&
       !aimbot_should_extinguish_team(localplayer, player, weapon) &&
@@ -2428,15 +2440,15 @@ inline aimbot_player_skip_reason aimbot_player_skip_reason_for(
     return aimbot_player_skip_reason::ignored;
   }
   if (aimbot_ignore_enabled(Aim::ignore_dead_ringer) && player->is_dead_ringer_active()) return aimbot_player_skip_reason::ignored;
-  if (aimbot_ignore_enabled(Aim::ignore_vaccinator) && player->is_vaccinator_resistant()) return aimbot_player_skip_reason::ignored;
+  if (aimbot_ignore_enabled(Aim::ignore_vaccinator) && aimbot_vaccinator_blocks(player, weapon)) return aimbot_player_skip_reason::ignored;
   if (aimbot_ignore_enabled(Aim::ignore_disguised) && player->is_disguised()) return aimbot_player_skip_reason::ignored;
   if (aimbot_ignore_enabled(Aim::ignore_taunting) && player->is_taunting()) return aimbot_player_skip_reason::ignored;
   if (aimbot_ignore_enabled(Aim::ignore_sentry_busters) && player->is_sentry_buster()) return aimbot_player_skip_reason::ignored;
+  if (aimbot_truce_active() && entry.team != localplayer->get_team()) return aimbot_player_skip_reason::invulnerable;
   if (aimbot_ignore_enabled(Aim::ignore_unsimulated) && global_vars != nullptr &&
       config.aimbot.ignore_unsimulated_ticks > 0 &&
-      global_vars->interval_per_tick > 0.0f &&
       global_vars->curtime - entry.simulation_time >
-        global_vars->interval_per_tick * static_cast<float>(config.aimbot.ignore_unsimulated_ticks)) {
+        tick_interval() * static_cast<float>(config.aimbot.ignore_unsimulated_ticks)) {
     return aimbot_player_skip_reason::ignored;
   }
   if (aimbot_ignore_enabled(Aim::ignore_ipc_bots)) {
@@ -2918,31 +2930,13 @@ inline float aimbot_candidate_target_speed(const aimbot_candidate& candidate) {
   return std::hypot(target_velocity.x, target_velocity.y) + (std::fabs(target_velocity.z) * 0.35f);
 }
 
-inline float aimbot_candidate_motion_scale(const aimbot_candidate& candidate) {
-  const float target_speed = aimbot_candidate_target_speed(candidate);
-  const float speed_ratio = std::clamp(target_speed / 320.0f, 0.0f, 1.75f);
-  float motion_scale = 0.82f + (speed_ratio * 0.34f);
-
-  return std::clamp(motion_scale, 0.75f, 1.65f);
-}
-
 inline bool aimbot_mode_uses_visible_steering() {
   return config.aimbot.aim_mode == Aim::AimMode::SMOOTH ||
          config.aimbot.aim_mode == Aim::AimMode::ASSISTIVE;
 }
 
-inline float aimbot_assist_strength(const Vec3& original_view_angles,
-  const Vec3& target_view_angles,
-  float motion_scale = 1.0f) {
-  const float assist_strength = std::clamp(config.aimbot.assist_strength / 100.0f, 0.0f, 1.0f);
-  if (assist_strength <= 0.0f) {
-    return 0.0f;
-  }
-
-  (void)original_view_angles;
-  (void)target_view_angles;
-  (void)motion_scale;
-  return std::clamp(assist_strength, 0.0f, 1.0f);
+inline float aimbot_assist_strength() {
+  return std::clamp(config.aimbot.assist_strength / 100.0f, 0.0f, 1.0f);
 }
 
 inline Vec3 aimbot_lerp_angles(const Vec3& source_angles, const Vec3& target_angles, float amount) {
@@ -2956,9 +2950,8 @@ inline Vec3 aimbot_lerp_angles(const Vec3& source_angles, const Vec3& target_ang
 }
 
 inline Vec3 aimbot_apply_smooth_angles(const Vec3& source_view_angles,
-  const Vec3& target_view_angles,
-  float motion_scale = 1.0f) {
-  const float strength = aimbot_assist_strength(source_view_angles, target_view_angles, motion_scale);
+  const Vec3& target_view_angles) {
+  const float strength = aimbot_assist_strength();
   if (strength >= 1.0f) {
     return aimbot_clamp_angles(target_view_angles);
   }
@@ -2969,9 +2962,8 @@ inline Vec3 aimbot_apply_smooth_angles(const Vec3& source_view_angles,
 inline Vec3 aimbot_apply_assistive_angles(const Vec3& source_view_angles,
   const Vec3& target_view_angles,
   const Vec3& last_input_angles,
-  const bool has_last_input_angles,
-  float motion_scale = 1.0f) {
-  const float strength = aimbot_assist_strength(source_view_angles, target_view_angles, motion_scale);
+  const bool has_last_input_angles) {
+  const float strength = aimbot_assist_strength();
   if (strength <= 0.0f) {
     return source_view_angles;
   }
@@ -3011,19 +3003,16 @@ inline Vec3 aimbot_apply_assistive_angles(const Vec3& source_view_angles,
 inline Vec3 aimbot_apply_mode_angles(const Vec3& source_view_angles,
   const Vec3& target_view_angles,
   const Vec3& last_input_angles,
-  const bool has_last_input_angles,
-  const aimbot_candidate& candidate) {
-  const float motion_scale = aimbot_candidate_motion_scale(candidate);
+  const bool has_last_input_angles) {
   switch (config.aimbot.aim_mode) {
   case Aim::AimMode::SMOOTH:
-    return aimbot_apply_smooth_angles(source_view_angles, target_view_angles, motion_scale);
+    return aimbot_apply_smooth_angles(source_view_angles, target_view_angles);
   case Aim::AimMode::ASSISTIVE:
     return aimbot_apply_assistive_angles(
       source_view_angles,
       target_view_angles,
       last_input_angles,
-      has_last_input_angles,
-      motion_scale);
+      has_last_input_angles);
   default:
     return target_view_angles;
   }

@@ -575,6 +575,35 @@ inline void draw_spectator_indicator()
 static void draw_game_indicators()
 {
   using namespace cat_indicator;
+  if (config.misc.automation.stalker_enabled && ImGui::GetCurrentContext() != nullptr) {
+    const int tracked = automation::profile_stalker::status_count();
+    if (tracked > 0) {
+      std::vector<automation::profile_stalker::presence_card> cards{};
+      cards.reserve(static_cast<std::size_t>(tracked));
+      for (int index = 0; index < tracked; ++index) {
+        cards.push_back(automation::profile_stalker::status(index));
+      }
+      std::vector<mono::indicator_row> rows{};
+      rows.reserve(cards.size());
+      for (const auto& card : cards) {
+        rows.push_back({
+          .name = card.name,
+          .type = card.heading,
+          .value = card.summary,
+          .active = card.in_server
+        });
+      }
+      const ImVec2 position = mono::indicator_panel(
+        "profile_presence",
+        "presence",
+        rows,
+        { config.misc.automation.stalker_overlay_x, config.misc.automation.stalker_overlay_y },
+        cat_menu::font_regular(),
+        menu_focused);
+      config.misc.automation.stalker_overlay_x = position.x;
+      config.misc.automation.stalker_overlay_y = position.y;
+    }
+  }
   if (!should_draw_overlay()) return;
 
   const std::vector<section_spec> sections = build_sections();

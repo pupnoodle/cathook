@@ -10,6 +10,7 @@
 #include <string_view>
 #include <unordered_map>
 #include "core/math/math.hpp"
+#include "core/entity_cache.hpp"
 #include "core/player_manager.hpp"
 #include "features/combat/anti_aim/anti_aim.hpp"
 #include "features/combat/aimbot/aimbot.hpp"
@@ -19,6 +20,9 @@
 #include "games/tf2/sdk/interfaces/engine.hpp"
 #include "games/tf2/sdk/interfaces/entity_list.hpp"
 #include "games/tf2/sdk/interfaces/global_vars.hpp"
+#include "games/tf2/sdk/netvars.hpp"
+#include <functional>
+#include <vector>
 
 namespace
 {
@@ -35,6 +39,8 @@ struct visual_group_snapshot
 {
   std::vector<visual_group> groups{};
   uint32_t active_group_mask = 0;
+  uint32_t overlay_targets = 0;
+  uint32_t model_targets = 0;
   bool need_screen_overlay = false;
   bool need_model_effects = false;
   bool need_backtrack_visualizer = false;
@@ -387,39 +393,36 @@ std::uint32_t next_group_id = 1;
     text_equals(network_name, "CTFBall_Ornament");
 }
 
-[[nodiscard]] std::string recv_table_for_entity(Entity* entity)
-{
-  if (entity == nullptr) {
-    return {};
-  }
-
-  const std::string_view network_name = safe_text(entity->get_network_name());
-  if (network_name.empty()) {
-    return {};
-  }
-
-  std::string table_name = "DT_";
-  if (network_name.size() > 1 && network_name.front() == 'C') {
-    table_name.append(network_name.substr(1));
-  } else {
-    table_name.append(network_name);
-  }
-
-  return table_name;
-}
-
 [[nodiscard]] bool read_bool_netvar(Entity* entity, const char* prop_name)
 {
   if (entity == nullptr || prop_name == nullptr) {
     return false;
   }
 
-  const auto table_name = recv_table_for_entity(entity);
-  if (table_name.empty()) {
+  const auto* client_class = entity->get_typed_client_class();
+  if (client_class == nullptr || client_class->recv_table_ptr == nullptr) {
     return false;
   }
 
-  const int offset = tf2_netvars::find_offset(table_name.c_str(), {prop_name});
+  auto* table = client_class->recv_table_ptr;
+  struct cached_offsets {
+    int critical = 0;
+    int minicrit = 0;
+    bool resolved = false;
+  };
+  static std::unordered_map<const tf2_netvars::recv_table*, cached_offsets> offset_cache{};
+  auto& cached = offset_cache[table];
+  if (!cached.resolved) {
+    const std::vector<const char*> crit_path{"m_bCritical"};
+    const std::vector<const char*> mini_path{"m_bMiniCrit"};
+    std::vector<tf2_netvars::recv_table*> visiting{};
+    cached.critical = tf2_netvars::find_offset_in_table(table, crit_path, 0, 0, visiting);
+    visiting.clear();
+    cached.minicrit = tf2_netvars::find_offset_in_table(table, mini_path, 0, 0, visiting);
+    cached.resolved = true;
+  }
+
+  const int offset = std::strcmp(prop_name, "m_bCritical") == 0 ? cached.critical : cached.minicrit;
   if (offset <= 0) {
     return false;
   }
@@ -577,29 +580,53 @@ std::uint32_t next_group_id = 1;
     }
   }
 
-  if (entity->get_class_id() == class_id::PLAYER) {
-    return visual_group::target_players;
+  switch (entity->get_class_id()) {
+    case class_id::PLAYER:
+      return visual_group::target_players;
+    case class_id::SENTRY:
+    case class_id::DISPENSER:
+    case class_id::OBJECT_CART_DISPENSER:
+    case class_id::TELEPORTER:
+      return visual_group::target_buildings;
+    case class_id::ROCKET:
+    case class_id::PILL_OR_STICKY:
+    case class_id::ARROW:
+    case class_id::CROSSBOW_BOLT:
+    case class_id::FLARE:
+    case class_id::SENTRY_ROCKET:
+      return visual_group::target_projectiles;
+    case class_id::CAPTURE_FLAG:
+      return visual_group::target_objective;
+    case class_id::HEALTH_PACK:
+      return visual_group::target_health;
+    case class_id::AMMO:
+      return visual_group::target_ammo;
+    case class_id::AMMO_OR_HEALTH_PACK: {
+      const enum pickup_type pickup = entity->get_pickup_type();
+      if (pickup == pickup_type::MEDKIT) {
+        return visual_group::target_health;
+      }
+      if (pickup == pickup_type::AMMOPACK) {
+        return visual_group::target_ammo;
+      }
+      break;
+    }
+    case class_id::MVM_CURRENCY:
+      return visual_group::target_money;
+    case class_id::PUMPKIN:
+      return visual_group::target_bombs;
+    default:
+      break;
   }
-  if (entity->is_building()) {
-    return visual_group::target_buildings;
-  }
+
   if (is_projectile(entity)) {
     return visual_group::target_projectiles;
   }
   if (is_ragdoll(entity)) {
     return visual_group::target_ragdolls;
   }
-  if (entity->get_class_id() == class_id::CAPTURE_FLAG) {
-    return visual_group::target_objective;
-  }
   if (is_npc(entity)) {
     return visual_group::target_npcs;
-  }
-  if (entity->get_pickup_type() == pickup_type::MEDKIT || entity->get_class_id() == class_id::HEALTH_PACK) {
-    return visual_group::target_health;
-  }
-  if (entity->get_pickup_type() == pickup_type::AMMOPACK || entity->get_class_id() == class_id::AMMO) {
-    return visual_group::target_ammo;
   }
   if (is_money(entity)) {
     return visual_group::target_money;
@@ -704,7 +731,8 @@ std::uint32_t next_group_id = 1;
   return true;
 }
 
-[[nodiscard]] bool group_matches_entity(const visual_group& group, Entity* entity, Player* localplayer, bool models)
+[[nodiscard]] bool group_matches_entity(const visual_group& group, Entity* entity, Player* localplayer, bool models,
+  uint32_t target, Player* owner)
 {
   if (entity == nullptr || localplayer == nullptr) {
     return false;
@@ -725,7 +753,6 @@ std::uint32_t next_group_id = 1;
     return false;
   }
 
-  const uint32_t target = target_for_entity(entity, models, localplayer);
   if (models && g_fake_angle_model && entity == localplayer->to_entity() && anti_aim::has_visual_angles() && (group.targets & visual_group::target_fake_angle) != 0) {
     return true;
   }
@@ -738,7 +765,6 @@ std::uint32_t next_group_id = 1;
     return false;
   }
 
-  auto* owner = owner_player_for_entity(entity);
   if (!role_conditions_match(group, owner)) {
     return false;
   }
@@ -747,10 +773,12 @@ std::uint32_t next_group_id = 1;
 
 [[nodiscard]] std::size_t find_group_index(Entity* entity, Player* localplayer, bool models, const visual_groups::visual_group_snapshot& snapshot)
 {
-  if (snapshot.active_group_mask == 0 || snapshot.groups.empty()) {
+  if (snapshot.active_group_mask == 0 || snapshot.groups.empty() || entity == nullptr || localplayer == nullptr) {
     return visual_group_not_found;
   }
 
+  const uint32_t target = target_for_entity(entity, models, localplayer);
+  Player* owner = owner_player_for_entity(entity);
   const std::vector<visual_group>& groups = snapshot.groups;
 
   for (std::size_t group_index = 0; group_index < groups.size(); ++group_index) {
@@ -759,7 +787,7 @@ std::uint32_t next_group_id = 1;
     }
 
     const auto& group = groups[group_index];
-    if (group_matches_entity(group, entity, localplayer, models)) {
+    if (group_matches_entity(group, entity, localplayer, models, target, owner)) {
       return group_index;
     }
   }
@@ -801,6 +829,8 @@ void update_snapshot_capabilities(visual_groups::visual_group_snapshot& snapshot
   snapshot.need_backtrack_visualizer = false;
   snapshot.need_pickup_timers = false;
   snapshot.need_head_emojis = false;
+  snapshot.overlay_targets = 0;
+  snapshot.model_targets = 0;
 
   if (snapshot.active_group_mask == 0) {
     return;
@@ -818,6 +848,12 @@ void update_snapshot_capabilities(visual_groups::visual_group_snapshot& snapshot
     snapshot.need_backtrack_visualizer = snapshot.need_backtrack_visualizer || (group.backtrack & visual_group::backtrack_enabled) != 0;
     snapshot.need_pickup_timers = snapshot.need_pickup_timers || group.pickup_timer;
     snapshot.need_head_emojis = snapshot.need_head_emojis || (group.esp.draw_mask & group_esp_settings::head_emoji) != 0;
+    if (group_has_screen_overlay(group)) {
+      snapshot.overlay_targets |= group.targets;
+    }
+    if (group.chams.active() || group.glow.active() || group.backtrack_visuals.active()) {
+      snapshot.model_targets |= group.targets;
+    }
   }
 }
 
@@ -912,16 +948,12 @@ void store(Player* localplayer)
     return;
   }
 
-  const int max_entities = std::max(entity_list->get_max_entities(), 0);
-  if (next_snapshot->need_screen_overlay || next_snapshot->need_model_effects) {
-    next_snapshot->entity_groups.reserve(static_cast<std::size_t>(max_entities));
-    next_snapshot->model_groups.reserve(static_cast<std::size_t>(max_entities));
-  }
-
-  for (int index = 1; index < max_entities; ++index) {
-    auto* entity = entity_list->entity_from_index(static_cast<unsigned int>(index));
+  auto consider = [&](Entity* entity) {
     if (entity == nullptr) {
-      continue;
+      return;
+    }
+    if (entity->is_dormant() && !config.visuals.dormant_esp) {
+      return;
     }
 
     if (next_snapshot->need_screen_overlay) {
@@ -935,6 +967,31 @@ void store(Player* localplayer)
       if (model_group != visual_group_not_found) {
         next_snapshot->model_groups.emplace(entity, model_group);
       }
+    }
+  };
+
+  if (config.visuals.dormant_esp) {
+    const int max_entities = std::max(entity_list->get_max_entities(), 0);
+    next_snapshot->entity_groups.reserve(static_cast<std::size_t>(max_entities));
+    next_snapshot->model_groups.reserve(static_cast<std::size_t>(max_entities));
+    for (int index = 1; index < max_entities; ++index) {
+      consider(entity_list->entity_from_index(static_cast<unsigned int>(index)));
+    }
+  } else {
+    std::size_t live = 0;
+    for (const auto& bucket : entity_cache.buckets) {
+      live += bucket.size();
+    }
+    live += entity_cache_npcs().size();
+    next_snapshot->entity_groups.reserve(live);
+    next_snapshot->model_groups.reserve(live);
+    for (const auto& bucket : entity_cache.buckets) {
+      for (Entity* entity : bucket) {
+        consider(entity);
+      }
+    }
+    for (Entity* entity : entity_cache_npcs()) {
+      consider(entity);
     }
   }
 
@@ -975,6 +1032,28 @@ visual_group_match group_for_entity(Entity* entity, bool models)
   match.snapshot = std::move(snapshot);
   match.group = group;
   return match;
+}
+
+void visit_screen_entities(const std::function<void(Entity*, const visual_group_match&)>& fn)
+{
+  if (!fn) {
+    return;
+  }
+
+  std::shared_ptr<const visual_group_snapshot> snapshot = g_group_snapshot.load(std::memory_order_acquire);
+  if (snapshot == nullptr) {
+    return;
+  }
+
+  for (const auto& [entity, group_index] : snapshot->entity_groups) {
+    if (entity == nullptr || group_index >= snapshot->groups.size()) {
+      continue;
+    }
+    visual_group_match match{};
+    match.snapshot = snapshot;
+    match.group = &snapshot->groups[group_index];
+    fn(entity, match);
+  }
 }
 
 bool groups_active()

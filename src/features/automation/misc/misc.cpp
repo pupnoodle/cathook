@@ -9,20 +9,25 @@ V  o o  V  file: src/features/automation/misc/misc.cpp
   || (___\====
 */
 #include "features/automation/misc/misc.hpp"
+#include "core/shared/modules.hpp"
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <mutex>
 #include <system_error>
 #include <fstream>
 #include <limits>
 #include <random>
 #include <string>
 #include <string_view>
+#include <thread>
+#include <utility>
 #include <vector>
 #include "core/shared/sigs.hpp"
 #include "core/hooks/region_selector.hpp"
@@ -32,16 +37,22 @@ V  o o  V  file: src/features/automation/misc/misc.cpp
 #include "core/logger.hpp"
 #include "core/ipc/ipc_client.hpp"
 #include "core/player_manager.hpp"
+#include "core/player_resource.hpp"
+#include "core/entity_cache.hpp"
 #include "features/menu/config.hpp"
 #include "features/automation/autoitem/autoitem.hpp"
 #include "features/automation/mvm_queue/mvm_queue.hpp"
 #include "features/automation/nographics/nographics.hpp"
 #include "features/automation/profile_stalker_api.hpp"
 #include "features/automation/navbot/navbot_mesh.hpp"
+#include "features/automation/navbot/navbot_controller.hpp"
 #include "games/tf2/sdk/netvars.hpp"
+#include "games/tf2/sdk/bitbuf.hpp"
 #include "games/tf2/sdk/entities/player.hpp"
 #include "games/tf2/sdk/entities/entity.hpp"
 #include "games/tf2/sdk/entities/weapon.hpp"
+#include "games/tf2/sdk/entities/building.hpp"
+#include "games/tf2/sdk/entities/team_objective_resource.hpp"
 #include "games/tf2/sdk/materials/keyvalues.hpp"
 #include "games/tf2/sdk/interfaces/client.hpp"
 #include "games/tf2/sdk/interfaces/engine.hpp"
@@ -49,6 +60,7 @@ V  o o  V  file: src/features/automation/misc/misc.cpp
 #include "games/tf2/sdk/interfaces/convar_system.hpp"
 #include "games/tf2/sdk/interfaces/entity_list.hpp"
 #include "games/tf2/sdk/interfaces/global_vars.hpp"
+#include "games/tf2/sdk/interfaces/steam_runtime.hpp"
 #include "games/tf2/sdk/interfaces/game_event_manager.hpp"
 #include "libsigscan/libsigscan.h"
 
@@ -69,22 +81,72 @@ constexpr int micspam_min_interval_seconds = 1;
 constexpr int micspam_max_interval_seconds = 600;
 constexpr const char* micspam_source_directory = "/opt/cathook/micspam";
 constexpr const char* micspam_voice_input_path = "voice_input.wav";
+
+namespace
+{
+
+struct micspam_prepare_state
+{
+  std::mutex mutex{};
+  std::thread worker{};
+  std::atomic_bool job_running{false};
+  std::atomic_bool result_ready{false};
+  std::atomic_bool result_value{false};
+
+  ~micspam_prepare_state()
+  {
+    if (worker.joinable())
+    {
+      worker.join();
+    }
+  }
+};
+
+micspam_prepare_state& micspam_prepare()
+{
+  static micspam_prepare_state state{};
+  return state;
+}
+
+bool poll_micspam_prepare_result()
+{
+  auto& state = micspam_prepare();
+  if (!state.result_ready.exchange(false, std::memory_order_acq_rel))
+  {
+    return false;
+  }
+
+  if (state.worker.joinable())
+  {
+    state.worker.join();
+  }
+  return state.result_value.load(std::memory_order_acquire);
+}
+
+}
 constexpr float mvm_command_interval = 1.0f;
 constexpr float mvm_buybot_interval = 0.2f;
 constexpr float ping_reduce_interval = 0.1f;
 constexpr int casual_match_group_default = 7;
 constexpr float anti_afk_trigger_padding = 10.0f;
 constexpr int text_msg_user_message_type = 5;
+constexpr int say_text2_user_message_type = 4;
+constexpr int gr_state_preround = 3;
+constexpr int gr_state_rnd_running = 4;
+constexpr int gr_state_between_rounds = 10;
+constexpr int call_vote_failed_user_message_type = 45;
+constexpr int vote_start_user_message_type = 46;
+constexpr int vote_pass_user_message_type = 47;
+constexpr int vote_failed_user_message_type = 48;
+constexpr int vote_fail_reason_rate_exceeded = 2;
+constexpr int vote_fail_reason_on_cooldown = 8;
 constexpr int report_reason_cheating = 1;
-constexpr const char* tf_client_module_name = "tf/bin/linux64/client.so";
 constexpr float party_client_scan_interval = 0.25f;
 constexpr const char* auto_balance_pending_token = "#TF_Autobalance_TeamChangePending";
 constexpr float autotaunt_step_interval = 0.12f;
 constexpr int max_chat_command_length = 220;
 constexpr const char* startup_sound_list_name = "startup_sounds.txt";
 constexpr float announcer_combo_window = 5.0f;
-constexpr int gr_state_preround = 3;
-constexpr int gr_state_between_rounds = 10;
 
 using get_party_client_fn = void* (*)();
 using get_matchmaking_client_fn = void* (*)();
@@ -96,7 +158,14 @@ using request_queue_for_match_fn = void (*)(void*, unsigned int);
 using request_leave_for_match_fn = void (*)(void*, unsigned int);
 using request_queue_for_standby_fn = void (*)(void*);
 using request_leave_standby_fn = void (*)(void*);
+using promote_to_leader_fn = bool (*)(void*, std::uint64_t);
 using report_player_account_fn = bool (*)(std::uint64_t, int);
+using party_get_num_members_fn = int (*)(void*);
+using party_get_num_online_members_fn = int (*)(void*);
+using party_get_member_steamid_fn = std::uint64_t (*)(void*, int);
+using party_in_party_not_leader_fn = bool (*)(void*);
+using party_send_party_chat_fn = void (*)(void*, const char*);
+using party_kick_player_fn = bool (*)(void*, std::uint64_t);
 
 struct party_client_api
 {
@@ -111,6 +180,13 @@ struct party_client_api
   request_leave_for_match_fn request_leave_for_match = nullptr;
   request_queue_for_standby_fn request_queue_for_standby = nullptr;
   request_leave_standby_fn request_leave_standby = nullptr;
+  promote_to_leader_fn promote_to_leader = nullptr;
+  party_get_num_members_fn get_num_members = nullptr;
+  party_get_num_online_members_fn get_num_online_members = nullptr;
+  party_get_member_steamid_fn get_member_steamid = nullptr;
+  party_in_party_not_leader_fn in_party_not_leader = nullptr;
+  party_send_party_chat_fn send_party_chat = nullptr;
+  party_kick_player_fn kick_player = nullptr;
   int scan_step = 0;
   float next_scan_time = 0.0f;
 };
@@ -118,6 +194,46 @@ struct party_client_api
 party_client_api g_party_client_api{};
 report_player_account_fn g_report_player_account = nullptr;
 bool g_report_player_account_initialized = false;
+
+struct vote_message_reader
+{
+  const bf_read* message = nullptr;
+  int bit = 0;
+  bool ok = true;
+
+  int read(int count)
+  {
+    if (message == nullptr || !message->is_valid() || count < 0 ||
+        bit + count > message->data_bits)
+    {
+      ok = false;
+      return 0;
+    }
+    std::uint32_t value = 0;
+    for (int i = 0; i < count; ++i)
+    {
+      value |= static_cast<std::uint32_t>(
+          (message->data[(bit + i) >> 3] >> ((bit + i) & 7)) & 1u) << i;
+    }
+    bit += count;
+    return value;
+  }
+
+  std::string read_string()
+  {
+    std::string result;
+    while (ok)
+    {
+      const int c = read(8);
+      if (!ok || c == 0)
+      {
+        break;
+      }
+      result.push_back(static_cast<char>(c));
+    }
+    return result;
+  }
+};
 
 struct text_file_cache
 {
@@ -505,16 +621,15 @@ bool is_enemy_close_to_local(float safety_distance)
   }
 
   const Vec3 local_origin = localplayer->get_origin();
-  const int max_entities = entity_list->get_max_entities();
-  for (int index = 1; index < max_entities; ++index)
+  for (const auto& entry : entity_cache_players())
   {
-    auto* player = entity_list->player_from_index(index);
-    if (player == nullptr || player == localplayer || player->get_class_id() != class_id::PLAYER || !player->is_alive() || player->is_dormant())
+    auto* player = entry.player;
+    if (player == nullptr || player == localplayer || !entry.alive || entry.dormant)
     {
       continue;
     }
 
-    if (player->get_team() == localplayer->get_team())
+    if (entry.team == localplayer->get_team())
     {
       continue;
     }
@@ -632,7 +747,7 @@ void initialize_party_client_api()
   {
     case 0:
     {
-      void* get_party_client_match = sigscan_module(tf_client_module_name, sigs::get_party_client);
+      void* get_party_client_match = sigscan_module(cathook::core::modules::tf_client, sigs::get_party_client);
       if (get_party_client_match != nullptr)
       {
         g_party_client_api.get_party_client = reinterpret_cast<get_party_client_fn>(
@@ -643,27 +758,27 @@ void initialize_party_client_api()
     }
     case 1:
       g_party_client_api.get_matchmaking_client =
-        reinterpret_cast<get_matchmaking_client_fn>(sigscan_module(tf_client_module_name, sigs::get_matchmaking_client));
+        reinterpret_cast<get_matchmaking_client_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::get_matchmaking_client));
       ++g_party_client_api.scan_step;
       return;
     case 2:
       g_party_client_api.load_saved_casual_criteria =
-        reinterpret_cast<load_saved_casual_criteria_fn>(sigscan_module(tf_client_module_name, sigs::load_saved_casual_criteria));
+        reinterpret_cast<load_saved_casual_criteria_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::load_saved_casual_criteria));
       ++g_party_client_api.scan_step;
       return;
     case 3:
       g_party_client_api.is_in_queue_for_match_group =
-        reinterpret_cast<is_in_queue_for_match_group_fn>(sigscan_module(tf_client_module_name, sigs::is_in_queue_for_match_group));
+        reinterpret_cast<is_in_queue_for_match_group_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::is_in_queue_for_match_group));
       ++g_party_client_api.scan_step;
       return;
     case 4:
       g_party_client_api.is_in_standby_queue =
-        reinterpret_cast<is_in_standby_queue_fn>(sigscan_module(tf_client_module_name, sigs::is_in_standby_queue));
+        reinterpret_cast<is_in_standby_queue_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::is_in_standby_queue));
       ++g_party_client_api.scan_step;
       return;
     case 5:
       g_party_client_api.abandon_current_match =
-        reinterpret_cast<abandon_current_match_fn>(sigscan_module(tf_client_module_name, sigs::abandon_current_match));
+        reinterpret_cast<abandon_current_match_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::abandon_current_match));
       ++g_party_client_api.scan_step;
       return;
     case 6:
@@ -672,17 +787,52 @@ void initialize_party_client_api()
       return;
     case 7:
       g_party_client_api.request_leave_for_match =
-        reinterpret_cast<request_leave_for_match_fn>(sigscan_module(tf_client_module_name, sigs::request_leave_for_match));
+        reinterpret_cast<request_leave_for_match_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::request_leave_for_match));
       ++g_party_client_api.scan_step;
       return;
     case 8:
       g_party_client_api.request_queue_for_standby =
-        reinterpret_cast<request_queue_for_standby_fn>(sigscan_module(tf_client_module_name, sigs::request_queue_for_standby));
+        reinterpret_cast<request_queue_for_standby_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::request_queue_for_standby));
       ++g_party_client_api.scan_step;
       return;
     case 9:
       g_party_client_api.request_leave_standby =
-        reinterpret_cast<request_leave_standby_fn>(sigscan_module(tf_client_module_name, sigs::request_leave_standby));
+        reinterpret_cast<request_leave_standby_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::request_leave_standby));
+      ++g_party_client_api.scan_step;
+      return;
+    case 10:
+      g_party_client_api.promote_to_leader =
+        reinterpret_cast<promote_to_leader_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::promote_to_leader));
+      ++g_party_client_api.scan_step;
+      return;
+    case 11:
+      g_party_client_api.get_num_members =
+        reinterpret_cast<party_get_num_members_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::party_client_get_num_members));
+      ++g_party_client_api.scan_step;
+      return;
+    case 12:
+      g_party_client_api.get_num_online_members =
+        reinterpret_cast<party_get_num_online_members_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::party_client_get_num_online_members));
+      ++g_party_client_api.scan_step;
+      return;
+    case 13:
+      g_party_client_api.get_member_steamid =
+        reinterpret_cast<party_get_member_steamid_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::party_client_get_member_steamid));
+      ++g_party_client_api.scan_step;
+      return;
+    case 14:
+      g_party_client_api.in_party_not_leader =
+        reinterpret_cast<party_in_party_not_leader_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::party_client_in_party_not_leader));
+      ++g_party_client_api.scan_step;
+      return;
+    case 15:
+      g_party_client_api.send_party_chat =
+        reinterpret_cast<party_send_party_chat_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::party_client_send_party_chat));
+      ++g_party_client_api.scan_step;
+      return;
+    case 16:
+      g_party_client_api.kick_player =
+        reinterpret_cast<party_kick_player_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::party_client_kick_player));
       ++g_party_client_api.scan_step;
       return;
     default:
@@ -691,7 +841,7 @@ void initialize_party_client_api()
 
   g_party_client_api.initialized = true;
   log_queue_debug(
-    "api init get_party_client=%p get_matchmaking_client=%p load_saved_casual_criteria=%p is_in_queue=%p is_in_standby=%p abandon_current_match=%p request_queue=%p request_leave=%p request_queue_standby=%p request_leave_standby=%p\n",
+    "api init get_party_client=%p get_matchmaking_client=%p load_saved_casual_criteria=%p is_in_queue=%p is_in_standby=%p abandon_current_match=%p request_queue=%p request_leave=%p request_queue_standby=%p request_leave_standby=%p promote_to_leader=%p num_members=%p online_members=%p member_steamid=%p not_leader=%p party_chat=%p kick=%p\n",
     reinterpret_cast<void*>(g_party_client_api.get_party_client),
     reinterpret_cast<void*>(g_party_client_api.get_matchmaking_client),
     reinterpret_cast<void*>(g_party_client_api.load_saved_casual_criteria),
@@ -701,7 +851,14 @@ void initialize_party_client_api()
     reinterpret_cast<void*>(g_party_client_api.request_queue_for_match),
     reinterpret_cast<void*>(g_party_client_api.request_leave_for_match),
     reinterpret_cast<void*>(g_party_client_api.request_queue_for_standby),
-    reinterpret_cast<void*>(g_party_client_api.request_leave_standby));
+    reinterpret_cast<void*>(g_party_client_api.request_leave_standby),
+    reinterpret_cast<void*>(g_party_client_api.promote_to_leader),
+    reinterpret_cast<void*>(g_party_client_api.get_num_members),
+    reinterpret_cast<void*>(g_party_client_api.get_num_online_members),
+    reinterpret_cast<void*>(g_party_client_api.get_member_steamid),
+    reinterpret_cast<void*>(g_party_client_api.in_party_not_leader),
+    reinterpret_cast<void*>(g_party_client_api.send_party_chat),
+    reinterpret_cast<void*>(g_party_client_api.kick_player));
 }
 
 bool party_client_api_ready()
@@ -799,40 +956,13 @@ bool cancel_active_queues(void* party_client, unsigned int queue_mode, bool& in_
 
 Entity* get_player_resource_entity()
 {
-  if (entity_list == nullptr)
-  {
-    return nullptr;
-  }
-
-  const int max_entities = entity_list->get_max_entities();
-  for (int index = 1; index < max_entities; ++index)
-  {
-    auto* entity = entity_list->entity_from_index(index);
-    if (entity == nullptr)
-    {
-      continue;
-    }
-
-    if (entity->get_class_id() == class_id::PLAYER_RESOURCE)
-    {
-      return entity;
-    }
-  }
-
-  return nullptr;
+  return cathook::core::player_resource::get_player_resource_entity();
 }
 
 template <typename value_type>
 value_type read_player_resource_value(Entity* player_resource, int array_offset, int player_index)
 {
-  if (player_resource == nullptr || array_offset <= 0 || player_index <= 0)
-  {
-    return {};
-  }
-
-  const auto base = reinterpret_cast<std::uintptr_t>(player_resource);
-  const auto entry_offset = static_cast<std::uintptr_t>(array_offset) + (static_cast<std::uintptr_t>(player_index) * sizeof(value_type));
-  return *reinterpret_cast<value_type*>(base + entry_offset);
+  return cathook::core::player_resource::read_value<value_type>(player_resource, array_offset, player_index);
 }
 
 int get_local_ping()
@@ -842,7 +972,7 @@ int get_local_ping()
     return 0;
   }
 
-  static const int ping_offset = tf2_netvars::find_offset("DT_TFPlayerResource", { "baseclass", "m_iPing" });
+  static tf2_netvars::lazy_offset ping_offset{"DT_TFPlayerResource", { "baseclass", "m_iPing" }};
   if (ping_offset <= 0)
   {
     return 0;
@@ -860,8 +990,8 @@ int count_requeue_players()
   }
 
   int human_players = 0;
-  const int max_entities = entity_list->get_max_entities();
-  for (int index = 1; index < max_entities; ++index)
+  const int max_clients = cathook::core::player_resource::max_client_index();
+  for (int index = 1; index <= max_clients; ++index)
   {
     auto* player = entity_list->player_from_index(index);
     if (player == nullptr || player->get_class_id() != class_id::PLAYER)
@@ -1023,8 +1153,8 @@ bool is_mvm_mann_up_match()
     return true;
   }
 
-  static const int match_group_offset = tf2_netvars::find_offset(
-    "DT_TFGameRulesProxy", {"m_nMatchGroupType"});
+  static tf2_netvars::lazy_offset match_group_offset{
+    "DT_TFGameRulesProxy", {"m_nMatchGroupType"}};
   if (match_group_offset <= 0)
   {
     return true;
@@ -1128,6 +1258,171 @@ void send_mvm_upgrades_done(int num_upgrades)
   send_mvm_command(key_values);
 }
 
+constexpr std::array<std::uint8_t, 59> mvm_upgrade_levels{
+  4, 4, 4, 4, 4, 4, 3, 3, 6, 4,
+  3, 4, 1, 3, 1, 1, 1, 4, 4, 4,
+  3, 3, 3, 1, 4, 1, 1, 4, 3, 1,
+  4, 4, 2, 4, 1, 3, 2, 3, 2, 3,
+  3, 4, 1, 4, 3, 4, 1, 4, 4, 2,
+  3, 3, 3, 3, 3, 3, 5, 5, 3
+};
+
+int mvm_upgrade_max_levels(int upgrade)
+{
+  if (upgrade < 0 || static_cast<std::size_t>(upgrade) >= mvm_upgrade_levels.size())
+  {
+    return 4;
+  }
+  return mvm_upgrade_levels[static_cast<std::size_t>(upgrade)];
+}
+
+struct mvm_upgrade_step
+{
+  int upgrade;
+  int slot;
+};
+
+constexpr int mvm_slot_character = -1;
+constexpr int mvm_slot_primary = 0;
+constexpr int mvm_slot_secondary = 1;
+constexpr int mvm_slot_melee = 2;
+constexpr int mvm_slot_sapper = 3;
+constexpr int mvm_slot_buildings = 4;
+
+constexpr mvm_upgrade_step mvm_sniper_plan[] = {
+  {17, mvm_slot_primary}, {35, mvm_slot_primary}, {2, mvm_slot_primary}, {5, mvm_slot_primary},
+  {6, mvm_slot_primary}, {12, mvm_slot_primary}, {13, mvm_slot_primary}, {40, mvm_slot_primary},
+  {41, mvm_slot_primary}, {52, mvm_slot_character}, {53, mvm_slot_character}, {54, mvm_slot_character},
+  {51, mvm_slot_character}, {56, mvm_slot_character}
+};
+constexpr mvm_upgrade_step mvm_pyro_plan[] = {
+  {52, mvm_slot_character}, {53, mvm_slot_character}, {54, mvm_slot_character}, {51, mvm_slot_character},
+  {56, mvm_slot_character}, {30, mvm_slot_primary}, {31, mvm_slot_primary}, {33, mvm_slot_primary},
+  {0, mvm_slot_primary}, {2, mvm_slot_primary}, {5, mvm_slot_primary}, {6, mvm_slot_primary}
+};
+constexpr mvm_upgrade_step mvm_heavy_plan[] = {
+  {52, mvm_slot_character}, {53, mvm_slot_character}, {54, mvm_slot_character}, {51, mvm_slot_character},
+  {56, mvm_slot_character}, {0, mvm_slot_primary}, {2, mvm_slot_primary}, {5, mvm_slot_primary},
+  {6, mvm_slot_primary}, {11, mvm_slot_primary}, {12, mvm_slot_primary}, {13, mvm_slot_primary},
+  {41, mvm_slot_primary}
+};
+constexpr mvm_upgrade_step mvm_scout_plan[] = {
+  {52, mvm_slot_character}, {53, mvm_slot_character}, {54, mvm_slot_character}, {51, mvm_slot_character},
+  {55, mvm_slot_character}, {56, mvm_slot_character}, {46, mvm_slot_secondary}, {0, mvm_slot_primary},
+  {2, mvm_slot_primary}, {5, mvm_slot_primary}, {6, mvm_slot_primary}, {12, mvm_slot_primary}
+};
+constexpr mvm_upgrade_step mvm_engineer_plan[] = {
+  {22, mvm_slot_buildings}, {20, mvm_slot_buildings}, {52, mvm_slot_character}, {53, mvm_slot_character},
+  {54, mvm_slot_character}, {51, mvm_slot_character}, {57, mvm_slot_character}, {56, mvm_slot_character},
+  {4, mvm_slot_melee}, {0, mvm_slot_melee}
+};
+constexpr mvm_upgrade_step mvm_soldier_plan[] = {
+  {52, mvm_slot_character}, {0, mvm_slot_primary}, {53, mvm_slot_character}, {2, mvm_slot_primary},
+  {54, mvm_slot_character}, {5, mvm_slot_primary}, {51, mvm_slot_character}, {6, mvm_slot_primary},
+  {56, mvm_slot_character}, {47, mvm_slot_primary}, {33, mvm_slot_primary}
+};
+constexpr mvm_upgrade_step mvm_demoman_plan[] = {
+  {52, mvm_slot_character}, {0, mvm_slot_primary}, {53, mvm_slot_character}, {2, mvm_slot_primary},
+  {54, mvm_slot_character}, {5, mvm_slot_primary}, {51, mvm_slot_character}, {8, mvm_slot_primary},
+  {56, mvm_slot_character}, {27, mvm_slot_primary}, {33, mvm_slot_primary}
+};
+constexpr mvm_upgrade_step mvm_spy_plan[] = {
+  {37, mvm_slot_sapper}, {52, mvm_slot_character}, {53, mvm_slot_character}, {54, mvm_slot_character},
+  {51, mvm_slot_character}, {4, mvm_slot_melee}, {0, mvm_slot_melee}
+};
+
+const mvm_upgrade_step* buybot_plan_for_class(tf_class player_class, int& count)
+{
+  switch (player_class)
+  {
+    case tf_class::SNIPER:
+      count = static_cast<int>(std::size(mvm_sniper_plan));
+      return mvm_sniper_plan;
+    case tf_class::PYRO:
+      count = static_cast<int>(std::size(mvm_pyro_plan));
+      return mvm_pyro_plan;
+    case tf_class::HEAVYWEAPONS:
+      count = static_cast<int>(std::size(mvm_heavy_plan));
+      return mvm_heavy_plan;
+    case tf_class::SCOUT:
+      count = static_cast<int>(std::size(mvm_scout_plan));
+      return mvm_scout_plan;
+    case tf_class::ENGINEER:
+      count = static_cast<int>(std::size(mvm_engineer_plan));
+      return mvm_engineer_plan;
+    case tf_class::SOLDIER:
+      count = static_cast<int>(std::size(mvm_soldier_plan));
+      return mvm_soldier_plan;
+    case tf_class::DEMOMAN:
+      count = static_cast<int>(std::size(mvm_demoman_plan));
+      return mvm_demoman_plan;
+    case tf_class::SPY:
+      count = static_cast<int>(std::size(mvm_spy_plan));
+      return mvm_spy_plan;
+    default:
+      count = 0;
+      return nullptr;
+  }
+}
+
+bool has_vaccinator(Player* localplayer)
+{
+  if (localplayer == nullptr)
+  {
+    return false;
+  }
+  for (int index = 0; index < Player::max_weapon_count; ++index)
+  {
+    auto* weapon = localplayer->get_weapon_at(index);
+    if (weapon != nullptr && weapon->get_def_id() == Medic_s_TheVaccinator)
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool parse_say_text2(const bf_read* message_data, int& entity_index, std::string& text)
+{
+  if (message_data == nullptr || !message_data->is_valid() || message_data->data == nullptr
+    || message_data->data_bytes < 4)
+  {
+    return false;
+  }
+
+  const auto* cursor = message_data->data;
+  const auto* end = cursor + message_data->data_bytes;
+  entity_index = *cursor++;
+  if (cursor >= end)
+  {
+    return false;
+  }
+  ++cursor;
+
+  auto skip_string = [&]() {
+    while (cursor < end && *cursor != 0)
+    {
+      ++cursor;
+    }
+    if (cursor < end)
+    {
+      ++cursor;
+    }
+  };
+
+  skip_string();
+  skip_string();
+  if (cursor >= end)
+  {
+    return false;
+  }
+
+  const auto* start = reinterpret_cast<const char*>(cursor);
+  skip_string();
+  text.assign(start, strnlen(start, static_cast<std::size_t>(end - reinterpret_cast<const std::uint8_t*>(start))));
+  return !text.empty();
+}
+
 void initialize_report_player_account()
 {
   if (g_report_player_account_initialized)
@@ -1171,6 +1466,18 @@ automation_controller& controller()
 
 void shutdown()
 {
+  {
+    auto& state = micspam_prepare();
+    std::scoped_lock lock{state.mutex};
+    if (state.worker.joinable())
+    {
+      state.worker.join();
+    }
+    state.job_running.store(false, std::memory_order_release);
+    state.result_ready.store(false, std::memory_order_release);
+    state.result_value.store(false, std::memory_order_release);
+  }
+
   g_party_client_api = {};
   g_report_player_account = nullptr;
   g_report_player_account_initialized = false;
@@ -1258,6 +1565,360 @@ bool abandon_current_match()
   return true;
 }
 
+constexpr std::uint64_t steamid64_individual_base = 0x0110000100000000ULL;
+
+bool party_has_account(void* party_client, std::uint32_t account_id)
+{
+  if (g_party_client_api.get_num_members == nullptr
+    || g_party_client_api.get_member_steamid == nullptr)
+  {
+    return cathook::core::players::has_role(account_id, cathook::core::players::party_role);
+  }
+
+  const int count = g_party_client_api.get_num_members(party_client);
+  if (count < 2)
+  {
+    return false;
+  }
+
+  for (int index = 0; index < count; ++index)
+  {
+    const auto steam_id = g_party_client_api.get_member_steamid(party_client, index);
+    if (steam_id != 0 && static_cast<std::uint32_t>(steam_id & 0xffffffffull) == account_id)
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool promote_party_leader(std::uint32_t account_id)
+{
+  initialize_party_client_api();
+  if (account_id == 0
+    || g_party_client_api.get_party_client == nullptr
+    || g_party_client_api.promote_to_leader == nullptr)
+  {
+    return false;
+  }
+
+  auto* party_client = g_party_client_api.get_party_client();
+  if (party_client == nullptr)
+  {
+    return false;
+  }
+
+  auto* party = *reinterpret_cast<void**>(reinterpret_cast<std::uintptr_t>(party_client) + 0x30);
+  const bool is_leader = *reinterpret_cast<bool*>(reinterpret_cast<std::uintptr_t>(party_client) + 0x40);
+  if (party == nullptr || !is_leader || !party_has_account(party_client, account_id))
+  {
+    return false;
+  }
+
+  return g_party_client_api.promote_to_leader(party_client, steamid64_individual_base | account_id);
+}
+
+bool autoparty_api_ready()
+{
+  initialize_party_client_api();
+  return g_party_client_api.get_party_client != nullptr &&
+         g_party_client_api.get_num_members != nullptr &&
+         g_party_client_api.get_num_online_members != nullptr &&
+         g_party_client_api.get_member_steamid != nullptr &&
+         g_party_client_api.in_party_not_leader != nullptr &&
+         g_party_client_api.send_party_chat != nullptr &&
+         g_party_client_api.kick_player != nullptr;
+}
+
+std::uint32_t local_steam_account_id()
+{
+  auto* user = steam_runtime::resolve_steam_user();
+  if (user == nullptr)
+  {
+    return 0;
+  }
+  return static_cast<std::uint32_t>(user->get_steam_id() & 0xffffffffull);
+}
+
+void parse_party_hosts(std::string_view text, std::vector<std::uint32_t>& out)
+{
+  out.clear();
+  std::size_t pos = 0;
+  while (pos < text.size())
+  {
+    const auto next = text.find_first_of(",; \t", pos);
+    const auto token = text.substr(pos, next == std::string_view::npos ? std::string_view::npos : next - pos);
+    if (!token.empty())
+    {
+      char token_buffer[24]{};
+      const auto length = std::min<std::size_t>(token.size(), sizeof(token_buffer) - 1);
+      std::memcpy(token_buffer, token.data(), length);
+      const auto id = std::strtoul(token_buffer, nullptr, 10);
+      if (id != 0)
+      {
+        out.push_back(static_cast<std::uint32_t>(id));
+      }
+    }
+    if (next == std::string_view::npos)
+    {
+      break;
+    }
+    pos = next + 1;
+  }
+}
+
+void automation_controller::refresh_party_hosts()
+{
+  const auto& cfg = config.misc.automation;
+  if (cfg.autoparty_ipc_mode)
+  {
+    autoparty_hosts_ = cat_ipc::client::ipc_peer_friend_ids_by_injection_time(cfg.autoparty_ipc_count);
+    autoparty_hosts_source_.clear();
+    autoparty_from_ipc_ = true;
+    return;
+  }
+
+  if (autoparty_from_ipc_ || autoparty_hosts_source_ != cfg.autoparty_party_hosts)
+  {
+    autoparty_from_ipc_ = false;
+    autoparty_hosts_source_ = cfg.autoparty_party_hosts;
+    parse_party_hosts(autoparty_hosts_source_, autoparty_hosts_);
+  }
+}
+
+void automation_controller::run_autoparty()
+{
+  const auto& cfg = config.misc.automation;
+  if (!cfg.autoparty ||
+      cathook::core::is_detach_pending() ||
+      engine == nullptr ||
+      global_vars == nullptr)
+  {
+    return;
+  }
+
+  const float now = global_vars->realtime;
+  if (now < next_autoparty_time_)
+  {
+    return;
+  }
+  next_autoparty_time_ = now + static_cast<float>(std::max(1, cfg.autoparty_run_frequency));
+
+  refresh_party_hosts();
+  if (autoparty_hosts_.empty() || !autoparty_api_ready())
+  {
+    return;
+  }
+
+  void* client = g_party_client_api.get_party_client();
+  if (client == nullptr)
+  {
+    return;
+  }
+
+  const int max_size = std::clamp(cfg.autoparty_max_party_size, 1, 6);
+  const std::uint32_t local_account = local_steam_account_id();
+  const int member_count = g_party_client_api.get_num_members(client);
+  const int online_count = g_party_client_api.get_num_online_members(client);
+  const bool is_host = local_account != 0 &&
+    std::find(autoparty_hosts_.begin(), autoparty_hosts_.end(), local_account) != autoparty_hosts_.end();
+
+  const auto lock_party = [&]()
+  {
+    engine->client_cmd_unrestricted("tf_party_join_request_mode 2");
+  };
+  const auto unlock_party = [&]()
+  {
+    engine->client_cmd_unrestricted("tf_party_join_request_mode 0");
+  };
+  const auto request_join = [&](std::uint32_t account, bool expect_invite)
+  {
+    char command[96]{};
+    std::snprintf(command, sizeof(command), "tf_party_request_join_user %llu%s",
+                  static_cast<unsigned long long>(steamid64_individual_base | account),
+                  expect_invite ? " 1" : "");
+    engine->client_cmd_unrestricted(command);
+  };
+  const auto invite_user = [&](std::uint32_t account)
+  {
+    char command[96]{};
+    std::snprintf(command, sizeof(command), "tf_party_invite_user %llu",
+                  static_cast<unsigned long long>(steamid64_individual_base | account));
+    engine->client_cmd_unrestricted(command);
+  };
+  const auto invite_listed_hosts = [&](const std::vector<std::uint32_t>& members)
+  {
+    for (const auto host : autoparty_hosts_)
+    {
+      if (host == 0 || host == local_account ||
+          std::find(members.begin(), members.end(), host) != members.end())
+      {
+        continue;
+      }
+      invite_user(host);
+    }
+  };
+  const auto leave_party = [&](bool was_leader)
+  {
+    if (cfg.autoparty_log)
+    {
+      print("[autoparty] leaving party (%d/%d members offline)\n",
+            std::max(0, member_count - online_count), member_count);
+    }
+    engine->client_cmd_unrestricted("tf_party_leave");
+    if (was_leader && cfg.autoparty_auto_unlock)
+    {
+      unlock_party();
+    }
+  };
+
+  if (member_count <= 1)
+  {
+    if (is_host)
+    {
+      if (cfg.autoparty_auto_unlock)
+      {
+        unlock_party();
+      }
+      invite_listed_hosts({});
+    }
+    else
+    {
+      for (const auto host : autoparty_hosts_)
+      {
+        if (host == 0 || host == local_account)
+        {
+          continue;
+        }
+        request_join(host, false);
+        request_join(host, true);
+      }
+    }
+    return;
+  }
+
+  if (!is_host)
+  {
+    if (cfg.autoparty_auto_lock)
+    {
+      lock_party();
+    }
+    if (cfg.autoparty_auto_leave && member_count > online_count)
+    {
+      leave_party(false);
+    }
+    return;
+  }
+
+  if (g_party_client_api.in_party_not_leader(client))
+  {
+    if (cfg.autoparty_log)
+    {
+      print("[autoparty] leaving party: we are a host but not the leader\n");
+    }
+    engine->client_cmd_unrestricted("tf_party_leave");
+    if (cfg.autoparty_auto_unlock)
+    {
+      unlock_party();
+    }
+    return;
+  }
+
+  if (cfg.autoparty_auto_leave && member_count > online_count)
+  {
+    leave_party(true);
+    return;
+  }
+
+  std::vector<std::uint32_t> members;
+  members.reserve(static_cast<std::size_t>(member_count));
+  for (int i = 0; i < member_count; ++i)
+  {
+    const auto steam_id = g_party_client_api.get_member_steamid(client, i);
+    if (steam_id != 0)
+    {
+      members.push_back(static_cast<std::uint32_t>(steam_id & 0xffffffffull));
+    }
+  }
+
+  if (cfg.autoparty_kick_rage)
+  {
+    for (const auto account : members)
+    {
+      if (account == local_account ||
+          !cathook::core::players::has_role(account, cathook::core::players::cheater_role))
+      {
+        continue;
+      }
+      if (cfg.autoparty_log)
+      {
+        print("[autoparty] kicking cheater %u\n", account);
+      }
+      if (cfg.autoparty_message_kicks)
+      {
+        char message[160]{};
+        std::snprintf(message, sizeof(message),
+                      "Kicking Steam32 ID %u from the party because they are marked as a cheater", account);
+        g_party_client_api.send_party_chat(client, message);
+      }
+      g_party_client_api.kick_player(client, steamid64_individual_base | account);
+      return;
+    }
+  }
+
+  const auto member_total = static_cast<int>(members.size());
+  if (cfg.autoparty_auto_lock && member_total >= max_size)
+  {
+    lock_party();
+  }
+
+  if (member_total > max_size)
+  {
+    const int to_kick = member_total - max_size;
+    if (cfg.autoparty_log)
+    {
+      print("[autoparty] kicking %d members: %d/%d allowed\n", to_kick, member_total, max_size);
+    }
+    if (cfg.autoparty_message_kicks)
+    {
+      char message[192]{};
+      std::snprintf(message, sizeof(message),
+                    "Kicking %d party members because there are %d out of %d allowed members",
+                    to_kick, member_total, max_size);
+      g_party_client_api.send_party_chat(client, message);
+    }
+    int kicked = 0;
+    for (auto it = members.rbegin(); it != members.rend() && kicked < to_kick; ++it)
+    {
+      if (*it == local_account)
+      {
+        continue;
+      }
+      g_party_client_api.kick_player(client, steamid64_individual_base | *it);
+      ++kicked;
+    }
+  }
+
+  if (cfg.autoparty_auto_unlock && member_total < max_size)
+  {
+    unlock_party();
+  }
+
+  if (member_total < max_size)
+  {
+    invite_listed_hosts(members);
+  }
+}
+
+void mvm_quit()
+{
+  abandon_current_match();
+  if (engine != nullptr)
+  {
+    engine->client_cmd_unrestricted("disconnect");
+  }
+}
+
 void automation_controller::on_create_move(user_cmd* user_cmd)
 {
   if (cathook::core::is_detach_pending() ||
@@ -1311,6 +1972,7 @@ void automation_controller::on_frame_stage_notify()
   }
 
   run_auto_report();
+  run_auto_vote();
   run_ping_reducer();
   run_mvm_actions();
   autoitem::on_tick();
@@ -1335,10 +1997,15 @@ void automation_controller::on_paint()
     return;
   }
 
-  autoitem::on_tick();
-  mvm_queue::tick();
-  run_queueing();
-  profile_stalker::tick();
+  if (!engine->is_in_game())
+  {
+    autoitem::on_tick();
+    mvm_queue::tick();
+    run_queueing();
+    profile_stalker::tick();
+  }
+
+  run_autoparty();
 }
 
 void automation_controller::run_startup_sound()
@@ -1412,6 +2079,7 @@ void automation_controller::on_menu_tick()
   autoitem::on_tick();
   mvm_queue::tick();
   run_queueing();
+  run_autoparty();
   profile_stalker::tick();
 #endif
 
@@ -1425,12 +2093,30 @@ void automation_controller::on_dispatch_user_message(int message_type, const bf_
     return;
   }
 
+  run_auto_vote_message(message_type, message_data);
+
+  if (message_type == say_text2_user_message_type)
+  {
+    int entity_index = 0;
+    std::string text;
+    if (parse_say_text2(message_data, entity_index, text))
+    {
+      run_chat_commands(text, cathook::core::players::account_id_for_player_index(entity_index), false);
+    }
+    return;
+  }
+
   if (message_type != text_msg_user_message_type)
   {
     return;
   }
 
   const auto message = read_text_message_token(message_data);
+  if (message == "#GameUI_vote_failed_vote_in_progress")
+  {
+    vote_active_ = true;
+    return;
+  }
   if (message != auto_balance_pending_token)
   {
     const bool class_change_blocked =
@@ -1500,6 +2186,18 @@ void automation_controller::on_game_event(GameEvent* event)
         mvm_auto_abandoned_ = abandon_current_match();
       }
 
+      if (std::strcmp(name, "party_chat") == 0
+        && event->get_int("type", 0) == 1)
+      {
+        const char* steam_id_text = event->get_string("steamid", "");
+        const std::uint64_t steam_id = steam_id_text != nullptr ? std::strtoull(steam_id_text, nullptr, 10) : 0;
+        const char* text = event->get_string("text", "");
+        if (text != nullptr)
+        {
+          run_chat_commands(text, static_cast<std::uint32_t>(steam_id & 0xFFFFFFFFull), true);
+        }
+      }
+
       if (std::strcmp(name, "revive_player_notify") == 0
         && config.misc.automation.mvm_instant_revive
         && entity_list != nullptr
@@ -1525,16 +2223,16 @@ bool automation_controller::is_setup_time() const
     return warmup_active_;
   }
 
-  Entity* proxy = entity_list->get_game_rules_proxy();
-  if (proxy == nullptr)
+  void* rules = tf2_netvars::game_rules_object();
+  if (rules == nullptr)
   {
     return warmup_active_;
   }
 
-  static const int waiting_offset = tf2_netvars::find_offset("DT_TFGameRulesProxy", { "m_bInWaitingForPlayers" });
-  static const int state_offset = tf2_netvars::find_offset("DT_TFGameRulesProxy", { "m_iRoundState" });
-  static const int setup_offset = tf2_netvars::find_offset("DT_TFGameRulesProxy", { "m_bInSetup" });
-  const auto proxy_address = reinterpret_cast<std::uintptr_t>(proxy);
+  static tf2_netvars::lazy_offset waiting_offset{"DT_TFGameRulesProxy", { "m_bInWaitingForPlayers" }};
+  static tf2_netvars::lazy_offset state_offset{"DT_TFGameRulesProxy", { "m_iRoundState" }};
+  static tf2_netvars::lazy_offset setup_offset{"DT_TFGameRulesProxy", { "m_bInSetup" }};
+  const auto proxy_address = reinterpret_cast<std::uintptr_t>(rules);
 
   const bool waiting = waiting_offset > 0 && *reinterpret_cast<bool*>(proxy_address + waiting_offset);
   const bool in_setup = setup_offset > 0 && *reinterpret_cast<bool*>(proxy_address + setup_offset);
@@ -1815,8 +2513,8 @@ void automation_controller::run_auto_report()
   }
 
   const int local_index = engine->get_localplayer_index();
-  const int max_entities = entity_list->get_max_entities();
-  for (int index = 1; index < max_entities; ++index)
+  const int max_clients = cathook::core::player_resource::max_client_index();
+  for (int index = 1; index <= max_clients; ++index)
   {
     if (index == local_index)
     {
@@ -1883,6 +2581,305 @@ void automation_controller::run_auto_vote_map(GameEvent* event)
   engine->client_cmd_unrestricted(command);
 }
 
+namespace
+{
+
+bool auto_vote_protected(std::uint32_t account_id)
+{
+  if (account_id == 0)
+  {
+    return false;
+  }
+  return cathook::core::players::is_friendly(account_id) ||
+         cathook::core::players::is_ignored(account_id) ||
+         cathook::core::players::has_role(account_id, cathook::core::players::party_role);
+}
+
+std::uint32_t vote_account_id(Entity* player_resource, int index)
+{
+  static tf2_netvars::lazy_offset account_id_offset{"DT_TFPlayerResource", {"baseclass", "m_iAccountID"}};
+  return cathook::core::player_resource::read_value<std::uint32_t>(
+      player_resource, account_id_offset, index);
+}
+
+bool vote_index_valid(Entity* player_resource, int index)
+{
+  static tf2_netvars::lazy_offset valid_offset{"DT_TFPlayerResource", {"baseclass", "m_bValid"}};
+  return cathook::core::player_resource::read_value<std::uint8_t>(
+             player_resource, valid_offset, index) != 0;
+}
+
+int vote_user_id(Entity* player_resource, int index)
+{
+  static tf2_netvars::lazy_offset user_id_offset{"DT_TFPlayerResource", {"baseclass", "m_iUserID"}};
+  return cathook::core::player_resource::read_value<int>(
+      player_resource, user_id_offset, index);
+}
+
+int vote_team(Entity* player_resource, int index)
+{
+  static tf2_netvars::lazy_offset team_offset{"DT_TFPlayerResource", {"baseclass", "m_iTeam"}};
+  return cathook::core::player_resource::read_value<int>(
+      player_resource, team_offset, index);
+}
+
+void cast_vote(int vote_id, int option)
+{
+  char command[40]{};
+  std::snprintf(command, sizeof(command), "vote %d option%d", vote_id, option);
+  engine->client_cmd_unrestricted(command);
+}
+
+}
+
+void automation_controller::run_auto_vote_message(int message_type, const bf_read* message_data)
+{
+  const auto& settings = config.misc.automation;
+  if (settings.auto_vote == 0 || message_data == nullptr || global_vars == nullptr)
+  {
+    return;
+  }
+
+  vote_message_reader reader{message_data, message_data->current_bit};
+  switch (message_type)
+  {
+  case vote_start_user_message_type:
+    {
+      const int team = reader.read(8);
+      const int vote_id = reader.read(32);
+      const int caller = reader.read(8);
+      const std::string reason = reader.read_string();
+      reader.read_string();
+      const int target = reader.read(8) >> 1;
+      if (!reader.ok || reason.find("kick") == std::string::npos)
+      {
+        return;
+      }
+
+      const int local_index = engine->get_localplayer_index();
+      if (caller == local_index || target == local_index)
+      {
+        vote_active_ = true;
+        return;
+      }
+
+      pending_votes_[vote_id] = pending_vote{team, caller, target, global_vars->curtime, 0.0f, false};
+      return;
+    }
+  case vote_pass_user_message_type:
+  case vote_failed_user_message_type:
+    {
+      reader.read(4);
+      const int vote_id = reader.read(32);
+      if (!reader.ok)
+      {
+        return;
+      }
+      pending_votes_.erase(vote_id);
+      vote_active_ = false;
+      return;
+    }
+  case call_vote_failed_user_message_type:
+    {
+      if ((settings.auto_vote & Misc::Automation::auto_vote_kick) == 0)
+      {
+        return;
+      }
+      const int reason = reader.read(8);
+      const int time_left = reader.read(16);
+      if (reader.ok &&
+          (reason == vote_fail_reason_on_cooldown || reason == vote_fail_reason_rate_exceeded))
+      {
+        vote_call_cooldown_expire_ = global_vars->curtime + static_cast<float>(time_left);
+      }
+      return;
+    }
+  default:
+    return;
+  }
+}
+
+void automation_controller::run_auto_vote()
+{
+  const auto& settings = config.misc.automation;
+  if (settings.auto_vote == 0 || engine == nullptr || entity_list == nullptr ||
+      global_vars == nullptr || !engine->is_in_game())
+  {
+    pending_votes_.clear();
+    vote_active_ = false;
+    return;
+  }
+
+  Player* localplayer = entity_list->get_localplayer();
+  if (localplayer == nullptr)
+  {
+    return;
+  }
+
+  const int local_index = engine->get_localplayer_index();
+  const int local_team = static_cast<int>(localplayer->get_team());
+  Entity* player_resource = cathook::core::player_resource::get_player_resource_entity();
+  const float curtime = global_vars->curtime;
+
+  if (!pending_votes_.empty() && player_resource != nullptr)
+  {
+    static Convar* vote_timer_duration = nullptr;
+    if (vote_timer_duration == nullptr && convar_system != nullptr)
+    {
+      vote_timer_duration = convar_system->find_var("sv_vote_timer_duration");
+    }
+    const float max_duration = (vote_timer_duration != nullptr ? vote_timer_duration->get_float() : 15.0f) + 1.0f;
+
+    std::vector<int> expired{};
+    for (auto& [vote_id, vote] : pending_votes_)
+    {
+      const bool other_team = vote.team != local_team;
+      if (other_team || !vote_index_valid(player_resource, vote.target) ||
+          vote.start_time + max_duration <= curtime)
+      {
+        if (!other_team || vote.voted)
+        {
+          vote_active_ = false;
+        }
+        expired.push_back(vote_id);
+        continue;
+      }
+      if (vote.voted)
+      {
+        continue;
+      }
+
+      vote_active_ = true;
+      if ((settings.auto_vote & (Misc::Automation::auto_vote_defend | Misc::Automation::auto_vote_assist)) == 0)
+      {
+        vote.voted = true;
+        continue;
+      }
+
+      if (settings.auto_vote_delay)
+      {
+        if (vote.vote_time == 0.0f)
+        {
+          const float low = std::min(settings.auto_vote_delay_min, settings.auto_vote_delay_max);
+          const float high = std::max(settings.auto_vote_delay_min, settings.auto_vote_delay_max);
+          vote.vote_time = vote.start_time +
+              low + static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX) * (high - low);
+        }
+        if (vote.vote_time > curtime)
+        {
+          break;
+        }
+      }
+
+      vote.voted = true;
+
+      const std::uint32_t target_account = vote_account_id(player_resource, vote.target);
+      const bool target_protected = auto_vote_protected(target_account);
+      const bool target_marked =
+          cathook::core::players::has_role(target_account, cathook::core::players::cheater_role);
+      const bool defend_target =
+          (settings.auto_vote & Misc::Automation::auto_vote_defend) != 0 && target_protected;
+
+      if (vote_index_valid(player_resource, vote.caller))
+      {
+        const std::uint32_t caller_account = vote_account_id(player_resource, vote.caller);
+        if (auto_vote_protected(caller_account) && !target_protected)
+        {
+          cast_vote(vote_id, 1);
+        }
+        else if (defend_target)
+        {
+          cast_vote(vote_id, 2);
+        }
+        else if ((settings.auto_vote & Misc::Automation::auto_vote_kick) != 0 && target_marked)
+        {
+          cast_vote(vote_id, 1);
+        }
+        else if ((settings.auto_vote & Misc::Automation::auto_vote_assist) != 0 &&
+                 auto_vote_protected(caller_account))
+        {
+          cast_vote(vote_id, 1);
+        }
+      }
+      else
+      {
+        cast_vote(vote_id, defend_target ? 2 : 1);
+      }
+      break;
+    }
+    for (const int vote_id : expired)
+    {
+      pending_votes_.erase(vote_id);
+    }
+    if (vote_active_)
+    {
+      return;
+    }
+  }
+
+  if ((settings.auto_vote & Misc::Automation::auto_vote_kick) == 0 ||
+      player_resource == nullptr || local_index <= 0)
+  {
+    return;
+  }
+
+  if (vote_active_ || vote_call_cooldown_expire_ > curtime ||
+      curtime < next_auto_vote_kick_time_)
+  {
+    return;
+  }
+  next_auto_vote_kick_time_ = curtime + 1.0f;
+
+  std::vector<int> candidates{};
+  const int max_clients = global_vars->max_clients;
+  for (int index = 1; index <= max_clients; ++index)
+  {
+    if (index == local_index || !vote_index_valid(player_resource, index) ||
+        vote_team(player_resource, index) != local_team)
+    {
+      continue;
+    }
+
+    player_info info{};
+    if (!engine->get_player_info(index, &info) || info.fakeplayer)
+    {
+      continue;
+    }
+
+    const std::uint32_t account_id = vote_account_id(player_resource, index);
+    if (account_id == 0 || auto_vote_protected(account_id))
+    {
+      continue;
+    }
+    const bool marked =
+        cathook::core::players::has_role(account_id, cathook::core::players::cheater_role);
+    if (!marked && (settings.auto_vote & Misc::Automation::auto_vote_kick_all) == 0)
+    {
+      continue;
+    }
+    candidates.push_back(index);
+  }
+
+  if (candidates.empty())
+  {
+    return;
+  }
+
+  static Convar* vote_creation_timer = nullptr;
+  if (vote_creation_timer == nullptr && convar_system != nullptr)
+  {
+    vote_creation_timer = convar_system->find_var("sv_vote_creation_timer");
+  }
+  vote_call_cooldown_expire_ =
+      curtime + (vote_creation_timer != nullptr ? vote_creation_timer->get_float() : 300.0f);
+
+  const int target = candidates[static_cast<std::size_t>(std::rand()) % candidates.size()];
+  char command[64]{};
+  std::snprintf(command, sizeof(command), "callvote Kick \"%d other\"",
+                vote_user_id(player_resource, target));
+  engine->client_cmd_unrestricted(command);
+}
+
 void automation_controller::run_autotaunt(GameEvent* event)
 {
   if (!config.misc.automation.autotaunt || event == nullptr || engine == nullptr || entity_list == nullptr || global_vars == nullptr)
@@ -1927,7 +2924,16 @@ void automation_controller::run_autotaunt(GameEvent* event)
   autotaunt_previous_slot_ = -1;
   autotaunt_waiting_for_taunt_ = false;
 
-  const int wanted_slot = std::clamp(config.misc.automation.autotaunt_weapon_slot, 0, 5);
+  int wanted_slot = std::clamp(config.misc.automation.autotaunt_weapon_slot, 0, 5);
+  const auto local_class = localplayer->get_tf_class();
+  if (wanted_slot == 4 && local_class != tf_class::SPY && local_class != tf_class::ENGINEER)
+  {
+    wanted_slot = 1;
+  }
+  if (wanted_slot == 5 && local_class != tf_class::ENGINEER)
+  {
+    wanted_slot = 1;
+  }
   auto* weapon = localplayer->get_weapon();
   if (wanted_slot > 0 && weapon != nullptr)
   {
@@ -2263,8 +3269,36 @@ void automation_controller::run_voice_command_spam()
   next_voice_command_time_ = global_vars->realtime + voice_command_spam_interval;
 }
 
-bool automation_controller::prepare_micspam_voice_file()
+bool convert_micspam_voice_file(const std::filesystem::path& selected)
 {
+  namespace fs = std::filesystem;
+
+  std::error_code ec;
+  const std::string source_path = selected.string();
+
+  const std::string cmd =
+    "ffmpeg -hide_banner -loglevel error -y -i " + shell_quote(source_path) +
+    " -ac 1 -ar 22050 -acodec pcm_s16le -fflags +bitexact -flags +bitexact " +
+    shell_quote(micspam_voice_input_path) + " >/dev/null 2>&1";
+  if (std::system(cmd.c_str()) == 0 && fs::exists(micspam_voice_input_path, ec))
+  {
+    return true;
+  }
+
+  fs::copy_file(selected, micspam_voice_input_path, fs::copy_options::overwrite_existing, ec);
+  return !ec && fs::exists(micspam_voice_input_path, ec);
+}
+
+void micspam_prepare_worker(const std::filesystem::path source)
+{
+  auto& state = micspam_prepare();
+  const bool converted = convert_micspam_voice_file(source);
+  state.result_value.store(converted, std::memory_order_release);
+  state.result_ready.store(true, std::memory_order_release);
+  state.job_running.store(false, std::memory_order_release);
+}
+
+bool automation_controller::prepare_micspam_voice_file(){
   namespace fs = std::filesystem;
 
   std::error_code ec;
@@ -2296,33 +3330,39 @@ bool automation_controller::prepare_micspam_voice_file()
   const std::size_t index = candidates.size() == 1
     ? 0
     : static_cast<std::size_t>(std::rand()) % candidates.size();
-  const fs::path& selected = candidates[index];
+  const fs::path selected = candidates[index];
 
-  const std::string source_path = selected.string();
-  const std::string source_ext = [&]() {
+  auto& state = micspam_prepare();
+  std::scoped_lock lock{state.mutex};
+  if (state.result_ready.load(std::memory_order_acquire) ||
+      state.job_running.load(std::memory_order_acquire))
+  {
+    return false;
+  }
+  if (state.worker.joinable())
+  {
+    state.worker.join();
+  }
+
+  fs::remove(micspam_voice_input_path, ec);
+
+  const auto source_ext = [&]() {
     std::string e = selected.extension().string();
     std::transform(e.begin(), e.end(), e.begin(), [](unsigned char c) { return std::tolower(c); });
     return e;
   }();
+  const bool needs_conversion = source_ext != ".wav";
 
-  fs::remove(micspam_voice_input_path, ec);
-
-  const std::string cmd =
-    "ffmpeg -hide_banner -loglevel error -y -i " + shell_quote(source_path) +
-    " -ac 1 -ar 22050 -acodec pcm_s16le -fflags +bitexact -flags +bitexact " +
-    shell_quote(micspam_voice_input_path) + " >/dev/null 2>&1";
-  if (std::system(cmd.c_str()) == 0 && fs::exists(micspam_voice_input_path, ec))
+  state.result_ready.store(false, std::memory_order_release);
+  state.result_value.store(false, std::memory_order_release);
+  if (!needs_conversion)
   {
-    return true;
-  }
-
-  if (source_ext == ".wav")
-  {
-    ec.clear();
     fs::copy_file(selected, micspam_voice_input_path, fs::copy_options::overwrite_existing, ec);
     return !ec && fs::exists(micspam_voice_input_path, ec);
   }
 
+  state.job_running.store(true, std::memory_order_release);
+  state.worker = std::thread{micspam_prepare_worker, std::move(selected)};
   return false;
 }
 
@@ -2372,9 +3412,15 @@ void automation_controller::run_micspam()
 
   if (!micspam_recording_ && now >= next_micspam_on_time_)
   {
+    bool voice_file_ready = false;
     if (config.misc.automation.micspam_from_file)
     {
-      if (prepare_micspam_voice_file() && convar_system != nullptr)
+      voice_file_ready = poll_micspam_prepare_result();
+      if (!voice_file_ready)
+      {
+        voice_file_ready = prepare_micspam_voice_file();
+      }
+      if (voice_file_ready && convar_system != nullptr)
       {
         Convar* sv_allow_voice_from_file = convar_system->find_var("sv_allow_voice_from_file");
         Convar* voice_inputfromfile = convar_system->find_var("voice_inputfromfile");
@@ -2421,6 +3467,188 @@ void automation_controller::run_micspam()
   }
 }
 
+void automation_controller::reset_buybot()
+{
+  mvm_buybot_step_ = 1;
+  mvm_buybot_upgrade_slot_step_ = 0;
+  mvm_buybot_upgrade_index_ = 0;
+  mvm_buybot_priority_step_ = 0;
+  mvm_buybot_cash_limit_reached_ = false;
+  mvm_buybot_finished_upgrades_ = false;
+  mvm_buybot_navigating_ = false;
+  mvm_buybot_stall_time_ = 0.0f;
+  next_mvm_buybot_time_ = 0.0f;
+  next_mvm_scout_equip_time_ = 0.0f;
+}
+
+bool automation_controller::is_buybot_busy() const
+{
+  if (!config.misc.automation.mvm_buybot || mvm_buybot_finished_upgrades_)
+  {
+    return false;
+  }
+  if (global_vars != nullptr && mvm_buybot_stall_time_ > 0.0f
+    && global_vars->curtime - mvm_buybot_stall_time_ > 45.0f)
+  {
+    return false;
+  }
+  if (entity_list == nullptr)
+  {
+    return false;
+  }
+  auto* localplayer = entity_list->get_localplayer();
+  if (localplayer == nullptr)
+  {
+    return false;
+  }
+  if (localplayer->in_upgrade_zone())
+  {
+    return true;
+  }
+  if (config.misc.automation.mvm_buybot_auto_class
+    && global_vars != nullptr
+    && global_vars->realtime < next_class_action_time_)
+  {
+    return true;
+  }
+  return mvm_buybot_navigating_;
+}
+
+void automation_controller::mvm_fix()
+{
+  if (!is_mvm_context())
+  {
+    print("[cat_mvm_fix] not in Mann vs. Machine\n");
+    return;
+  }
+
+  config.misc.automation.mvm_buybot = true;
+  mvm_buybot_cash_limit_reached_ = true;
+  mvm_buybot_finished_upgrades_ = false;
+  mvm_buybot_navigating_ = false;
+  mvm_buybot_stall_time_ = 0.0f;
+  if (engine != nullptr)
+  {
+    engine->client_cmd_unrestricted("retry");
+  }
+  print("[cat_mvm_fix] buybot marked as funded, reconnecting\n");
+}
+
+void automation_controller::run_chat_commands(std::string_view message, std::uint32_t account_id, bool party_chat)
+{
+  if (config.misc.automation.mvm_chat_commands == Misc::Automation::mvm_chat_command_mode::OFF
+    || message.empty())
+  {
+    return;
+  }
+
+  std::string cleaned;
+  cleaned.reserve(message.size());
+  for (unsigned char character : message)
+  {
+    if (character >= ' ')
+    {
+      cleaned.push_back(static_cast<char>(character));
+    }
+  }
+
+  const auto start = cleaned.find_first_not_of(' ');
+  if (start == std::string::npos)
+  {
+    return;
+  }
+  cleaned.erase(0, start);
+  if (!cleaned.empty() && (cleaned.front() == '!' || cleaned.front() == '/'))
+  {
+    cleaned.erase(0, 1);
+  }
+
+  std::vector<std::string> tokens;
+  for (std::size_t pos = 0; pos < cleaned.size();)
+  {
+    const auto end = cleaned.find(' ', pos);
+    const auto token_end = end == std::string::npos ? cleaned.size() : end;
+    if (token_end > pos)
+    {
+      tokens.emplace_back(cleaned.substr(pos, token_end - pos));
+    }
+    pos = token_end + 1;
+  }
+  if (tokens.empty())
+  {
+    return;
+  }
+
+  for (char& character : tokens[0])
+  {
+    character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+  }
+  const std::string& command = tokens[0];
+  const bool allowed_command =
+    command == "cat_mvm_fix" || command == "cat_mvm_quit" || command == "cat_mvm_tele"
+    || command == "cat_mvm_rent" || command == "cat_party_givelead";
+  if (!allowed_command)
+  {
+    return;
+  }
+
+  const std::uint32_t local_account = engine != nullptr
+    ? cathook::core::players::account_id_for_player_index(engine->get_localplayer_index())
+    : 0;
+  bool allowed = local_account != 0 && account_id == local_account;
+  if (!allowed)
+  {
+    switch (config.misc.automation.mvm_chat_commands)
+    {
+      case Misc::Automation::mvm_chat_command_mode::PARTY:
+        allowed = party_chat || cathook::core::players::has_role(account_id, cathook::core::players::party_role);
+        break;
+      case Misc::Automation::mvm_chat_command_mode::FRIENDS:
+        allowed = cathook::core::players::has_role(account_id, cathook::core::players::friend_role);
+        break;
+      case Misc::Automation::mvm_chat_command_mode::ROLE:
+        allowed = account_id != 0
+          && cathook::core::players::has_role(account_id, config.misc.automation.mvm_chat_commands_role);
+        break;
+      default:
+        break;
+    }
+  }
+  if (!allowed)
+  {
+    return;
+  }
+
+  if (command == "cat_mvm_fix")
+  {
+    mvm_fix();
+  }
+  else if (command == "cat_mvm_quit")
+  {
+    mvm_quit();
+  }
+  else if (command == "cat_mvm_tele")
+  {
+    if (!navbot::controller().path_to_teleporter())
+    {
+      print("[cat_mvm_tele] no reachable teleporter entrance found\n");
+    }
+  }
+  else if (command == "cat_mvm_rent")
+  {
+    autoitem::mvm_rent();
+  }
+  else if (command == "cat_party_givelead")
+  {
+    if (!promote_party_leader(account_id))
+    {
+      print("[cat_party_givelead] failed to promote %u\n", account_id);
+      return;
+    }
+    print("[cat_party_givelead] gave party leadership to %u\n", account_id);
+  }
+}
+
 void automation_controller::run_mvm_actions(user_cmd* user_cmd)
 {
   if (engine == nullptr || global_vars == nullptr || entity_list == nullptr || convar_system == nullptr)
@@ -2428,25 +3656,9 @@ void automation_controller::run_mvm_actions(user_cmd* user_cmd)
     return;
   }
 
-  if (!engine->is_in_game())
+  if (!engine->is_in_game() || !is_mvm_context())
   {
-    mvm_buybot_step_ = 1;
-    mvm_buybot_upgrade_slot_step_ = 0;
-    mvm_buybot_upgrade_index_ = 0;
-    mvm_buybot_cash_limit_reached_ = false;
-    mvm_buybot_finished_upgrades_ = false;
-    next_mvm_buybot_time_ = 0.0f;
-    return;
-  }
-
-  if (!is_mvm_context())
-  {
-    mvm_buybot_step_ = 1;
-    mvm_buybot_upgrade_slot_step_ = 0;
-    mvm_buybot_upgrade_index_ = 0;
-    mvm_buybot_cash_limit_reached_ = false;
-    mvm_buybot_finished_upgrades_ = false;
-    next_mvm_buybot_time_ = 0.0f;
+    reset_buybot();
     return;
   }
 
@@ -2456,13 +3668,64 @@ void automation_controller::run_mvm_actions(user_cmd* user_cmd)
     return;
   }
 
+  if ((localplayer->get_tf_class() == tf_class::MEDIC || localplayer->in_upgrade_zone())
+    && !has_vaccinator(localplayer))
+  {
+    mvm_buybot_cash_limit_reached_ = true;
+  }
+
   const int max_cash = std::max(config.misc.automation.mvm_buybot_max_cash, 0);
   if (max_cash > 0 && localplayer->get_currency() >= max_cash)
   {
     mvm_buybot_cash_limit_reached_ = true;
   }
+
+  int round_state = -1;
+  if (void* rules = tf2_netvars::game_rules_object(); rules != nullptr)
+  {
+    static tf2_netvars::lazy_offset state_offset{"DT_TFGameRulesProxy", {"m_iRoundState"}};
+    if (state_offset > 0)
+    {
+      round_state = *reinterpret_cast<int*>(reinterpret_cast<std::uintptr_t>(rules) + state_offset);
+    }
+  }
+
+  if (auto* objective = current_mvm_objective_resource(); objective != nullptr)
+  {
+    const bool between_waves = objective->is_mvm_between_waves();
+    const bool wave_running = !between_waves && round_state == gr_state_rnd_running;
+    if (objective->get_mvm_wave_count() > 1)
+    {
+      mvm_buybot_finished_upgrades_ = true;
+      mvm_buybot_cash_limit_reached_ = true;
+      mvm_buybot_navigating_ = false;
+      mvm_buybot_stall_time_ = 0.0f;
+    }
+    else if (wave_running)
+    {
+      mvm_buybot_cash_limit_reached_ = true;
+    }
+  }
+  else if (round_state == gr_state_rnd_running)
+  {
+    mvm_buybot_cash_limit_reached_ = true;
+  }
+
   const bool cash_limit_reached = mvm_buybot_cash_limit_reached_;
   auto* upgrade_station = nearest_mvm_upgrade_station(localplayer);
+  if (config.misc.automation.mvm_buybot && !mvm_buybot_finished_upgrades_
+    && !localplayer->in_upgrade_zone())
+  {
+    if (mvm_buybot_stall_time_ == 0.0f)
+    {
+      mvm_buybot_stall_time_ = global_vars->curtime;
+    }
+  }
+  else
+  {
+    mvm_buybot_stall_time_ = 0.0f;
+  }
+
   if (config.misc.automation.mvm_buybot
     && config.misc.automation.mvm_buybot_auto_class)
   {
@@ -2498,11 +3761,16 @@ void automation_controller::run_mvm_actions(user_cmd* user_cmd)
         engine->client_cmd_unrestricted("menuclosed");
         next_class_action_time_ = global_vars->realtime + auto_class_interval;
       }
+      return;
     }
   }
 
-  if (config.misc.automation.mvm_buybot && !localplayer->in_upgrade_zone()
-    && upgrade_station != nullptr)
+  mvm_buybot_navigating_ = config.misc.automation.mvm_buybot
+    && !mvm_buybot_finished_upgrades_
+    && !localplayer->in_upgrade_zone()
+    && upgrade_station != nullptr;
+
+  if (mvm_buybot_navigating_ && user_cmd != nullptr && !navbot::controller().is_pathing())
   {
     move_towards_mvm_station(localplayer, user_cmd, upgrade_station->get_origin());
   }
@@ -2518,20 +3786,28 @@ void automation_controller::run_mvm_actions(user_cmd* user_cmd)
     issued_command = true;
   }
 
-  bool mvm_ready_window = true;
-  if (auto* proxy = entity_list->get_game_rules_proxy(); proxy != nullptr)
+  bool mvm_ready_window = false;
+  bool already_ready = false;
+  if (void* rules = tf2_netvars::game_rules_object(); rules != nullptr)
   {
-    static const int waiting_offset = tf2_netvars::find_offset(
-      "DT_TFGameRulesProxy", {"m_bInWaitingForPlayers"});
-    static const int state_offset = tf2_netvars::find_offset(
-      "DT_TFGameRulesProxy", {"m_iRoundState"});
-    const auto proxy_address = reinterpret_cast<std::uintptr_t>(proxy);
+    static tf2_netvars::lazy_offset waiting_offset{
+      "DT_TFGameRulesProxy", {"m_bInWaitingForPlayers"}};
+    static tf2_netvars::lazy_offset state_offset{
+      "DT_TFGameRulesProxy", {"m_iRoundState"}};
+    static tf2_netvars::lazy_offset ready_offset{
+      "DT_TFGameRulesProxy", {"m_bPlayerReady"}};
+    const auto proxy_address = reinterpret_cast<std::uintptr_t>(rules);
     mvm_ready_window = waiting_offset > 0 && state_offset > 0
       && *reinterpret_cast<bool*>(proxy_address + waiting_offset)
       && *reinterpret_cast<int*>(proxy_address + state_offset) == gr_state_between_rounds;
+    const int local_index = engine->get_localplayer_index();
+    if (ready_offset > 0 && local_index >= 0 && local_index < 102)
+    {
+      already_ready = reinterpret_cast<bool*>(proxy_address + ready_offset)[local_index];
+    }
   }
   if (global_vars->realtime >= next_mvm_command_time_
-    && config.misc.automation.auto_mvm_ready_up && mvm_ready_window)
+    && config.misc.automation.auto_mvm_ready_up && mvm_ready_window && !already_ready)
   {
     engine->client_cmd_unrestricted("tournament_player_readystate 1");
     issued_command = true;
@@ -2544,30 +3820,24 @@ void automation_controller::run_mvm_actions(user_cmd* user_cmd)
 
   if (!config.misc.automation.mvm_buybot)
   {
-    mvm_buybot_step_ = 1;
-    mvm_buybot_upgrade_slot_step_ = 0;
-    mvm_buybot_upgrade_index_ = 0;
-    mvm_buybot_cash_limit_reached_ = false;
-    mvm_buybot_finished_upgrades_ = false;
-    next_mvm_buybot_time_ = 0.0f;
+    reset_buybot();
     return;
   }
 
-  if (!localplayer->in_upgrade_zone())
-  {
-    mvm_buybot_step_ = 1;
-    mvm_buybot_upgrade_slot_step_ = 0;
-    mvm_buybot_upgrade_index_ = 0;
-    next_mvm_buybot_time_ = 0.0f;
-    return;
-  }
-
-  if (mvm_buybot_finished_upgrades_)
+  if (mvm_buybot_finished_upgrades_ || !localplayer->in_upgrade_zone())
   {
     return;
   }
 
   if (global_vars->realtime < next_mvm_buybot_time_)
+  {
+    return;
+  }
+
+  const bool waiting_for_medic = config.misc.automation.mvm_buybot_auto_class
+    && !cash_limit_reached
+    && localplayer->get_tf_class() != tf_class::MEDIC;
+  if (waiting_for_medic)
   {
     return;
   }
@@ -2580,18 +3850,42 @@ void automation_controller::run_mvm_actions(user_cmd* user_cmd)
       return;
     }
 
+    if (localplayer->get_tf_class() == tf_class::SCOUT
+      && global_vars->realtime >= next_mvm_scout_equip_time_)
+    {
+      autoitem::equip_item(static_cast<int>(tf_class::SCOUT), 0, Scout_m_ForceANature);
+      autoitem::equip_item(static_cast<int>(tf_class::SCOUT), 1, Scout_s_MadMilk);
+      next_mvm_scout_equip_time_ = global_vars->realtime + 3.0f;
+    }
+
+    int plan_count = 0;
+    const auto* plan = buybot_plan_for_class(localplayer->get_tf_class(), plan_count);
+    if (plan != nullptr && mvm_buybot_priority_step_ < plan_count)
+    {
+      const auto step = plan[mvm_buybot_priority_step_++];
+      const int levels = mvm_upgrade_max_levels(step.upgrade);
+      send_mvm_command(new KeyValues("MvM_UpgradesBegin"));
+      for (int level = 0; level < levels; ++level)
+      {
+        send_mvm_upgrade(step.slot, step.upgrade, 1);
+      }
+      send_mvm_upgrades_done(levels);
+      next_mvm_buybot_time_ = global_vars->realtime + 0.05f;
+      return;
+    }
+
     constexpr int max_upgrade_index = 128;
-    constexpr int max_upgrade_levels = 10;
     constexpr std::array<int, 2> upgrade_slots{0, -1};
     const int slot = upgrade_slots[
       static_cast<std::size_t>(mvm_buybot_upgrade_slot_step_) % upgrade_slots.size()];
+    const int levels = mvm_upgrade_max_levels(mvm_buybot_upgrade_index_);
 
     send_mvm_command(new KeyValues("MvM_UpgradesBegin"));
-    for (int level = 0; level < max_upgrade_levels; ++level)
+    for (int level = 0; level < levels; ++level)
     {
       send_mvm_upgrade(slot, mvm_buybot_upgrade_index_, 1);
     }
-    send_mvm_upgrades_done(max_upgrade_levels);
+    send_mvm_upgrades_done(levels);
 
     ++mvm_buybot_upgrade_index_;
     if (mvm_buybot_upgrade_index_ >= max_upgrade_index)
@@ -2601,6 +3895,7 @@ void automation_controller::run_mvm_actions(user_cmd* user_cmd)
       if (mvm_buybot_upgrade_slot_step_ >= static_cast<int>(upgrade_slots.size()))
       {
         mvm_buybot_finished_upgrades_ = true;
+        mvm_buybot_navigating_ = false;
       }
     }
 

@@ -18,6 +18,8 @@ V  o o  V  file: src/features/visuals/spectator_list.cpp
 #include "games/tf2/sdk/entities/player.hpp"
 #include "games/tf2/sdk/interfaces/engine.hpp"
 #include "games/tf2/sdk/interfaces/entity_list.hpp"
+#include "games/tf2/sdk/interfaces/global_vars.hpp"
+#include "core/player_resource.hpp"
 
 namespace spectator_list
 {
@@ -65,8 +67,8 @@ std::vector<spectator_entry> collect_spectators(Player** target_player_out)
   }
 
   spectators.reserve(8);
-  const int max_entities = entity_list->get_max_entities();
-  for (int index = 1; index < max_entities; ++index) {
+  const int max_clients = cathook::core::player_resource::max_client_index();
+  for (int index = 1; index <= max_clients; ++index) {
     auto* player = entity_list->player_from_index(index);
     if (player == nullptr || player == localplayer || player->get_class_id() != class_id::PLAYER) {
       continue;

@@ -30,7 +30,7 @@ const CATHOOK_ROOT = process.env.CATHOOK_ROOT || '/opt/cathook';
 const DEFAULT_SHARED_TF2_PATH = process.env.CAT_TF2_PATH || '/opt/steamapps/common/Team Fortress 2';
 const VISIBLE_WINDOWS = process.env.CAT_VISIBLE_WINDOWS === '1';
 const BOT_DISPLAY = process.env.DISPLAY || process.env.CAT_DEFAULT_DISPLAY || ':699';
-const BOT_XAUTHORITY = process.env.XAUTHORITY || path.join(process.env.HOME || '', '.Xauthority');
+const BOT_XAUTHORITY = VISIBLE_WINDOWS ? (process.env.XAUTHORITY || path.join(process.env.HOME || '', '.Xauthority')) : '';
 const XPRA_LOG = process.env.CAT_XPRA_LOG || '/tmp/cat-catbot-xpra.log';
 const TEXTMODE_GAME = process.env.CAT_TEXTMODE_GAME !== '0';
 const BOT_TF2_OVERLAY_ENABLED = process.env.CAT_BOT_TF2_OVERLAY !== '0';
@@ -59,14 +59,13 @@ const GDB_CRASH_REPORTS = process.env.CAT_GDB_CRASH_REPORTS === '1'
     || (process.env.CAT_GDB_CRASH_REPORTS !== '0' && config.gdb_crash_reports === true);
 const steam_window_options_default = VISIBLE_WINDOWS
     ? ''
-    : '-silent -cef-disable-gpu -cef-disable-gpu-compositing -cef-force-occlusion'
-      + ' -cef-disable-site-isolation -cef-disable-hang-timeouts -cef-disable-renderer-restart'
-      + ' -cef-disable-breakpad -cef-disable-logging -cef-disable-js-logging -cef-disable-hevc'
-      + ' -disablehighdpi -nominidumps -nobreakpad -skipstreamingdrivers';
+    : '-noreactlogin -silent -nominidumps -nobreakpad -cef-disable-gpu -cef-disable-gpu-compositing --disable-gpu --disable-gpu-compositing';
 const steam_window_options = process.env.CAT_STEAM_WINDOW_OPTIONS || steam_window_options_default;
 const steam_shim_loop_sleep = process.env.CAT_STM_LOOP_SLEEP === '0' || process.env.CAT_STM_STEAM_LOOP_SLEEP === '0' ? '0' : '1';
 const steam_shim_loop_sleep_us_value = Number.parseInt(process.env.CAT_STM_LOOP_SLEEP_US || process.env.CAT_STM_STEAM_LOOP_SLEEP_US || '100000', 10);
 const steam_shim_loop_sleep_us = Number.isSafeInteger(steam_shim_loop_sleep_us_value) && steam_shim_loop_sleep_us_value > 0 ? steam_shim_loop_sleep_us_value : 100000;
+const steam_shim_webhelper_trim = process.env.CAT_STM_WEBHELPER_TRIM === '0' ? '0' : '1';
+const steam_shim_webhelper_single = process.env.CAT_STM_WEBHELPER_SINGLE === '1' ? '1' : '0';
 const game_window_options_default = VISIBLE_WINDOWS
     ? '-gl -sw -w 1280 -h 720'
     : (TEXTMODE_GAME ? '-silent -sw -w 1 -h 480' : '-gl -silent -sw -w 1 -h 480');
@@ -120,12 +119,9 @@ function game_port_options(botid) {
     return `-tv_port ${tv_port} +tv_port ${tv_port} -port ${bot_port_base} +port ${bot_port_base} +clientport ${client_port_min}-${client_port_max}`;
 }
 
-const LAUNCH_OPTIONS_STEAM = `firejail --dns=1.1.1.1 %NETWORK% --noprofile --private="%HOME%" --private-tmp --private-dev --read-write=/opt/cathook/ipc --name=%JAILNAME% --env=PULSE_SERVER="unix:/tmp/pulse.sock" --env=DISPLAY=%DISPLAY% --env=XAUTHORITY=%XAUTHORITY% --env=TMPDIR=/tmp --env=TMP=/tmp --env=TEMP=/tmp --env=XDG_RUNTIME_DIR=/tmp/xdg-runtime --env=NO_AT_BRIDGE=1 --env=GTK_USE_PORTAL=0 --env=GIO_USE_VFS=local --env=CAT_SKIP_DBUS_RUN_SESSION=${SKIP_DBUS_RUN_SESSION ? '1' : '0'} --env=CAT_STEAM_TXTMODE=${STEAM_TXTMODE_ENABLED ? '1' : '0'} --env=CAT_STEAM_TXTMODE_HIDE_WINDOWS=${STEAM_TXTMODE_HIDE_WINDOWS} --env=CAT_STEAM_TXTMODE_DROP_DRAWS=${STEAM_TXTMODE_DROP_DRAWS} --env=CAT_STEAM_TXTMODE_TRIM_WEBHELPER=${STEAM_TXTMODE_TRIM_WEBHELPER} --env=CAT_STEAM_TXTMODE_FRAME_INTERVAL_US=${STEAM_TXTMODE_FRAME_INTERVAL_US} --env=CAT_STEAM_TXTMODE_HARDWARE_SEED=%HARDWARE_SEED% ${HEADLESS_STEAM_GRAPHICS_FIREJAIL_ENV} ${STEAM_NOGRAPHICS_RENDERER_ENV} --env=LD_LIBRARY_PATH=%STEAM_LD_LIBRARY_PATH% --env=LD_PRELOAD= --env=CAT_STEAM_TXTMODE_PRELOAD=%LD_PRELOAD% --env=CAT_STM_LOOP_SLEEP=%CAT_STM_LOOP_SLEEP% --env=CAT_STM_LOOP_SLEEP_US=%CAT_STM_LOOP_SLEEP_US% sh -lc 'mkdir -p "$XDG_RUNTIME_DIR"; chmod 700 "$XDG_RUNTIME_DIR"; if [ "$CAT_SKIP_DBUS_RUN_SESSION" = 1 ]; then exec env DBUS_SESSION_BUS_ADDRESS="unix:path=/tmp/cat-disabled-dbus" "$@"; elif command -v dbus-run-session >/dev/null 2>&1; then exec dbus-run-session -- "$@"; else exec "$@"; fi' steam-session %STEAM% %STEAM_VGUI_ARG% ${steam_window_options} -login %LOGIN% %PASSWORD%`
-const LAUNCH_OPTIONS_STEAM_RESET = 'firejail --net=none --noprofile --private="%HOME%" --private-dev --read-write=/opt/cathook/ipc --env=LD_LIBRARY_PATH=%STEAM_LD_LIBRARY_PATH% %STEAM% --reset'
-const LAUNCH_OPTIONS_STEAM_WITH_HARDWARE = LAUNCH_OPTIONS_STEAM.replace(
-    '--env=CAT_STEAM_TXTMODE_FRAME_INTERVAL_US=',
-    `--env=CAT_STEAM_TXTMODE_SYNTHETIC_HARDWARE=${STEAM_TXTMODE_SYNTHETIC_HARDWARE} --env=CAT_STEAM_TXTMODE_FRAME_INTERVAL_US=`,
-);
+const LAUNCH_OPTIONS_STEAM = `env -u LD_PRELOAD firejail --ipc-namespace %DNS% %NETWORK% --noprofile --private="%HOME%" --private-tmp --private-dev --read-write=/opt/cathook/ipc --name=%JAILNAME% --env=PULSE_SERVER="unix:/tmp/pulse.sock" --env=DISPLAY=%DISPLAY% --env=XAUTHORITY=%XAUTHORITY% --env=TMPDIR=/tmp --env=TMP=/tmp --env=TEMP=/tmp --env=XDG_RUNTIME_DIR=/tmp/xdg-runtime --env=NO_AT_BRIDGE=1 --env=GTK_USE_PORTAL=0 --env=GIO_USE_VFS=local --env=CAT_SKIP_DBUS_RUN_SESSION=${SKIP_DBUS_RUN_SESSION ? '1' : '0'} ${HEADLESS_STEAM_GRAPHICS_FIREJAIL_ENV} --env=LD_LIBRARY_PATH=%STEAM_LD_LIBRARY_PATH% --env=LD_PRELOAD= --env=CAT_STEAM_TXTMODE_PRELOAD=%LD_PRELOAD% --env=CAT_STEAM_TXTMODE=${STEAM_TXTMODE_ENABLED ? '1' : '0'} --env=CAT_STEAM_TXTMODE_SYNTHETIC_HARDWARE=${STEAM_TXTMODE_ENABLED ? '1' : '0'} --env=CAT_STEAM_TXTMODE_HARDWARE_SEED=%HARDWARE_SEED% --env=CAT_STEAM_TXTMODE_HIDE_WINDOWS=${STEAM_TXTMODE_HIDE_WINDOWS} --env=CAT_STEAM_TXTMODE_DROP_DRAWS=${STEAM_TXTMODE_DROP_DRAWS} --env=CAT_STM_LOOP_SLEEP=%CAT_STM_LOOP_SLEEP% --env=CAT_STM_LOOP_SLEEP_US=%CAT_STM_LOOP_SLEEP_US% --env=CAT_STM_WEBHELPER_TRIM=%CAT_STM_WEBHELPER_TRIM% --env=CAT_STM_WEBHELPER_SINGLE=%CAT_STM_WEBHELPER_SINGLE% sh -lc 'mkdir -p "$XDG_RUNTIME_DIR"; chmod 700 "$XDG_RUNTIME_DIR"; if [ "$CAT_SKIP_DBUS_RUN_SESSION" = 1 ]; then exec env -u LD_PRELOAD DBUS_SESSION_BUS_ADDRESS="unix:path=/tmp/cat-disabled-dbus" "$@"; elif command -v dbus-run-session >/dev/null 2>&1; then exec dbus-run-session -- env -u LD_PRELOAD "$@"; else exec env -u LD_PRELOAD "$@"; fi' steam-session %STEAM% %STEAM_VGUI_ARG% ${steam_window_options} -login %LOGIN% %PASSWORD%`
+const LAUNCH_OPTIONS_STEAM_RESET = 'env -u LD_PRELOAD firejail --ipc-namespace --net=none --noprofile --private="%HOME%" --private-dev --read-write=/opt/cathook/ipc --env=LD_LIBRARY_PATH=%STEAM_LD_LIBRARY_PATH% %STEAM% --reset'
+const LAUNCH_OPTIONS_STEAM_WITH_HARDWARE = LAUNCH_OPTIONS_STEAM;
 const LAUNCH_OPTIONS_GAME = `firejail --join=%JAILNAME% bash -c 'cd "%GAMEPATH%" && %RUNTIME_PREFIX% ${HEADLESS_STEAM_GRAPHICS_ASSIGNMENTS} ${textmode_allocator_assignments} SteamAppId=440 SteamGameId=440 SteamOverlayGameId=440 SteamEnv=1 CATHOOK_ROOT="%CATHOOK_ROOT%" CATHOOK_ROOT_DIR="%CATHOOK_ROOT%" CATHOOK_AUTO_ATTACH=1 CATHOOK_ATTACH_DELAY_SECONDS=%CATHOOK_ATTACH_DELAY_SECONDS% CAT_BOT_ID="%BOT_ID%" CAT_BOT_NAME="%BOT_NAME%" CAT_STEAM_TXTMODE_HARDWARE_SEED="%HARDWARE_SEED%" CAT_STEAMID32=%STEAMID32% DBUS_SESSION_BUS_ADDRESS="unix:path=/tmp/cat-disabled-dbus" LD_PRELOAD=%LD_PRELOAD% DISPLAY=%DISPLAY% XAUTHORITY="%XAUTHORITY%" PULSE_SERVER="unix:/tmp/pulse.sock" %GAME_BINARY% -steam -game tf ${GAME_WINDOW_OPTIONS} -novid -nojoy -nomessagebox -nominidumps -nohltv -nobreakpad -noquicktime -precachefontchars -particles 1 -snoforceformat -softparticlesdefaultoff ${GAME_MODE_OPTIONS} -forcenovsync +volume 0 -noqueuedpacketprocessing -limitvsconst -nocrashdialog -noipx -threads 1 %GAME_PORT_OPTIONS% -nosteamcontroller -low +fps_max 30'`
 const LAUNCH_OPTIONS_GAME_WITH_HARDWARE = LAUNCH_OPTIONS_GAME.replace(
     'CAT_BOT_ID="%BOT_ID%"',
@@ -663,15 +659,40 @@ function steam_txtmode_library64() {
 }
 
 function steam_preload_value() {
-    const library_name = steam_txtmode_library();
-    const library_basenames = new Set([path.basename(library_name)]);
-    const extra_preload = (process.env.STEAM_LD_PRELOAD || '')
-        .split(':')
-        .filter((entry) => entry && !library_basenames.has(path.basename(entry)));
-    if (!STEAM_TXTMODE_ENABLED)
-        return extra_preload.join(':');
-
-    return [library_name, ...extra_preload].join(':');
+    const shim_libraries = [];
+    if (STEAM_TXTMODE_ENABLED) {
+        const candidates = [
+            process.env.CAT_STEAM_TXTMODE_LIBRARY,
+            path.join(CATHOOK_ROOT, 'botpanel/cat-steamtxtmode/bin/lib64/libcatsteamtxtmode.so'),
+            path.resolve(__dirname, '../../cat-steamtxtmode/bin/lib64/libcatsteamtxtmode.so'),
+            process.env.CAT_STEAM_TXTMODE_LIBRARY64,
+            path.join(CATHOOK_ROOT, 'botpanel/cat-steamtxtmode/bin/libx64/libcatsteamtxtmode.so'),
+            path.resolve(__dirname, '../../cat-steamtxtmode/bin/libx64/libcatsteamtxtmode.so'),
+            path.join(CATHOOK_ROOT, 'lib64/libcatsteamtxtmode.so'),
+        ];
+        for (const candidate of candidates) {
+            if (candidate && fs.existsSync(candidate))
+                shim_libraries.push(candidate);
+        }
+    }
+    const seen_entries = {};
+    const ordered_entries = [];
+    const push_unique_existing = function (entry) {
+        const empty_entry = (entry === undefined || entry === null || entry === "");
+        if (empty_entry) return;
+        if (seen_entries[entry]) return;
+        seen_entries[entry] = true;
+        let entry_ok = false;
+        try {
+            entry_ok = fs.existsSync(entry);
+        } catch (check_error) {
+            entry_ok = false;
+        }
+        if (entry_ok) ordered_entries.push(entry);
+    };
+    shim_libraries.forEach(push_unique_existing);
+    String(process.env.STEAM_LD_PRELOAD || "").split(":").forEach(push_unique_existing);
+    return ordered_entries.join(":");
 }
 
 function cathook_textmode_library() {
@@ -3324,14 +3345,17 @@ class Bot extends EventEmitter {
             .replace("%JAILNAME%", shell_quote(self.name))
             .replace("%STEAM_LD_LIBRARY_PATH%", shell_quote(process.env.LD_LIBRARY_PATH || ''))
             .replace("%LD_PRELOAD%", shell_quote(steam_preload))
-            .replace("%HARDWARE_SEED%", shell_quote(STEAM_TXTMODE_HARDWARE_SEED))
+            .replace("%HARDWARE_SEED%", shell_quote(self.name))
             .replace("%CAT_STM_LOOP_SLEEP%", shell_quote(steam_shim_loop_sleep))
             .replace("%CAT_STM_LOOP_SLEEP_US%", shell_quote(String(steam_shim_loop_sleep_us)))
+            .replace("%CAT_STM_WEBHELPER_TRIM%", shell_quote(steam_shim_webhelper_trim))
+            .replace("%CAT_STM_WEBHELPER_SINGLE%", shell_quote(steam_shim_webhelper_single))
             .replace("%STEAM_VGUI_ARG%", STEAM_VGUI_REQUIRED ? '-vgui' : '')
             // XOrg Display
             .replace("%DISPLAY%", shell_quote(display_value))
             .replace("%XAUTHORITY%", shell_quote(xauthority_path))
             // Network
+            .replace("%DNS%", '--dns=1.1.1.1 --dns=8.8.8.8')
             .replace("%NETWORK%", USER.SUPPORTS_FJ_NET ? `--net=${USER.interface}` : `--netns=catbotns${this.botid}`)
             // Home folder
             .replace("%HOME%", self.home.replace(/"/g, '\\"'))

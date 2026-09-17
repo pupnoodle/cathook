@@ -19,8 +19,10 @@ V  o o  V  file: src/games/tf2/sdk/netvars.hpp
 #include <unordered_map>
 #include <vector>
 #include <mutex>
+#include <atomic>
 
 #include "games/tf2/sdk/interfaces/client.hpp"
+#include "core/memory/resolve.hpp"
 
 namespace tf2_netvars
 {
@@ -156,11 +158,147 @@ inline int find_offset(const char* table_name, std::initializer_list<const char*
   return 0;
 }
 
-inline void clear_cache()
+inline recv_prop* find_prop_in_table(recv_table* table, const std::vector<const char*>& path, std::size_t depth,
+  std::vector<recv_table*>& visiting, int recursion_depth = 0)
 {
-  std::scoped_lock lock{offset_cache_mutex()};
-  offset_cache().clear();
+  if (table == nullptr || table->props == nullptr || depth >= path.size() || recursion_depth > 64 ||
+      std::find(visiting.begin(), visiting.end(), table) != visiting.end()) {
+    return nullptr;
+  }
+  visiting.push_back(table);
+
+  for (int index = 0; index < table->prop_count; ++index) {
+    auto* prop = &table->props[index];
+    if (prop == nullptr || prop->var_name == nullptr || prop->var_name[0] == '\0') {
+      continue;
+    }
+
+    if (std::strcmp(prop->var_name, path[depth]) == 0) {
+      if (depth + 1 >= path.size()) {
+        visiting.pop_back();
+        return prop;
+      }
+
+      if (prop->data_table != nullptr) {
+        if (auto* nested = find_prop_in_table(prop->data_table, path, depth + 1, visiting, recursion_depth + 1)) {
+          return nested;
+        }
+      }
+    }
+
+    if (prop->data_table != nullptr) {
+      if (auto* nested = find_prop_in_table(prop->data_table, path, depth, visiting, recursion_depth + 1)) {
+        return nested;
+      }
+    }
+  }
+
+  visiting.pop_back();
+  return nullptr;
 }
+
+inline recv_prop* find_prop(const char* table_name, std::initializer_list<const char*> props)
+{
+  if (client == nullptr || table_name == nullptr || props.size() == 0) {
+    return nullptr;
+  }
+
+  const std::vector<const char*> path{ props.begin(), props.end() };
+  auto* classes = reinterpret_cast<client_class*>(client->get_all_classes());
+  for (auto* current = classes; current != nullptr; current = current->next) {
+    if (current->recv_table_ptr == nullptr || current->recv_table_ptr->net_table_name == nullptr) {
+      continue;
+    }
+
+    if (std::strcmp(current->recv_table_ptr->net_table_name, table_name) != 0) {
+      continue;
+    }
+
+    std::vector<recv_table*> visiting{};
+    return find_prop_in_table(current->recv_table_ptr, path, 0, visiting);
+  }
+
+  return nullptr;
+}
+
+inline int proxy_store_disp(const void* fn)
+{
+  const auto* code = static_cast<const std::uint8_t*>(fn);
+  if (code == nullptr) {
+    return 0;
+  }
+  for (std::size_t i = 0; i < 64; ++i) {
+    std::size_t j = i;
+    bool rex_b = false;
+    while (code[j] >= 0x40 && code[j] <= 0x4F && j - i < 3) {
+      rex_b = rex_b || (code[j] & 1) != 0;
+      ++j;
+    }
+    if (code[j] != 0x88 && code[j] != 0x89) {
+      continue;
+    }
+    const std::uint8_t modrm = code[j + 1];
+    const int mod = modrm >> 6;
+    const int rm = modrm & 7;
+    if (rm != 6 || mod == 0 || mod == 3 || rex_b) {
+      continue;
+    }
+    if (mod == 1) {
+      return code[j + 2];
+    }
+    return cathook::core::memory::read_disp32(code + j, 2);
+  }
+  return 0;
+}
+
+inline void** pointer_datatable_slot(const char* table_name, const char* prop_name)
+{
+  const recv_prop* prop = find_prop(table_name, { prop_name });
+  if (prop == nullptr || prop->data_table_proxy_fn == nullptr) {
+    return nullptr;
+  }
+  const auto* code = static_cast<const std::uint8_t*>(prop->data_table_proxy_fn);
+  for (std::size_t i = 0; i + 7 <= 32; ++i) {
+    if (code[i] == 0x48 && code[i + 1] == 0x8D && (code[i + 2] & 0xC7) == 0x05) {
+      return reinterpret_cast<void**>(cathook::core::memory::resolve_rip_relative(code + i, 3, 7));
+    }
+  }
+  return nullptr;
+}
+
+inline void* game_rules_object()
+{
+  static void** slot = nullptr;
+  if (slot == nullptr) {
+    slot = pointer_datatable_slot("DT_TFGameRulesProxy", "tf_gamerules_data");
+  }
+  return slot != nullptr ? *slot : nullptr;
+}
+
+struct lazy_offset
+{
+  const char* table;
+  std::initializer_list<const char*> path;
+  std::atomic<int> value{0};
+
+  constexpr lazy_offset(const char* table_name, std::initializer_list<const char*> prop_path)
+      : table(table_name), path(prop_path)
+  {
+  }
+
+  lazy_offset(const lazy_offset&) = delete;
+  lazy_offset& operator=(const lazy_offset&) = delete;
+
+  operator int()
+  {
+    int current = value.load(std::memory_order_acquire);
+    if (current <= 0) {
+      current = find_offset(table, path);
+      if (current > 0) value.store(current, std::memory_order_release);
+    }
+    return current;
+  }
+};
 
 }
 

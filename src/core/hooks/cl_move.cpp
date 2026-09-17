@@ -9,6 +9,11 @@ V  o o  V  file: src/core/hooks/cl_move.cpp
   || (___\====
 */
 #include <cstdint>
+#include <cstdlib>
+#include <vector>
+#include "core/memory/code_scan.hpp"
+#include "core/memory/resolve.hpp"
+#include "core/print.hpp"
 #include "features/combat/tickbase/tickbase.hpp"
 #include "games/tf2/sdk/entities/player.hpp"
 #include "games/tf2/sdk/interfaces/client.hpp"
@@ -23,11 +28,63 @@ prediction_run_simulation_fn prediction_run_simulation_original = nullptr;
 namespace
 {
 
-auto resolve_cl_move_lea(void* cl_move, int offset) -> std::uint8_t*
+bool lea_consumed_by(const std::uint8_t* p, const std::uint8_t* end, int reg,
+                     std::uint8_t prefix, std::uint8_t opcode2, int span)
 {
-  if (cl_move == nullptr || offset < 0) return nullptr;
-  auto instruction = reinterpret_cast<std::uintptr_t>(cl_move) + static_cast<std::uintptr_t>(offset);
-  return reinterpret_cast<std::uint8_t*>(resolve_checked_rip_relative(instruction, 3, 7, {0x48, 0x8D, 0x05}));
+  for (const std::uint8_t* q = p; q < p + span && q < end; q += cathook::core::memory::insn_length(q, end)) {
+    cathook::core::memory::mem_insn insn{};
+    if (!cathook::core::memory::decode_mem_insn(q, end, insn)) {
+      continue;
+    }
+    if (insn.opcode == 0x0F && insn.opcode2 == opcode2 && insn.prefix == prefix &&
+        insn.base == reg) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool resolve_cl_move_globals(void* cl_move, double** net_time, float** unbounded, float** std_deviation)
+{
+  *net_time = nullptr;
+  *unbounded = nullptr;
+  *std_deviation = nullptr;
+  const auto* begin = static_cast<const std::uint8_t*>(cl_move);
+  const auto* end = begin + 0x600;
+
+  struct movss_global
+  {
+    std::uintptr_t target;
+    std::ptrdiff_t position;
+  };
+  std::vector<movss_global> movss_globals;
+
+  for (const std::uint8_t* p = begin; p < end; p += cathook::core::memory::insn_length(p, end)) {
+    cathook::core::memory::mem_insn insn{};
+    if (!cathook::core::memory::decode_mem_insn(p, end, insn)) {
+      continue;
+    }
+    if (insn.opcode == 0x8D && cathook::core::memory::is_rip_relative(insn)) {
+      if (lea_consumed_by(p + insn.size, end, insn.reg, 0xF2, 0x58, 0x30)) {
+        *net_time = reinterpret_cast<double*>(insn.rip_target);
+      } else if (lea_consumed_by(p + insn.size, end, insn.reg, 0xF3, 0x10, 0x30)) {
+        movss_globals.push_back({insn.rip_target, p - begin});
+      }
+    }
+  }
+
+  for (const auto& first : movss_globals) {
+    for (const auto& second : movss_globals) {
+      if (first.target + 4 != second.target ||
+          std::abs(first.position - second.position) > 0x100) {
+        continue;
+      }
+      *unbounded = reinterpret_cast<float*>(first.target);
+      *std_deviation = reinterpret_cast<float*>(second.target);
+      return *net_time != nullptr;
+    }
+  }
+  return false;
 }
 
 }
@@ -42,16 +99,17 @@ void prediction_run_simulation_hook(void* prediction_instance, int current_comma
   float curtime)
 {
   CATHOOK_HOOK_GUARD();
-  tickbase::apply_prediction_fix(current_command, cmd, localplayer, &curtime);
+  if (prediction_run_simulation_original == nullptr) {
+    return;
+  }
+
+  tickbase::apply_prediction_fix(current_command, localplayer, &curtime);
 
   int original_tick_count = 0;
   bool restore_tick = false;
 
   if (cmd != nullptr && cmd->tick_count > 0) {
-    const float interval = global_vars != nullptr && global_vars->interval_per_tick > 0.0f
-      ? global_vars->interval_per_tick
-      : static_cast<float>(TICK_INTERVAL);
-    const int predicted_tick = static_cast<int>(0.5f + (curtime / std::max(interval, 0.0001f)));
+    const int predicted_tick = static_cast<int>(0.5f + (curtime / tick_interval()));
     if (cmd->tick_count != predicted_tick) {
       original_tick_count = cmd->tick_count;
       cmd->tick_count = predicted_tick;
@@ -59,9 +117,7 @@ void prediction_run_simulation_hook(void* prediction_instance, int current_comma
     }
   }
 
-  if (prediction_run_simulation_original != nullptr) {
-    prediction_run_simulation_original(prediction_instance, current_command, cmd, localplayer, curtime);
-  }
+  prediction_run_simulation_original(prediction_instance, current_command, cmd, localplayer, curtime);
 
   if (restore_tick && cmd != nullptr) {
     cmd->tick_count = original_tick_count;
@@ -74,17 +130,14 @@ void initialize_cl_move_globals(tickbase::host_should_run_fn host_should_run)
     return;
   }
 
-  constexpr int net_time_lea_offset = 0x16f;
-  constexpr int host_frametime_unbounded_lea_offset = 0x45d;
-  constexpr int host_frametime_std_deviation_lea_offset = 0x48d;
+  double* net_time = nullptr;
+  float* host_frametime_unbounded = nullptr;
+  float* host_frametime_std_deviation = nullptr;
 
-  auto* net_time = reinterpret_cast<double*>(resolve_cl_move_lea(reinterpret_cast<void*>(cl_move_original), net_time_lea_offset));
-  auto* host_frametime_unbounded =
-    reinterpret_cast<float*>(resolve_cl_move_lea(reinterpret_cast<void*>(cl_move_original), host_frametime_unbounded_lea_offset));
-  auto* host_frametime_std_deviation =
-    reinterpret_cast<float*>(resolve_cl_move_lea(reinterpret_cast<void*>(cl_move_original), host_frametime_std_deviation_lea_offset));
-
-  if (net_time == nullptr || host_frametime_unbounded == nullptr || host_frametime_std_deviation == nullptr) {
+  if (!resolve_cl_move_globals(reinterpret_cast<void*>(cl_move_original),
+                               &net_time, &host_frametime_unbounded, &host_frametime_std_deviation)) {
+    print("[tickbase] CL_Move global resolution failed (net_time=%p unbounded=%p stddev=%p); tickbase shifting disabled\n",
+      static_cast<void*>(net_time), static_cast<void*>(host_frametime_unbounded), static_cast<void*>(host_frametime_std_deviation));
     return;
   }
   tickbase::initialize_engine_globals(net_time, host_frametime_unbounded, host_frametime_std_deviation, host_should_run);

@@ -71,6 +71,8 @@ const char* goal_type_name(goal_type type)
       return "mvm_upgrade_station";
     case goal_type::followbot:
       return "followbot";
+    case goal_type::command_path:
+      return "command_path";
     case goal_type::roam:
     default:
       return "roam";

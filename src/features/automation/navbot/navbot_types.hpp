@@ -25,13 +25,13 @@ constexpr float player_width = 49.0f;
 constexpr float half_player_width = player_width * 0.5f;
 constexpr float player_clearance_margin = 4.0f;
 constexpr float player_jump_height = 72.0f;
+constexpr float player_ledge_mount_height = 64.0f;
 constexpr float player_step_height = 18.0f;
-constexpr float walkable_ramp_height = 45.0f;
-constexpr float walkable_ramp_run = 80.0f;
 constexpr float jump_trigger_height = 28.0f;
 constexpr float jump_trigger_run = 60.0f;
 constexpr float crumb_reach_distance = 50.0f;
-constexpr float crumb_reach_vertical_tolerance = player_jump_height;
+constexpr float crumb_reach_up_tolerance = player_step_height + 4.0f;
+constexpr float crumb_reach_drop_tolerance = player_jump_height * 4.0f;
 constexpr float crumb_skip_segment_distance = 64.0f;
 constexpr float pickup_destination_reach_distance = 20.0f;
 
@@ -88,7 +88,8 @@ enum class goal_type : uint8_t
   mvm_frontline,
   mvm_teleporter,
   mvm_upgrade_station,
-  followbot
+  followbot,
+  command_path
 };
 
 enum class crumb_kind : uint8_t
@@ -183,7 +184,7 @@ constexpr uint32_t goal_type_bit(goal_type type)
   return 1u << static_cast<uint32_t>(type);
 }
 
-constexpr size_t goal_type_count = static_cast<size_t>(goal_type::followbot) + 1;
+constexpr size_t goal_type_count = static_cast<size_t>(goal_type::command_path) + 1;
 
 constexpr size_t goal_type_index(goal_type type)
 {
@@ -192,7 +193,7 @@ constexpr size_t goal_type_index(goal_type type)
 
 constexpr bool goal_type_can_be_excluded(goal_type type)
 {
-  return type != goal_type::roam;
+  return type != goal_type::roam && type != goal_type::command_path;
 }
 
 struct goal_candidate

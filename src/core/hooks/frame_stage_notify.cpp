@@ -17,6 +17,7 @@ V  o o  V  file: src/core/hooks/frame_stage_notify.cpp
 #include <utility>
 #include "games/tf2/sdk/entities/player.hpp"
 #include "core/entity_cache.hpp"
+#include "core/player_resource.hpp"
 #include "core/commands.hpp"
 #include "core/detach.hpp"
 #include "core/identify/identify.hpp"
@@ -27,9 +28,14 @@ V  o o  V  file: src/core/hooks/frame_stage_notify.cpp
 #include "features/combat/aimbot/resolver.hpp"
 #include "features/combat/backtrack/backtrack.hpp"
 #include "features/combat/animation/anim_driver.hpp"
+#include "features/automation/cheat_detection/cheat_detection.hpp"
+#include "features/automation/killstreak/killstreak.hpp"
 #include "features/automation/navbot/navbot_controller.hpp"
+#include "features/automation/spectate/spectate.hpp"
+#include "features/automation/anti_cheat_compat/anti_cheat_compat.hpp"
 #include "features/visuals/thirdperson.hpp"
 #include "features/visuals/skybox_changer.hpp"
+#include "features/visuals/skin_changer.hpp"
 #include "features/visuals/world_visuals.hpp"
 #include "features/visuals/groups/visual_groups.hpp"
 #include "core/print.hpp"
@@ -48,7 +54,6 @@ enum ClientFrameStage {
 void (*frame_stage_notify_original)(void*, ClientFrameStage);
 
 static float last_time = 0.0;
-static unsigned int a = 0;
 
 namespace
 {
@@ -204,6 +209,9 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
   CATHOOK_HOOK_GUARD();
   if (cathook::core::is_detach_pending()) {
     thirdperson::end_render_angles();
+    if (frame_stage_notify_original != nullptr) {
+      frame_stage_notify_original(me, current_stage);
+    }
     cathook::core::service_detach_request();
     return;
   }
@@ -218,6 +226,10 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
     update_zoom_sensitivity();
   }
 
+  if (runtime_ready && current_stage == FRAME_NET_UPDATE_POSTDATAUPDATE_END) {
+    skin_changer::apply();
+  }
+
   if (frame_stage_notify_original == nullptr) {
     restore_frame_stage_state();
     return;
@@ -227,9 +239,15 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
   if (!runtime_ready) {
     entity_cache_clear_lists();
     entity_cache_clear_snapshot();
+    cathook::core::player_resource::invalidate_player_resource_cache();
     last_time = 0.0f;
     run_match_exec_on_level_change();
     run_skybox_changer();
+    skin_changer::invalidate();
+    killstreak::reset();
+    spectate::reset();
+    cheat_detection::reset();
+    anti_cheat_compat::reset();
     restore_frame_stage_state();
     return;
   }
@@ -237,6 +255,7 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
       !engine->is_connected() || !engine->is_in_game()) {
     entity_cache_clear_lists();
     entity_cache_clear_snapshot();
+    cathook::core::player_resource::invalidate_player_resource_cache();
     restore_frame_stage_state();
     return;
   }
@@ -265,6 +284,7 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
       entity_cache_clear_snapshot();
       resolver::update_pending_shots();
       aimbot::update_shot_diagnostics();
+      spectate::on_net_update_start();
 
       break;
     }
@@ -274,7 +294,7 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
       entity_cache_snapshot snapshot{};
       snapshot.players.reserve(32);
       const bool refresh_friend_cache = steam_friends != nullptr && global_vars->curtime - last_time >= 1;
-      const bool cache_player_info = config.aimbot.master || refresh_friend_cache;
+      const bool cache_player_info = true;
 
       const int max_entities_value = entity_list->get_max_entities();
       if (max_entities_value <= 0 || max_entities_value > 8192) {
@@ -287,34 +307,16 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
 	Entity* entity = entity_list->entity_from_index(i);
 	if (entity == nullptr) continue;
 
-        const class_id entity_class = entity->get_class_id();
+        const auto* client_class = entity->get_typed_client_class();
+        if (client_class == nullptr) {
+          continue;
+        }
+        const class_id entity_class = static_cast<class_id>(client_class->class_id);
         if (static_cast<int>(entity_class) < 0 || static_cast<int>(entity_class) > 512) {
           continue;
         }
-        const char* network_name = entity->get_network_name();
-        if (network_name != nullptr && network_name[0] != '\0' &&
-            (std::strstr(network_name, "Boss") != nullptr ||
-             std::strstr(network_name, "Merasmus") != nullptr ||
-             std::strstr(network_name, "Eyeball") != nullptr ||
-             std::strstr(network_name, "Headless") != nullptr ||
-             std::strstr(network_name, "Zombie") != nullptr ||
-             std::strstr(network_name, "Tank") != nullptr)) {
-          g_entity_cache_npcs.push_back(entity);
-        }
-
-        if (network_name != nullptr) {
-          if (std::strcmp(network_name, "CTFPumpkinBomb") == 0) {
-            entity_cache[class_id::PUMPKIN].push_back(entity);
-          } else if (std::strcmp(network_name, "CTFProjectile_SentryRocket") == 0) {
-            entity_cache[class_id::SENTRY_ROCKET].push_back(entity);
-          } else if (std::strcmp(network_name, "CCurrencyPack") == 0) {
-            entity_cache[class_id::MVM_CURRENCY].push_back(entity);
-          } else if (std::strcmp(network_name, "CFuncUpgrades") == 0
-            || std::strcmp(network_name, "CUpgrades") == 0
-            || std::strcmp(network_name, "CFuncUpgradeStation") == 0) {
-            entity_cache[class_id::MVM_UPGRADE_STATION].push_back(entity);
-          }
-        }
+        const char* network_name = client_class->network_name;
+        bool classified = false;
 
 	switch (entity_class) {
 	case class_id::PLAYER:
@@ -356,8 +358,14 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
 	      }
 	    }
 
+            classified = true;
 	    break;
 	  }
+
+	case class_id::PLAYER_RESOURCE:
+	  cathook::core::player_resource::cache_player_resource_entity(entity, static_cast<int>(i));
+	  classified = true;
+	  break;
 
 	case class_id::AMMO_OR_HEALTH_PACK:
 	  {
@@ -367,33 +375,81 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
 	    else if (pickup == pickup_type::MEDKIT)
 	      entity_cache[class_id::HEALTH_PACK].push_back(entity);
 
+            classified = true;
 	    break;
 	  }
 
 	case class_id::CAPTURE_FLAG:
-	  entity_cache[class_id::CAPTURE_FLAG].push_back(entity); break;
+	  entity_cache[class_id::CAPTURE_FLAG].push_back(entity);
+	  classified = true;
+	  break;
 
 	case class_id::OBJECTIVE_RESOURCE:
-	  entity_cache[class_id::OBJECTIVE_RESOURCE].push_back(entity); break;
+	  entity_cache[class_id::OBJECTIVE_RESOURCE].push_back(entity);
+	  classified = true;
+	  break;
 
 	case class_id::SENTRY:
 	case class_id::OBJECT_CART_DISPENSER:
 	case class_id::DISPENSER:
 	case class_id::TELEPORTER:
-	  entity_cache[entity_class].push_back(entity); break;
+	  entity_cache[entity_class].push_back(entity);
+	  classified = true;
+	  break;
 
 	case class_id::SNIPER_DOT:
-	  entity_cache[class_id::SNIPER_DOT].push_back(entity); break;
+	  entity_cache[class_id::SNIPER_DOT].push_back(entity);
+	  classified = true;
+	  break;
 
         case class_id::ROCKET:
         case class_id::PILL_OR_STICKY:
         case class_id::FLARE:
         case class_id::ARROW:
         case class_id::CROSSBOW_BOLT:
+        case class_id::SENTRY_ROCKET:
           entity_cache[entity_class].push_back(entity);
+          classified = true;
+          break;
 
+        case class_id::WEARABLE:
+        case class_id::WEARABLE_CAMPAIGN_ITEM:
+        case class_id::WEARABLE_DEMO_SHIELD:
+        case class_id::WEARABLE_ECON:
+        case class_id::WEARABLE_ITEM:
+        case class_id::WEARABLE_RAZORBACK:
+        case class_id::WEARABLE_VM:
+        case class_id::WEARABLE_LEVELABLE_ITEM:
+        case class_id::WEARABLE_ROBOT_ARM:
+          entity_cache[entity_class].push_back(entity);
+          classified = true;
+          break;
 	}
 
+        if (classified || network_name == nullptr || network_name[0] == '\0') {
+          continue;
+        }
+
+        if (std::strstr(network_name, "Boss") != nullptr ||
+            std::strstr(network_name, "Merasmus") != nullptr ||
+            std::strstr(network_name, "Eyeball") != nullptr ||
+            std::strstr(network_name, "Headless") != nullptr ||
+            std::strstr(network_name, "Zombie") != nullptr ||
+            std::strstr(network_name, "Tank") != nullptr) {
+          g_entity_cache_npcs.push_back(entity);
+        }
+
+        if (std::strcmp(network_name, "CTFPumpkinBomb") == 0) {
+          entity_cache[class_id::PUMPKIN].push_back(entity);
+        } else if (std::strcmp(network_name, "CTFProjectile_SentryRocket") == 0) {
+          entity_cache[class_id::SENTRY_ROCKET].push_back(entity);
+        } else if (std::strcmp(network_name, "CCurrencyPack") == 0) {
+          entity_cache[class_id::MVM_CURRENCY].push_back(entity);
+        } else if (std::strcmp(network_name, "CFuncUpgrades") == 0
+          || std::strcmp(network_name, "CUpgrades") == 0
+          || std::strcmp(network_name, "CFuncUpgradeStation") == 0) {
+          entity_cache[class_id::MVM_UPGRADE_STATION].push_back(entity);
+        }
       }
 
       entity_cache_publish_snapshot(std::move(snapshot));
@@ -431,6 +487,9 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
     cat_ipc::client::tick();
     cathook::core::identify::tick();
     cathook::core::players::tick();
+    killstreak::apply();
+    spectate::on_net_update_end();
+    cheat_detection::on_net_update_end();
     automation::controller().on_frame_stage_notify();
     navbot::controller().on_frame_stage_notify();
   }

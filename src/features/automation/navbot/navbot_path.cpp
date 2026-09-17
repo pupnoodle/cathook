@@ -56,7 +56,11 @@ struct queue_entry_less
 
 constexpr uint32_t tf_team_red = 2u;
 constexpr uint32_t tf_team_blue = 3u;
+constexpr uint32_t path_tf_nav_spawn_room_red = 0x00000002u;
+constexpr uint32_t path_tf_nav_spawn_room_blue = 0x00000004u;
 constexpr uint32_t path_nav_mesh_avoid = 0x00000080u;
+constexpr uint32_t path_tf_nav_blue_sentry_danger = 0x00000080u;
+constexpr uint32_t path_tf_nav_red_sentry_danger = 0x00000100u;
 constexpr uint32_t path_tf_nav_blue_setup_gate = 0x00000800u;
 constexpr uint32_t path_tf_nav_red_setup_gate = 0x00001000u;
 constexpr uint32_t path_tf_nav_blocked_after_point_capture = 0x00002000u;
@@ -67,24 +71,15 @@ constexpr uint32_t path_tf_nav_with_second_point = 0x00020000u;
 constexpr uint32_t path_tf_nav_with_third_point = 0x00040000u;
 constexpr uint32_t path_tf_nav_with_fourth_point = 0x00080000u;
 constexpr uint32_t path_tf_nav_with_fifth_point = 0x00100000u;
+constexpr uint32_t path_tf_nav_door_always_blocks = 0x20000000u;
 constexpr uint32_t path_tf_nav_unblockable = 0x40000000u;
 constexpr float start_area_search_radius = half_player_width + player_clearance_margin + 24.0f;
 constexpr float avoid_area_cost = 650.0f;
 constexpr float dropdown_edge_cost = 350.0f;
 constexpr float dropdown_height_cost = 2.0f;
-
-float distance_sq(const Vec3& left, const Vec3& right)
-{
-  auto dx = left.x - right.x;
-  auto dy = left.y - right.y;
-  auto dz = left.z - right.z;
-  return dx * dx + dy * dy + dz * dz;
-}
-
-float distance_value(const Vec3& left, const Vec3& right)
-{
-  return std::sqrt(distance_sq(left, right));
-}
+constexpr float jump_edge_cost = 120.0f;
+constexpr float enemy_spawn_area_cost = 4000.0f;
+constexpr float sentry_danger_area_cost = 350.0f;
 
 bool nav_edge_valid_path(nav_edge_id edge_id)
 {
@@ -142,6 +137,11 @@ bool nav_area_is_blocked_for_request(const nav_area_data& area, const path_reque
     return true;
   }
   if (request.team == tf_team_blue && area_has_tf_attribute(area, path_tf_nav_red_one_way_door))
+  {
+    return true;
+  }
+
+  if (area_has_tf_attribute(area, path_tf_nav_door_always_blocks))
   {
     return true;
   }
@@ -215,7 +215,7 @@ std::optional<uint32_t> find_nearest_crumb_node(const nav_mesh_cache& cache,
       continue;
     }
 
-    const auto node_distance = distance_sq(node.world, world);
+    const auto node_distance = length_squared(node.world - world);
     if (!found || node_distance < best_distance)
     {
       found = true;
@@ -497,7 +497,7 @@ path_result solve_path_request(const navbot_mesh& mesh, const navbot_hazards& ha
 
   auto start_index = *start_node;
   auto goal_index = *goal_node;
-  auto start_heuristic = distance_value(cache.crumb_nodes[start_index].world, cache.crumb_nodes[goal_index].world);
+  auto start_heuristic = distance_3d(cache.crumb_nodes[start_index].world, cache.crumb_nodes[goal_index].world);
   std::vector<path_node> nodes(cache.crumb_nodes.size());
   std::priority_queue<queue_entry, std::vector<queue_entry>, queue_entry_less> open_set{};
 
@@ -559,12 +559,30 @@ path_result solve_path_request(const navbot_mesh& mesh, const navbot_hazards& ha
       {
         step_cost += avoid_area_cost;
       }
+      const auto enemy_spawn_attribute = request.team == tf_team_red
+        ? path_tf_nav_spawn_room_blue
+        : request.team == tf_team_blue ? path_tf_nav_spawn_room_red : 0u;
+      if ((next_area->tf_attributes & enemy_spawn_attribute) != 0)
+      {
+        step_cost += enemy_spawn_area_cost;
+      }
+      const auto sentry_danger_attribute = request.team == tf_team_red
+        ? path_tf_nav_blue_sentry_danger
+        : request.team == tf_team_blue ? path_tf_nav_red_sentry_danger : 0u;
+      if ((next_area->tf_attributes & sentry_danger_attribute) != 0)
+      {
+        step_cost += sentry_danger_area_cost;
+      }
       if (edge.is_dropdown)
       {
         const auto& current_world = cache.crumb_nodes[entry.area_index].world;
         const auto& next_world = cache.crumb_nodes[next_index].world;
         const auto height_drop = std::max(0.0f, current_world.z - next_world.z - player_step_height);
         step_cost += dropdown_edge_cost + height_drop * dropdown_height_cost;
+      }
+      if (edge.requires_jump)
+      {
+        step_cost += jump_edge_cost;
       }
       step_cost += hazards.area_cost(next_id, current_time);
       auto new_cost = node.g_cost + step_cost;
@@ -574,7 +592,7 @@ path_result solve_path_request(const navbot_mesh& mesh, const navbot_hazards& ha
         continue;
       }
 
-      auto heuristic = distance_value(cache.crumb_nodes[next_index].world, cache.crumb_nodes[goal_index].world);
+      auto heuristic = distance_3d(cache.crumb_nodes[next_index].world, cache.crumb_nodes[goal_index].world);
       nodes[next_index].g_cost = new_cost;
       nodes[next_index].f_cost = new_cost + heuristic;
       nodes[next_index].parent_index = entry.area_index;

@@ -31,6 +31,7 @@ V  o o  V  file: src/features/visuals/esp/esp.cpp
 #include "core/entity_cache.hpp"
 #include "core/math/math.hpp"
 #include "core/player_manager.hpp"
+#include "core/player_resource.hpp"
 #include "features/combat/aimbot/aimbot.hpp"
 #include "features/combat/backtrack/backtrack.hpp"
 #include "features/menu/config.hpp"
@@ -47,7 +48,6 @@ V  o o  V  file: src/features/visuals/esp/esp.cpp
 #include "games/tf2/sdk/interfaces/entity_list.hpp"
 #include "games/tf2/sdk/interfaces/global_vars.hpp"
 #include "games/tf2/sdk/interfaces/render_view.hpp"
-#include "games/tf2/sdk/interfaces/surface.hpp"
 #define STB_IMAGE_IMPLEMENTATION
 #include "games/tf2/sdk/thirdparty/stb/stb_image.h"
 #ifdef Status
@@ -62,8 +62,6 @@ constexpr float cathook_healthbar_width = 7.0f;
 constexpr float cathook_healthbar_fill_width = 5.0f;
 constexpr float cathook_healthbar_border = 1.0f;
 constexpr float cathook_text_padding = 4.0f;
-constexpr int cathook_surface_font_tall = 12;
-constexpr int cathook_surface_font_weight = 400;
 constexpr float cathook_head_emoji_size_base = 2500.0f;
 constexpr float cathook_head_emoji_size_bias = 15.0f;
 constexpr float cathook_head_emoji_tile_size = 64.0f;
@@ -84,9 +82,23 @@ constexpr float esp_smoothing_snap_distance = 180.0f;
 constexpr float esp_smoothing_snap_scale = 1.75f;
 constexpr unsigned int esp_smoothing_stale_frames = 2;
 constexpr unsigned int esp_bounds_cache_stale_frames = 2;
-constexpr uintptr_t player_resource_score_offset = 0xC80;
-constexpr uintptr_t player_resource_deaths_offset = 0xE18;
-constexpr uintptr_t tf_player_resource_damage_offset = 0x2360;
+inline int player_resource_score_offset()
+{
+  static tf2_netvars::lazy_offset offset{"DT_TFPlayerResource", { "baseclass", "m_iScore" }};
+  return offset;
+}
+
+inline int player_resource_deaths_offset()
+{
+  static tf2_netvars::lazy_offset offset{"DT_TFPlayerResource", { "baseclass", "m_iDeaths" }};
+  return offset;
+}
+
+inline int tf_player_resource_damage_offset()
+{
+  static tf2_netvars::lazy_offset offset{"DT_TFPlayerResource", { "m_iDamage" }};
+  return offset;
+}
 
 struct head_emoji_texture_state
 {
@@ -242,7 +254,11 @@ bool g_esp_was_in_game = false;
 [[nodiscard]] Vec3 get_esp_draw_origin(Entity* entity);
 
 template <typename value_type>
-[[nodiscard]] value_type read_player_resource_value(Entity* player_resource, uintptr_t array_offset, int player_index);
+[[nodiscard]] value_type read_player_resource_value(Entity* player_resource, uintptr_t array_offset, int player_index)
+{
+  return cathook::core::player_resource::read_value<value_type>(
+    player_resource, static_cast<int>(array_offset), player_index);
+}
 
 [[nodiscard]] bool is_finite_bounds(const esp_bounds& bounds)
 {
@@ -635,17 +651,14 @@ void smooth_projected_box(Entity* entity, projected_box* box)
   return bytes;
 }
 
-[[nodiscard]] std::array<std::filesystem::path, 8> head_emoji_atlas_candidates()
+[[nodiscard]] std::array<std::filesystem::path, 6> head_emoji_atlas_candidates()
 {
-  const auto source_directory = std::filesystem::path(__FILE__).parent_path();
   return {
-    source_directory / "atlas.png",
     cathook::core::root_directory() / "assets" / "textures" / "atlas.png",
     cathook::core::root_directory() / "assets" / "atlas.png",
     cathook::core::root_directory() / "textures" / "atlas.png",
     std::filesystem::current_path() / "assets" / "textures" / "atlas.png",
     std::filesystem::current_path() / "src" / "features" / "visuals" / "esp" / "atlas.png",
-    std::filesystem::current_path() / "features" / "visuals" / "esp" / "atlas.png",
     std::filesystem::current_path() / "atlas.png"
   };
 }
@@ -865,13 +878,6 @@ void reset_head_emoji_atlas()
 [[nodiscard]] RGBA_float esp_color_for_entity(Entity* entity, const visual_group& group)
 {
   return visual_groups::resolve_color(entity, group, group.esp.override_color, group.esp.color);
-}
-
-[[nodiscard]] RGBA player_esp_color(Player* player, Player* localplayer)
-{
-  (void)localplayer;
-  const visual_groups::visual_group_match group = player != nullptr ? visual_groups::group_for_entity(player->to_entity(), false) : visual_groups::visual_group_match{};
-  return group ? esp_color_for_entity(player->to_entity(), *group).to_RGBA() : RGBA{255, 255, 255, 255};
 }
 
 [[nodiscard]] std::string player_name(Player* player)
@@ -1227,7 +1233,7 @@ void reset_head_emoji_atlas()
 
 [[nodiscard]] int player_ping(Entity* player_resource, int player_index)
 {
-  static const int ping_offset = tf2_netvars::find_offset("DT_TFPlayerResource", { "baseclass", "m_iPing" });
+  static tf2_netvars::lazy_offset ping_offset{"DT_TFPlayerResource", { "baseclass", "m_iPing" }};
   return ping_offset > 0 ? read_player_resource_value<int>(player_resource, static_cast<uintptr_t>(ping_offset), player_index) : 0;
 }
 
@@ -1241,8 +1247,8 @@ void reset_head_emoji_atlas()
     return {};
   }
 
-  const int score = read_player_resource_value<int>(player_resource, player_resource_score_offset, player_index);
-  const int deaths = read_player_resource_value<int>(player_resource, player_resource_deaths_offset, player_index);
+  const int score = read_player_resource_value<int>(player_resource, player_resource_score_offset(), player_index);
+  const int deaths = read_player_resource_value<int>(player_resource, player_resource_deaths_offset(), player_index);
   char buffer[32]{};
   if (deaths <= 0) {
     std::snprintf(buffer, sizeof(buffer), "KDR %d", score);
@@ -1502,7 +1508,10 @@ void draw_player_sightline(ImDrawList* draw_list, Player* player, const visual_g
     return {};
   }
 
-  return *reinterpret_cast<Vec3*>(reinterpret_cast<uintptr_t>(entity) + 0x168);
+  static tf2_netvars::lazy_offset velocity_offset{"DT_BasePlayer", { "m_vecVelocity[0]" }};
+  return velocity_offset > 0
+    ? *reinterpret_cast<Vec3*>(reinterpret_cast<uintptr_t>(entity) + static_cast<uintptr_t>(velocity_offset.operator int()))
+    : Vec3{};
 }
 
 void draw_entity_trajectory(ImDrawList* draw_list, Entity* entity, const visual_group& group)
@@ -1712,41 +1721,14 @@ void draw_entity_trajectory(ImDrawList* draw_list, Entity* entity, const visual_
 
 [[nodiscard]] Entity* get_player_resource_entity()
 {
-  if (entity_list == nullptr) {
-    return nullptr;
-  }
-
-  for (unsigned int index = 1; index < static_cast<unsigned int>(entity_list->get_max_entities()); ++index) {
-    auto* entity = entity_list->entity_from_index(index);
-    if (entity == nullptr) {
-      continue;
-    }
-
-    if (entity->get_class_id() == class_id::PLAYER_RESOURCE) {
-      return entity;
-    }
-  }
-
-  return nullptr;
-}
-
-template <typename value_type>
-[[nodiscard]] value_type read_player_resource_value(Entity* player_resource, uintptr_t array_offset, int player_index)
-{
-  if (player_resource == nullptr || player_index <= 0) {
-    return {};
-  }
-
-  const auto base = reinterpret_cast<uintptr_t>(player_resource);
-  const auto entry_offset = array_offset + (static_cast<uintptr_t>(player_index) * sizeof(value_type));
-  return *reinterpret_cast<value_type*>(base + entry_offset);
+  return cathook::core::player_resource::get_player_resource_entity();
 }
 
 [[nodiscard]] int get_mafia_level(Entity* player_resource, int player_index)
 {
-  const auto score = read_player_resource_value<int>(player_resource, player_resource_score_offset, player_index);
-  const auto deaths = read_player_resource_value<int>(player_resource, player_resource_deaths_offset, player_index);
-  const auto damage = read_player_resource_value<int>(player_resource, tf_player_resource_damage_offset, player_index);
+  const auto score = read_player_resource_value<int>(player_resource, player_resource_score_offset(), player_index);
+  const auto deaths = read_player_resource_value<int>(player_resource, player_resource_deaths_offset(), player_index);
+  const auto damage = read_player_resource_value<int>(player_resource, tf_player_resource_damage_offset(), player_index);
 
   const auto level = (score * 3) + (damage / 100) - (deaths * 7);
   return std::clamp(level, 1, 100);
@@ -1882,51 +1864,6 @@ void draw_atlas_tile(
   }
 
   if (texture == nullptr || texture->Status != ImTextureStatus_OK || texture->Width <= 0 || texture->Height <= 0) {
-    if (!ensure_head_emoji_atlas_loaded() || g_head_emoji_atlas.pixels.empty() ||
-        g_head_emoji_atlas.width <= 0 || g_head_emoji_atlas.height <= 0) {
-      return;
-    }
-
-    constexpr int tile_size = static_cast<int>(cathook_head_emoji_tile_size);
-    const int source_x = tile_column * tile_size;
-    const int source_y = tile_row * tile_size;
-    if (source_x < 0 || source_y < 0 ||
-        source_x + tile_size > g_head_emoji_atlas.width ||
-        source_y + tile_size > g_head_emoji_atlas.height) {
-      return;
-    }
-
-    const int samples = std::clamp(static_cast<int>(std::ceil(size / 2.0f)), 12, tile_size);
-    const float block_size = size / static_cast<float>(samples);
-    const ImVec2 top_left(center.x - (size * 0.5f), center.y - (size * 0.5f));
-    for (int y = 0; y < samples; ++y) {
-      for (int x = 0; x < samples; ++x) {
-        const int pixel_x = source_x + std::clamp((x * tile_size) / samples, 0, tile_size - 1);
-        const int pixel_y = source_y + std::clamp((y * tile_size) / samples, 0, tile_size - 1);
-        const size_t pixel_offset = (static_cast<size_t>(pixel_y) * static_cast<size_t>(g_head_emoji_atlas.width) + static_cast<size_t>(pixel_x)) * 4u;
-        const uint8_t source_alpha = g_head_emoji_atlas.pixels[pixel_offset + 3u];
-        if (source_alpha < 24) {
-          continue;
-        }
-
-        const uint32_t tint_alpha = (tint >> IM_COL32_A_SHIFT) & 0xFFu;
-        const auto alpha = static_cast<uint8_t>(
-          (static_cast<uint32_t>(source_alpha) * tint_alpha) / 255u);
-        if (alpha == 0) {
-          continue;
-        }
-
-        const auto color = IM_COL32(
-          g_head_emoji_atlas.pixels[pixel_offset],
-          g_head_emoji_atlas.pixels[pixel_offset + 1u],
-          g_head_emoji_atlas.pixels[pixel_offset + 2u],
-          alpha);
-        draw_list->AddRectFilled(
-          ImVec2(top_left.x + (static_cast<float>(x) * block_size), top_left.y + (static_cast<float>(y) * block_size)),
-          ImVec2(top_left.x + (static_cast<float>(x + 1) * block_size) + 0.5f, top_left.y + (static_cast<float>(y + 1) * block_size) + 0.5f),
-          color);
-      }
-    }
     return;
   }
 
@@ -2040,80 +1977,6 @@ void draw_atlas_tile(
   auto text_color = base_color;
   text_color.a = std::clamp(text_color.a * alpha_scale, 0.0f, 1.0f);
   return to_imgui_color(text_color.to_RGBA());
-}
-
-[[nodiscard]] RGBA color_with_alpha(RGBA color, float alpha_scale)
-{
-  color.a = std::clamp(static_cast<int>(std::round(static_cast<float>(color.a) * alpha_scale)), 0, 255);
-  return color;
-}
-
-[[nodiscard]] RGBA imgui_to_rgba(ImU32 color)
-{
-  return RGBA{
-    static_cast<int>((color >> IM_COL32_R_SHIFT) & 0xFF),
-    static_cast<int>((color >> IM_COL32_G_SHIFT) & 0xFF),
-    static_cast<int>((color >> IM_COL32_B_SHIFT) & 0xFF),
-    static_cast<int>((color >> IM_COL32_A_SHIFT) & 0xFF)
-  };
-}
-
-[[nodiscard]] int surface_round(float value)
-{
-  return static_cast<int>(std::round(value));
-}
-
-[[nodiscard]] unsigned long esp_surface_font()
-{
-  static unsigned long font = 0;
-  static int last_tall = 0;
-  const int tall = std::max(8, cathook_surface_font_tall);
-  if (surface == nullptr) {
-    return 0;
-  }
-
-  if (font == 0 || last_tall != tall) {
-    font = surface->text_create_font();
-    if (font != 0) {
-      surface->text_set_font_glyph_set(font, "Verdana", tall, cathook_surface_font_weight, 0, 0, 0);
-      last_tall = tall;
-    }
-  }
-
-  return font;
-}
-
-[[nodiscard]] std::wstring widen_for_surface(const std::string& text)
-{
-  auto wide = std::wstring{};
-  wide.reserve(text.size());
-  for (const unsigned char character : text) {
-    wide.push_back(static_cast<wchar_t>(character));
-  }
-  return wide;
-}
-
-[[nodiscard]] ImVec2 surface_text_size(const std::string& text)
-{
-  const auto font = esp_surface_font();
-  if (font == 0 || text.empty() || surface == nullptr) {
-    return {};
-  }
-
-  const auto wide = widen_for_surface(text);
-  return ImVec2(
-    static_cast<float>(surface->get_string_width(font, wide.c_str())),
-    static_cast<float>(std::max(surface->get_font_height(font), cathook_surface_font_tall)));
-}
-
-[[nodiscard]] float surface_text_line_height()
-{
-  const auto font = esp_surface_font();
-  if (font == 0 || surface == nullptr) {
-    return static_cast<float>(cathook_surface_font_tall + 2);
-  }
-
-  return static_cast<float>(std::max(surface->get_font_height(font), cathook_surface_font_tall) + 2);
 }
 
 [[nodiscard]] bool get_backtrack_record_screen_bounds(const backtrack::backtrack_record& record, esp_bounds* bounds)
@@ -2555,232 +2418,6 @@ void draw_player_condition_lines(ImDrawList* draw_list, const esp_bounds& bounds
   }
 }
 
-void surface_set_color(RGBA color)
-{
-  if (surface == nullptr) {
-    return;
-  }
-
-  surface->set_rgba(color);
-}
-
-void surface_filled_rect(float x1, float y1, float x2, float y2, RGBA color)
-{
-  if (surface == nullptr || color.a <= 0) {
-    return;
-  }
-
-  surface_set_color(color);
-  surface->draw_filled_rect(surface_round(x1), surface_round(y1), surface_round(x2), surface_round(y2));
-}
-
-void surface_line(float x1, float y1, float x2, float y2, RGBA color)
-{
-  if (surface == nullptr || color.a <= 0) {
-    return;
-  }
-
-  surface_set_color(color);
-  surface->draw_line(surface_round(x1), surface_round(y1), surface_round(x2), surface_round(y2));
-}
-
-void surface_outline_box(const esp_bounds& bounds, RGBA color, float alpha_scale)
-{
-  if (surface == nullptr) {
-    return;
-  }
-
-  const auto black = color_with_alpha(RGBA{0, 0, 0, 255}, alpha_scale);
-  surface_set_color(black);
-  surface->draw_outlined_rect(surface_round(bounds.min_x - 1.0f), surface_round(bounds.min_y - 1.0f), surface_round(bounds.max_x + 1.0f), surface_round(bounds.max_y + 1.0f));
-  surface->draw_outlined_rect(surface_round(bounds.min_x + 1.0f), surface_round(bounds.min_y + 1.0f), surface_round(bounds.max_x - 1.0f), surface_round(bounds.max_y - 1.0f));
-  surface_set_color(color);
-  surface->draw_outlined_rect(surface_round(bounds.min_x), surface_round(bounds.min_y), surface_round(bounds.max_x), surface_round(bounds.max_y));
-}
-
-void surface_corner_box(const esp_bounds& bounds, RGBA color, float alpha_scale)
-{
-  const auto black = color_with_alpha(RGBA{0, 0, 0, 255}, alpha_scale);
-  const auto height_size = std::max(4.0f, (bounds.height() - 3.0f) * cathook_corner_scale);
-  const auto width_size = std::max(4.0f, (bounds.width() - 2.0f) * cathook_corner_scale);
-
-  surface_filled_rect(bounds.min_x, bounds.min_y, bounds.min_x + width_size + 1.0f, bounds.min_y + 3.0f, black);
-  surface_filled_rect(bounds.min_x, bounds.min_y + 3.0f, bounds.min_x + 3.0f, bounds.min_y + height_size, black);
-  surface_filled_rect(bounds.max_x - width_size - 1.0f, bounds.min_y, bounds.max_x, bounds.min_y + 3.0f, black);
-  surface_filled_rect(bounds.max_x - 2.0f, bounds.min_y + 3.0f, bounds.max_x + 1.0f, bounds.min_y + height_size, black);
-  surface_filled_rect(bounds.min_x, bounds.max_y - 3.0f, bounds.min_x + width_size + 1.0f, bounds.max_y, black);
-  surface_filled_rect(bounds.min_x, bounds.max_y - height_size, bounds.min_x + 3.0f, bounds.max_y, black);
-  surface_filled_rect(bounds.max_x - width_size - 1.0f, bounds.max_y - 3.0f, bounds.max_x, bounds.max_y, black);
-  surface_filled_rect(bounds.max_x - 2.0f, bounds.max_y - height_size, bounds.max_x + 1.0f, bounds.max_y, black);
-
-  surface_line(bounds.min_x + 1.0f, bounds.min_y + 1.0f, bounds.min_x + 1.0f + width_size, bounds.min_y + 1.0f, color);
-  surface_line(bounds.min_x + 1.0f, bounds.min_y + 1.0f, bounds.min_x + 1.0f, bounds.min_y + 1.0f + height_size, color);
-  surface_line(bounds.max_x - 1.0f, bounds.min_y + 1.0f, bounds.max_x - 1.0f - width_size, bounds.min_y + 1.0f, color);
-  surface_line(bounds.max_x - 1.0f, bounds.min_y + 1.0f, bounds.max_x - 1.0f, bounds.min_y + 1.0f + height_size, color);
-  surface_line(bounds.min_x + 1.0f, bounds.max_y - 1.0f, bounds.min_x + 1.0f + width_size, bounds.max_y - 1.0f, color);
-  surface_line(bounds.min_x + 1.0f, bounds.max_y - 1.0f, bounds.min_x + 1.0f, bounds.max_y - 1.0f - height_size, color);
-  surface_line(bounds.max_x - 1.0f, bounds.max_y - 1.0f, bounds.max_x - 1.0f - width_size, bounds.max_y - 1.0f, color);
-  surface_line(bounds.max_x - 1.0f, bounds.max_y - 1.0f, bounds.max_x - 1.0f, bounds.max_y - 1.0f - height_size, color);
-}
-
-void surface_esp_box(Entity* entity, const esp_bounds& bounds, esp_box_type box_style, RGBA color, float alpha_scale)
-{
-  switch (box_style) {
-  case esp_box_type::corner:
-    surface_corner_box(bounds, color, alpha_scale);
-    break;
-  case esp_box_type::filled:
-    surface_filled_rect(bounds.min_x, bounds.min_y, bounds.max_x, bounds.max_y, color_with_alpha(color, 0.18f * alpha_scale));
-    surface_outline_box(bounds, color, alpha_scale);
-    break;
-  case esp_box_type::projected: {
-    auto box = projected_box{};
-    if (entity != nullptr && get_entity_projected_box(entity, &box)) {
-      constexpr std::array<std::pair<size_t, size_t>, 12> edges = {{
-        {0, 1}, {1, 2}, {2, 3}, {3, 0},
-        {4, 5}, {5, 6}, {6, 7}, {7, 4},
-        {0, 4}, {1, 5}, {2, 6}, {3, 7},
-      }};
-      const auto shadow = color_with_alpha(RGBA{0, 0, 0, 255}, alpha_scale);
-      for (const auto& [start, end] : edges) {
-        surface_line(box.screen_points[start].x + 1.0f, box.screen_points[start].y + 1.0f, box.screen_points[end].x + 1.0f, box.screen_points[end].y + 1.0f, shadow);
-        surface_line(box.screen_points[start].x, box.screen_points[start].y, box.screen_points[end].x, box.screen_points[end].y, color);
-      }
-      break;
-    }
-    surface_outline_box(bounds, color, alpha_scale);
-    break;
-  }
-  case esp_box_type::rounded:
-  case esp_box_type::outline:
-  default:
-    surface_outline_box(bounds, color, alpha_scale);
-    break;
-  }
-}
-
-void surface_text_at(const ImVec2& position, RGBA color, const std::string& text)
-{
-  const auto font = esp_surface_font();
-  if (surface == nullptr || font == 0 || text.empty() || color.a <= 0) {
-    return;
-  }
-
-  const auto wide = widen_for_surface(text);
-  surface->draw_set_text_font(font);
-  surface->draw_set_text_color(0, 0, 0, color.a);
-  surface->draw_set_text_pos(surface_round(position.x + 1.0f), surface_round(position.y + 1.0f));
-  surface->draw_print_text(wide.c_str(), static_cast<int>(wide.size()));
-  surface->draw_set_text_color(color);
-  surface->draw_set_text_pos(surface_round(position.x), surface_round(position.y));
-  surface->draw_print_text(wide.c_str(), static_cast<int>(wide.size()));
-}
-
-void surface_text_centered(const ImVec2& position, RGBA color, const std::string& text)
-{
-  const auto text_size = surface_text_size(text);
-  surface_text_at(ImVec2(position.x - text_size.x * 0.5f, position.y), color, text);
-}
-
-void surface_text_centered_with_background(const ImVec2& position, RGBA color, const std::string& text, uint8_t background_alpha, float alpha_scale)
-{
-  if (text.empty()) {
-    return;
-  }
-
-  const auto text_size = surface_text_size(text);
-  const auto text_pos = ImVec2(position.x - text_size.x * 0.5f, position.y);
-  const auto alpha = std::clamp(static_cast<int>(std::round(static_cast<float>(background_alpha) * alpha_scale)), 0, 255);
-  surface_filled_rect(text_pos.x - 3.0f, text_pos.y - 2.0f, text_pos.x + text_size.x + 3.0f, text_pos.y + text_size.y + 2.0f, RGBA{0, 0, 0, alpha});
-  surface_text_at(text_pos, color, text);
-}
-
-void surface_right_line(const esp_bounds& bounds, float* y, RGBA color, const std::string& text)
-{
-  if (y == nullptr || text.empty()) {
-    return;
-  }
-
-  surface_text_at(ImVec2(bounds.max_x + cathook_text_padding, *y), color, text);
-  *y += surface_text_line_height();
-}
-
-void surface_left_line(const esp_bounds& bounds, float* y, RGBA color, const std::string& text)
-{
-  if (y == nullptr || text.empty()) {
-    return;
-  }
-
-  const auto text_size = surface_text_size(text);
-  surface_text_at(ImVec2(bounds.min_x - cathook_text_padding - text_size.x, *y), color, text);
-  *y += surface_text_line_height();
-}
-
-void surface_bottom_center_line(const esp_bounds& bounds, float* y, RGBA color, const std::string& text)
-{
-  if (y == nullptr || text.empty()) {
-    return;
-  }
-
-  surface_text_centered(ImVec2((bounds.min_x + bounds.max_x) * 0.5f, *y), color, text);
-  *y += surface_text_line_height();
-}
-
-void surface_vertical_health_bar(const esp_bounds& bounds, int health, int max_health, float alpha_scale)
-{
-  if (max_health <= 0) {
-    return;
-  }
-
-  const auto border = color_with_alpha(RGBA{0, 0, 0, 255}, alpha_scale);
-  const auto fill_color = color_with_alpha(get_health_color(health, max_health), alpha_scale);
-  const auto clamped_ratio = std::clamp(static_cast<float>(health) / static_cast<float>(max_health), 0.0f, 1.0f);
-  const auto outer_min_y = bounds.min_y - cathook_healthbar_border;
-  const auto outer_max_y = bounds.max_y + cathook_healthbar_border;
-  const auto fill_height = (outer_max_y - outer_min_y - 2.0f) * clamped_ratio;
-  surface_set_color(border);
-  if (surface != nullptr) {
-    surface->draw_outlined_rect(surface_round(bounds.min_x - cathook_healthbar_width), surface_round(outer_min_y), surface_round(bounds.min_x), surface_round(outer_max_y));
-  }
-
-  if (fill_height > 0.0f) {
-    surface_filled_rect(bounds.min_x - cathook_healthbar_width + cathook_healthbar_border, outer_max_y - fill_height - cathook_healthbar_border,
-      bounds.min_x - cathook_healthbar_width + cathook_healthbar_border + cathook_healthbar_fill_width, outer_max_y - cathook_healthbar_border, fill_color);
-  }
-}
-
-void surface_player_bones(Player* player, RGBA color, float alpha_scale)
-{
-  if (player == nullptr) {
-    return;
-  }
-
-  constexpr std::array<std::pair<int, int>, 16> bones = {{
-    {aim_hitbox_head, aim_hitbox_spine_3}, {aim_hitbox_spine_3, aim_hitbox_spine_2},
-    {aim_hitbox_spine_2, aim_hitbox_spine_1}, {aim_hitbox_spine_1, aim_hitbox_pelvis},
-    {aim_hitbox_spine_3, aim_hitbox_left_upper_arm}, {aim_hitbox_left_upper_arm, aim_hitbox_left_forearm},
-    {aim_hitbox_left_forearm, aim_hitbox_left_hand}, {aim_hitbox_spine_3, aim_hitbox_right_upper_arm},
-    {aim_hitbox_right_upper_arm, aim_hitbox_right_forearm}, {aim_hitbox_right_forearm, aim_hitbox_right_hand},
-    {aim_hitbox_pelvis, aim_hitbox_left_thigh}, {aim_hitbox_left_thigh, aim_hitbox_left_calf},
-    {aim_hitbox_left_calf, aim_hitbox_left_foot}, {aim_hitbox_pelvis, aim_hitbox_right_thigh},
-    {aim_hitbox_right_thigh, aim_hitbox_right_calf}, {aim_hitbox_right_calf, aim_hitbox_right_foot},
-  }};
-
-  const auto shadow = color_with_alpha(RGBA{0, 0, 0, 255}, alpha_scale);
-  for (const auto& [first_hitbox, second_hitbox] : bones) {
-    Vec3 first_world{}, second_world{}, first_screen{}, second_screen{};
-    if (!player->get_hitbox_center(first_hitbox, &first_world) ||
-        !player->get_hitbox_center(second_hitbox, &second_world) ||
-        !overlay_projection::world_to_screen(first_world, &first_screen) ||
-        !overlay_projection::world_to_screen(second_world, &second_screen)) {
-      continue;
-    }
-
-    surface_line(first_screen.x + 1.0f, first_screen.y + 1.0f, second_screen.x + 1.0f, second_screen.y + 1.0f, shadow);
-    surface_line(first_screen.x, first_screen.y, second_screen.x, second_screen.y, color);
-  }
-}
-
 void draw_player_bones(ImDrawList* draw_list, Player* player, ImU32 color, float alpha_scale,
   const Vec3* origin_override = nullptr)
 {
@@ -2907,7 +2544,7 @@ void draw_player_class_icon(ImDrawList* draw_list, const esp_bounds& bounds, Pla
     IM_COL32(255, 255, 255, static_cast<int>(std::round(255.0f * alpha_scale))));
 }
 
-void draw_player_head_emoji(ImDrawList* draw_list, const esp_bounds& bounds, Player* player, Player* localplayer, const visual_group& group)
+void draw_player_head_emoji(ImDrawList* draw_list, Player* player, Player* localplayer, const visual_group& group)
 {
   if (draw_list == nullptr || player == nullptr || localplayer == nullptr || (group.esp.draw_mask & group_esp_settings::head_emoji) == 0 || render_view == nullptr) {
     return;
@@ -2945,7 +2582,6 @@ void draw_player_head_emoji(ImDrawList* draw_list, const esp_bounds& bounds, Pla
 
   const auto delta = get_esp_draw_origin(player->to_entity()) - get_esp_draw_origin(localplayer->to_entity());
   const auto distance = std::sqrt((delta.x * delta.x) + (delta.y * delta.y) + (delta.z * delta.z));
-  (void)bounds;
   const auto distance_size = ((cathook_head_emoji_size_base * group.esp.head_emoji_scale) / (distance + 10.0f)) + cathook_head_emoji_size_bias;
   const auto size = std::clamp(distance_size, 14.0f, 48.0f);
   if (size <= 0.0f) {
@@ -3003,7 +2639,7 @@ void draw_player_head_emoji_only(ImDrawList* draw_list, Player* player, Player* 
   }
 
   if (const visual_groups::visual_group_match group = visual_groups::group_for_entity(entity, false)) {
-    draw_player_head_emoji(draw_list, smooth_esp_bounds(entity, bounds), player, localplayer, *group);
+    draw_player_head_emoji(draw_list, player, localplayer, *group);
   }
 }
 
@@ -3159,7 +2795,7 @@ void draw_player_esp(ImDrawList* draw_list, Player* player, Player* localplayer,
   }
 
   draw_player_class_icon(draw_list, bounds, player, localplayer, group);
-  draw_player_head_emoji(draw_list, bounds, player, localplayer, group);
+  draw_player_head_emoji(draw_list, player, localplayer, group);
   draw_player_mafia_text(draw_list, bounds, player, player_resource, group, neutral_text, right_y);
 }
 
@@ -3370,8 +3006,10 @@ void update_player_head_emoji_cache()
     return;
   }
 
-  const auto max_entities = entity_list->get_max_entities();
-  for (unsigned int index = 1; index < max_entities && index < g_head_emoji_positions.size(); ++index) {
+  const auto max_players = std::min(
+    static_cast<unsigned int>(std::max(cathook::core::player_resource::max_client_index(), 0) + 1),
+    static_cast<unsigned int>(g_head_emoji_positions.size()));
+  for (unsigned int index = 1; index < max_players; ++index) {
     auto* player = entity_list->player_from_index(index);
     if (!should_draw_player(player, localplayer) && !should_draw_teammate_head_emoji(player, localplayer)) {
       continue;
@@ -3414,7 +3052,7 @@ void draw_players_imgui()
   }
 
   const auto* level_name = engine->get_level_name();
-  const auto current_level_name = level_name != nullptr ? std::string(level_name) : std::string{};
+  const char* current_level_name = level_name != nullptr ? level_name : "";
   if (!g_esp_was_in_game || g_esp_level_name != current_level_name) {
     reset_esp_runtime_state();
     g_esp_level_name = current_level_name;
@@ -3443,33 +3081,25 @@ void draw_players_imgui()
 
   auto* player_resource = get_player_resource_entity();
 
-  for (unsigned int index = 1; index < entity_list->get_max_entities(); ++index) {
-    auto* entity = entity_list->entity_from_index(index);
-    if (entity == nullptr) {
-      continue;
-    }
-
-    const visual_groups::visual_group_match group = visual_groups::group_for_entity(entity, false);
-    if (!group) {
-      continue;
+  visual_groups::visit_screen_entities([&](Entity* entity, const visual_groups::visual_group_match& group) {
+    if (entity == nullptr || !group) {
+      return;
     }
 
     if (entity->get_class_id() == class_id::PLAYER) {
       auto* player = reinterpret_cast<Player*>(entity);
-      if (should_draw_player(player, localplayer)) {
+      if (should_consider_player_for_esp(player, localplayer)) {
         draw_offscreen_arrow(draw_list, entity, localplayer, *group);
         draw_player_sightline(draw_list, player, *group);
         draw_player_esp(draw_list, player, localplayer, player_resource, *group);
-      } else if (should_draw_teammate_head_emoji(player, localplayer)) {
-        draw_player_head_emoji_only(draw_list, player, localplayer);
       }
-      continue;
+      return;
     }
 
     draw_offscreen_arrow(draw_list, entity, localplayer, *group);
     draw_entity_trajectory(draw_list, entity, *group);
     draw_group_entity_esp(draw_list, entity, *group);
-  }
+  });
 
   draw_pickup_timers(draw_list);
   cleanup_esp_smoothing_states();
@@ -3517,8 +3147,8 @@ void draw_backtrack_visualizer_imgui()
   }
 
   const int max_draw_ticks = std::clamp(config.backtrack.visualizer_ticks, 1, backtrack::max_records);
-  for (unsigned int index = 1; index < entity_list->get_max_entities(); ++index) {
-    auto* player = entity_list->player_from_index(index);
+  for (int index = 1; index < backtrack::max_entities; ++index) {
+    auto* player = entity_list->player_from_index(static_cast<unsigned int>(index));
     if (player == nullptr || player == localplayer) continue;
 
     const auto group = visual_groups::group_for_entity(player->to_entity(), false);

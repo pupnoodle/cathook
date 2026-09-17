@@ -4,9 +4,6 @@
 
     font-family: "Tahoma", sans-serif;
     font-size: 10px;
-
-    font-smooth: none;
-    -webkit-font-smoothing: none;
 }
 
 input {
@@ -82,7 +79,7 @@ input[type=button]:active {
 }
 
 .vgui-select-option {
-    padding: 3;
+    padding: 3px;
     width: 100%;
 }
 
@@ -125,6 +122,13 @@ input[type=button]:active {
 input:not([type=checkbox]) {
     padding: 3px;
     font-size: 10px;
+}
+
+input:not([type=checkbox]):not([type=button]) {
+    min-width: 62px;
+}
+
+input[type=button] {
     min-width: 62px;
 }
 

@@ -44,6 +44,11 @@ public:
   [[nodiscard]] Player* melee_target() const;
   [[nodiscard]] bool has_silent_path_look() const;
   [[nodiscard]] Vec3 silent_path_look_angles() const;
+  bool path_to(const Vec3& destination);
+  void cancel_path();
+  bool path_to_teleporter();
+  [[nodiscard]] bool has_command_path() const;
+  [[nodiscard]] bool is_pathing() const;
 
 private:
   struct crumb_failure_state
@@ -82,6 +87,7 @@ private:
   [[nodiscard]] int current_captured_point_index() const;
   [[nodiscard]] uint32_t current_mini_round_mask() const;
   [[nodiscard]] bool should_block_pathing(Player* localplayer) const;
+  [[nodiscard]] bool should_run() const;
 
   navbot_mesh mesh_{};
   navbot_hazards hazards_{};
@@ -119,6 +125,9 @@ private:
   bool setup_finished_ = false;
   bool warmup_active_ = false;
   bool mvm_wave_started_ = false;
+  bool command_path_active_ = false;
+  Vec3 command_destination_{};
+  nav_area_id command_area_{};
 };
 
 navbot_controller& controller();

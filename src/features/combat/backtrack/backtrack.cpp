@@ -4,10 +4,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <deque>
-#include <optional>
-#include <sstream>
 #include "core/entity_cache.hpp"
-#include "core/logger.hpp"
 #include "features/combat/aimbot/aim_utils.hpp"
 #include "features/combat/aimbot/resolver.hpp"
 #include "features/menu/config.hpp"
@@ -23,7 +20,6 @@
 #include "games/tf2/sdk/interfaces/model_info.hpp"
 #include "core/hooks/cl_read_packets.hpp"
 #include "features/combat/animation/anim_driver.hpp"
-#include <memory>
 
 bool write_to_table(void** vtable, int index, void* func);
 void* read_vtable_entry(void** vtable, int index, const char* hook_name);
@@ -56,16 +52,9 @@ int g_last_incoming_sequence = 0;
 float g_latency_ramp = 0.0f;
 float g_last_sent_interp = -1.0f;
 float g_next_interp_send_time = 0.0f;
-std::optional<Vec3> g_selected_position{};
 void** g_hooked_net_channel_vtable = nullptr;
 send_datagram_fn g_send_datagram_original = nullptr;
 
-[[nodiscard]] float tick_interval()
-{
-  return global_vars != nullptr && global_vars->interval_per_tick > 0.0f
-    ? global_vars->interval_per_tick
-    : static_cast<float>(TICK_INTERVAL);
-}
 
 [[nodiscard]] float max_unlag_seconds()
 {
@@ -81,16 +70,6 @@ send_datagram_fn g_send_datagram_original = nullptr;
 [[nodiscard]] float window_seconds()
 {
   return std::clamp(static_cast<float>(config.backtrack.window_ms) * 0.001f, 0.0f, max_unlag_seconds());
-}
-
-[[nodiscard]] int time_to_ticks(float seconds)
-{
-  return static_cast<int>(0.5f + (seconds / std::max(tick_interval(), 0.0001f)));
-}
-
-[[nodiscard]] float ticks_to_time(int ticks)
-{
-  return static_cast<float>(ticks) * tick_interval();
 }
 
 struct interp_convars {
@@ -221,7 +200,7 @@ float server_believed_lerp_seconds()
 
 [[nodiscard]] bool should_record()
 {
-  const bool history_needed = is_enabled() || config.aimbot.master;
+  const bool history_needed = is_enabled();
   return history_needed &&
          engine != nullptr &&
          global_vars != nullptr &&
@@ -341,20 +320,7 @@ float server_believed_lerp_seconds()
   return record_delta_for_target_tick(timing, time_to_ticks(record.sim_time));
 }
 
-[[nodiscard]] float record_capture_gap(const backtrack_record& record)
-{
-  const float choke_gap = ticks_to_time(std::max(record.choked_ticks + 1, 1));
-  return std::max({tick_interval(), choke_gap, record.sample_gap});
-}
 
-[[nodiscard]] float record_timing_score(const backtrack_timing& timing, const backtrack_record& record)
-{
-  const float capture_excess = std::max(0.0f, record_capture_gap(record) - tick_interval());
-  const float uncertainty = std::min(
-    (capture_excess * 0.5f) + std::min(capture_excess, timing.selection_slack),
-    tick_interval() * 6.0f);
-  return record_delta(timing, record) + uncertainty;
-}
 
 [[nodiscard]] bool command_tick_for_record_timing(const backtrack_record& record,
   Player* player,
@@ -620,32 +586,6 @@ void run_manual_backtrack(user_cmd* user_cmd)
   }
 }
 
-[[nodiscard]] bool point_visible(Player* localplayer,
-  const backtrack_record& record,
-  const backtrack_hitbox& hitbox,
-  const Vec3& point)
-{
-  if (localplayer == nullptr || !hitbox.valid || !aimbot_vec3_is_finite(point)) {
-    return false;
-  }
-
-  const Vec3 start_pos = localplayer->get_shoot_pos();
-  if (!aimbot_vec3_is_finite(start_pos) || !world_clear(start_pos, point)) {
-    return false;
-  }
-
-  const Vec3 bullet_angles = aimbot_calculate_angles_to_position(start_pos, point);
-  Vec3 forward{};
-  angle_vectors(bullet_angles, &forward, nullptr, nullptr);
-  if (!aimbot_vec3_is_finite(forward)) {
-    return false;
-  }
-
-  const float target_distance = distance_3d(start_pos, point);
-  const Vec3 end_pos = start_pos + (forward * std::max(target_distance + 64.0f, 128.0f));
-  return ray_hits_record_hitbox(record, hitbox, start_pos, end_pos) && ray_hits_record_bounds(record, start_pos, end_pos);
-}
-
 bool add_record_hitbox(backtrack_record* record,
   const studio_box& hitbox,
   int studio_hitbox_id,
@@ -861,31 +801,21 @@ int send_datagram_hook(net_channel* channel, bf_write* data)
   return result;
 }
 
-[[nodiscard]] bool better_backtrack_candidate(const aimbot_candidate& candidate,
-  const aimbot_candidate& best,
-  int candidate_priority,
-  int best_priority,
-  float candidate_score,
-  float best_score)
-{
-  if (candidate.entity == nullptr) {
-    return false;
-  }
-  if (best.entity == nullptr) {
-    return true;
-  }
-  if (config.backtrack.prefer_on_shot && candidate.backtrack_on_shot != best.backtrack_on_shot) {
-    return candidate.backtrack_on_shot;
-  }
-  if (candidate_priority != best_priority) {
-    return candidate_priority < best_priority;
-  }
-  if (std::fabs(candidate_score - best_score) > tick_interval() * 0.5f) {
-    return candidate_score < best_score;
-  }
-  return candidate.fov < best.fov;
 }
 
+float record_capture_gap(const backtrack_record& record)
+{
+  const float choke_gap = ticks_to_time(std::max(record.choked_ticks + 1, 1));
+  return std::max({tick_interval(), choke_gap, record.sample_gap});
+}
+
+float record_timing_score(const backtrack_timing& timing, const backtrack_record& record)
+{
+  const float capture_excess = std::max(0.0f, record_capture_gap(record) - tick_interval());
+  const float uncertainty = std::min(
+    (capture_excess * 0.5f) + std::min(capture_excess, timing.selection_slack),
+    tick_interval() * 6.0f);
+  return record_delta(timing, record) + uncertainty;
 }
 
 bool is_enabled()
@@ -1197,32 +1127,6 @@ void record_player(Player* player)
   history.records[0] = record;
   history.record_count = std::min(history.record_count + 1, max_records);
 
-  {
-    static constexpr bool enable_bones_log = false;
-    if constexpr (enable_bones_log) {
-      static std::unique_ptr<cathook::core::logger> capture_log{};
-      static float next_capture_log_time = 0.0f;
-      const float realtime_now = global_vars != nullptr ? global_vars->realtime : 0.0f;
-      const float speed_2d = std::sqrt(record.velocity.x * record.velocity.x + record.velocity.y * record.velocity.y);
-      if (capture_log == nullptr) {
-        capture_log = std::make_unique<cathook::core::logger>(cathook::core::log_directory() / "bones.log");
-      }
-      if (capture_log->is_open() && global_vars != nullptr && (speed_2d > 10.0f || next_capture_log_time == 0.0f) && realtime_now >= next_capture_log_time) {
-        const matrix_3x4& root_bone = record.bones[record.bone_count > 0 ? 0 : 0];
-        const Vec3 root{root_bone.mat[0][3], root_bone.mat[1][3], root_bone.mat[2][3]};
-        const Vec3 root_delta = root - record.origin;
-        const float root_offset = std::sqrt(root_delta.x * root_delta.x + root_delta.y * root_delta.y + root_delta.z * root_delta.z);
-        const Vec3 render_origin = record.player != nullptr ? record.player->get_render_origin() : record.origin;
-        Vec3 implicit_origin{};
-        const bool have_implicit = implicit_rewind_position(record.player, &implicit_origin);
-        std::ostringstream line{};
-        line << std::fixed << std::setprecision(3) << "idx=" << record.ent_index << " sim=" << record.sim_time << " curtime=" << global_vars->curtime << " tickcount=" << global_vars->tickcount << " frame=" << global_vars->framecount << " origin={" << record.origin.x << ',' << record.origin.y << ',' << record.origin.z << "}" << " render={" << render_origin.x << ',' << render_origin.y << ',' << render_origin.z << "}" << " implicit=" << (have_implicit ? 1 : 0) << ",{" << implicit_origin.x << ',' << implicit_origin.y << ',' << implicit_origin.z << "}" << " bone0={" << root.x << ',' << root.y << ',' << root.z << "}" << " root_offset=" << root_offset << " speed=" << speed_2d << " choked=" << record.choked_ticks << " gap=" << record.sample_gap;
-        capture_log->write(line.str());
-        next_capture_log_time = realtime_now + 0.25f;
-      }
-    }
-  }
-
   const float base_retention = max_unlag_seconds() + (tick_interval() * 2.0f);
   const float retention = std::max(base_retention, dormant_keep_seconds);
   while (history.record_count > 1 &&
@@ -1258,7 +1162,6 @@ void clear()
   g_latency_ramp = 0.0f;
   g_last_sent_interp = -1.0f;
   g_next_interp_send_time = 0.0f;
-  g_selected_position = std::nullopt;
 }
 
 const backtrack_history* records_for_player(Player* player)
@@ -1487,16 +1390,6 @@ bool dormant_can_shoot(Player* player)
   return true;
 }
 
-bool selected_position(Vec3* position)
-{
-  if (position == nullptr || !g_selected_position) {
-    return false;
-  }
-
-  *position = *g_selected_position;
-  return true;
-}
-
 void backtrack_to_crosshair(user_cmd* user_cmd, Player* localplayer, Weapon* weapon)
 {
   if (user_cmd == nullptr || localplayer == nullptr || weapon == nullptr ||
@@ -1622,133 +1515,6 @@ void backtrack_to_crosshair(user_cmd* user_cmd, Player* localplayer, Weapon* wea
   if (best.record != nullptr && best.tick_count > 0) {
     user_cmd->tick_count = best.tick_count;
   }
-}
-
-aimbot_candidate find_hitscan_candidate(Player* localplayer,
-  Weapon* weapon,
-  Player* player,
-  const Vec3& original_view_angles,
-  bool preferred)
-{
-  g_selected_position = std::nullopt;
-  if (!is_enabled() ||
-      !config.backtrack.enabled ||
-      localplayer == nullptr ||
-      weapon == nullptr ||
-      player == nullptr ||
-      global_vars == nullptr) {
-    return {};
-  }
-
-  const backtrack_timing timing = build_timing();
-  backtrack_record_view view = valid_records(player);
-  if (!timing.valid || view.count <= 0) {
-    return {};
-  }
-
-  const std::uint32_t hitbox_mask = configured_hitbox_mask(weapon);
-  const bool head_only = (hitbox_mask & aim_hitbox_mask_head) != 0 &&
-    (hitbox_mask & ~aim_hitbox_mask_head) == 0;
-  const bool body_aim = !head_only && (localplayer->is_crit_boosted() ||
-    aimbot_body_aim_lethal(localplayer, weapon, player));
-  const Vec3 shoot_pos = localplayer->get_shoot_pos();
-  aimbot_candidate best_candidate{};
-  int best_priority = INT_MAX;
-  float best_score = FLT_MAX;
-
-  for (int record_index = 0; record_index < view.count; ++record_index) {
-    const backtrack_record* record = view.records[record_index];
-    if (record == nullptr) {
-      continue;
-    }
-
-    const float timing_error = record_timing_score(timing, *record);
-    for (int hitbox_index = 0; hitbox_index < record->hitbox_count; ++hitbox_index) {
-      const backtrack_hitbox& hitbox = record->hitboxes[hitbox_index];
-      if (!hitbox.valid ||
-          !aimbot_hitbox_matches_mask(hitbox.hitbox, hitbox_mask) ||
-          (body_aim && hitbox.hitbox == aim_hitbox_head)) {
-        continue;
-      }
-
-      const int priority = aimbot_hitbox_priority(localplayer, player, weapon, hitbox.hitbox);
-      if (priority == INT_MAX) {
-        continue;
-      }
-
-      studio_box box{};
-      box.bone = hitbox.bone;
-      box.group = hitbox.group;
-      box.bbmin = hitbox.mins;
-      box.bbmax = hitbox.maxs;
-
-      constexpr int max_local_points = 21;
-      Vec3 local_points[max_local_points]{};
-      const bool use_multipoint =
-        priority == 0 &&
-        (hitbox.hitbox == aim_hitbox_head || config.aimbot.multipoint_scale > 0.0f);
-      const int point_count = aimbot_build_local_hitbox_points(
-        box,
-        record->bones[hitbox.bone],
-        shoot_pos,
-        local_points,
-        max_local_points,
-        use_multipoint,
-        hitbox.hitbox);
-
-      for (int point_index = 0; point_index < point_count; ++point_index) {
-        const Vec3 point = aimbot_transform_point(local_points[point_index], record->bones[hitbox.bone]);
-        if (!point_within_weapon_range(weapon, shoot_pos, point)) {
-          continue;
-        }
-        if (!point_visible(localplayer, *record, hitbox, point)) {
-          continue;
-        }
-
-        const Vec3 aim_angles = aimbot_calculate_angles_to_position(shoot_pos, point);
-        const Vec3 view_angles = command_angles(localplayer, aim_angles);
-        const float fov = aimbot_calculate_fov(view_angles, original_view_angles);
-
-        aimbot_candidate candidate{};
-        candidate.entity = player;
-        candidate.player = player;
-        candidate.preferred = preferred;
-        candidate.bone = hitbox.bone;
-        candidate.hitbox = hitbox.hitbox;
-        candidate.studio_hitbox = hitbox.studio_hitbox;
-        candidate.aim_position = point;
-        candidate.aim_angles = aim_angles;
-        candidate.fov = fov;
-        candidate.distance = distance_3d(localplayer->get_origin(), record->origin);
-        candidate.health = player->get_health();
-        candidate.simulation_time = record->sim_time;
-        candidate.backtrack_timing_error = timing_error;
-        candidate.backtrack_capture_gap = record_capture_gap(*record);
-        candidate.backtrack_on_shot = record->on_shot;
-        if (!command_tick_for_record_timing(*record, player, timing, &candidate.tick_count)) {
-          continue;
-        }
-        candidate.command_angles = view_angles;
-        candidate.backtrack_mins = record->origin + record->mins;
-        candidate.backtrack_maxs = record->origin + record->maxs;
-        candidate.backtrack_hitbox_mins = hitbox.mins;
-        candidate.backtrack_hitbox_maxs = hitbox.maxs;
-        candidate.backtrack_bone = record->bones[hitbox.bone];
-        candidate.backtrack_hitbox_valid = true;
-        candidate.visible = true;
-        candidate.backtrack = true;
-
-        if (better_backtrack_candidate(candidate, best_candidate, priority, best_priority, timing_error, best_score)) {
-          best_candidate = candidate;
-          best_priority = priority;
-          best_score = timing_error;
-          g_selected_position = point;
-        }
-      }
-    }
-  }
-
-  return best_candidate;
 }
 
 void install_net_channel_hook()

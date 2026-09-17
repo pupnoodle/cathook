@@ -24,6 +24,7 @@ V  o o  V  file: src/features/menu/menu.hpp
 #include "features/visuals/material_manager.hpp"
 #include "features/visuals/groups/visual_groups.hpp"
 #include "features/visuals/skybox_changer.hpp"
+#include "features/visuals/skin_changer.hpp"
 #include "mono/mono.hpp"
 #include "mono/icon_definitions.hpp"
 #include "mono/material_icons.hpp"
@@ -131,16 +132,6 @@ inline void preload_menu_font_ascii(ImFont* font, float size) {
     baked->FindGlyph(c);
   }
 }
-
-enum tab_id
-{
-  tab_aimbot,
-  tab_visuals,
-  tab_misc,
-  tab_cat_bot,
-  tab_debug,
-  tab_config
-};
 
 enum visuals_subtab_id
 {
@@ -338,39 +329,6 @@ enum automation_subtab_id
 inline ImVec4 with_alpha(ImVec4 color, float alpha) {
   color.w *= alpha;
   return color;
-}
-
-inline std::string ellipsize_text(const char* text, float max_width) {
-  if (text == nullptr) {
-    return {};
-  }
-
-  const std::string source = text;
-  if (source.empty() || ImGui::CalcTextSize(source.c_str()).x <= max_width) {
-    return source;
-  }
-
-  constexpr const char* ellipsis = "...";
-  if (ImGui::CalcTextSize(ellipsis).x > max_width) {
-    return ellipsis;
-  }
-
-  std::size_t low = 0;
-  std::size_t high = source.size();
-  while (low < high) {
-    const std::size_t mid = (low + high + 1) / 2;
-    std::string candidate = source.substr(0, mid);
-    candidate += ellipsis;
-    if (ImGui::CalcTextSize(candidate.c_str()).x <= max_width) {
-      low = mid;
-    } else {
-      high = mid - 1;
-    }
-  }
-
-  std::string result = source.substr(0, low);
-  result += ellipsis;
-  return result;
 }
 
 inline ImFont* font_regular();
@@ -583,11 +541,6 @@ inline bool begin_panel(const char* name, const ImVec2& size) {
   return !ImGui::GetCurrentWindow()->SkipItems;
 }
 
-inline void begin_panel_at(const char* name, const ImVec2& position, const ImVec2& size) {
-  ImGui::SetCursorPos(position);
-  begin_panel(name, size);
-}
-
 inline void end_panel();
 inline float end_panel_ex();
 
@@ -699,20 +652,6 @@ inline float column_width(const int column_count) {
   }
 
   return (ImGui::GetContentRegionAvail().x - (k_gap * static_cast<float>(column_count - 1))) / static_cast<float>(column_count);
-}
-
-inline void begin_column() {
-  ImGui::BeginGroup();
-}
-
-inline void next_column() {
-  ImGui::EndGroup();
-  ImGui::SameLine(0.0f, k_gap);
-  ImGui::BeginGroup();
-}
-
-inline void end_column() {
-  ImGui::EndGroup();
 }
 
 inline bool checkbox(const char* label, bool* value) {
@@ -922,17 +861,6 @@ static void draw_watermark(void) {
     { "Use mouse to navigate in menu.", text }
   };
   mono::corner_text(lines, { 8.0f, 8.0f }, cat_menu::font_regular());
-}
-
-static void draw_beta_notice(void) {
-  const ImVec4 accent = cat_menu::menu_accent();
-  mono::center_notice(
-    "BETA",
-    "*some of the features may work badly or straight up not work, please report all issues on githubs issue page.",
-    { accent.x, accent.y, accent.z, accent.w },
-    { cat_menu::k_text_soft.x, cat_menu::k_text_soft.y, cat_menu::k_text_soft.z, cat_menu::k_text_soft.w },
-    cat_menu::font_regular_large(),
-    cat_menu::font_regular());
 }
 
 static void draw_aimbot_content() {
@@ -1608,6 +1536,67 @@ static void draw_visuals_world_content() {
     cat_menu::checkbox("Remove screen overlays", &config.visuals.effects.remove_screen_overlays);
     cat_menu::checkbox("Remove screen effects", &config.visuals.effects.remove_screen_effects);
   });
+  cat_menu::flow_panel("Skin changer", 1, 390.0f, [&]() {
+    cat_menu::checkbox("Enable skin changer", &config.visuals.skin_changer.enabled);
+    cat_menu::checkbox("Reskin to stock variants", &config.visuals.skin_changer.reskin);
+
+    Player* local = entity_list != nullptr && engine != nullptr && engine->is_in_game()
+      ? entity_list->get_localplayer() : nullptr;
+    Weapon* weapon = local != nullptr ? local->get_weapon() : nullptr;
+    const int skin_key = weapon != nullptr ? skin_changer::key(weapon->get_def_id()) : -1;
+    Visuals::SkinChanger::Skin* skin = &config.visuals.skin_changer.defaults;
+    Visuals::SkinChanger::Skin override_skin{};
+    if (weapon != nullptr) {
+      override_skin = skin_changer::get(skin_key);
+      skin = &override_skin;
+      ImGui::TextUnformatted(("Editing " + std::string(skin_changer::weapon_label(skin_key))).c_str());
+      if (override_skin.empty()) {
+        ImGui::TextUnformatted("No override; defaults apply.");
+      }
+    } else {
+      ImGui::TextUnformatted("Editing default skins (or hold a weapon)");
+    }
+
+    std::vector<const char*> kit_names{};
+    std::vector<int> kit_ids{};
+    skin_changer::get_kits(weapon != nullptr ? skin_key : -1, kit_names, kit_ids);
+    int selected_kit = 0;
+    for (std::size_t index = 0; index < kit_ids.size(); ++index) {
+      if (kit_ids[index] == skin->paintkit) selected_kit = static_cast<int>(index);
+    }
+    if (cat_menu::combo("Paint kit", &selected_kit, kit_names.data(), static_cast<int>(kit_names.size())) &&
+        selected_kit >= 0 && static_cast<std::size_t>(selected_kit) < kit_ids.size()) {
+      skin->paintkit = kit_ids[static_cast<std::size_t>(selected_kit)];
+    }
+    cat_menu::slider_float("Wear", &skin->wear, 0.0f, 1.0f, "%.2f");
+    cat_menu::slider_int("Seed", &skin->seed, 0, 16);
+    static const char* skin_quality_items[] = {
+      "Auto", "Normal", "Genuine", "Vintage", "Unusual", "Unique", "Strange", "Haunted", "Collector's", "Decorated"
+    };
+    static const int skin_quality_ids[] = { -1, 0, 1, 3, 5, 6, 11, 13, 14, 15 };
+    int selected_quality = 0;
+    for (int index = 0; index < IM_ARRAYSIZE(skin_quality_ids); ++index) {
+      if (skin_quality_ids[index] == skin->quality) selected_quality = index;
+    }
+    if (cat_menu::combo("Quality", &selected_quality, skin_quality_items, IM_ARRAYSIZE(skin_quality_items)) &&
+        selected_quality >= 0 && selected_quality < IM_ARRAYSIZE(skin_quality_ids)) {
+      skin->quality = skin_quality_ids[selected_quality];
+    }
+    cat_menu::checkbox("Festive", &skin->festive);
+    cat_menu::checkbox("Australium", &skin->australium);
+    static const char* skin_killstreak_items[] = { "None", "Basic", "Specialized", "Professional" };
+    cat_menu::combo("Killstreak", &skin->killstreak, skin_killstreak_items, IM_ARRAYSIZE(skin_killstreak_items));
+    static const char* skin_sheen_items[] = {
+      "Off", "Team shine", "Deadly daffodil", "Manndarin", "Mean green",
+      "Agonizing emerald", "Villainous violet", "Hot rod"
+    };
+    cat_menu::combo("Sheen", &skin->sheen, skin_sheen_items, IM_ARRAYSIZE(skin_sheen_items));
+    static const char* skin_unusual_items[] = {"None", "Hot", "Isotope", "Cool", "Energy Orb"};
+    cat_menu::combo("Weapon unusual", &skin->unusual, skin_unusual_items, IM_ARRAYSIZE(skin_unusual_items));
+    if (weapon != nullptr) {
+      skin_changer::set(skin_key, override_skin);
+    }
+  });
   cat_menu::flow_panel("Removals", 1, 250.0f, [&]() {
     cat_menu::checkbox("Remove interpolation", &config.visuals.removals.interpolation);
     cat_menu::checkbox("Remove lerp", &config.visuals.removals.lerp);
@@ -1934,190 +1923,6 @@ static void draw_region_selector_panel(const char* list_id) {
   }
 }
 
-static void draw_cat_bot_content() {
-  const char* class_items[] = { "Undefined", "Scout", "Sniper", "Soldier", "Demoman", "Medic", "Heavy", "Pyro", "Spy", "Engineer" };
-  const char* queue_mode_items[] = {
-    "MvM Practice",
-    "MvM Mann Up",
-    "Ladder 6v6",
-    "Ladder 9v9",
-    "Ladder 12v12",
-    "Casual 6v6",
-    "Casual 9v9",
-    "Casual 12v12",
-    "Event 12v12"
-  };
-  const char* requeue_action_items[] = {
-    "Queue only",
-    "Leave + requeue"
-  };
-  const char* voice_command_spam_items[] = {
-    "Off",
-    "Random",
-    "Medic",
-    "Thanks",
-    "Nice Shot",
-    "Cheers",
-    "Jeers",
-    "Go Go Go",
-    "Move Up",
-    "Go Left",
-    "Go Right",
-    "Yes",
-    "No",
-    "Incoming",
-    "Spy",
-    "Sentry Ahead",
-    "Need Teleporter",
-    "Pootis",
-    "Need Sentry",
-    "Activate Charge",
-    "Help",
-    "Battle Cry"
-  };
-
-  cat_menu::begin_flow_layout("cat_bot_layout", 2);
-  cat_menu::flow_panel("Autojoin and Taunt", 0, 138.0f, [&]() {
-    cat_menu::checkbox("Auto class select", &config.misc.automation.auto_class_select);
-    cat_menu::combo("Preferred class", (int*)&config.misc.automation.class_selected, class_items, IM_ARRAYSIZE(class_items));
-    cat_menu::checkbox("Don't join class during warmup", &config.misc.automation.auto_class_dont_join_during_warmup);
-    cat_menu::checkbox("Auto taunt", &config.misc.automation.autotaunt);
-    cat_menu::slider_float("Taunt chance", &config.misc.automation.autotaunt_chance, 0.0f, 100.0f, "%.0f%%");
-    cat_menu::slider_float("Taunt safety distance", &config.misc.automation.autotaunt_safety_distance, 0.0f, 5000.0f, "%.0f HU");
-    cat_menu::slider_int("Taunt weapon slot", &config.misc.automation.autotaunt_weapon_slot, 0, 5);
-  });
-  cat_menu::flow_panel("Autoqueue", 0, 216.0f, [&]() {
-    cat_menu::checkbox("Auto queue", &config.misc.automation.auto_queue);
-    cat_menu::checkbox("Auto requeue", &config.misc.automation.auto_requeue);
-    cat_menu::checkbox("Requeue on kick", &config.misc.automation.requeue_on_kick);
-    cat_menu::checkbox("Auto casual join", &config.misc.automation.auto_casual_join);
-    cat_menu::combo("Queue mode", &config.misc.automation.auto_queue_mode, queue_mode_items, IM_ARRAYSIZE(queue_mode_items));
-    static int cached_tour_count = -1;
-    static std::vector<std::string> tour_name_storage{};
-    static std::vector<const char*> tour_items{};
-    const int tours = automation::mvm_queue::tour_count();
-    if (tours != cached_tour_count) {
-      cached_tour_count = tours;
-      tour_name_storage.clear();
-      tour_name_storage.reserve(static_cast<std::size_t>(tours));
-      for (int index = 0; index < tours; ++index) {
-        tour_name_storage.emplace_back(automation::mvm_queue::tour_display_name(index));
-      }
-      tour_items.clear();
-      tour_items.push_back("Any");
-      for (const auto& name : tour_name_storage) {
-        tour_items.push_back(name.c_str());
-      }
-      if (config.misc.automation.mvm_tour_index > tours) config.misc.automation.mvm_tour_index = 0;
-    }
-    if (!tour_items.empty()) {
-      cat_menu::combo("MvM tour", &config.misc.automation.mvm_tour_index, tour_items.data(), static_cast<int>(tour_items.size()));
-      cat_menu::checkbox("Only uncompleted missions", &config.misc.automation.mvm_uncompleted_only);
-    } else {
-      ImGui::TextDisabled("No MvM tours in schema");
-      config.misc.automation.mvm_tour_index = 0;
-    }
-    cat_menu::checkbox("Boot camp missions", &config.misc.automation.bootcamp_enabled);
-    static int cached_bootcamp_count = -1;
-    static std::vector<const char*> bootcamp_items{};
-    static std::vector<std::uint32_t> bootcamp_bits{};
-    const int bootcamp_missions = automation::mvm_queue::bootcamp_mission_count();
-    if (bootcamp_missions != cached_bootcamp_count) {
-      cached_bootcamp_count = bootcamp_missions;
-      bootcamp_items.clear();
-      bootcamp_bits.clear();
-      bootcamp_items.reserve(static_cast<std::size_t>(bootcamp_missions));
-      bootcamp_bits.reserve(static_cast<std::size_t>(bootcamp_missions));
-      for (int index = 0; index < bootcamp_missions; ++index) {
-        bootcamp_items.push_back(automation::mvm_queue::bootcamp_mission_name(index));
-        bootcamp_bits.push_back(1u << index);
-      }
-      const std::uint32_t selectable_mask = bootcamp_bits.empty() ? 0u : (bootcamp_missions >= 32 ? ~0u : ((1u << bootcamp_missions) - 1u));
-      config.misc.automation.bootcamp_mission_bits &= selectable_mask;
-    }
-    if (bootcamp_missions > 0) {
-      cat_menu::multi_select_combo(
-        "Bootcamp mission list",
-        &config.misc.automation.bootcamp_mission_bits,
-        bootcamp_items.data(),
-        bootcamp_bits.data(),
-        bootcamp_missions);
-    } else {
-      ImGui::TextDisabled("No practice missions in schema");
-    }
-    cat_menu::slider_int("RQ if players <", &config.misc.automation.rq_if_players_lte, 0, 32);
-    cat_menu::slider_int("RQ if players >", &config.misc.automation.rq_if_players_gte, 0, 32);
-    cat_menu::slider_int("RQ if IPC bots >", &config.misc.automation.rq_if_ipc_bots_gt, 0, 32);
-    cat_menu::checkbox("RQ if no navmesh", &config.misc.automation.rq_if_no_navmesh);
-    cat_menu::checkbox("RQ ignore friends", &config.misc.automation.rq_ignore_friends);
-    cat_menu::combo("Requeue action", (int*)&config.misc.automation.requeue_action, requeue_action_items, IM_ARRAYSIZE(requeue_action_items));
-  });
-  cat_menu::flow_panel("Profile stalker", 1, 150.0f, [&]() {
-    cat_menu::checkbox("Enable", &config.misc.automation.stalker_enabled);
-    cat_menu::slider_int("Query interval", &config.misc.automation.stalker_interval, 5, 300, "%d s");
-    ImGui::TextDisabled("Accounts from stalk.txt:");
-    const int status_lines = automation::profile_stalker::status_count();
-    if (status_lines == 0) {
-      ImGui::TextDisabled("none found");
-    } else {
-      for (int index = 0; index < status_lines; ++index) {
-        ImGui::TextUnformatted(automation::profile_stalker::status_line(index).c_str());
-      }
-    }
-  });
-  cat_menu::flow_panel("Region selector", 0, 360.0f, [&]() {
-    draw_region_selector_panel("##region_selector_list");
-  }, false);
-  cat_menu::flow_panel("Utilities", 1, 278.0f, [&]() {
-    cat_menu::checkbox("Anti AFK", &config.misc.automation.anti_afk);
-    cat_menu::checkbox("Anti autobalance", &config.misc.automation.anti_autobalance);
-    cat_menu::checkbox("Anti MOTD", &config.misc.automation.anti_motd);
-    cat_menu::checkbox("Don't close MOTD during warmup", &config.misc.automation.anti_motd_dont_close_during_warmup);
-    cat_menu::checkbox("Auto report", &config.misc.automation.auto_report);
-    cat_menu::checkbox("Auto vote map", &config.misc.automation.auto_vote_map);
-    cat_menu::slider_int("Vote option", &config.misc.automation.auto_vote_map_option, 0, 2);
-    cat_menu::checkbox("Noisemaker spam", &config.misc.automation.noisemaker_spam);
-    cat_menu::combo("Voice command spam", (int*)&config.misc.automation.voice_command_spam, voice_command_spam_items, IM_ARRAYSIZE(voice_command_spam_items));
-    cat_menu::checkbox("Micspam", &config.misc.automation.micspam);
-    cat_menu::slider_int("Micspam on", &config.misc.automation.micspam_interval_on_seconds, 1, 600, "%d s");
-    cat_menu::slider_int("Micspam off", &config.misc.automation.micspam_interval_off_seconds, 1, 600, "%d s");
-    cat_menu::checkbox("Micspam from file", &config.misc.automation.micspam_from_file);
-  });
-  cat_menu::flow_panel("AutoItem", 1, 290.0f, [&]() {
-    cat_menu::checkbox("Enable", &config.misc.automation.auto_item);
-    cat_menu::slider_int("Interval", &config.misc.automation.auto_item_interval_ms, 1000, 120000, "%d ms");
-    cat_menu::checkbox("Weapons", &config.misc.automation.auto_item_weapons);
-    cat_menu::input_text("Primary", &config.misc.automation.auto_item_primary);
-    cat_menu::input_text("Secondary", &config.misc.automation.auto_item_secondary);
-    cat_menu::input_text("Melee", &config.misc.automation.auto_item_melee);
-    cat_menu::checkbox("Equipment", &config.misc.automation.auto_item_equipment);
-    cat_menu::input_text("Building", &config.misc.automation.auto_item_building);
-    cat_menu::input_text("PDA", &config.misc.automation.auto_item_pda);
-    cat_menu::input_text("PDA2", &config.misc.automation.auto_item_pda2);
-    cat_menu::input_text("Action", &config.misc.automation.auto_item_action);
-    cat_menu::input_text("Taunt", &config.misc.automation.auto_item_taunt);
-    cat_menu::checkbox("Hats", &config.misc.automation.auto_item_hats);
-    cat_menu::input_text("Hat 1", &config.misc.automation.auto_item_hat1);
-    cat_menu::input_text("Hat 2", &config.misc.automation.auto_item_hat2);
-    cat_menu::input_text("Hat 3", &config.misc.automation.auto_item_hat3);
-    cat_menu::checkbox("Noisemaker", &config.misc.automation.auto_item_noisemaker);
-    cat_menu::checkbox("Debug", &config.misc.automation.auto_item_debug);
-  });
-  cat_menu::flow_panel("MvM", 1, 202.0f, [&]() {
-    cat_menu::checkbox("Instant respawn", &config.misc.automation.mvm_instant_respawn);
-    cat_menu::checkbox("Instant revive", &config.misc.automation.mvm_instant_revive);
-    cat_menu::checkbox("Allow inspect", &config.misc.automation.allow_mvm_inspect);
-    cat_menu::checkbox("Auto ready up", &config.misc.automation.auto_mvm_ready_up);
-    cat_menu::checkbox("Auto abandon Mann Up", &config.misc.automation.auto_mvm_abandon_mannup);
-    cat_menu::checkbox("Buybot", &config.misc.automation.mvm_buybot);
-    cat_menu::slider_int("Buybot max cash", &config.misc.automation.mvm_buybot_max_cash, 0, 50000);
-    cat_menu::checkbox("Buybot auto class", &config.misc.automation.mvm_buybot_auto_class);
-    cat_menu::combo("Buybot class", (int*)&config.misc.automation.mvm_buybot_class,
-      class_items, IM_ARRAYSIZE(class_items));
-  });
-  cat_menu::end_flow_layout();
-}
-
 static void draw_chat_content() {
   static const char* chatspam_items[] = {
     "Off",
@@ -2196,6 +2001,20 @@ static void draw_queue_content() {
   cat_menu::flow_panel("Region selector", 0, 390.0f, [&]() {
     draw_region_selector_panel("##queue_region_selector_list");
   }, false);
+  cat_menu::flow_panel("AutoParty", 0, 252.0f, [&]() {
+    cat_menu::checkbox("Enable", &config.misc.automation.autoparty);
+    cat_menu::slider_int("Max party size", &config.misc.automation.autoparty_max_party_size, 1, 6);
+    cat_menu::input_text("Hosts (Steam32 IDs)", &config.misc.automation.autoparty_party_hosts);
+    cat_menu::checkbox("Kick cheaters", &config.misc.automation.autoparty_kick_rage);
+    cat_menu::checkbox("Auto leave on offline member", &config.misc.automation.autoparty_auto_leave);
+    cat_menu::checkbox("Auto lock", &config.misc.automation.autoparty_auto_lock);
+    cat_menu::checkbox("Auto unlock", &config.misc.automation.autoparty_auto_unlock);
+    cat_menu::checkbox("Log", &config.misc.automation.autoparty_log);
+    cat_menu::checkbox("Message kicks to party", &config.misc.automation.autoparty_message_kicks);
+    cat_menu::checkbox("IPC mode", &config.misc.automation.autoparty_ipc_mode);
+    cat_menu::slider_int("IPC host count", &config.misc.automation.autoparty_ipc_count, 0, 8);
+    cat_menu::slider_int("Run every", &config.misc.automation.autoparty_run_frequency, 5, 300, "%d s");
+  });
   cat_menu::end_flow_layout();
 }
 
@@ -2240,7 +2059,36 @@ static void draw_automation_utilities_content() {
     cat_menu::checkbox("Auto report", &config.misc.automation.auto_report);
     cat_menu::checkbox("Auto vote map", &config.misc.automation.auto_vote_map);
     cat_menu::slider_int("Vote option", &config.misc.automation.auto_vote_map_option, 0, 2);
+    static const char* auto_vote_items[] = {"Defend", "Assist", "Kick", "Kick all"};
+    static const uint32_t auto_vote_bits[] = {
+      Misc::Automation::auto_vote_defend, Misc::Automation::auto_vote_assist,
+      Misc::Automation::auto_vote_kick, Misc::Automation::auto_vote_kick_all};
+    cat_menu::multi_select_combo("Auto vote", &config.misc.automation.auto_vote,
+                                 auto_vote_items, auto_vote_bits, IM_ARRAYSIZE(auto_vote_items));
+    cat_menu::checkbox("Auto vote delay", &config.misc.automation.auto_vote_delay);
+    cat_menu::slider_float("Vote delay min", &config.misc.automation.auto_vote_delay_min, 0.0f, 30.0f, "%.1f s");
+    cat_menu::slider_float("Vote delay max", &config.misc.automation.auto_vote_delay_max, 0.0f, 30.0f, "%.1f s");
+    cat_menu::checkbox("Killstreak", &config.misc.automation.killstreak);
     cat_menu::checkbox("Custom announcer", &config.misc.automation.custom_announcer);
+  });
+  static const char* cheat_detection_items[] = {
+    "Invalid pitch", "Packet choking", "Aim flick", "Duck speed", "Lag-comp abuse", "Crit manipulation"};
+  static const uint32_t cheat_detection_bits[] = {
+    Misc::CheatDetection::method_invalid_pitch, Misc::CheatDetection::method_packet_choking,
+    Misc::CheatDetection::method_aim_flick, Misc::CheatDetection::method_duck_speed,
+    Misc::CheatDetection::method_lagcomp_abuse, Misc::CheatDetection::method_crit_manipulation};
+  cat_menu::flow_panel("Cheat detection", 1, 190.0f, [&]() {
+    cat_menu::multi_select_combo("Methods", &config.misc.cheat_detection.methods,
+                                 cheat_detection_items, cheat_detection_bits, IM_ARRAYSIZE(cheat_detection_items));
+    cat_menu::slider_int("Detections to mark", &config.misc.cheat_detection.detections_required, 1, 20);
+    cat_menu::slider_float("Min flick", &config.misc.cheat_detection.min_flick, 1.0f, 180.0f, "%.0f deg");
+    cat_menu::slider_float("Max noise", &config.misc.cheat_detection.max_noise, 0.0f, 45.0f, "%.1f deg");
+    cat_menu::slider_int("Min choking ticks", &config.misc.cheat_detection.min_choking_ticks, 2, 128);
+    cat_menu::slider_int("Lag-comp min delta", &config.misc.cheat_detection.lagcomp_min_delta, 2, 64);
+    cat_menu::slider_float("Lag-comp window", &config.misc.cheat_detection.lagcomp_window, 0.1f, 10.0f, "%.1f s");
+    cat_menu::slider_int("Lag-comp bursts", &config.misc.cheat_detection.lagcomp_burst_count, 1, 16);
+    cat_menu::slider_int("Crit window", &config.misc.cheat_detection.crit_window, 2, 200);
+    cat_menu::slider_float("Crit threshold", &config.misc.cheat_detection.crit_threshold, 1.0f, 100.0f, "%.0f%%");
   });
   cat_menu::flow_panel("Spam", 1, 200.0f, [&]() {
     cat_menu::checkbox("Noisemaker spam", &config.misc.automation.noisemaker_spam);
@@ -2256,7 +2104,7 @@ static void draw_automation_utilities_content() {
     cat_menu::slider_float("Taunt safety distance", &config.misc.automation.autotaunt_safety_distance, 0.0f, 5000.0f, "%.0f HU");
     cat_menu::slider_int("Taunt weapon slot", &config.misc.automation.autotaunt_weapon_slot, 0, 5);
   });
-  cat_menu::flow_panel("MvM", 1, 202.0f, [&]() {
+  cat_menu::flow_panel("MvM", 1, 268.0f, [&]() {
     cat_menu::checkbox("Instant respawn", &config.misc.automation.mvm_instant_respawn);
     cat_menu::checkbox("Instant revive", &config.misc.automation.mvm_instant_revive);
     cat_menu::checkbox("Allow inspect", &config.misc.automation.allow_mvm_inspect);
@@ -2267,6 +2115,41 @@ static void draw_automation_utilities_content() {
     cat_menu::checkbox("Buybot auto class", &config.misc.automation.mvm_buybot_auto_class);
     cat_menu::combo("Buybot class", (int*)&config.misc.automation.mvm_buybot_class,
       class_items, IM_ARRAYSIZE(class_items));
+    static const char* mvm_chat_command_items[] = { "Off", "Party", "Friends", "Role" };
+    cat_menu::combo("Chat commands", (int*)&config.misc.automation.mvm_chat_commands,
+      mvm_chat_command_items, IM_ARRAYSIZE(mvm_chat_command_items));
+    if (config.misc.automation.mvm_chat_commands == Misc::Automation::mvm_chat_command_mode::ROLE) {
+      static const char* chat_role_items[] = { "Ignored", "Cheater", "Friend", "Party", "F2P", "Cat" };
+      static const int chat_role_ids[] = { -1, -2, -3, -4, -5, -8 };
+      int chat_role_index = 3;
+      for (int index = 0; index < IM_ARRAYSIZE(chat_role_ids); ++index) {
+        if (chat_role_ids[index] == config.misc.automation.mvm_chat_commands_role) {
+          chat_role_index = index;
+          break;
+        }
+      }
+      if (cat_menu::combo("Chat command role", &chat_role_index, chat_role_items, IM_ARRAYSIZE(chat_role_items)) &&
+          chat_role_index >= 0 && chat_role_index < IM_ARRAYSIZE(chat_role_ids)) {
+        config.misc.automation.mvm_chat_commands_role = chat_role_ids[chat_role_index];
+      }
+    }
+  });
+  cat_menu::flow_panel("Profile presence", 0, 280.0f, [&]() {
+    cat_menu::checkbox("Enable", &config.misc.automation.stalker_enabled);
+    cat_menu::slider_int("Refresh interval", &config.misc.automation.stalker_interval, 5, 300, "%d s");
+    ImGui::TextWrapped("Tracks SteamIDs listed in stalk.txt using Steam presence and public server queries.");
+    const int tracked = automation::profile_stalker::status_count();
+    if (tracked <= 0) {
+      ImGui::TextUnformatted("No profiles in stalk.txt");
+      return;
+    }
+    for (int index = 0; index < tracked; ++index) {
+      if (index > 0) {
+        ImGui::Separator();
+      }
+      const auto card = automation::profile_stalker::status(index);
+      ImGui::TextUnformatted(card.card.empty() ? "Unknown" : card.card.c_str());
+    }
   });
   cat_menu::end_flow_layout();
 }
@@ -2502,6 +2385,7 @@ static void draw_exploits_content() {
   });
   cat_menu::flow_panel("Engine", 0, 118.0f, [&]() {
     cat_menu::checkbox("Equip region unlock", &config.misc.exploits.equip_region_unlock);
+    cat_menu::checkbox("Anti-cheat compat", &config.misc.exploits.anti_cheat_compat);
     cat_menu::checkbox("Ping reducer", &config.misc.exploits.ping_reducer);
     cat_menu::slider_int("Ping target", &config.misc.exploits.ping_target, 1, 100);
   });
@@ -2517,69 +2401,6 @@ static void draw_exploits_content() {
     cat_menu::slider_float("Fake offset", &config.misc.exploits.anti_aim_fake_yaw_offset, -180.0f, 180.0f, "%.0f deg");
     cat_menu::slider_float("Spin speed", &config.misc.exploits.anti_aim_spin_speed, -180.0f, 180.0f, "%.0f deg");
     cat_menu::checkbox("Anti-overlap", &config.misc.exploits.anti_aim_anti_overlap);
-  });
-  cat_menu::end_flow_layout();
-}
-
-static void draw_debug_content() {
-  static int unlock_click_count = 0;
-
-  cat_menu::begin_flow_layout("debug_layout", 2);
-  cat_menu::flow_panel("Debug", 0, 252.0f, [&]() {
-    auto& font_names = cat_menu::available_font_names();
-    std::vector<const char*> font_name_items{};
-    font_name_items.reserve(font_names.size());
-    for (const std::string& name : font_names) {
-      font_name_items.emplace_back(name.c_str());
-    }
-
-    int selected_font = 0;
-    if (config.misc.menu.use_custom_font) {
-      for (int index = 1; index < static_cast<int>(font_names.size()); ++index) {
-        if (font_names[static_cast<size_t>(index)] == config.misc.menu.custom_font) {
-          selected_font = index;
-          break;
-        }
-      }
-    }
-
-    if (cat_menu::combo("Menu font", &selected_font, font_name_items.data(), static_cast<int>(font_name_items.size()))) {
-      config.misc.menu.use_custom_font = selected_font > 0;
-      if (selected_font > 0) {
-        config.misc.menu.custom_font = font_names[static_cast<size_t>(selected_font)];
-      } else {
-        config.misc.menu.custom_font.clear();
-      }
-    }
-    cat_menu::combo("Menu scale", &config.misc.menu.dpi_scale, cat_menu::k_dpi_scale_labels.data(), static_cast<int>(cat_menu::k_dpi_scale_labels.size()));
-    cat_menu::checkbox("Draw all entities", &config.debug.debug_render_all_entities);
-    cat_menu::checkbox("Show active flag IDs", &config.debug.show_active_flag_ids_of_players);
-
-    ImGui::Dummy(ImVec2(0.0f, 8.0f));
-
-    const char* button_label = config.debug.insider_settings_unlocked ? "Insider Settings: Unlocked" : "Unlock Insider Settings";
-    if (cat_menu::accent_button(button_label, ImVec2(-1.0f, 26.0f), false)) {
-      if (!config.debug.insider_settings_unlocked) {
-        unlock_click_count++;
-        if (unlock_click_count >= 5) {
-          config.debug.insider_settings_unlocked = true;
-          unlock_click_count = 0;
-          if (engine != nullptr) {
-            engine->client_cmd_unrestricted("play ui/duel_challenge.wav");
-          }
-        }
-      } else {
-        config.debug.insider_settings_unlocked = false;
-        unlock_click_count = 0;
-        enforce_insider_settings_lock(config);
-      }
-    }
-
-    if (!config.debug.insider_settings_unlocked && unlock_click_count > 0) {
-      ImGui::PushStyleColor(ImGuiCol_Text, cat_menu::k_text_soft);
-      ImGui::Text("Clicks: %d/5", unlock_click_count);
-      ImGui::PopStyleColor();
-    }
   });
   cat_menu::end_flow_layout();
 }

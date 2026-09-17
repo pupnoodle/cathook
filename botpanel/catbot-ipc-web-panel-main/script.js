@@ -391,9 +391,50 @@ function cmd(command, data, callback) {
 
 var autorestart = {};
 
-function update_ban_tracker_data(row, data) {
+const CLIENT_CELL_CLASSES = [
+	['restarts', 'client-restarts'],
+	['bot_name', 'client-bot-name'],
+	['state', 'client-state'],
+	['steam', 'client-steam'],
+	['ban_tracker', 'client-ban-tracker active'],
+	['uptime_total', 'client-uptime-total active'],
+	['pid', 'client-pid active'],
+	['id', 'client-id active'],
+	['status', 'client-status active'],
+	['name', 'client-name active'],
+	['uptime_queue', 'client-uptime-queue active'],
+	['total', 'client-total active'],
+	['score', 'client-score connected active'],
+	['shots', 'client-shots active'],
+	['hitrate', 'client-hitrate active'],
+	['hsrate', 'client-hsrate active'],
+	['uptime_server', 'client-uptime-server connected active'],
+	['alive', 'client-alive connected active'],
+	['team', 'client-team connected active'],
+	['cls', 'client-class connected active'],
+	['health', 'client-health connected active'],
+	['ip', 'client-ip connected active'],
+	['map', 'client-map connected active'],
+	['players', 'client-players connected active'],
+	['bots', 'client-bots connected active']
+];
+
+function set_cell(cell, text) {
+	const next = text == null ? '' : String(text);
+	if (cell.textContent !== next)
+		cell.textContent = next;
+}
+
+function set_status_class(cell, cls) {
+	const next = 'client-status active' + (cls ? ' ' + cls : '');
+	if (cell.className !== next)
+		cell.className = next;
+}
+
+function update_ban_tracker_data(entry, data) {
+	const cell = entry.cells.ban_tracker;
 	if (!data) {
-		row.find('.client-ban-tracker').text('N/A');
+		set_cell(cell, 'N/A');
 		return;
 	}
 
@@ -401,21 +442,27 @@ function update_ban_tracker_data(row, data) {
 	if (data.reason)
 		text += ` (${data.reason})`;
 
-	row.find('.client-ban-tracker')
-		.removeClass('error warning')
-		.toggleClass('warning', data.status === 'suspicious')
-		.toggleClass('error', data.status === 'confirmed' || data.status === 'error')
-		.text(text);
+	const next = 'client-ban-tracker active'
+		+ (data.status === 'suspicious' ? ' warning' : '')
+		+ (data.status === 'confirmed' || data.status === 'error' ? ' error' : '');
+	if (cell.className !== next)
+		cell.className = next;
+	set_cell(cell, text);
 }
 
-function clearIPCId(row) {
-	row.removeAttr('data-ipc-id').removeAttr('data-pid');
-	row.find('.client-pid, .client-id, .client-name, .client-status').text('N/A');
+function clearIPCId(entry) {
+	entry.row.removeAttr('data-ipc-id').removeAttr('data-pid');
+	set_cell(entry.cells.pid, 'N/A');
+	set_cell(entry.cells.id, 'N/A');
+	set_cell(entry.cells.name, 'N/A');
+	set_cell(entry.cells.status, 'N/A');
 }
 
-function updateIPCData(row, id, data, state, ipc_observed_at) {
+function updateIPCData(entry, id, data, state, ipc_observed_at) {
+	const row = entry.row;
+	const cells = entry.cells;
 	if (!data) {
-		clearIPCId(row);
+		clearIPCId(entry);
 		return;
 	}
 	var accumulated = data.accumulated || {};
@@ -427,14 +474,18 @@ function updateIPCData(row, id, data, state, ipc_observed_at) {
 	var time = Number.isFinite(heartbeat) ? Math.floor(Date.now() / 1000 - heartbeat) : 0;
 	row.toggleClass('stale', observed_age > 30);
 	if (observed_age > 30) {
-		row.find('.client-status').removeClass('error').addClass('warning').text('Query stale ' + observed_age + 's (last known)');
+		set_status_class(cells.status, 'warning');
+		set_cell(cells.status, 'Query stale ' + observed_age + 's (last known)');
 		return;
 	} else if (!data.heartbeat || time < 4) {
-		row.find('.client-status').removeClass('error warning').text('OK ' + time);
+		set_status_class(cells.status, '');
+		set_cell(cells.status, 'OK ' + time);
 	} else if (time < 45) {
-		row.find('.client-status').removeClass('error').addClass('warning').text('Warning ' + time);
+		set_status_class(cells.status, 'warning');
+		set_cell(cells.status, 'Warning ' + time);
 	} else {
-		row.find('.client-status').removeClass('warning').addClass('error').text('Dead ' + time);
+		set_status_class(cells.status, 'error');
+		set_cell(cells.status, 'Dead ' + time);
 		if (state === 5 && $('#autorestart-bots').prop('checked')) {
 			if ((Date.now() - ts_injected * 1000 > 20) && data.heartbeat && (!autorestart[row.attr('data-id')] || (Date.now() - autorestart[row.attr('data-id')]) > 1000 * 5)) {
 				autorestart[row.attr('data-id')] = Date.now();
@@ -452,68 +503,70 @@ function updateIPCData(row, id, data, state, ipc_observed_at) {
 			}
 		}
 	}
-	row.find('.client-pid').text(data.pid);
-	row.find('.client-id').text(id);
+	set_cell(cells.pid, data.pid);
+	set_cell(cells.id, id);
 	row.attr('data-ipc-id', id);
-	row.find('.client-name').text(data.name);
-	row.find('.client-total').text(accumulated.score || 0);
+	set_cell(cells.name, data.name);
+	set_cell(cells.total, accumulated.score || 0);
 	var hitrate = Math.floor((accumulated.shots ? accumulated.hits / accumulated.shots : 0) * 100);
 	var hsrate = Math.floor((accumulated.hits ? accumulated.headshots / accumulated.hits : 0) * 100);
-	row.find('.client-shots').text(accumulated.shots || 0);
-	row.find('.client-hitrate').text(hitrate + '%');
-	row.find('.client-hsrate').text(hsrate + '%');
-	row.find('.client-uptime-total').text(Number.isFinite(ts_injected) ? format(Date.now() - ts_injected * 1000) : 'N/A');
+	set_cell(cells.shots, accumulated.shots || 0);
+	set_cell(cells.hitrate, hitrate + '%');
+	set_cell(cells.hsrate, hsrate + '%');
+	set_cell(cells.uptime_total, Number.isFinite(ts_injected) ? format(Date.now() - ts_injected * 1000) : 'N/A');
 	if (data.ts_queue_started) {
-		row.find('.client-uptime-queue').text(format(Date.now() - data.ts_queue_started * 1000));
+		set_cell(cells.uptime_queue, format(Date.now() - data.ts_queue_started * 1000));
 	} else if (data.connected && data.ts_disconnected && data.ts_connected > data.ts_disconnected) {
-		row.find('.client-uptime-queue').text(format(1000 * (data.ts_connected - data.ts_disconnected)));
+		set_cell(cells.uptime_queue, format(1000 * (data.ts_connected - data.ts_disconnected)));
 	} else if (!data.connected) {
 		if (data.ts_disconnected) {
-			row.find('.client-uptime-queue').text(format(Date.now() - data.ts_disconnected * 1000));
+			set_cell(cells.uptime_queue, format(Date.now() - data.ts_disconnected * 1000));
 		} else {
-			row.find('.client-uptime-queue').text(Number.isFinite(ts_injected) ? format(Date.now() - ts_injected * 1000) : 'N/A');
+			set_cell(cells.uptime_queue, Number.isFinite(ts_injected) ? format(Date.now() - ts_injected * 1000) : 'N/A');
 		}
 	} else {
-		row.find('.client-uptime-queue').text('N/A');
+		set_cell(cells.uptime_queue, 'N/A');
 	}
 	if (data.connected) {
 		row.toggleClass('disconnected', false);
 		row.toggleClass('stale', observed_age > 30);
-		row.find('.client-uptime-server').text(format(Date.now() - data.ts_connected * 1000));
-		row.find('.client-ip').text(ingame.server || 'N/A');
-		row.find('.client-alive').text(ingame.life_state ? 'Dead' : 'Alive');
-		row.find('.client-team').text(teams[ingame.team] || 'N/A');
-		row.find('.client-class').text(classes[ingame.role] || 'N/A');
-		row.find('.client-score').text(ingame.score || 0);
-		row.find('.client-health').text((ingame.health || 0) + '/' + (ingame.health_max || 0));
-        row.find('.client-map').text(ingame.mapname || 'N/A');
-        row.find('.client-players').text(ingame.player_count || 0);
-        row.find('.client-bots').text(ingame.bot_count || 0);
+		set_cell(cells.uptime_server, format(Date.now() - data.ts_connected * 1000));
+		set_cell(cells.ip, ingame.server || 'N/A');
+		set_cell(cells.alive, ingame.life_state ? 'Dead' : 'Alive');
+		set_cell(cells.team, teams[ingame.team] || 'N/A');
+		set_cell(cells.cls, classes[ingame.role] || 'N/A');
+		set_cell(cells.score, ingame.score || 0);
+		set_cell(cells.health, (ingame.health || 0) + '/' + (ingame.health_max || 0));
+        set_cell(cells.map, ingame.mapname || 'N/A');
+        set_cell(cells.players, ingame.player_count || 0);
+        set_cell(cells.bots, ingame.bot_count || 0);
 	} else {
 		row.toggleClass('disconnected', true);
-		row.find('.connected').text('N/A');
+		for (var i = 0; i < entry.connected_cells.length; i++)
+			set_cell(entry.connected_cells[i], 'N/A');
 	}
 }
 
 function updateUserData(bot, data) {
-	var row = bot_rows[bot];
-	if (!row || !row.length) {
-		row = $(`tr[data-id="${bot}"]`);
+	var entry = bot_rows[bot];
+	if (!entry || !entry.row.length) {
+		var row = $(`tr[data-id="${bot}"]`);
 		if (!row.length)
 			return;
-		bot_rows[bot] = row;
+		entry = cache_row_cells(row);
+		bot_rows[bot] = entry;
 	}
-	row.toggleClass('stopped', data.state != 5);
-	row.find('.client-state').text(STATE[data.state]);
-	row.find('.client-restarts').text(data.restarts);
+	entry.row.toggleClass('stopped', data.state != 5);
+	set_cell(entry.cells.state, STATE[data.state]);
+	set_cell(entry.cells.restarts, data.restarts);
 	const ipc_id = data.ipcID;
 	const has_ipc = data.state === 5 && data.ipc && Number.isInteger(ipc_id) && ipc_id >= 0;
 	if (has_ipc) {
-		row.attr('data-ipc-id', ipc_id);
-		row.attr('data-pid', data.ipc.pid);
-		row.find('.client-pid').text(data.ipc.pid);
+		entry.row.attr('data-ipc-id', ipc_id);
+		entry.row.attr('data-pid', data.ipc.pid);
+		set_cell(entry.cells.pid, data.ipc.pid);
 		const profile_url = data.profile_url || steam_id.profile_url_from_account_id32(data.ipc.friendid);
-		const steam_cell = row.find('.client-steam')[0];
+		const steam_cell = entry.cells.steam;
 		if (steam_cell && steam_cell.getAttribute('data-profile-url') !== (profile_url || '')) {
 			steam_cell.setAttribute('data-profile-url', profile_url || '');
 			$(steam_cell).empty();
@@ -525,11 +578,30 @@ function updateUserData(bot, data) {
 		}
 	}
 	if (!has_ipc) {
-		clearIPCId(row);
-		row.find('.active').text('N/A');
+		clearIPCId(entry);
+		for (var i = 0; i < entry.active_cells.length; i++)
+			set_cell(entry.active_cells[i], 'N/A');
 	}
-	update_ban_tracker_data(row, data.ban_tracker);
-	updateIPCData(row, has_ipc ? ipc_id : -1, has_ipc ? data.ipc : null, data.state, data.ipc_observed_at);
+	update_ban_tracker_data(entry, data.ban_tracker);
+	updateIPCData(entry, has_ipc ? ipc_id : -1, has_ipc ? data.ipc : null, data.state, data.ipc_observed_at);
+}
+
+function cache_row_cells(row) {
+	const entry = { row: row, cells: {}, connected_cells: [], active_cells: [] };
+	const tr = row[0];
+	for (var i = 0; i < CLIENT_CELL_CLASSES.length; i++) {
+		const key = CLIENT_CELL_CLASSES[i][0];
+		const cls = CLIENT_CELL_CLASSES[i][1].split(' ')[0];
+		const cell = tr.getElementsByClassName(cls)[0];
+		if (!cell)
+			continue;
+		entry.cells[key] = cell;
+		if (cell.classList.contains('connected'))
+			entry.connected_cells.push(cell);
+		if (cell.classList.contains('active'))
+			entry.active_cells.push(cell);
+	}
+	return entry;
 }
 
 function addClientRow(botid, data) {
@@ -544,33 +616,15 @@ function addClientRow(botid, data) {
     actions.append($('<input>').attr('type', 'button').attr('value', 'Restart').on('click', restartButtonCallback));
     actions.append($('<input>').attr('type', 'button').attr('value', 'Terminate').on('click', terminateButtonCallback));
 	row.append(actions);
-	row.append($('<td></td>').attr('class', 'client-restarts').text('N/A'));
-	row.append($('<td></td>').attr('class', 'client-bot-name').text(botid));
-	row.append($('<td></td>').attr('class', 'client-state').text(STATE[data.state] || 'PENDING'));
-	row.append($('<td></td>').attr('class', 'client-steam').text('N/A'));
-	row.append($('<td></td>').attr('class', 'client-ban-tracker active').text('N/A'));
-    row.append($('<td></td>').attr('class', 'client-uptime-total active').text('N/A'));
-    row.append($('<td></td>').attr('class', 'client-pid active').text('N/A'));
-	row.append($('<td></td>').attr('class', 'client-id active').text('N/A'));
-    row.append($('<td></td>').attr('class', 'client-status active').text('N/A'));
-    row.append($('<td></td>').attr('class', 'client-name active').text('N/A'));
-    row.append($('<td></td>').attr('class', 'client-uptime-queue active').text('N/A'));
-    row.append($('<td></td>').attr('class', 'client-total active').text('N/A'));
-    row.append($('<td></td>').attr('class', 'client-score connected active').text('N/A'));
-    row.append($('<td></td>').attr('class', 'client-shots active').text('N/A'));
-    row.append($('<td></td>').attr('class', 'client-hitrate active').text('N/A'));
-    row.append($('<td></td>').attr('class', 'client-hsrate active').text('N/A'));
-    row.append($('<td></td>').attr('class', 'client-uptime-server connected active').text('N/A'));
-    row.append($('<td></td>').attr('class', 'client-alive connected active').text('N/A'));
-    row.append($('<td></td>').attr('class', 'client-team connected active').text('N/A'));
-    row.append($('<td></td>').attr('class', 'client-class connected active').text('N/A'));
-    row.append($('<td></td>').attr('class', 'client-health connected active').text('N/A'));
-    row.append($('<td></td>').attr('class', 'client-ip connected active').text('N/A'));
-    row.append($('<td></td>').attr('class', 'client-map connected active').text('NYI'));
-    row.append($('<td></td>').attr('class', 'client-players connected active').text('NYI'));
-    row.append($('<td></td>').attr('class', 'client-bots connected active').text('NYI'));
+	for (var i = 0; i < CLIENT_CELL_CLASSES.length; i++) {
+		row.append($('<td></td>').attr('class', CLIENT_CELL_CLASSES[i][1]).text('N/A'));
+	}
+	row.find('.client-bot-name').text(botid);
+	row.find('.client-state').text(STATE[data.state] || 'PENDING');
+	row.find('.client-map, .client-players, .client-bots').text('NYI');
     $('#clients').append(row);
-    bot_rows[botid] = row;
+    const entry = cache_row_cells(row);
+    bot_rows[botid] = entry;
     return row;
 }
 

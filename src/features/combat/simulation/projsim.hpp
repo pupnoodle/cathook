@@ -11,18 +11,6 @@
 
 namespace projsim {
 
-namespace detail {
-
-inline float tick_interval() {
-  if (global_vars != nullptr && std::isfinite(global_vars->interval_per_tick) &&
-      global_vars->interval_per_tick > 0.0001f) {
-    return global_vars->interval_per_tick;
-  }
-  return 0.015f;
-}
-
-}
-
 struct params {
   Vec3 origin{};
   Vec3 velocity{};
@@ -31,8 +19,6 @@ struct params {
   Vec3 hull{2.0f, 2.0f, 2.0f};
   unsigned int collision_mask = MASK_SOLID | CONTENTS_DEBRIS | CONTENTS_HITBOX;
   trace_filter filter{};
-  bool ignore_target = false;
-  Entity* local_player = nullptr;
 };
 
 struct simulation {
@@ -55,7 +41,7 @@ struct simulation {
   }
 
   bool step() {
-    const float dt = detail::tick_interval();
+    const float dt = tick_interval();
     Vec3 next = position + velocity * dt;
     next.z -= 0.5f * p.gravity * dt * dt;
 

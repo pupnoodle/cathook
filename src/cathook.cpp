@@ -45,7 +45,9 @@ V  o o  V  file: src/cathook.cpp
 #include "core/detach.hpp"
 #include "core/types.hpp"
 #include "core/memory/byte_patch.hpp"
-#include "core/memory/memory.hpp"
+#include "core/memory/code_scan.hpp"
+#include "core/memory/maps.hpp"
+#include "core/memory/resolve.hpp"
 #include "core/shared/sigs.hpp"
 #include "games/tf2/sdk/materials/keyvalues.hpp"
 #include "games/tf2/sdk/interfaces/engine.hpp"
@@ -78,12 +80,8 @@ V  o o  V  file: src/cathook.cpp
 #include "libsigscan/libsigscan.h"
 #include "funchook/funchook.h"
 
-bool (*in_cond_original)(void*, int) = nullptr;
-
-std::uintptr_t resolve_checked_rip_relative(std::uintptr_t instruction, std::ptrdiff_t displacement_offset,
-  std::ptrdiff_t instruction_size, std::initializer_list<std::uint8_t> opcode);
-
 #include "core/hooks/sdl.cpp"
+#include "features/visuals/esp/esp.cpp"
 #include "core/hooks/vulkan.cpp"
 #include "core/overwrite_dlopen.cpp"
 #include "core/hooks/hooks.cpp"
@@ -128,8 +126,6 @@ std::uintptr_t resolve_checked_rip_relative(std::uintptr_t instruction, std::ptr
 #include "core/hooks/intro_menu_on_tick.cpp"
 #include "core/hooks/class_menu_show_panel.cpp"
 #include "core/hooks/team_menu_show_panel.cpp"
-#include "core/hooks/map_info_menu_show_panel.cpp"
-#include "core/hooks/text_window_show_panel.cpp"
 #include "core/random_seed.hpp"
 #include "features/automation/navbot/navbot_mesh.cpp"
 #include "features/automation/navbot/navbot_hazards.cpp"
@@ -144,17 +140,21 @@ std::uintptr_t resolve_checked_rip_relative(std::uintptr_t instruction, std::ptr
 #include "features/automation/region_selector/region_selector.cpp"
 #include "features/automation/autoitem/autoitem.cpp"
 #include "features/automation/misc/misc.cpp"
+#include "features/automation/killstreak/killstreak.cpp"
+#include "features/automation/spectate/spectate.cpp"
+#include "features/automation/cheat_detection/cheat_detection.cpp"
+#include "features/automation/anti_cheat_compat/anti_cheat_compat.cpp"
 #include "features/automation/mvm_queue/mvm_queue.cpp"
-#if defined(CATHOOK_WITH_PROFILE_STALKER) && CATHOOK_WITH_PROFILE_STALKER
 #include "features/automation/profile_stalker/profile_stalker.cpp"
-#endif
 #include "features/automation/navbot/navbot_controller.cpp"
 #include "features/visuals/hitmarker.cpp"
 #include "features/visuals/spectator_list.cpp"
 #include "features/visuals/thirdperson.cpp"
 #include "features/visuals/radar/radar.cpp"
 #include "features/visuals/skybox_changer.cpp"
+#include "features/visuals/skin_changer.cpp"
 #include "features/visuals/world_visuals.cpp"
+#include "core/hooks/hook_registry.hpp"
 
 void** client_mode_vtable;
 void** model_render_vtable;
@@ -163,14 +163,7 @@ void** client_vtable;
 void** game_event_manager_vtable;
 void** steam_networking_utils_vtable;
 
-funchook_t* funchook;
-
 bool initialize_game_runtime();
-
-using shaderapidx9_apply_pending_transition_snapshot_fn = std::int64_t (*)(void*);
-shaderapidx9_apply_pending_transition_snapshot_fn shaderapidx9_apply_pending_transition_snapshot_original = nullptr;
-using shaderapivk_apply_pending_transition_snapshot_fn = std::int64_t (*)(void*);
-shaderapivk_apply_pending_transition_snapshot_fn shaderapivk_apply_pending_transition_snapshot_original = nullptr;
 
 using client_panel_image_paint_fn = void (*)(void*);
 client_panel_image_paint_fn client_panel_image_paint_original = nullptr;
@@ -214,8 +207,31 @@ void client_panel_image_paint_hook(void* panel)
     return;
   }
 
+  static const int image_offset = [] {
+    const auto* fn = static_cast<const std::uint8_t*>(
+      sigscan_module("client.so", sigs::client_panel_image_paint));
+    if (fn == nullptr) {
+      return 0;
+    }
+    const auto* end = fn + 0x100;
+    for (const std::uint8_t* p = fn; p < end; p += cathook::core::memory::insn_length(p, end)) {
+      cathook::core::memory::mem_insn insn{};
+      if (!cathook::core::memory::decode_mem_insn(p, end, insn)) {
+        continue;
+      }
+      if (insn.opcode == 0x8B && insn.mod == 2 && insn.base >= 0 && insn.disp > 0) {
+        return insn.disp;
+      }
+    }
+    return 0;
+  }();
+  if (image_offset <= 0) {
+    client_panel_image_paint_original(panel);
+    return;
+  }
+
   auto* bytes = static_cast<std::uint8_t*>(panel);
-  auto* image = *reinterpret_cast<void**>(bytes + 0x1e8);
+  auto* image = *reinterpret_cast<void**>(bytes + image_offset);
   if (image == nullptr || *reinterpret_cast<void**>(image) == nullptr) {
     return;
   }
@@ -269,48 +285,6 @@ int scene_entity_should_transmit_hook(void* scene_entity, void* check_transmit_i
   }
 
   return scene_entity_should_transmit_original(scene_entity, check_transmit_info);
-}
-
-std::int64_t shaderapidx9_apply_pending_transition_snapshot_hook(void* shaderapi)
-{
-  CATHOOK_HOOK_GUARD();
-  if (shaderapi == nullptr || shaderapidx9_apply_pending_transition_snapshot_original == nullptr) {
-    return 0xFFFFFFFFLL;
-  }
-
-  constexpr std::uintptr_t pending_snapshot_offset = 0x3930;
-  auto* bytes = static_cast<std::uint8_t*>(shaderapi);
-  const auto pending_snapshot = *reinterpret_cast<std::int16_t*>(bytes + pending_snapshot_offset);
-  if (pending_snapshot < 0) {
-    static std::atomic_bool warned_invalid_snapshot = false;
-    if (!warned_invalid_snapshot.exchange(true, std::memory_order_acq_rel)) {
-      print("shaderapidx9 pending transition snapshot was invalid; skipping apply\n");
-    }
-    return 0xFFFFFFFFLL;
-  }
-
-  return shaderapidx9_apply_pending_transition_snapshot_original(shaderapi);
-}
-
-std::int64_t shaderapivk_apply_pending_transition_snapshot_hook(void* shaderapi)
-{
-  CATHOOK_HOOK_GUARD();
-  if (shaderapi == nullptr || shaderapivk_apply_pending_transition_snapshot_original == nullptr) {
-    return 0xFFFFFFFFLL;
-  }
-
-  constexpr std::uintptr_t pending_snapshot_offset = 0x3A30;
-  auto* bytes = static_cast<std::uint8_t*>(shaderapi);
-  const auto pending_snapshot = *reinterpret_cast<std::int16_t*>(bytes + pending_snapshot_offset);
-  if (pending_snapshot < 0) {
-    static std::atomic_bool warned_invalid_snapshot = false;
-    if (!warned_invalid_snapshot.exchange(true, std::memory_order_acq_rel)) {
-      print("shaderapivk pending transition snapshot was invalid; skipping apply\n");
-    }
-    return 0xFFFFFFFFLL;
-  }
-
-  return shaderapivk_apply_pending_transition_snapshot_original(shaderapi);
 }
 
 namespace
@@ -433,10 +407,146 @@ steam_networking_utils* resolve_steam_networking_utils()
 
 }
 
+void register_hook_entries()
+{
+  if (!hooks::all().empty()) {
+    return;
+  }
+
+  hooks::add(hooks::vmt("ModelRender::ForcedMaterialOverride", &model_render_vtable, 1,
+    (void**)&model_render_forced_material_override_original, (void*)model_render_forced_material_override_hook));
+  hooks::add(hooks::vmt("ModelRender::DrawModelExecute", &model_render_vtable, 19,
+    (void**)&model_render_draw_model_execute_original, (void*)model_render_draw_model_execute_hook));
+  hooks::add(hooks::vmt("ClientModeShared::DoPostScreenSpaceEffects", &client_mode_vtable, 40,
+    (void**)&client_mode_post_screen_space_effects_original, (void*)client_mode_post_screen_space_effects_hook));
+  hooks::add(hooks::vmt("ClientModeShared::CreateMove", &client_mode_vtable, 22,
+    (void**)&client_mode_create_move_original, (void*)client_mode_create_move_hook));
+  hooks::add(hooks::vmt("Client::CreateMove", &client_vtable, 21,
+    (void**)&client_create_move_original, (void*)client_create_move_hook));
+#if !defined(CATHOOK_TEXTMODE) || !CATHOOK_TEXTMODE
+  hooks::add(hooks::vmt("ClientModeShared::OverrideView", &client_mode_vtable, 17,
+    (void**)&override_view_original, (void*)override_view_hook));
+  hooks::add(hooks::vmt("ClientModeShared::ShouldDrawViewModel", &client_mode_vtable, 25,
+    (void**)&draw_view_model_original, (void*)draw_view_model_hook));
+  hooks::add(hooks::vmt("VGUI_Panel::PaintTraverse", &vgui_vtable, 42,
+    (void**)&paint_traverse_original, (void*)paint_traverse_hook));
+#endif
+  hooks::add(hooks::vmt("GameEventManager::FireEventClientSide", &game_event_manager_vtable, 9,
+    (void**)&fire_event_client_side_original, (void*)fire_event_client_side_hook));
+  hooks::add(hooks::vmt("Client::FrameStageNotify", &client_vtable, 35,
+    (void**)&frame_stage_notify_original, (void*)frame_stage_notify_hook));
+  hooks::add(hooks::vmt("Client::DispatchUserMessage", &client_vtable, 36,
+    (void**)&dispatch_user_message_original, (void*)dispatch_user_message_hook));
+
+  hooks::add(hooks::vmt("SteamNetworkingUtils::GetPingToDataCenter", &steam_networking_utils_vtable,
+    steam_networking_utils_get_ping_to_data_center_index,
+    (void**)&steam_networking_utils_get_ping_to_data_center_original,
+    (void*)steam_networking_utils_get_ping_to_data_center_hook, hooks::group::deferred));
+  hooks::add(hooks::vmt("SteamNetworkingUtils::GetDirectPingToPOP", &steam_networking_utils_vtable,
+    steam_networking_utils_get_direct_ping_to_pop_index,
+    (void**)&steam_networking_utils_get_direct_ping_to_pop_original,
+    (void*)steam_networking_utils_get_direct_ping_to_pop_hook, hooks::group::deferred));
+
+  hooks::add(hooks::sig("InCond", "client.so", sigs::in_cond,
+    (void**)&in_cond_original, (void*)in_cond_hook, true));
+#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
+  hooks::add(hooks::resolved("LoadWhiteList", "engine.so", sigs::load_white_list,
+    (void**)&load_white_list_original));
+  hooks::add(hooks::resolved("Host_IsSecureServerAllowed", "engine.so", sigs::host_is_secure_server_allowed,
+    (void**)&host_is_secure_server_allowed_original));
+#else
+  hooks::add(hooks::sig("LoadWhiteList", "engine.so", sigs::load_white_list,
+    (void**)&load_white_list_original, (void*)load_white_list_hook, true));
+  hooks::add(hooks::sig("Host_IsSecureServerAllowed", "engine.so", sigs::host_is_secure_server_allowed,
+    (void**)&host_is_secure_server_allowed_original, (void*)host_is_secure_server_allowed_hook, false, true));
+#endif
+  hooks::add(hooks::resolved("item schema lookup map", "client.so", sigs::item_schema_lookup_map,
+    (void**)&item_schema_lookup_map_original, true));
+  hooks::add(hooks::sig("item definition lookup", "client.so", sigs::item_definition_lookup,
+    (void**)&item_definition_lookup_original, (void*)item_definition_lookup_hook, true));
+  hooks::add(hooks::sig("inspect target check", "client.so", sigs::inspect_target_check,
+    (void**)&inspect_target_check_original, (void*)inspect_target_check_hook, true));
+  hooks::add(hooks::resolved("CAttributeManager::AttribHookValue", "client.so", sigs::attribute_hook_value_float,
+    (void**)&attribute_hook_value_float_original));
+  hooks::add(hooks::resolved("CEconItemSchema::GetAttributeDefinition", "client.so",
+    sigs::attribute_definition_lookup,
+    (void**)&skin_changer::attribute_definition_lookup));
+  hooks::add(hooks::resolved("CAttributeList::SetRuntimeAttributeValue", "client.so",
+    sigs::attribute_list_set_runtime_value,
+    (void**)&skin_changer::attribute_list_set_runtime_value));
+  hooks::add(hooks::resolved("CBaseClientState::ForceFullUpdate", "engine.so",
+    sigs::client_state_force_full_update,
+    (void**)&client_state_force_full_update));
+  hooks::add(hooks::sig("CTFIntroMenu::OnTick", "client.so", sigs::intro_menu_on_tick,
+    (void**)&intro_menu_on_tick_original, (void*)intro_menu_on_tick_hook, true));
+  hooks::add(hooks::sig("CTFClassMenu::ShowPanel", "client.so", sigs::class_menu_show_panel,
+    (void**)&class_menu_show_panel_original, (void*)class_menu_show_panel_hook, true));
+  hooks::add(hooks::sig("CTFTeamMenu::ShowPanel", "client.so", sigs::team_menu_show_panel,
+    (void**)&team_menu_show_panel_original, (void*)team_menu_show_panel_hook, true));
+  hooks::add(hooks::sig("client panel image paint crash guard", "client.so", sigs::client_panel_image_paint,
+    (void**)&client_panel_image_paint_original, (void*)client_panel_image_paint_hook, false, false));
+  hooks::add(hooks::sig("CSceneEntity::CheckTransmit", "server.so", sigs::server_scene_entity_should_transmit,
+    (void**)&scene_entity_should_transmit_original, (void*)scene_entity_should_transmit_hook, false, false));
+  hooks::add(hooks::resolved("CBaseEntity::CheckTransmit", "server.so", sigs::server_base_entity_should_transmit,
+    (void**)&base_entity_should_transmit));
+  hooks::add(hooks::sig("CL_Move", "engine.so", sigs::cl_move,
+    (void**)&cl_move_original, (void*)cl_move_hook, true));
+  hooks::add(hooks::sig("CL_ReadPackets", "engine.so", sigs::cl_read_packets,
+    (void**)&cl_read_packets_original, (void*)cl_read_packets_hook, true));
+  hooks::add(hooks::sig("CL_ProcessPacketEntities", "engine.so", sigs::cl_process_packet_entities,
+    (void**)&cl_process_packet_entities_original, (void*)cl_process_packet_entities_hook, false, true));
+  hooks::add(hooks::resolved("CTFPartyClient::RequestQueueForMatch", "client.so", sigs::request_queue_for_match,
+    (void**)&region_selector_request_queue_for_match_original));
+  hooks::add(hooks::sig("CTFGCClientSystem SO event", "client.so", sigs::tf_gc_client_system_so_event,
+    (void**)&tf_gc_client_system_so_event_original, (void*)tf_gc_client_system_so_event_hook, false, true));
+  hooks::add(hooks::resolved("CTFGCClientSystem::RequestAcceptMatchInvite", "client.so",
+    sigs::tf_gc_client_system_request_accept_match_invite,
+    (void**)&tf_gc_client_system_request_accept_match_invite));
+  hooks::add(hooks::resolved("CTFGCClientSystem::JoinMMMatch", "client.so", sigs::tf_gc_client_system_join_mm_match,
+    (void**)&tf_gc_client_system_join_mm_match));
+  hooks::add(hooks::sig("CPrediction::RunSimulation", "client.so", sigs::prediction_run_simulation,
+    (void**)&prediction_run_simulation_original, (void*)prediction_run_simulation_hook, true));
+  hooks::add(hooks::sig("CTFWeaponBase::CalcIsAttackCritical", "client.so", sigs::ctf_weapon_base_calc_is_attack_critical,
+    (void**)&ctf_weapon_base_calc_is_attack_critical_original, (void*)ctf_weapon_base_calc_is_attack_critical_hook,
+    false, true));
+  hooks::add(hooks::sig("CTFWeaponBaseMelee::CalcIsAttackCritical", "client.so",
+    sigs::ctf_weapon_base_melee_calc_is_attack_critical,
+    (void**)&ctf_weapon_base_melee_calc_is_attack_critical_original,
+    (void*)ctf_weapon_base_melee_calc_is_attack_critical_hook, false, true));
+  hooks::add(hooks::sig("CPvPRankPanel rank record", "client.so", sigs::casual_rank_record,
+    (void**)&casual_medal::rank_record_original, (void*)casual_medal::rank_record_hook, false, false));
+  hooks::add(hooks::resolved("KeyValues() constructor", "client.so", sigs::key_values_constructor,
+    (void**)&key_values_constructor_original, true));
+  hooks::add(hooks::resolved("KeyValues::SetInt()", "client.so", sigs::key_values_set_int,
+    (void**)&key_values_set_int_original, true));
+  hooks::add(hooks::resolved("KeyValues::LoadFromBuffer()", "client.so", sigs::key_values_load_from_buffer,
+    (void**)&key_values_load_from_buffer_original, true));
+  hooks::add(hooks::resolved("KeyValues::deleteThis()", "client.so", sigs::key_values_delete_this,
+    (void**)&key_values_delete_this_original, true));
+
+  hooks::add(hooks::pre_resolved("CViewRender::PerformScreenSpaceEffects",
+    (void**)&view_render_perform_screen_space_effects_original,
+    (void*)view_render_perform_screen_space_effects_hook, false, false));
+  hooks::add(hooks::pre_resolved("CViewRender::PerformScreenOverlay",
+    (void**)&view_render_perform_screen_overlay_original,
+    (void*)view_render_perform_screen_overlay_hook, false, false));
+  hooks::add(hooks::pre_resolved("vstdlib RandomInt", (void**)&casual_medal::random_int_original,
+    (void*)casual_medal::random_int_hook, false, false));
+
+  hooks::add(hooks::sdl("SDL_PollEvent", (void*)poll_event_hook, (void**)&poll_event_original, &poll_event_target));
+  hooks::add(hooks::sdl("SDL_GL_SwapWindow", (void*)swap_window_hook, (void**)&swap_window_original,
+    &swap_window_target));
+  hooks::add(hooks::sdl("SDL_GetWindowFlags", (void*)get_window_flags_hook, (void**)&get_window_flags_original,
+    &get_window_flags_target));
+  hooks::add(hooks::sdl("SDL_GetWindowWMInfo", (void*)get_window_WM_info_hook, (void**)&get_window_WM_info_original,
+    &get_window_WM_info_target));
+  hooks::add(hooks::sdl("SDL_GetWindowSize", (void*)get_window_size_hook, (void**)&get_window_size_original,
+    &get_window_size_target));
+}
+
 bool install_steam_networking_utils_hooks()
 {
-  if (steam_networking_utils_get_ping_to_data_center_original != nullptr &&
-      steam_networking_utils_get_direct_ping_to_pop_original != nullptr)
+  if (hooks::group_armed(hooks::group::deferred))
   {
     return true;
   }
@@ -473,56 +583,8 @@ bool install_steam_networking_utils_hooks()
     return false;
   }
 
-  bool hooks_installed = true;
-  if (steam_networking_utils_get_ping_to_data_center_original == nullptr)
-  {
-    steam_networking_utils_get_ping_to_data_center_original =
-      reinterpret_cast<int (*)(void*, steam_networking_pop_id, steam_networking_pop_id*)>(
-        read_vtable_entry(
-          steam_networking_utils_vtable,
-          steam_networking_utils_get_ping_to_data_center_index,
-          "ISteamNetworkingUtils::GetPingToDataCenter"));
-
-    if (steam_networking_utils_get_ping_to_data_center_original == nullptr || !write_to_table(
-          steam_networking_utils_vtable,
-          steam_networking_utils_get_ping_to_data_center_index,
-          reinterpret_cast<void*>(steam_networking_utils_get_ping_to_data_center_hook)))
-    {
-      steam_networking_utils_get_ping_to_data_center_original = nullptr;
-      hooks_installed = false;
-      print("ISteamNetworkingUtils::GetPingToDataCenter hook failed\n");
-    }
-    else
-    {
-      print("ISteamNetworkingUtils::GetPingToDataCenter hooked\n");
-    }
-  }
-
-  if (steam_networking_utils_get_direct_ping_to_pop_original == nullptr)
-  {
-    steam_networking_utils_get_direct_ping_to_pop_original =
-      reinterpret_cast<int (*)(void*, steam_networking_pop_id)>(
-        read_vtable_entry(
-          steam_networking_utils_vtable,
-          steam_networking_utils_get_direct_ping_to_pop_index,
-          "ISteamNetworkingUtils::GetDirectPingToPOP"));
-
-    if (steam_networking_utils_get_direct_ping_to_pop_original == nullptr || !write_to_table(
-          steam_networking_utils_vtable,
-          steam_networking_utils_get_direct_ping_to_pop_index,
-          reinterpret_cast<void*>(steam_networking_utils_get_direct_ping_to_pop_hook)))
-    {
-      steam_networking_utils_get_direct_ping_to_pop_original = nullptr;
-      hooks_installed = false;
-      print("ISteamNetworkingUtils::GetDirectPingToPOP hook failed\n");
-    }
-    else
-    {
-      print("ISteamNetworkingUtils::GetDirectPingToPOP hooked\n");
-    }
-  }
-
-  return hooks_installed;
+  hooks::install_group(hooks::group::deferred);
+  return hooks::group_armed(hooks::group::deferred);
 }
 
 namespace cathook::core
@@ -542,9 +604,6 @@ constexpr long attach_ready_delay_max_seconds = 300;
 constexpr auto attach_module_wait_timeout = std::chrono::seconds(30);
 
 constexpr std::string_view steamclient_module = "steamclient.so";
-#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
-#else
-#endif
 
 constexpr std::array<const char*, 29> game_events = {
 
@@ -579,32 +638,9 @@ constexpr std::array<const char*, 29> game_events = {
   "mvm_wave_failed",
 };
 
-std::string find_loaded_module_path(const char* module_name, bool allow_prefix_match = false)
-{
-  std::ifstream maps{ "/proc/self/maps" };
-  std::string line{};
-
-  while (std::getline(maps, line)) {
-    const auto path_offset = line.find('/');
-    if (path_offset == std::string::npos) {
-      continue;
-    }
-
-    const auto path = std::string_view{ line }.substr(path_offset);
-    const auto name_offset = path.rfind('/');
-    const auto file_name = name_offset == std::string_view::npos ? path : path.substr(name_offset + 1);
-
-    if (file_name == module_name || (allow_prefix_match && file_name.starts_with(module_name))) {
-      return std::string{ path };
-    }
-  }
-
-  return {};
-}
-
 bool is_module_loaded(const char* module_name)
 {
-  return !find_loaded_module_path(module_name).empty();
+  return cathook::core::memory::is_module_loaded(module_name);
 }
 
 bool wait_for_module(const char* module_name)
@@ -722,7 +758,7 @@ void attach_worker_main()
     nographics::prepare_startup_patches();
     const bool initialized = ::initialize_game_runtime();
     print("cathook attach worker initialize_game_runtime returned %d\n", initialized ? 1 : 0);
-    if (!initialized) {
+    if (!initialized && runtime_initialized.load(std::memory_order_acquire)) {
       cathook::core::request_detach();
       cathook::core::service_detach_request();
     }
@@ -759,12 +795,8 @@ bool stop_attach_worker()
   attach_worker_stop.store(true, std::memory_order_release);
 
   auto& thread = attach_worker_thread();
-  if (thread.joinable()) {
-    if (std::this_thread::get_id() == thread.get_id()) {
-      return false;
-    } else {
-      thread.join();
-    }
+  if (thread.joinable() && std::this_thread::get_id() != thread.get_id()) {
+    thread.join();
   }
 
   attach_worker_started.store(false, std::memory_order_release);
@@ -776,19 +808,14 @@ void shutdown_imgui_runtime(const bool release_graphics_resources)
 {
   if (mono_ui_initialized()) {
     mono_ui_shutdown(release_graphics_resources);
-    return;
+  } else {
+    mono_ui_lock();
+    if (ImGui::GetCurrentContext() != nullptr) {
+      ImGui::DestroyContext();
+    }
+    mono_ui_unlock();
+    mono_ui_vulkan_resources_shutdown(release_graphics_resources);
   }
-
-  mono_ui_lock();
-  if (ImGui::GetCurrentContext() != nullptr) {
-    ImGui::DestroyContext();
-  }
-  mono_ui_unlock();
-}
-
-void shutdown_vulkan_runtime(bool release_graphics_resources)
-{
-  shutdown_vulkan_runtime_state(release_graphics_resources);
 }
 
 void shutdown_gl_runtime(bool release_graphics_resources)
@@ -849,66 +876,11 @@ void clear_runtime_pointer_state()
   model_info = nullptr;
   steam_client = nullptr;
   steam_friends = nullptr;
-  world_visuals::particle_create_original = nullptr;
-
-  model_render_draw_model_execute_original = nullptr;
-  model_render_forced_material_override_original = nullptr;
-  entity_visuals::draw_model_execute_original = nullptr;
-  client_mode_create_move_original = nullptr;
-  client_mode_post_screen_space_effects_original = nullptr;
-  view_render_perform_screen_space_effects_original = nullptr;
-  view_render_perform_screen_overlay_original = nullptr;
-  client_create_move_original = nullptr;
-  override_view_original = nullptr;
-  draw_view_model_original = nullptr;
+  steam_networking_utils_interface = nullptr;
+  random_seed = nullptr;
   get_panel_name_original = nullptr;
-  paint_traverse_original = nullptr;
-  client_panel_image_paint_original = nullptr;
-  scene_entity_should_transmit_original = nullptr;
-  base_entity_should_transmit = nullptr;
-  fire_event_client_side_original = nullptr;
-  frame_stage_notify_original = nullptr;
-  dispatch_user_message_original = nullptr;
-  steam_networking_utils_get_ping_to_data_center_original = nullptr;
-  steam_networking_utils_get_direct_ping_to_pop_original = nullptr;
 
-  load_white_list_original = nullptr;
-  item_schema_lookup_map_original = nullptr;
-  item_definition_lookup_original = nullptr;
-  inspect_target_check_original = nullptr;
-  attribute_hook_value_float_original = nullptr;
-  intro_menu_on_tick_original = nullptr;
-  class_menu_show_panel_original = nullptr;
-  team_menu_show_panel_original = nullptr;
-  cl_move_original = nullptr;
-  cl_read_packets_original = nullptr;
-  cl_process_packet_entities_original = nullptr;
-  host_is_secure_server_allowed_original = nullptr;
-  region_selector_request_queue_for_match_original = nullptr;
-  tf_gc_client_system_so_event_original = nullptr;
-  tf_gc_client_system_request_accept_match_invite = nullptr;
-  tf_gc_client_system_join_mm_match = nullptr;
-  prediction_run_simulation_original = nullptr;
-  ctf_weapon_base_calc_is_attack_critical_original = nullptr;
-  ctf_weapon_base_melee_calc_is_attack_critical_original = nullptr;
-  casual_medal::random_int_original = nullptr;
-  casual_medal::rank_record_original = nullptr;
-  shaderapidx9_apply_pending_transition_snapshot_original = nullptr;
-  shaderapivk_apply_pending_transition_snapshot_original = nullptr;
-  key_values_constructor_original = nullptr;
-  key_values_set_int_original = nullptr;
-  key_values_load_from_buffer_original = nullptr;
-  key_values_system_original = nullptr;
-  key_values_delete_this_original = nullptr;
-
-  queue_present_original = nullptr;
-  create_swapchain_original = nullptr;
-  destroy_swapchain_original = nullptr;
-  acquire_next_image_original = nullptr;
-  acquire_next_image2_original = nullptr;
-  create_device_original = nullptr;
-  get_device_queue_original = nullptr;
-  get_device_queue2_original = nullptr;
+  hooks::clear();
 }
 
 bool unload_module_runtime() {
@@ -920,22 +892,7 @@ bool unload_module_runtime() {
     return false;
   }
 
-  if (process_exiting.load(std::memory_order_acquire)) {
-    runtime_initialized.store(false, std::memory_order_release);
-    detach_complete.store(true, std::memory_order_release);
-    detach_started.store(false, std::memory_order_release);
-    unload_started.store(false, std::memory_order_release);
-    return true;
-  }
-
   if (unload_started.exchange(true)) {
-    return true;
-  }
-
-  if (!runtime_initialized.load(std::memory_order_acquire)) {
-    detach_complete.store(true, std::memory_order_release);
-    detach_started.store(false, std::memory_order_release);
-    unload_started.store(false, std::memory_order_release);
     return true;
   }
 
@@ -943,86 +900,29 @@ bool unload_module_runtime() {
   const bool release_graphics_resources = process_exiting.load(std::memory_order_acquire)
       || is_environment_enabled("CATHOOK_DETACH_RELEASE_GRAPHICS");
 
-  print("Unhooking VMT functions\n");
+  print("Unhooking functions\n");
   bool hooks_restored = nographics::shutdown();
   hooks_restored = backtrack::restore_net_channel_hook() && hooks_restored;
-
-  struct vmt_restore_entry {
-    void** vtable;
-    int index;
-    void* original;
-    const char* name;
-  };
-  const vmt_restore_entry vmt_restore_table[] = {
-    {client_mode_vtable, 22, (void*)client_mode_create_move_original, "ClientMode::CreateMove"},
-    {client_mode_vtable, 40, (void*)client_mode_post_screen_space_effects_original, "ClientMode::DoPostScreenSpaceEffects"},
-    {client_vtable, 21, (void*)client_create_move_original, "Client::CreateMove"},
-    {model_render_vtable, 19, (void*)model_render_draw_model_execute_original, "ModelRender::DrawModelExecute"},
-    {model_render_vtable, 1, (void*)model_render_forced_material_override_original, "ModelRender::ForcedMaterialOverride"},
-    {client_mode_vtable, 17, (void*)override_view_original, "OverrideView"},
-    {client_mode_vtable, 25, (void*)draw_view_model_original, "ShouldDrawViewModel"},
-    {vgui_vtable, 42, (void*)paint_traverse_original, "PaintTraverse"},
-    {game_event_manager_vtable, 9, (void*)fire_event_client_side_original, "FireEventClientSide"},
-    {client_vtable, 35, (void*)frame_stage_notify_original, "FrameStageNotify"},
-    {client_vtable, 36, (void*)dispatch_user_message_original, "DispatchUserMessage"},
-    {steam_networking_utils_vtable, steam_networking_utils_get_ping_to_data_center_index, (void*)steam_networking_utils_get_ping_to_data_center_original, "ISteamNetworkingUtils::GetPingToDataCenter"},
-    {steam_networking_utils_vtable, steam_networking_utils_get_direct_ping_to_pop_index, (void*)steam_networking_utils_get_direct_ping_to_pop_original, "ISteamNetworkingUtils::GetDirectPingToPOP"},
-  };
-  for (const auto& entry : vmt_restore_table) {
-    if (entry.vtable == nullptr || entry.original == nullptr) {
-      continue;
-    }
-    if (!write_to_table(entry.vtable, entry.index, entry.original)) {
-      print("%s failed to restore hook\n", entry.name);
-      hooks_restored = false;
-    }
-  }
-
-  print("Unhooking Non-VMT functions\n");
-  if (funchook != nullptr) {
-    const int result = funchook_uninstall(funchook, 0);
-    if (result != 0 && result != FUNCHOOK_ERROR_NOT_INSTALLED) {
-      print("Failed to uninstall inline hooks: %d\n", result);
-      hooks_restored = false;
-    }
-  }
+  hooks_restored = hooks::restore_all() && hooks_restored;
 
   print("Unhooking SDL functions\n");
   if (sdl_hooks_installed.load(std::memory_order_acquire)) {
-    begin_sdl_hook_uninstall();
-    SDL_SetEventFilter(nullptr, nullptr);
+    if (!begin_sdl_hook_uninstall()) {
+      print("Timed out waiting for SDL hooks to drain; aborting unload\n");
+      hooks_restored = false;
+    } else {
+      SDL_SetEventFilter(nullptr, nullptr);
 
-    if (swap_window_original != nullptr && !restore_sdl_hook_target(swap_window_target, (void*)swap_window_original)) {
-      print("Failed to restore SDL_GL_SwapWindow\n");
-    hooks_restored = false;
-    }
+      hooks_restored = hooks::restore_sdl() && hooks_restored;
 
-    if (poll_event_original != nullptr && !restore_sdl_hook_target(poll_event_target, (void*)poll_event_original)) {
-      print("Failed to restore SDL_PollEvent\n");
-    hooks_restored = false;
-    }
-
-    if (get_window_flags_original != nullptr && !restore_sdl_hook_target(get_window_flags_target, (void*)get_window_flags_original)) {
-      print("Failed to restore SDL_GetWindowFlags\n");
-    hooks_restored = false;
-    }
-
-    if (get_window_WM_info_original != nullptr && !restore_sdl_hook_target(get_window_WM_info_target, (void*)get_window_WM_info_original)) {
-      print("Failed to restore SDL_GetWindowWMInfo\n");
-    hooks_restored = false;
-    }
-
-    if (get_window_size_original != nullptr && !restore_sdl_hook_target(get_window_size_target, (void*)get_window_size_original)) {
-      print("Failed to restore SDL_GetWindowSize\n");
-    hooks_restored = false;
-    }
-
-    if (hooks_restored) {
-      finish_sdl_hook_uninstall();
+      if (hooks_restored) {
+        finish_sdl_hook_uninstall();
+      }
     }
   }
 
   if (!hooks_restored || !wait_for_other_hook_calls()) {
+    sdl_hooks_uninstalling.store(false, std::memory_order_release);
     unload_started.store(false, std::memory_order_release);
     detach_started.store(false, std::memory_order_release);
     detach_complete.store(false, std::memory_order_release);
@@ -1037,36 +937,19 @@ bool unload_module_runtime() {
   cathook::core::players::shutdown();
   surface_runtime::reset_ready();
   restore_client_crashfix_patches();
+  restore_launcher_source_lock();
   backtrack::clear();
   entity_visuals::on_shutdown(release_graphics_resources);
   world_visuals::on_shutdown();
   followbot::controller().shutdown();
   navbot::controller().shutdown();
   automation::shutdown();
-  region_selector_request_queue_for_match_original = nullptr;
-  if (funchook != nullptr) {
-    funchook_destroy(funchook);
-    funchook = nullptr;
-  }
-  in_cond_original = nullptr;
   tickbase::reset();
-
-  poll_event_original = nullptr;
-  swap_window_original = nullptr;
-  get_window_flags_original = nullptr;
-  get_window_WM_info_original = nullptr;
-  get_window_size_original = nullptr;
-  poll_event_target = nullptr;
-  swap_window_target = nullptr;
-  get_window_flags_target = nullptr;
-  get_window_WM_info_target = nullptr;
-  get_window_size_target = nullptr;
 
   if (!release_graphics_resources) {
     print("Skipping graphics resource release during detach\n");
   }
 
-  shutdown_vulkan_runtime(release_graphics_resources);
   shutdown_imgui_runtime(release_graphics_resources);
   shutdown_gl_runtime(release_graphics_resources);
 
@@ -1129,41 +1012,20 @@ bool initialize_module_runtime() {
 }
 
 void abort_module_runtime_init() {
-  runtime_initialized.store(false, std::memory_order_release);
-  game_hooks_installed.store(false, std::memory_order_release);
-  detach_complete.store(false, std::memory_order_release);
-  detach_started.store(false, std::memory_order_release);
-  detach_requested.store(false, std::memory_order_release);
-  unload_started.store(false, std::memory_order_release);
-  restore_client_crashfix_patches();
-  cathook::core::exception_handler::uninstall();
-  cathook::core::shutdown_config_store();
-  cathook::core::shutdown_logger();
-}
-
-}
-
-std::uintptr_t resolve_checked_rip_relative(std::uintptr_t instruction, std::ptrdiff_t displacement_offset,
-  std::ptrdiff_t instruction_size, std::initializer_list<std::uint8_t> opcode)
-{
-  if (instruction == 0 || opcode.size() == 0) return 0;
-  memory_page_permissions instruction_page{};
-  if (!query_page_permissions(reinterpret_cast<void*>(instruction), instruction_page) ||
-      (instruction_page.protection & PROT_EXEC) == 0) return 0;
-  const auto* bytes = reinterpret_cast<const std::uint8_t*>(instruction);
-  std::size_t index = 0;
-  for (const auto expected : opcode) {
-    if (bytes[index++] != expected) return 0;
+  print("Aborting cathook startup; restoring hooked runtime\n");
+  if (!unload_module_runtime()) {
+    nographics::shutdown();
+    backtrack::restore_net_channel_hook();
+    hooks::restore_all();
+    restore_client_crashfix_patches();
+    restore_launcher_source_lock();
+    cathook::core::identify::stop();
+    cat_ipc::client::shutdown();
+    runtime_initialized.store(false, std::memory_order_release);
+    game_hooks_installed.store(false, std::memory_order_release);
   }
-  if (displacement_offset < 0 || instruction_size < 0 ||
-      displacement_offset + static_cast<std::ptrdiff_t>(sizeof(std::int32_t)) > instruction_size) return 0;
-  std::int32_t displacement = 0;
-  std::memcpy(&displacement, bytes + displacement_offset, sizeof(displacement));
-  const auto target = instruction + instruction_size + static_cast<std::intptr_t>(displacement);
-  memory_page_permissions target_page{};
-  if (!query_page_permissions(reinterpret_cast<void*>(target), target_page) ||
-      (target_page.protection & PROT_READ) == 0) return 0;
-  return target;
+}
+
 }
 
 void** find_client_mode_storage_from_signature()
@@ -1175,15 +1037,14 @@ void** find_client_mode_storage_from_signature()
     return client_mode_storage;
   }
 
-  signature_scanned = true;
   void* instruction = sigscan_module("client.so", sigs::client_mode_shared);
   if (instruction == nullptr) {
     print("ClientModeShared storage signature missing\n");
     return nullptr;
   }
+  signature_scanned = true;
 
-  client_mode_storage = reinterpret_cast<void**>(resolve_checked_rip_relative(
-    reinterpret_cast<std::uintptr_t>(instruction), 3, 7, {0x48, 0x8D, 0x05}));
+  client_mode_storage = static_cast<void**>(cathook::core::memory::resolve_lea_rip(instruction));
   print("ClientModeShared storage found at %p\n", static_cast<void*>(client_mode_storage));
   return client_mode_storage;
 }
@@ -1200,8 +1061,7 @@ void** find_client_mode_storage_from_client()
     return nullptr;
   }
 
-  return reinterpret_cast<void**>(resolve_checked_rip_relative(
-    reinterpret_cast<std::uintptr_t>(instruction), 3, 7, {0x48, 0x8D, 0x05}));
+  return static_cast<void**>(cathook::core::memory::resolve_lea_rip(instruction));
 }
 
 void* read_client_mode_interface()
@@ -1246,6 +1106,61 @@ void* wait_for_client_mode_interface()
   return nullptr;
 }
 
+GlobalVars* read_global_vars(std::uintptr_t hud_update)
+{
+  const auto* const fn = reinterpret_cast<const std::uint8_t*>(hud_update);
+  const auto* const end = fn + 0x60;
+  for (const std::uint8_t* p = fn; p < end; p += cathook::core::memory::insn_length(p, end)) {
+    cathook::core::memory::mem_insn insn{};
+    if (!cathook::core::memory::decode_mem_insn(p, end, insn)) {
+      continue;
+    }
+    if (insn.opcode != 0x8B || !insn.rex_w || !cathook::core::memory::is_rip_relative(insn)) {
+      continue;
+    }
+    const int target_protection =
+      cathook::core::memory::protection_at(reinterpret_cast<const void*>(insn.rip_target));
+    if (target_protection < 0 || (target_protection & PROT_READ) == 0) {
+      continue;
+    }
+    auto* candidate = *reinterpret_cast<GlobalVars**>(insn.rip_target);
+    memory_page_permissions candidate_page{};
+    if (candidate != nullptr && query_page_permissions(candidate, candidate_page) &&
+        (candidate_page.protection & PROT_READ) != 0) {
+      return candidate;
+    }
+  }
+
+  return nullptr;
+}
+
+GlobalVars* wait_for_global_vars(std::uintptr_t hud_update)
+{
+  auto next_log = std::chrono::steady_clock::now();
+  const auto wait_start = next_log;
+
+  while (!cathook::core::attach_worker_stop.load(std::memory_order_acquire)
+      && !cathook::core::process_exiting.load(std::memory_order_acquire)) {
+    if (GlobalVars* candidate = read_global_vars(hud_update); candidate != nullptr) {
+      return candidate;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    if (now - wait_start >= cathook::core::attach_module_wait_timeout) {
+      print("cathook attach worker timed out waiting for CGlobalVars\n");
+      return nullptr;
+    }
+    if (now >= next_log) {
+      print("Waiting for CGlobalVars\n");
+      next_log = now + std::chrono::seconds(2);
+    }
+
+    std::this_thread::sleep_for(cathook::core::attach_wait_step);
+  }
+
+  return nullptr;
+}
+
 bool install_sdl_hooks()
 {
 #if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
@@ -1271,7 +1186,7 @@ bool install_sdl_hooks()
   print("Installing SDL hooks\n");
   void* lib_sdl_handle = dlopen("libSDL2-2.0.so.0", RTLD_LAZY | RTLD_NOLOAD);
   if (lib_sdl_handle == nullptr) {
-    const std::string sdl_path = cathook::core::find_loaded_module_path("libSDL2-2.0.so.0", true);
+    const std::string sdl_path = cathook::core::memory::module_path("libSDL2-2.0.so.0", true);
     if (!sdl_path.empty()) {
       print("SDL2 mapped at %s\n", sdl_path.c_str());
       lib_sdl_handle = dlopen(sdl_path.c_str(), RTLD_LAZY | RTLD_NOLOAD);
@@ -1285,58 +1200,8 @@ bool install_sdl_hooks()
 
   print("SDL2 loaded at %p\n", lib_sdl_handle);
 
-  bool sdl_hooks_ready = true;
-  if (!sdl_hook(lib_sdl_handle, "SDL_PollEvent", (void*)poll_event_hook, (void **)&poll_event_original, &poll_event_target)) {
-    print("Failed to hook SDL_PollEvent\n");
-    sdl_hooks_ready = false;
-  }
-
-  if (!sdl_hook(lib_sdl_handle, "SDL_GL_SwapWindow", (void*)swap_window_hook, (void **)&swap_window_original, &swap_window_target)) {
-    print("Failed to hook SDL_GL_SwapWindow\n");
-    sdl_hooks_ready = false;
-  }
-
-  if (!sdl_hook(lib_sdl_handle, "SDL_GetWindowFlags", (void*)get_window_flags_hook, (void **)&get_window_flags_original, &get_window_flags_target)) {
-    print("Failed to hook SDL_GetWindowFlags\n");
-    sdl_hooks_ready = false;
-  }
-
-  if (!sdl_hook(lib_sdl_handle, "SDL_GetWindowWMInfo", (void*)get_window_WM_info_hook, (void **)&get_window_WM_info_original, &get_window_WM_info_target)) {
-    print("Failed to hook SDL_GetWindowWMInfo\n");
-    sdl_hooks_ready = false;
-  }
-
-  if (!sdl_hook(lib_sdl_handle, "SDL_GetWindowSize", (void*)get_window_size_hook, (void **)&get_window_size_original, &get_window_size_target)) {
-    print("Failed to hook SDL_GetWindowSize\n");
-    sdl_hooks_ready = false;
-  }
-
-  if (!sdl_hooks_ready) {
-    if (poll_event_original != nullptr) {
-      restore_sdl_hook_target(poll_event_target, (void*)poll_event_original);
-      poll_event_original = nullptr;
-      poll_event_target = nullptr;
-    }
-    if (swap_window_original != nullptr) {
-      restore_sdl_hook_target(swap_window_target, (void*)swap_window_original);
-      swap_window_original = nullptr;
-      swap_window_target = nullptr;
-    }
-    if (get_window_flags_original != nullptr) {
-      restore_sdl_hook_target(get_window_flags_target, (void*)get_window_flags_original);
-      get_window_flags_original = nullptr;
-      get_window_flags_target = nullptr;
-    }
-    if (get_window_WM_info_original != nullptr) {
-      restore_sdl_hook_target(get_window_WM_info_target, (void*)get_window_WM_info_original);
-      get_window_WM_info_original = nullptr;
-      get_window_WM_info_target = nullptr;
-    }
-    if (get_window_size_original != nullptr) {
-      restore_sdl_hook_target(get_window_size_target, (void*)get_window_size_original);
-      get_window_size_original = nullptr;
-      get_window_size_target = nullptr;
-    }
+  if (!hooks::install_sdl(lib_sdl_handle)) {
+    hooks::restore_sdl();
     print("SDL hooks disabled after incomplete install\n");
     dlclose(lib_sdl_handle);
     return false;
@@ -1361,6 +1226,7 @@ bool initialize_game_runtime() {
   }
 
   print("initialize_game_runtime module runtime initialized\n");
+  register_hook_entries();
 
   if (!cathook::core::wait_for_module("engine.so")) {
     cathook::core::abort_module_runtime_init();
@@ -1407,7 +1273,7 @@ bool initialize_game_runtime() {
     return false;
   }
 
-  client_state = reinterpret_cast<ClientState*>(resolve_checked_rip_relative(rcon_addr_change_address, 3, 7, {0x48, 0x8D, 0x05}));
+  client_state = static_cast<ClientState*>(cathook::core::memory::resolve_lea_rip(reinterpret_cast<const void*>(rcon_addr_change_address)));
   error_assert(client_state == nullptr, "CClientState is missing");
 
   if (!cathook::core::wait_for_module("vgui2.so")) {
@@ -1469,8 +1335,8 @@ bool initialize_game_runtime() {
     return false;
   }
 
-  const auto input_storage = resolve_checked_rip_relative(func_address, 3, 7, {0x48, 0x8D, 0x05});
-  input = input_storage != 0 ? *reinterpret_cast<Input**>(input_storage) : nullptr;
+  const auto input_storage = cathook::core::memory::resolve_lea_rip(reinterpret_cast<const void*>(func_address));
+  input = input_storage != nullptr ? *static_cast<Input**>(input_storage) : nullptr;
   error_assert(input == nullptr, "CInput is missing");
 
   std::uintptr_t check_stuck_address = 0;
@@ -1479,8 +1345,8 @@ bool initialize_game_runtime() {
     return false;
   }
 
-  const auto move_helper_storage = resolve_checked_rip_relative(check_stuck_address, 3, 7, {0x48, 0x8D, 0x05});
-  move_helper = move_helper_storage != 0 ? *reinterpret_cast<MoveHelper**>(move_helper_storage) : nullptr;
+  const auto move_helper_storage = cathook::core::memory::resolve_lea_rip(reinterpret_cast<const void*>(check_stuck_address));
+  move_helper = move_helper_storage != nullptr ? *static_cast<MoveHelper**>(move_helper_storage) : nullptr;
   error_assert(move_helper == nullptr, "CMoveHelper is missing");
 
   prediction = (Prediction*)get_interface("./tf/bin/linux64/client.so", "VClientPrediction001");
@@ -1533,406 +1399,43 @@ bool initialize_game_runtime() {
   void* client_mode_interface = wait_for_client_mode_interface();
   error_assert(client_mode_interface == nullptr, "ClientModeShared is missing");
 
-  unsigned long hud_update = (unsigned long)client_vtable[11];
-  const auto global_vars_storage = resolve_checked_rip_relative(hud_update + 0x13, 3, 7, {0x48, 0x8B, 0x05});
-  global_vars = global_vars_storage != 0 ? *reinterpret_cast<GlobalVars**>(global_vars_storage) : nullptr;
+  const auto hud_update = reinterpret_cast<std::uintptr_t>(client_vtable[11]);
+  global_vars = wait_for_global_vars(hud_update);
   error_assert(global_vars == nullptr, "CGlobalVars is missing");
 
-  in_cond_original = (bool (*)(void*, int))sigscan_module("client.so", sigs::in_cond);
-  error_assert(in_cond_original == nullptr, "Failed to find InCond");
-
   client_mode_vtable = *(void***)client_mode_interface;
-
   model_render_vtable = *(void***)model_render;
-  model_render_forced_material_override_original = reinterpret_cast<void (*)(void*, Material*, OverrideType)>(
-    read_vtable_entry(model_render_vtable, 1, "ModelRender::ForcedMaterialOverride"));
-  model_render_draw_model_execute_original = reinterpret_cast<void (*)(void*, const DrawModelState&, const ModelRenderInfo&, matrix_3x4*)>(
-    read_vtable_entry(model_render_vtable, 19, "ModelRender::DrawModelExecute"));
-  entity_visuals::draw_model_execute_original = model_render_draw_model_execute_original;
-  if (model_render_draw_model_execute_original == nullptr || !write_to_table(
-        model_render_vtable, 19, (void*)model_render_draw_model_execute_hook)) {
-    print("ModelRender::DrawModelExecute hook failed\n");
-  } else {
-    print("ModelRender::DrawModelExecute hooked\n");
-  }
-  if (model_render_forced_material_override_original == nullptr || !write_to_table(
-        model_render_vtable, 1, (void*)model_render_forced_material_override_hook)) {
-    print("ModelRender::ForcedMaterialOverride hook failed\n");
-  } else {
-    print("ModelRender::ForcedMaterialOverride hooked\n");
-  }
+  vgui_vtable = *(void ***)vgui;
+  game_event_manager_vtable = *(void***)game_event_manager;
 
-  client_mode_post_screen_space_effects_original = reinterpret_cast<bool (*)(void*, const view_setup*)>(
-    read_vtable_entry(client_mode_vtable, 40, "ClientModeShared::DoPostScreenSpaceEffects"));
-  if (client_mode_post_screen_space_effects_original == nullptr || !write_to_table(
-        client_mode_vtable, 40, (void*)client_mode_post_screen_space_effects_hook)) {
-    print("ClientModeShared::DoPostScreenSpaceEffects hook failed\n");
-  } else {
-    print("ClientModeShared::DoPostScreenSpaceEffects hooked\n");
-  }
-
-  client_mode_create_move_original = reinterpret_cast<bool (*)(void*, float, user_cmd*)>(read_vtable_entry(client_mode_vtable, 22, "ClientModeShared::CreateMove"));
-  if (client_mode_create_move_original == nullptr || !write_to_table(client_mode_vtable, 22, (void*)client_mode_create_move_hook)) {
-    print("ClientModeShared::CreateMove hook failed\n");
-  } else {
-    print("ClientModeShared::CreateMove hooked\n");
-  }
-
-  client_create_move_original = reinterpret_cast<void (*)(void*, int, float, bool)>(read_vtable_entry(client_vtable, 21, "Client::CreateMove"));
-  if (client_create_move_original == nullptr || !write_to_table(client_vtable, 21, (void*)client_create_move_hook)) {
-    print("Client::CreateMove hook failed\n");
-  } else {
-    print("Client::CreateMove hooked\n");
-  }
 #if !defined(CATHOOK_TEXTMODE) || !CATHOOK_TEXTMODE
 
   skybox_changer::resolve_load_named_skys();
   world_visuals::resolve_particle_hook();
 
-  override_view_original = reinterpret_cast<void (*)(void*, view_setup*)>(read_vtable_entry(client_mode_vtable, 17, "ClientModeShared::OverrideView"));
-  if (override_view_original == nullptr || !write_to_table(client_mode_vtable, 17, (void*)override_view_hook)) {
-    print("OverrideView hook failed\n");
-  } else {
-    print("OverrideView hooked\n");
-  }
-
-  draw_view_model_original = reinterpret_cast<bool (*)(void*)>(read_vtable_entry(client_mode_vtable, 25, "ClientModeShared::ShouldDrawViewModel"));
-  if (draw_view_model_original == nullptr || !write_to_table(client_mode_vtable, 25, (void*)draw_view_model_hook)) {
-    print("ShouldDrawViewModel hook failed\n");
-  } else {
-    print("ShouldDrawViewModel hooked\n");
+  get_panel_name_original = reinterpret_cast<const char* (*)(void*, void*)>(
+    read_vtable_entry(vgui_vtable, 37, "VGUI_Panel::GetName"));
+  if (get_panel_name_original == nullptr) {
+    hooks::disable("VGUI_Panel::PaintTraverse");
   }
 #endif
-
-  vgui_vtable = *(void ***)vgui;
-#if !defined(CATHOOK_TEXTMODE) || !CATHOOK_TEXTMODE
-
-  get_panel_name_original = reinterpret_cast<const char* (*)(void*, void*)>(read_vtable_entry(vgui_vtable, 37, "VGUI_Panel::GetName"));
-  paint_traverse_original = reinterpret_cast<void (*)(void*, void*, bool, bool)>(read_vtable_entry(vgui_vtable, 42, "VGUI_Panel::PaintTraverse"));
-  if (get_panel_name_original == nullptr || paint_traverse_original == nullptr || !write_to_table(vgui_vtable, 42, (void*)paint_traverse_hook)) {
-    print("PaintTraverse hook failed\n");
-  } else {
-    print("PaintTraverse hooked\n");
-  }
-#endif
-
-  game_event_manager_vtable = *(void***)game_event_manager;
-  fire_event_client_side_original = reinterpret_cast<bool (*)(void*, GameEvent*)>(read_vtable_entry(game_event_manager_vtable, 9, "GameEventManager::FireEventClientSide"));
-  if (fire_event_client_side_original == nullptr || !write_to_table(game_event_manager_vtable, 9, (void*)fire_event_client_side_hook)) {
-    print("FireEventClientSide hook failed\n");
-  } else {
-    print("FireEventClientSide hooked\n");
-  }
-
-  frame_stage_notify_original = reinterpret_cast<void (*)(void*, ClientFrameStage)>(read_vtable_entry(client_vtable, 35, "Client::FrameStageNotify"));
-  if (frame_stage_notify_original == nullptr || !write_to_table(client_vtable, 35, (void*)frame_stage_notify_hook)) {
-    print("FrameStageNotify hook failed\n");
-  } else {
-    print("FrameStageNotify hooked\n");
-  }
-
-  dispatch_user_message_original = reinterpret_cast<bool (*)(void*, int, bf_read*)>(read_vtable_entry(client_vtable, 36, "Client::DispatchUserMessage"));
-  if (dispatch_user_message_original == nullptr || !write_to_table(client_vtable, 36, (void*)dispatch_user_message_hook)) {
-    print("DispatchUserMessage hook failed\n");
-  } else {
-    print("DispatchUserMessage hooked\n");
-  }
-
-  funchook = funchook_create();
 
   resolve_view_render_removal_hooks();
-
-  load_white_list_original = reinterpret_cast<void* (*)(void*)>(sigscan_module("engine.so", sigs::load_white_list));
-
-  item_schema_lookup_map_original = (std::uintptr_t (*)())sigscan_module("client.so", sigs::item_schema_lookup_map);
-  error_assert(item_schema_lookup_map_original == nullptr, "Failed to find item schema lookup map");
-  // inventory_changer::set_client_module_address(reinterpret_cast<const void*>(item_schema_lookup_map_original)); // Temporarily disabled.
-
-  item_definition_lookup_original =
-    (std::uintptr_t (*)(std::uintptr_t, unsigned int))sigscan_module("client.so", sigs::item_definition_lookup);
-  error_assert(item_definition_lookup_original == nullptr, "Failed to find item definition lookup");
-
-  inspect_target_check_original = (std::int64_t (*)(void*, void*))sigscan_module("client.so", sigs::inspect_target_check);
-  error_assert(inspect_target_check_original == nullptr, "Failed to find inspect target check");
-#if !defined(CATHOOK_TEXTMODE) || !CATHOOK_TEXTMODE
-#endif
-
-  attribute_hook_value_float_original = (float (*)(float, const char*, Entity*, void*, bool))sigscan_module("client.so", sigs::attribute_hook_value_float);
-  if (attribute_hook_value_float_original == nullptr) {
-    print("CAttributeManager::AttribHookValue signature missing; attribute hooks will return base values\n");
-  }
-
-  intro_menu_on_tick_original = (void (*)(void*))sigscan_module("client.so", sigs::intro_menu_on_tick);
-
-  class_menu_show_panel_original = (void (*)(void*, bool))sigscan_module("client.so", sigs::class_menu_show_panel);
-
-  team_menu_show_panel_original = (void (*)(void*, bool))sigscan_module("client.so", sigs::team_menu_show_panel);
-
-  client_panel_image_paint_original = reinterpret_cast<client_panel_image_paint_fn>(
-    sigscan_module("client.so", sigs::client_panel_image_paint));
-  if (client_panel_image_paint_original == nullptr) {
-    print("Failed to find client panel image paint crash guard; UI teardown guard disabled\n");
-  }
-
-  scene_entity_should_transmit_original = reinterpret_cast<should_transmit_fn>(
-    sigscan_module("server.so", sigs::server_scene_entity_should_transmit));
-  base_entity_should_transmit = reinterpret_cast<should_transmit_fn>(
-    sigscan_module("server.so", sigs::server_base_entity_should_transmit));
-  if (scene_entity_should_transmit_original == nullptr || base_entity_should_transmit == nullptr) {
-    print("Failed to find CSceneEntity CheckTransmit crash guard; stale scene guard disabled\n");
-    scene_entity_should_transmit_original = nullptr;
-    base_entity_should_transmit = nullptr;
-  }
-
-  cl_move_original = (tickbase::cl_move_fn)sigscan_module("engine.so", sigs::cl_move);
-  error_assert(cl_move_original == nullptr, "Failed to find CL_Move");
-
-  cl_read_packets_original = (std::int64_t (*)(char))sigscan_module("engine.so", sigs::cl_read_packets);
-  error_assert(cl_read_packets_original == nullptr, "Failed to find CL_ReadPackets");
-
-  cl_process_packet_entities_original =
-    (cl_process_packet_entities_fn)sigscan_module("engine.so", sigs::cl_process_packet_entities);
-  if (cl_process_packet_entities_original == nullptr) {
-    print("Failed to find CL_ProcessPacketEntities; crit hack full update state preservation disabled\n");
-  }
-
-  host_is_secure_server_allowed_original =
-    reinterpret_cast<host_is_secure_server_allowed_fn>(sigscan_module("engine.so", sigs::host_is_secure_server_allowed));
-  if (host_is_secure_server_allowed_original == nullptr) {
-    print("Failed to find Host_IsSecureServerAllowed; VAC bypass will only force the backing flag\n");
-  }
-
-  region_selector_request_queue_for_match_original =
-    (void (*)(void*, unsigned int))sigscan_module("client.so", sigs::request_queue_for_match);
-  if (region_selector_request_queue_for_match_original == nullptr) {
-    print("Failed to find CTFPartyClient::RequestQueueForMatch; autoqueue and region selector queue refresh disabled\n");
-  }
-
-  tf_gc_client_system_so_event_original =
-    (std::intptr_t (*)(void*, void*, int))sigscan_module("client.so", sigs::tf_gc_client_system_so_event);
-  if (tf_gc_client_system_so_event_original == nullptr) {
-    print("Failed to find CTFGCClientSystem SO event handler; auto casual join disabled\n");
-  }
-
-  tf_gc_client_system_request_accept_match_invite =
-    (void (*)(void*, std::uint64_t))sigscan_module("client.so", sigs::tf_gc_client_system_request_accept_match_invite);
-  if (tf_gc_client_system_request_accept_match_invite == nullptr) {
-    print("Failed to find CTFGCClientSystem::RequestAcceptMatchInvite; auto casual invite accepting disabled\n");
-  }
-
-  tf_gc_client_system_join_mm_match =
-    (std::intptr_t (*)(void*))sigscan_module("client.so", sigs::tf_gc_client_system_join_mm_match);
-  if (tf_gc_client_system_join_mm_match == nullptr) {
-    print("Failed to find CTFGCClientSystem::JoinMMMatch; auto casual joining disabled\n");
-  }
-
-  auto host_should_run = (tickbase::host_should_run_fn)sigscan_module("engine.so", sigs::host_should_run);
-  error_assert(host_should_run == nullptr, "Failed to find Host_ShouldRun");
-
-  prediction_run_simulation_original =
-    (prediction_run_simulation_fn)sigscan_module("client.so", sigs::prediction_run_simulation);
-  error_assert(prediction_run_simulation_original == nullptr, "Failed to find CPrediction::RunSimulation");
-
-  ctf_weapon_base_calc_is_attack_critical_original =
-    (ctf_weapon_base_calc_is_attack_critical_fn)sigscan_module("client.so", sigs::ctf_weapon_base_calc_is_attack_critical);
-  if (ctf_weapon_base_calc_is_attack_critical_original == nullptr) {
-    print("Failed to find CTFWeaponBase::CalcIsAttackCritical; ranged crit hack prediction fix disabled\n");
-  }
-
-  ctf_weapon_base_melee_calc_is_attack_critical_original =
-    (ctf_weapon_base_calc_is_attack_critical_fn)sigscan_module("client.so", sigs::ctf_weapon_base_melee_calc_is_attack_critical);
-  if (ctf_weapon_base_melee_calc_is_attack_critical_original == nullptr) {
-    print("Failed to find CTFWeaponBaseMelee::CalcIsAttackCritical; melee crit hack prediction fix disabled\n");
-  }
-
   casual_medal::resolve_random_int();
-  if (casual_medal::random_int_original == nullptr) {
-    print("Failed to resolve vstdlib RandomInt; guaranteed Casual medal flips disabled\n");
-  }
-
-  casual_medal::rank_record_original =
-    reinterpret_cast<casual_medal::rank_record_fn>(sigscan_module("client.so", sigs::casual_rank_record));
-  if (casual_medal::rank_record_original == nullptr) {
-    print("Failed to find CPvPRankPanel rank record; Casual medal changer disabled\n");
-  }
-
-  initialize_cl_move_globals(host_should_run);
-
-  int rv;
-
-  if (view_render_perform_screen_space_effects_original != nullptr) {
-    rv = funchook_prepare(
-      funchook,
-      reinterpret_cast<void**>(&view_render_perform_screen_space_effects_original),
-      reinterpret_cast<void*>(view_render_perform_screen_space_effects_hook));
-    if (rv != 0) {
-      print("Failed to prepare CViewRender::PerformScreenSpaceEffects removal hook\n");
-      view_render_perform_screen_space_effects_original = nullptr;
-    }
-  }
-
-  if (view_render_perform_screen_overlay_original != nullptr) {
-    rv = funchook_prepare(
-      funchook,
-      reinterpret_cast<void**>(&view_render_perform_screen_overlay_original),
-      reinterpret_cast<void*>(view_render_perform_screen_overlay_hook));
-    if (rv != 0) {
-      print("Failed to prepare CViewRender::PerformScreenOverlay removal hook\n");
-      view_render_perform_screen_overlay_original = nullptr;
-    }
-  }
-
-  if (!world_visuals::prepare_particle_hook(funchook)) {
-    print("Particle visual hook preparation failed; particle effect replacements disabled\n");
-  }
-
-  rv = funchook_prepare(funchook, (void**)&in_cond_original, (void*)in_cond_hook);
-  error_assert(rv != 0, "Failed to prepare InCond hook\n");
-#if !defined(CATHOOK_TEXTMODE) || !CATHOOK_TEXTMODE
-
-  rv = funchook_prepare(funchook, (void**)&load_white_list_original, (void*)load_white_list_hook);
-  error_assert(rv != 0, "Failed to prepare LoadWhiteList hook\n");
-#endif
-
-  rv = funchook_prepare(funchook, (void**)&item_definition_lookup_original, (void*)item_definition_lookup_hook);
-  error_assert(rv != 0, "Failed to prepare item definition lookup hook\n");
-
-  // Inventory changer attribute hook temporarily disabled.
-
-  rv = funchook_prepare(funchook, (void**)&inspect_target_check_original, (void*)inspect_target_check_hook);
-  error_assert(rv != 0, "Failed to prepare inspect target check hook\n");
-#if !defined(CATHOOK_TEXTMODE) || !CATHOOK_TEXTMODE
-#endif
-
-  rv = funchook_prepare(funchook, (void**)&intro_menu_on_tick_original, (void*)intro_menu_on_tick_hook);
-  error_assert(rv != 0, "Failed to prepare CTFIntroMenu::OnTick hook\n");
-
-  rv = funchook_prepare(funchook, (void**)&class_menu_show_panel_original, (void*)class_menu_show_panel_hook);
-  error_assert(rv != 0, "Failed to prepare CTFClassMenu::ShowPanel hook\n");
-
-  rv = funchook_prepare(funchook, (void**)&team_menu_show_panel_original, (void*)team_menu_show_panel_hook);
-  error_assert(rv != 0, "Failed to prepare CTFTeamMenu::ShowPanel hook\n");
-
-  if (client_panel_image_paint_original != nullptr) {
-    rv = funchook_prepare(
-      funchook,
-      reinterpret_cast<void**>(&client_panel_image_paint_original),
-      reinterpret_cast<void*>(client_panel_image_paint_hook));
-    if (rv != 0) {
-      print("Failed to prepare client panel image paint crash guard\n");
-      client_panel_image_paint_original = nullptr;
-    }
-  }
-
-  if (scene_entity_should_transmit_original != nullptr && base_entity_should_transmit != nullptr) {
-    rv = funchook_prepare(
-      funchook,
-      reinterpret_cast<void**>(&scene_entity_should_transmit_original),
-      reinterpret_cast<void*>(scene_entity_should_transmit_hook));
-    if (rv != 0) {
-      print("Failed to prepare CSceneEntity CheckTransmit crash guard\n");
-      scene_entity_should_transmit_original = nullptr;
-      base_entity_should_transmit = nullptr;
-    }
-  }
-
-  rv = funchook_prepare(funchook, (void**)&cl_move_original, (void*)cl_move_hook);
-  error_assert(rv != 0, "Failed to prepare CL_Move hook\n");
-
-  rv = funchook_prepare(funchook, (void**)&cl_read_packets_original, (void*)cl_read_packets_hook);
-  error_assert(rv != 0, "Failed to prepare CL_ReadPackets hook\n");
-
-  if (cl_process_packet_entities_original != nullptr) {
-    rv = funchook_prepare(
-      funchook,
-      (void**)&cl_process_packet_entities_original,
-      (void*)cl_process_packet_entities_hook);
-    error_assert(rv != 0, "Failed to prepare CL_ProcessPacketEntities hook\n");
-  }
-
-  if (host_is_secure_server_allowed_original != nullptr) {
-#if !defined(CATHOOK_TEXTMODE) || !CATHOOK_TEXTMODE
-
-    rv = funchook_prepare(
-      funchook,
-      (void**)&host_is_secure_server_allowed_original,
-      (void*)host_is_secure_server_allowed_hook);
-    error_assert(rv != 0, "Failed to prepare Host_IsSecureServerAllowed hook\n");
-#endif
-
-  }
-
-  if (tf_gc_client_system_so_event_original != nullptr) {
-    rv = funchook_prepare(
-      funchook,
-      (void**)&tf_gc_client_system_so_event_original,
-      (void*)tf_gc_client_system_so_event_hook);
-    error_assert(rv != 0, "Failed to prepare CTFGCClientSystem SO event hook\n");
-  }
-
-  rv = funchook_prepare(funchook, (void**)&prediction_run_simulation_original, (void*)prediction_run_simulation_hook);
-  error_assert(rv != 0, "Failed to prepare CPrediction::RunSimulation hook\n");
-
-  if (ctf_weapon_base_calc_is_attack_critical_original != nullptr) {
-    rv = funchook_prepare(
-      funchook,
-      (void**)&ctf_weapon_base_calc_is_attack_critical_original,
-      (void*)ctf_weapon_base_calc_is_attack_critical_hook);
-    error_assert(rv != 0, "Failed to prepare CTFWeaponBase::CalcIsAttackCritical hook\n");
-  }
-
-  if (ctf_weapon_base_melee_calc_is_attack_critical_original != nullptr) {
-    rv = funchook_prepare(
-      funchook,
-      (void**)&ctf_weapon_base_melee_calc_is_attack_critical_original,
-      (void*)ctf_weapon_base_melee_calc_is_attack_critical_hook);
-    error_assert(rv != 0, "Failed to prepare CTFWeaponBaseMelee::CalcIsAttackCritical hook\n");
-  }
-
-  if (casual_medal::random_int_original != nullptr) {
-    rv = funchook_prepare(
-      funchook,
-      reinterpret_cast<void**>(&casual_medal::random_int_original),
-      reinterpret_cast<void*>(casual_medal::random_int_hook));
-    if (rv != 0) {
-      print("Failed to prepare RandomInt hook; guaranteed Casual medal flips disabled\n");
-    }
-  }
-
-  if (casual_medal::rank_record_original != nullptr) {
-    rv = funchook_prepare(
-      funchook,
-      reinterpret_cast<void**>(&casual_medal::rank_record_original),
-      reinterpret_cast<void*>(casual_medal::rank_record_hook));
-    if (rv != 0) {
-      print("Failed to prepare CPvPRankPanel rank-record hook; Casual medal changer disabled\n");
-    }
-  }
 
   print("Renderer safety mode: engine-owned materials only; internal shader hooks disabled\n");
-  const bool shaderapivk_loaded = get_module_base_address("shaderapivk.so") != nullptr;
-  if (shaderapivk_loaded) {
-    shaderapivk_apply_pending_transition_snapshot_original =
-      reinterpret_cast<shaderapivk_apply_pending_transition_snapshot_fn>(
-        sigscan_module("shaderapivk.so", sigs::shaderapivk_apply_pending_transition_snapshot));
-  }
-
-  key_values_constructor_original = (KeyValues* (*)(void*, const char*))sigscan_module("client.so", sigs::key_values_constructor);
-  error_assert(key_values_constructor_original == nullptr, "Failed to find KeyValues() constructor");
-
-  key_values_set_int_original = reinterpret_cast<void* (*)(void*, const char*, int)>(sigscan_module("client.so", sigs::key_values_set_int));
-  error_assert(key_values_set_int_original == nullptr, "Failed to find KeyValues::SetInt()");
-
-  key_values_load_from_buffer_original = (bool (*)(void*, const char*, const char*, void*, const char*))sigscan_module("client.so", sigs::key_values_load_from_buffer);
-  error_assert(key_values_load_from_buffer_original == nullptr, "Failed to find KeyValues::LoadFromBuffer()");
-
-  key_values_delete_this_original = reinterpret_cast<void (*)(void*)>(sigscan_module("client.so", sigs::key_values_delete_this));
-  error_assert(key_values_delete_this_original == nullptr, "Failed to find KeyValues::deleteThis()");
-
   if (nographics::is_noshaderapi()) {
     print("Empty shader API (-noshaderapi); skipping Vulkan present hooks\n");
-  } else if (shaderapivk_loaded) {
+  } else if (nographics::command_line_has_vulkan() ||
+      cathook::core::memory::module_base("shaderapivk.so") != nullptr) {
+    if (cathook::core::memory::module_base("shaderapivk.so") == nullptr &&
+        !cathook::core::wait_for_module("shaderapivk.so")) {
+      print("Vulkan renderer requested, but shaderapivk.so is not loaded; skipping Vulkan hooks\n");
+    } else {
     void* lib_vulkan_handle = open_loaded_library("libvulkan.so.1");
+    if (lib_vulkan_handle == nullptr) {
+      lib_vulkan_handle = dlopen("libvulkan.so.1", RTLD_NOW | RTLD_LOCAL);
+    }
     if (lib_vulkan_handle == nullptr) {
       lib_vulkan_handle = dlopen("/usr/lib/libvulkan.so.1", RTLD_LAZY | RTLD_NOLOAD);
     }
@@ -1959,7 +1462,8 @@ bool initialize_game_runtime() {
       create_info.enabledExtensionCount = 1;
       create_info.ppEnabledExtensionNames = &instance_extension;
 
-      const auto instance_result = vkCreateInstance(&create_info, vk_allocator, &vk_instance);
+      VkInstance vk_instance = VK_NULL_HANDLE;
+      const auto instance_result = vkCreateInstance(&create_info, nullptr, &vk_instance);
       error_assert(instance_result != VK_SUCCESS || vk_instance == VK_NULL_HANDLE, "Failed to create Vulkan dummy instance\n");
 
       uint32_t gpu_count = 0;
@@ -1980,16 +1484,17 @@ bool initialize_game_runtime() {
 	}
       }
 
-      vk_physical_device = gpus[use_gpu];
+      const VkPhysicalDevice vk_physical_device = gpus[use_gpu];
 
-      count = 0;
+      uint32_t count = 0;
       vkGetPhysicalDeviceQueueFamilyProperties(vk_physical_device, &count, nullptr);
       error_assert(count == 0, "Failed to enumerate Vulkan queue families\n");
 
-      queue_families = std::make_unique<VkQueueFamilyProperties[]>(count);
+      auto queue_families = std::make_unique<VkQueueFamilyProperties[]>(count);
 
       vkGetPhysicalDeviceQueueFamilyProperties(vk_physical_device, &count, queue_families.get());
 
+      uint32_t queue_family = (uint32_t)-1;
       for (uint32_t i = 0; i < count; ++i) {
 	if (queue_families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
 	  queue_family = i;
@@ -2017,58 +1522,95 @@ bool initialize_game_runtime() {
 
       VkDevice vk_fake_device = VK_NULL_HANDLE;
 
-      const auto device_result = vkCreateDevice(vk_physical_device, &create_info2, vk_allocator, &vk_fake_device);
+      const auto device_result = vkCreateDevice(vk_physical_device, &create_info2, nullptr, &vk_fake_device);
       error_assert(device_result != VK_SUCCESS || vk_fake_device == VK_NULL_HANDLE, "Failed to create Vulkan dummy device\n");
 
-      create_device_original = (VkResult (*)(VkPhysicalDevice, const VkDeviceCreateInfo*, const VkAllocationCallbacks*, VkDevice*))vkGetInstanceProcAddr(vk_instance, "vkCreateDevice");
+      const auto vk_get_instance_proc = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
+        dlsym(lib_vulkan_handle, "vkGetInstanceProcAddr"));
+
+      create_device_original = vk_get_instance_proc != nullptr
+        ? reinterpret_cast<PFN_vkCreateDevice>(
+            vk_get_instance_proc(vk_instance, "vkCreateDevice"))
+        : nullptr;
       queue_present_original = (VkResult (*)(VkQueue, const VkPresentInfoKHR*))vkGetDeviceProcAddr(vk_fake_device, "vkQueuePresentKHR");
-      acquire_next_image_original = (VkResult (*)(VkDevice, VkSwapchainKHR, uint64_t, VkSemaphore, VkFence, uint32_t*))vkGetDeviceProcAddr(vk_fake_device, "vkAcquireNextImageKHR");
-      acquire_next_image2_original = (VkResult (*)(VkDevice, const VkAcquireNextImageInfoKHR*,  uint32_t*))vkGetDeviceProcAddr(vk_fake_device, "vkAcquireNextImage2KHR");
-      create_swapchain_original = (VkResult (*)(VkDevice, const VkSwapchainCreateInfoKHR*, const VkAllocationCallbacks*, VkSwapchainKHR*))vkGetDeviceProcAddr(vk_fake_device, "vkCreateSwapchainKHR");
-      destroy_swapchain_original = (void (*)(VkDevice, VkSwapchainKHR, const VkAllocationCallbacks*))vkGetDeviceProcAddr(vk_fake_device, "vkDestroySwapchainKHR");
-      get_device_queue_original = (void (*)(VkDevice, uint32_t, uint32_t, VkQueue*))vkGetDeviceProcAddr(vk_fake_device, "vkGetDeviceQueue");
-      get_device_queue2_original = (void (*)(VkDevice, const VkDeviceQueueInfo2*, VkQueue*))vkGetDeviceProcAddr(vk_fake_device, "vkGetDeviceQueue2");
+      get_device_queue_original = reinterpret_cast<PFN_vkGetDeviceQueue>(
+        vkGetDeviceProcAddr(vk_fake_device, "vkGetDeviceQueue"));
+      get_device_queue2_original = reinterpret_cast<PFN_vkGetDeviceQueue2>(
+        vkGetDeviceProcAddr(vk_fake_device, "vkGetDeviceQueue2"));
+      create_swapchain_original = reinterpret_cast<PFN_vkCreateSwapchainKHR>(
+        vkGetDeviceProcAddr(vk_fake_device, "vkCreateSwapchainKHR"));
+      destroy_swapchain_original = reinterpret_cast<PFN_vkDestroySwapchainKHR>(
+        vkGetDeviceProcAddr(vk_fake_device, "vkDestroySwapchainKHR"));
+      acquire_next_image_original = reinterpret_cast<PFN_vkAcquireNextImageKHR>(
+        vkGetDeviceProcAddr(vk_fake_device, "vkAcquireNextImageKHR"));
+      acquire_next_image2_original = reinterpret_cast<PFN_vkAcquireNextImage2KHR>(
+        vkGetDeviceProcAddr(vk_fake_device, "vkAcquireNextImage2KHR"));
+      destroy_device_original = reinterpret_cast<PFN_vkDestroyDevice>(
+        vkGetDeviceProcAddr(vk_fake_device, "vkDestroyDevice"));
 
-      vkDestroyDevice(vk_fake_device, vk_allocator);
+      vkDestroyDevice(vk_fake_device, nullptr);
 
-      rv = funchook_prepare(funchook, (void**)&queue_present_original, (void*)queue_present_hook);
-      error_assert(rv != 0, "Failed to prepare vkQueuePresentKHR hook\n");
+      vulkan_overlay_set_instance(vk_instance, vk_physical_device);
 
-      rv = funchook_prepare(funchook, (void**)&acquire_next_image_original, (void*)acquire_next_image_hook);
-      error_assert(rv != 0, "Failed to prepare vkAcquireNextImageKHR hook\n");
-
-      rv = funchook_prepare(funchook, (void**)&acquire_next_image2_original, (void*)acquire_next_image2_hook);
-      error_assert(rv != 0, "Failed to prepare vkAcquireNextImage2KHR hook\n");
-
-      rv = funchook_prepare(funchook, (void**)&create_swapchain_original, (void*)create_swapchain_hook);
-      error_assert(rv != 0, "Failed to prepare vkCreateSwapchainKHR hook\n");
-
-      rv = funchook_prepare(funchook, (void**)&destroy_swapchain_original, (void*)destroy_swapchain_hook);
-      error_assert(rv != 0, "Failed to prepare vkDestroySwapchainKHR hook\n");
-
+      hooks::add(hooks::pre_resolved("vkQueuePresentKHR", (void**)&queue_present_original,
+        (void*)queue_present_hook, true));
       if (create_device_original != nullptr) {
-        rv = funchook_prepare(funchook, (void**)&create_device_original, (void*)create_device_hook);
-        error_assert(rv != 0, "Failed to prepare vkCreateDevice hook\n");
+        hooks::add(hooks::pre_resolved("vkCreateDevice", (void**)&create_device_original,
+          (void*)create_device_hook, false));
       }
-
       if (get_device_queue_original != nullptr) {
-        rv = funchook_prepare(funchook, (void**)&get_device_queue_original, (void*)get_device_queue_hook);
-        error_assert(rv != 0, "Failed to prepare vkGetDeviceQueue hook\n");
+        hooks::add(hooks::pre_resolved("vkGetDeviceQueue", (void**)&get_device_queue_original,
+          (void*)get_device_queue_hook, false));
       }
-
       if (get_device_queue2_original != nullptr) {
-        rv = funchook_prepare(funchook, (void**)&get_device_queue2_original, (void*)get_device_queue2_hook);
-        error_assert(rv != 0, "Failed to prepare vkGetDeviceQueue2 hook\n");
+        hooks::add(hooks::pre_resolved("vkGetDeviceQueue2", (void**)&get_device_queue2_original,
+          (void*)get_device_queue2_hook, false));
       }
-
-      dlclose(lib_vulkan_handle);
+      if (create_swapchain_original != nullptr) {
+        hooks::add(hooks::pre_resolved("vkCreateSwapchainKHR", (void**)&create_swapchain_original,
+          (void*)create_swapchain_hook, false));
+      }
+      if (destroy_swapchain_original != nullptr) {
+        hooks::add(hooks::pre_resolved("vkDestroySwapchainKHR", (void**)&destroy_swapchain_original,
+          (void*)destroy_swapchain_hook, false));
+      }
+      if (acquire_next_image_original != nullptr) {
+        hooks::add(hooks::pre_resolved("vkAcquireNextImageKHR", (void**)&acquire_next_image_original,
+          (void*)acquire_next_image_hook, false));
+      }
+      if (acquire_next_image2_original != nullptr) {
+        hooks::add(hooks::pre_resolved("vkAcquireNextImage2KHR", (void**)&acquire_next_image2_original,
+          (void*)acquire_next_image2_hook, false));
+      }
+      if (destroy_device_original != nullptr) {
+        hooks::add(hooks::pre_resolved("vkDestroyDevice", (void**)&destroy_device_original,
+          (void*)destroy_device_hook, false));
+      }
     } else {
       print("Vulkan mode detected, but libvulkan.so.1 is not loaded\n");
     }
+    }
   }
 
-  rv = funchook_install(funchook, 0);
-  error_assert(rv != 0, "Non-VMT related hooks failed\n");
+  error_assert(!hooks::resolve_all(), "Required hook signatures are missing");
+
+  auto host_should_run = (tickbase::host_should_run_fn)sigscan_module("engine.so", sigs::host_should_run);
+  error_assert(host_should_run == nullptr, "Failed to find Host_ShouldRun");
+  initialize_cl_move_globals(host_should_run);
+
+  if (scene_entity_should_transmit_original == nullptr || base_entity_should_transmit == nullptr) {
+    hooks::disable("CSceneEntity::CheckTransmit");
+    scene_entity_should_transmit_original = nullptr;
+    base_entity_should_transmit = nullptr;
+  }
+
+  if (!world_visuals::prepare_particle_hook(hooks::detail::ensure_funchook())) {
+    print("Particle visual hook preparation failed; particle effect replacements disabled\n");
+  }
+
+  error_assert(!hooks::install_all(), "Failed to install hooks");
+
+  entity_visuals::draw_model_execute_original = model_render_draw_model_execute_original;
 
   install_sdl_hooks();
 
@@ -2079,7 +1621,7 @@ bool initialize_game_runtime() {
     return false;
   }
 
-  random_seed = reinterpret_cast<uint32_t*>(resolve_checked_rip_relative(func_address_2, 3, 7, {0x48, 0x8D, 0x05}));
+  random_seed = static_cast<uint32_t*>(cathook::core::memory::resolve_lea_rip(reinterpret_cast<const void*>(func_address_2)));
   if (random_seed == nullptr) {
     cathook::core::request_detach();
     cathook::core::service_detach_request();
@@ -2124,5 +1666,10 @@ __attribute__((destructor))
 void __exit() {
   cathook::core::process_exiting.store(true, std::memory_order_release);
   cathook::core::stop_attach_worker();
+  if (cathook::core::runtime_initialized.load(std::memory_order_acquire)
+      || cathook::core::game_hooks_installed.load(std::memory_order_acquire)
+      || sdl_hooks_installed.load(std::memory_order_acquire)) {
+    cathook::core::unload_module_runtime();
+  }
   cathook::core::exception_handler::uninstall();
 }

@@ -8,20 +8,13 @@
 #include "games/tf2/sdk/net_messages.hpp"
 #include "core/ipc/ipc_client.hpp"
 #include "core/math/math.hpp"
-#include "core/player_manager.hpp"
 #include "external/MD5/MD5.hpp"
 #include <algorithm>
-#include <climits>
 #include <cmath>
 
 namespace crit_hack {
 
 namespace {
-
-inline float math_remap(float val, float a, float b, float c, float d) {
-  if (a == b) return c;
-  return c + (val - a) * (d - c) / (b - a);
-}
 
 using c_valve_random = valve_random;
 
@@ -29,9 +22,6 @@ c_valve_random valve_rand;
 
 int crit_damage = 0;
 int ranged_damage = 0;
-int melee_damage = 0;
-int resource_damage = 0;
-int desync_damage = 0;
 std::unordered_map<int, health_history_t> health_history{};
 
 bool crit_banned = false;
@@ -62,9 +52,6 @@ int cached_crit_checks = 0;
 int cached_crit_seed_requests = 0;
 bool weapon_info_cache_valid = false;
 
-// Keep the search bounded while allowing the shot to use a future seed.
-// The current usercmd is rewritten and sent normally; no packet queue is
-// needed to wait for the selected command.
 constexpr int max_crit_command_search = 4096;
 
 enum class crit_request {
@@ -96,33 +83,6 @@ void reset_weapon_info() {
   cached_crit_checks = 0;
   cached_crit_seed_requests = 0;
   weapon_info_cache_valid = false;
-}
-
-inline Entity* get_player_resource_entity() {
-  if (entity_list == nullptr) {
-    return nullptr;
-  }
-
-  const int max_entities = entity_list->get_max_entities();
-  for (int index = 1; index < max_entities; ++index) {
-    auto* entity = entity_list->entity_from_index(index);
-    if (entity != nullptr && entity->get_class_id() == class_id::PLAYER_RESOURCE) {
-      return entity;
-    }
-  }
-
-  return nullptr;
-}
-
-template <typename value_type>
-inline value_type read_player_resource_value(Entity* player_resource, int array_offset, int player_index) {
-  if (player_resource == nullptr || player_index <= 0) {
-    return {};
-  }
-
-  const auto base = reinterpret_cast<std::uintptr_t>(player_resource);
-  const auto entry_offset = static_cast<std::uintptr_t>(array_offset) + (static_cast<std::uintptr_t>(player_index) * sizeof(value_type));
-  return *reinterpret_cast<value_type*>(base + entry_offset);
 }
 
 int command_to_seed(int command_number, Weapon* weapon, bool melee) {
@@ -209,8 +169,8 @@ float crit_cost_multiplier(bool melee, int checks, int seed_requests) {
     return 1.0f;
   }
 
-  return math_remap(
-    std::clamp(static_cast<float>(seed_requests) / static_cast<float>(checks), 0.1f, 1.0f),
+  return remap_clamped(
+    static_cast<float>(seed_requests) / static_cast<float>(checks),
     0.1f,
     1.0f,
     1.0f,
@@ -461,15 +421,6 @@ void update_info(Player* local, Weapon* weapon) {
         (normalized_crit_damage / current_allowed_chance) - normalized_crit_damage - std::max(0.0f, non_crit_damage));
     }
   }
-
-  auto* resource = get_player_resource_entity();
-  if (resource != nullptr) {
-    static const int damage_offset = tf2_netvars::find_offset("DT_TFPlayerResource", { "baseclass", "m_iDamage" });
-    if (damage_offset > 0) {
-      resource_damage = read_player_resource_value<int>(resource, damage_offset, engine->get_localplayer_index());
-      desync_damage = ranged_damage + melee_damage - resource_damage;
-    }
-  }
 }
 
 crit_request get_crit_request(user_cmd* cmd, Weapon* weapon) {
@@ -544,19 +495,15 @@ create_move_result on_create_move(user_cmd* cmd, bool aimbot_requested_shot) {
 
   if (weapon->is_rapid_fire() && global_vars->curtime < active_rapid_fire_crit_check_time(weapon) + 1.0f) {
     current_queue_state = queue_state::blocked;
-    result.attack_allowed = true;
     return result;
   }
 
   crit_request req = get_crit_request(cmd, weapon);
   if (req == crit_request::any) {
-    result.attack_allowed = true;
     return result;
   }
 
   const bool wants_crit = req == crit_request::crit;
-  result.crit_requested = wants_crit;
-  result.skip_requested = req == crit_request::skip;
 
   if (!is_crit_command(cmd->command_number, weapon, wants_crit, true, is_melee_weapon)) {
     const int selected_command = get_crit_command(
@@ -567,24 +514,18 @@ create_move_result on_create_move(user_cmd* cmd, bool aimbot_requested_shot) {
       true,
       is_melee_weapon);
 
+    result.attack_suppressed = true;
     if (selected_command > 0) {
-      if (selected_command == cmd->command_number) {
-        cmd->random_seed = MD5_PseudoRandom(static_cast<unsigned int>(selected_command)) & INT_MAX;
-        current_queue_state = queue_state::releasing;
-        result.attack_allowed = true;
-      } else {
-        current_queue_state = queue_state::blocked;
-        result.attack_allowed = false;
-      }
+      queued_crit_command = selected_command;
+      queued_ticks = selected_command - cmd->command_number;
+      current_queue_state = queue_state::waiting_for_seed;
     } else {
       current_queue_state = queue_state::blocked;
-      result.attack_allowed = false;
     }
     return result;
   }
 
   current_queue_state = wants_crit ? queue_state::releasing : queue_state::idle;
-  result.attack_allowed = true;
   return result;
 }
 
@@ -625,7 +566,7 @@ void on_game_event(GameEvent* event) {
               for (const auto& [h, storage] : history.history_map) {
                 int old_h2 = storage.old_health % 32768;
                 if (old_h2 > health) {
-                  old_h = health > old_h ? old_h2 : std::min(old_h, old_h2);
+                  old_h = old_h2;
                 }
               }
             }
@@ -663,8 +604,6 @@ void on_game_event(GameEvent* event) {
       if (crit && !local->is_crit_boosted()) {
         crit_damage += damage;
       }
-    } else {
-      melee_damage += damage;
     }
   } else if (event_name == "player_spawn") {
     int victim_id = event->get_int("userid");
@@ -676,7 +615,7 @@ void on_game_event(GameEvent* event) {
       }
     }
   } else if (event_name == "scorestats_accumulated_update" || event_name == "mvm_reset_stats") {
-    ranged_damage = crit_damage = melee_damage = 0;
+    ranged_damage = crit_damage = 0;
   } else if (event_name == "client_beginconnect" || event_name == "client_disconnect" || event_name == "game_newmap") {
     reset();
   }
@@ -685,9 +624,6 @@ void on_game_event(GameEvent* event) {
 void reset() {
   crit_damage = 0;
   ranged_damage = 0;
-  melee_damage = 0;
-  resource_damage = 0;
-  desync_damage = 0;
   crit_banned = false;
   damage_till_flip = 0.0f;
   reset_weapon_info();
@@ -702,7 +638,7 @@ void store_health_history(int index, int health, Player* player) {
     if (player->is_dormant()) {
       history.spawn_counter = -1;
     } else {
-      static const int spawn_counter_offset = tf2_netvars::find_offset("DT_BasePlayer", { "m_iSpawnCounter" });
+      static tf2_netvars::lazy_offset spawn_counter_offset{"DT_TFPlayer", { "m_iSpawnCounter" }};
       if (spawn_counter_offset > 0) {
         int sc = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(player) + spawn_counter_offset);
         if (history.spawn_counter == -1)
@@ -772,62 +708,6 @@ bool weapon_can_crit(Weapon* weapon, bool weapon_only) {
   }
 
   return true;
-}
-
-bool is_command_crit(user_cmd* cmd, int command_number) {
-  auto* local = entity_list != nullptr ? entity_list->get_localplayer() : nullptr;
-  if (cmd == nullptr || local == nullptr || !local->is_alive() || local->is_dormant()) {
-    return false;
-  }
-
-  auto* weapon = local->get_weapon();
-  if (weapon == nullptr || !weapon_can_crit(weapon)) {
-    return false;
-  }
-
-  update_info(local, weapon);
-  return is_crit_command(command_number, weapon, true, true, weapon->is_melee());
-}
-
-int find_queued_crit_command(user_cmd* cmd, int max_commands) {
-  auto* local = entity_list != nullptr ? entity_list->get_localplayer() : nullptr;
-  if (cmd == nullptr || local == nullptr || !local->is_alive() || local->is_dormant()) {
-    current_queue_state = queue_state::blocked;
-    return 0;
-  }
-
-  auto* weapon = local->get_weapon();
-  if (weapon == nullptr || !weapon_can_crit(weapon)) {
-    current_queue_state = queue_state::blocked;
-    return 0;
-  }
-
-  update_info(local, weapon);
-
-  if (available_crits <= 0 || crit_banned || local->is_crit_boosted() || weapon->crit_time() > global_vars->curtime) {
-    current_queue_state = queue_state::blocked;
-    return 0;
-  }
-
-  if (weapon->is_rapid_fire() && global_vars->curtime < active_rapid_fire_crit_check_time(weapon) + 1.0f) {
-    current_queue_state = queue_state::blocked;
-    return 0;
-  }
-
-  const int bounded_commands = std::min(max_commands, max_crit_command_search);
-  const int target_command = get_crit_command(weapon, cmd->command_number, bounded_commands, true, true, weapon->is_melee());
-  queued_crit_command = target_command;
-  queued_ticks = target_command > 0 ? std::max(0, target_command - cmd->command_number) : 0;
-  current_queue_state = target_command > 0
-    ? (target_command == cmd->command_number ? queue_state::releasing : queue_state::waiting_for_seed)
-    : queue_state::blocked;
-  return target_command;
-}
-
-void notify_queued_release(int command_number) {
-  if (command_number > 0 && queued_crit_command == command_number) {
-    current_queue_state = queue_state::releasing;
-  }
 }
 
 crit_stats_t get_stats() {

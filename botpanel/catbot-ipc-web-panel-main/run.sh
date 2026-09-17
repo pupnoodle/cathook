@@ -10,6 +10,10 @@ cd "$panel_dir" || exit 1
 
 mkdir -p logs
 log_path="${CAT_PANEL_LOG:-panel.log}"
+export CAT_STEAM_TXTMODE="${CAT_STEAM_TXTMODE:-1}"
+export CAT_STM_WEBHELPER_TRIM="${CAT_STM_WEBHELPER_TRIM:-1}"
+export CAT_STM_WEBHELPER_SINGLE="${CAT_STM_WEBHELPER_SINGLE:-1}"
+export CAT_TEXTMODE_GAME="${CAT_TEXTMODE_GAME:-1}"
 
 node_path="$(command -v node || command -v nodejs || true)"
 if [ -z "$node_path" ]; then

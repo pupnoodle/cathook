@@ -10,7 +10,11 @@ V  o o  V  file: src/features/automation/misc/misc.hpp
 */
 #ifndef AUTOMATION_MISC_HPP
 #define AUTOMATION_MISC_HPP
+#include <cstdint>
+#include <filesystem>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -32,8 +36,12 @@ public:
   void on_game_event(GameEvent* event);
 
   [[nodiscard]] bool is_setup_time() const;
+  [[nodiscard]] bool is_buybot_busy() const;
+  void mvm_fix();
+  void run_chat_commands(std::string_view message, std::uint32_t account_id, bool party_chat);
 
 private:
+  void reset_buybot();
   void apply_misc_convars();
   void run_auto_class_select();
   void run_anti_afk(user_cmd* user_cmd);
@@ -56,6 +64,25 @@ private:
   void run_ping_reducer();
   void run_queueing();
   void run_boost_queueing();
+  void run_auto_vote_message(int message_type, const bf_read* message_data);
+  void run_auto_vote();
+  void run_autoparty();
+  void refresh_party_hosts();
+
+  struct pending_vote
+  {
+    int team = 0;
+    int caller = 0;
+    int target = 0;
+    float start_time = 0.0f;
+    float vote_time = 0.0f;
+    bool voted = false;
+  };
+
+  std::unordered_map<int, pending_vote> pending_votes_{};
+  bool vote_active_ = false;
+  float vote_call_cooldown_expire_ = 0.0f;
+  float next_auto_vote_kick_time_ = 0.0f;
 
   float next_class_action_time_ = 0.0f;
   float next_queue_action_time_ = 0.0f;
@@ -90,8 +117,12 @@ private:
   int mvm_buybot_step_ = 1;
   int mvm_buybot_upgrade_slot_step_ = 0;
   int mvm_buybot_upgrade_index_ = 0;
+  int mvm_buybot_priority_step_ = 0;
   bool mvm_buybot_cash_limit_reached_ = false;
   bool mvm_buybot_finished_upgrades_ = false;
+  bool mvm_buybot_navigating_ = false;
+  float mvm_buybot_stall_time_ = 0.0f;
+  float next_mvm_scout_equip_time_ = 0.0f;
   int autotaunt_previous_slot_ = -1;
   bool autotaunt_waiting_for_taunt_ = false;
   int chatspam_index_ = 0;
@@ -103,6 +134,10 @@ private:
   float announcer_last_headshot_time_ = -100000.0f;
   std::vector<std::pair<float, std::string>> pending_killsays_{};
   std::vector<unsigned long> reported_account_ids_{};
+  std::vector<std::uint32_t> autoparty_hosts_{};
+  std::string autoparty_hosts_source_{};
+  bool autoparty_from_ipc_ = false;
+  float next_autoparty_time_ = 0.0f;
 };
 
 automation_controller& controller();
@@ -110,6 +145,8 @@ bool reload_casual_criteria();
 bool request_casual_queue();
 bool cancel_casual_queue();
 bool abandon_current_match();
+bool promote_party_leader(std::uint32_t account_id);
+void mvm_quit();
 void shutdown();
 
 }

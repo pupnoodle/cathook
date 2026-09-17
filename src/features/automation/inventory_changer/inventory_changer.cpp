@@ -1,5 +1,7 @@
 #if 0 // Inventory changer temporarily disabled.
 
+#include "core/memory/code_scan.hpp"
+
 namespace inventory_changer
 {
 namespace
@@ -112,11 +114,17 @@ void refresh_schema_options(const std::uintptr_t schema)
     const auto definition = item_definition_lookup_original(schema, definition_index);
     if (definition == 0) continue;
     found_definition = true;
-    const auto* item_name = *reinterpret_cast<const char* const*>(definition + 0x58);
-    const auto* item_type = *reinterpret_cast<const char* const*>(definition + 0x68);
+    static const int item_name_offset = cathook::core::memory::keyed_store_offset("client.so", "item_name");
+    static const int item_type_offset = cathook::core::memory::keyed_store_offset("client.so", "item_type_name");
+    static const int acts_as_wearable_offset = cathook::core::memory::keyed_store_offset("client.so", "act_as_wearable");
+    static const int acts_as_weapon_offset = cathook::core::memory::keyed_store_offset("client.so", "act_as_weapon");
+    if (item_name_offset <= 0 || item_type_offset <= 0 ||
+        acts_as_wearable_offset <= 0 || acts_as_weapon_offset <= 0) break;
+    const auto* item_name = *reinterpret_cast<const char* const*>(definition + item_name_offset);
+    const auto* item_type = *reinterpret_cast<const char* const*>(definition + item_type_offset);
     if (item_name == nullptr || item_name[0] == '\0') continue;
-    const bool acts_as_wearable = *reinterpret_cast<const std::uint8_t*>(definition + 0x102) != 0;
-    const bool acts_as_weapon = *reinterpret_cast<const std::uint8_t*>(definition + 0x103) != 0;
+    const bool acts_as_wearable = *reinterpret_cast<const std::uint8_t*>(definition + acts_as_wearable_offset) != 0;
+    const bool acts_as_weapon = *reinterpret_cast<const std::uint8_t*>(definition + acts_as_weapon_offset) != 0;
     std::string label = localized_item_name(item_name, localization);
     if (label.empty()) label = item_name;
     const bool is_crate = contains_insensitive(item_name, "crate") || contains_insensitive(item_name, "case") ||
@@ -371,28 +379,26 @@ bool is_local_item(Entity* entity)
 
 int definition_offset(Entity* entity)
 {
-  static const int weapon_offset = [] {
-    int value = tf2_netvars::find_offset("DT_TFWeaponBase", {"m_Item", "m_iItemDefinitionIndex"});
-    return value > 0 ? value : 0xd04;
-  }();
-  static const int wearable_offset = [] {
-    int value = tf2_netvars::find_offset("DT_TFWearable", {"m_Item", "m_iItemDefinitionIndex"});
-    if (value <= 0) value = tf2_netvars::find_offset("DT_EconEntity", {"m_Item", "m_iItemDefinitionIndex"});
-    return value > 0 ? value : 0xd04;
-  }();
-  return entity != nullptr && entity->is_base_combat_weapon() ? weapon_offset : wearable_offset;
+  static tf2_netvars::lazy_offset weapon_offset{"DT_TFWeaponBase", {"m_Item", "m_iItemDefinitionIndex"}};
+  static tf2_netvars::lazy_offset wearable_offset{"DT_TFWearable", {"m_Item", "m_iItemDefinitionIndex"}};
+  static tf2_netvars::lazy_offset econ_offset{"DT_EconEntity", {"m_Item", "m_iItemDefinitionIndex"}};
+  if (entity != nullptr && entity->is_base_combat_weapon()) return weapon_offset;
+  const int offset = wearable_offset;
+  return offset > 0 ? offset : static_cast<int>(econ_offset);
 }
 
 std::uint16_t read_definition(Entity* entity)
 {
-  if (entity == nullptr) return 0;
-  return *reinterpret_cast<const std::uint16_t*>(reinterpret_cast<const std::byte*>(entity) + definition_offset(entity));
+  const int offset = definition_offset(entity);
+  if (entity == nullptr || offset <= 0) return 0;
+  return *reinterpret_cast<const std::uint16_t*>(reinterpret_cast<const std::byte*>(entity) + offset);
 }
 
 void write_definition(Entity* entity, const std::uint16_t definition)
 {
-  if (entity == nullptr || definition == 0) return;
-  auto* address = reinterpret_cast<std::uint16_t*>(reinterpret_cast<std::byte*>(entity) + definition_offset(entity));
+  const int offset = definition_offset(entity);
+  if (entity == nullptr || definition == 0 || offset <= 0) return;
+  auto* address = reinterpret_cast<std::uint16_t*>(reinterpret_cast<std::byte*>(entity) + offset);
   if (*address != definition) *address = definition;
 }
 

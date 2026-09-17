@@ -8,7 +8,6 @@ V  o o  V  file: src/core/hooks/class_menu_show_panel.cpp
   |     \     )
   || (___\====
 */
-#include <unistd.h>
 #include "games/tf2/sdk/interfaces/entity_list.hpp"
 #include "features/menu/config.hpp"
 #include "features/automation/misc/misc.hpp"

@@ -2,6 +2,7 @@
 #include "core/identify/identify_client.hpp"
 #include "core/commands.hpp"
 #include "core/player_manager.hpp"
+#include "core/player_resource.hpp"
 #include "core/print.hpp"
 #include "external/MD5/MD5.hpp"
 #include "games/tf2/sdk/entities/player.hpp"
@@ -168,6 +169,12 @@ std::string player_hash(std::uint32_t friends_id, std::string_view name)
     return {};
   }
 
+  static thread_local std::unordered_map<std::uint32_t, std::pair<std::string, std::string>> cache{};
+  if (const auto found = cache.find(friends_id); found != cache.end() && found->second.first == name)
+  {
+    return found->second.second;
+  }
+
   std::string blob = std::to_string(friends_id) + std::string{name};
   MD5Value_t result{};
   MD5_ProcessSingleBuffer(blob.data(), static_cast<int>(blob.size()), result);
@@ -180,6 +187,7 @@ std::string player_hash(std::uint32_t friends_id, std::string_view name)
     hex_str.push_back(hex_chars[(byte >> 4) & 0x0f]);
     hex_str.push_back(hex_chars[byte & 0x0f]);
   }
+  cache[friends_id] = {std::string{name}, hex_str};
   return hex_str;
 }
 
@@ -308,24 +316,10 @@ void on_player_death(int attacker_user_id)
     return;
   }
 
-  Entity* player_resource = nullptr;
-  const int max_entities = entity_list->get_max_entities();
-  for (int i = 1; i < max_entities; ++i)
-  {
-    auto* entity = entity_list->entity_from_index(i);
-    if (entity != nullptr && entity->get_class_id() == class_id::PLAYER_RESOURCE)
-    {
-      player_resource = entity;
-      break;
-    }
-  }
+  Entity* player_resource = cathook::core::player_resource::get_player_resource_entity();
 
-  static const int ping_offset = tf2_netvars::find_offset("DT_TFPlayerResource", { "baseclass", "m_iPing" });
-  const char* name_ptr = nullptr;
-  if (ping_offset > 816 && player_resource != nullptr)
-  {
-    name_ptr = reinterpret_cast<const char* const*>(reinterpret_cast<uintptr_t>(player_resource) + ping_offset - 816)[attacker_index];
-  }
+  static tf2_netvars::lazy_offset ping_offset{"DT_TFPlayerResource", { "baseclass", "m_iPing" }};
+  const char* name_ptr = cathook::core::player_resource::name_pointer(player_resource, ping_offset, attacker_index);
   const std::string_view name = (name_ptr != nullptr && name_ptr[0] != '\0') ? name_ptr : info.name;
 
   if (!is_peer(account_id, name))

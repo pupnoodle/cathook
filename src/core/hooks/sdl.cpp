@@ -16,12 +16,14 @@ V  o o  V  file: src/core/hooks/sdl.cpp
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <mutex>
 #include <thread>
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_opengl3.h"
 #include "imgui/imgui_impl_sdl2.h"
 #include "imgui/imgui_impl_vulkan.h"
+
 #include "core/ui/mono_ui.hpp"
 #include "mono/mono.hpp"
 #include "games/tf2/sdk/interfaces/surface.hpp"
@@ -36,9 +38,9 @@ V  o o  V  file: src/core/hooks/sdl.cpp
 #include "features/visuals/spectator_list.hpp"
 #include "features/automation/navbot/navbot_controller.hpp"
 #include "features/automation/nographics/nographics.hpp"
+#undef Status
 
 bool (*poll_event_original)(SDL_Event*) = NULL;
-int  (*peep_events_original)(SDL_Event*, int, SDL_eventaction, int, int) = NULL;
 void (*swap_window_original)(SDL_Window*) = NULL;
 Uint32 (*get_window_flags_original)(SDL_Window*) = NULL;
 SDL_bool (*get_window_WM_info_original)(SDL_Window* window, SDL_SysWMinfo* info) = NULL;
@@ -51,13 +53,20 @@ void** get_window_size_target = nullptr;
 std::atomic_bool sdl_hooks_installed = false;
 std::atomic_bool sdl_hooks_uninstalling = false;
 std::atomic_int sdl_active_hook_calls = 0;
+enum class mono_backend_kind : std::uint8_t {
+  none,
+  opengl,
+  vulkan,
+};
+
 static mono::runtime mono_runtime{};
-static bool mono_opengl_backend = false;
-static bool mono_backend_selected = false;
+static mono_backend_kind mono_backend = mono_backend_kind::none;
 static bool mono_skip_opengl_backend_shutdown = false;
 static SDL_GLContext mono_opengl_context = nullptr;
-static std::atomic_bool mono_opengl_overlay_disabled = false;
-static bool mono_opengl_frame_ready = false;
+static std::atomic_bool mono_overlay_disabled = false;
+static bool mono_frame_ready = false;
+static std::atomic_bool mono_vulkan_device_lost = false;
+static ImGui_ImplVulkan_InitInfo mono_vulkan_init_info{};
 static std::recursive_mutex mono_ui_mutex{};
 static thread_local bool mono_ui_frame_lock_held = false;
 static std::array<mono::key_state, SDL_NUM_SCANCODES> mono_keyboard_state{};
@@ -77,13 +86,19 @@ struct sdl_hook_call_guard
   }
 };
 
-void begin_sdl_hook_uninstall()
+bool begin_sdl_hook_uninstall()
 {
   sdl_hooks_uninstalling.store(true, std::memory_order_release);
 
-  for (int attempt = 0; attempt < 100 && sdl_active_hook_calls.load(std::memory_order_acquire) > 0; ++attempt) {
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (sdl_active_hook_calls.load(std::memory_order_acquire) > 0) {
+    if (std::chrono::steady_clock::now() >= deadline) {
+      sdl_hooks_uninstalling.store(false, std::memory_order_release);
+      return false;
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
+  return true;
 }
 
 void finish_sdl_hook_uninstall()
@@ -207,8 +222,7 @@ static void configure_mono_input() {
   });
 }
 
-static bool initialize_mono_runtime(
-    SDL_Window *const window, const bool vulkan, const SDL_GLContext opengl_context = nullptr) {
+static bool initialize_mono_runtime(SDL_Window *const window, mono::backend backend, const mono_backend_kind kind) {
   if (window == nullptr) {
     return false;
   }
@@ -216,51 +230,17 @@ static bool initialize_mono_runtime(
   std::lock_guard<std::recursive_mutex> lock(mono_ui_mutex);
 
   if (mono_runtime.initialized()) {
-    return mono_backend_selected && mono_opengl_backend == !vulkan;
+    return mono_backend == kind;
   }
 
   configure_mono_input();
-  const bool initialized = mono_runtime.initialize({
-    .initialize = [window, vulkan, opengl_context]() {
-      if (vulkan) {
-        return ImGui_ImplSDL2_InitForVulkan(window);
-      }
-
-      if (!ImGui_ImplSDL2_InitForOpenGL(window, opengl_context)) {
-        return false;
-      }
-
-      if (!ImGui_ImplOpenGL3_Init()) {
-        ImGui_ImplSDL2_Shutdown();
-        return false;
-      }
-      return true;
-    },
-    .shutdown = [vulkan]() {
-      if (!vulkan && !mono_skip_opengl_backend_shutdown) {
-        ImGui_ImplOpenGL3_Shutdown();
-      }
-      if (ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().BackendPlatformUserData != nullptr) {
-        ImGui_ImplSDL2_Shutdown();
-      }
-    },
-    .new_frame = [window, vulkan]() {
-      if (vulkan) {
-        ImGui_ImplVulkan_NewFrame();
-      }
-
-      update_imgui_sdl_display_size(window);
-      update_imgui_frame_timing();
-    },
-    .render = [](ImDrawData *const) {}
-  }, [](ImGuiIO &io) {
+  const bool initialized = mono_runtime.initialize(std::move(backend), [](ImGuiIO &io) {
     io.ConfigWindowsMoveFromTitleBarOnly = true;
     cat_menu::ensure_fonts();
     return io.FontDefault != nullptr;
   });
   if (initialized) {
-    mono_opengl_backend = !vulkan;
-    mono_backend_selected = true;
+    mono_backend = kind;
     set_imgui_theme();
   }
   return initialized;
@@ -268,14 +248,14 @@ static bool initialize_mono_runtime(
 
 bool mono_ui_initialize_opengl(SDL_Window *const window) {
   const SDL_GLContext current_context = SDL_GL_GetCurrentContext();
-  if (window == nullptr || current_context == nullptr || mono_opengl_overlay_disabled.load(std::memory_order_acquire)) {
+  if (window == nullptr || current_context == nullptr || mono_overlay_disabled.load(std::memory_order_acquire)) {
     return false;
   }
 
   {
     std::lock_guard<std::recursive_mutex> lock(mono_ui_mutex);
     if (mono_runtime.initialized()) {
-      return mono_backend_selected && mono_opengl_backend && current_context == mono_opengl_context;
+      return mono_backend == mono_backend_kind::opengl && current_context == mono_opengl_context;
     }
   }
 
@@ -286,7 +266,33 @@ bool mono_ui_initialize_opengl(SDL_Window *const window) {
   }
 
   mono_opengl_context = current_context;
-  if (!initialize_mono_runtime(window, false, current_context)) {
+  if (!initialize_mono_runtime(window, {
+    .initialize = [window, current_context]() {
+      if (!ImGui_ImplSDL2_InitForOpenGL(window, current_context)) {
+        return false;
+      }
+
+      if (!ImGui_ImplOpenGL3_Init()) {
+        ImGui_ImplSDL2_Shutdown();
+        return false;
+      }
+      return true;
+    },
+    .shutdown = []() {
+      if (!mono_skip_opengl_backend_shutdown) {
+        ImGui_ImplOpenGL3_Shutdown();
+      }
+      if (ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().BackendPlatformUserData != nullptr) {
+        ImGui_ImplSDL2_Shutdown();
+      }
+    },
+    .new_frame = [window]() {
+      ImGui_ImplSDL2_NewFrame();
+      update_imgui_sdl_display_size(window);
+      update_imgui_frame_timing();
+    },
+    .render = [](ImDrawData *const) {}
+  }, mono_backend_kind::opengl)) {
     mono_opengl_context = nullptr;
     return false;
   }
@@ -295,13 +301,114 @@ bool mono_ui_initialize_opengl(SDL_Window *const window) {
   return true;
 }
 
-bool mono_ui_initialize_vulkan(SDL_Window *const window) {
-  return initialize_mono_runtime(window, true);
+bool mono_ui_initialize_vulkan(SDL_Window *const window, const ImGui_ImplVulkan_InitInfo &init_info) {
+  if (window == nullptr || mono_overlay_disabled.load(std::memory_order_acquire)) {
+    return false;
+  }
+
+  {
+    std::lock_guard<std::recursive_mutex> lock(mono_ui_mutex);
+    if (mono_runtime.initialized()) {
+      return mono_backend == mono_backend_kind::vulkan;
+    }
+  }
+
+  mono_vulkan_init_info = init_info;
+  if (!initialize_mono_runtime(window, {
+    .initialize = [window]() {
+      if (!ImGui_ImplSDL2_InitForVulkan(window)) {
+        return false;
+      }
+
+      if (!ImGui_ImplVulkan_Init(&mono_vulkan_init_info)) {
+        ImGui_ImplSDL2_Shutdown();
+        return false;
+      }
+      return true;
+    },
+    .shutdown = []() {
+      if (!mono_vulkan_device_lost && ImGui::GetCurrentContext() != nullptr &&
+          ImGui::GetIO().BackendRendererUserData != nullptr) {
+        ImGui_ImplVulkan_Shutdown();
+      }
+      if (ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().BackendPlatformUserData != nullptr) {
+        ImGui_ImplSDL2_Shutdown();
+      }
+    },
+    .new_frame = [window]() {
+      ImGui_ImplSDL2_NewFrame();
+      update_imgui_sdl_display_size(window);
+      update_imgui_frame_timing();
+    },
+    .render = [](ImDrawData *const) {}
+  }, mono_backend_kind::vulkan)) {
+    return false;
+  }
+
+  print("[renderer] Vulkan overlay initialized\n");
+  return true;
 }
 
-bool mono_ui_backend_matches(const bool vulkan) {
+bool mono_ui_backend_ready() {
   std::lock_guard<std::recursive_mutex> lock(mono_ui_mutex);
-  return mono_runtime.initialized() && mono_backend_selected && mono_opengl_backend == !vulkan;
+  return mono_runtime.initialized() && mono_backend != mono_backend_kind::none;
+}
+
+bool mono_ui_vulkan_frame_pending() {
+  std::lock_guard<std::recursive_mutex> lock(mono_ui_mutex);
+  return mono_backend == mono_backend_kind::vulkan && mono_runtime.initialized() && mono_frame_ready;
+}
+
+bool mono_ui_vulkan_render(const VkCommandBuffer command_buffer) {
+  std::lock_guard<std::recursive_mutex> lock(mono_ui_mutex);
+  if (mono_backend != mono_backend_kind::vulkan || !mono_runtime.initialized() ||
+      !mono_frame_ready || command_buffer == VK_NULL_HANDLE) {
+    return false;
+  }
+
+  ImDrawData *const draw_data = ImGui::GetDrawData();
+  if (draw_data != nullptr && draw_data->Valid) {
+    ImGui_ImplVulkan_RenderDrawData(draw_data, command_buffer);
+  }
+  return true;
+}
+
+void mono_ui_vulkan_frame_consumed() {
+  std::lock_guard<std::recursive_mutex> lock(mono_ui_mutex);
+  mono_frame_ready = false;
+}
+
+bool mono_ui_vulkan_prepare_target(const VkRenderPass render_pass, const unsigned int min_image_count,
+    const unsigned int image_count) {
+  std::lock_guard<std::recursive_mutex> lock(mono_ui_mutex);
+  if (mono_backend != mono_backend_kind::vulkan || !mono_runtime.initialized()) {
+    return false;
+  }
+
+  if (mono_vulkan_init_info.RenderPass == render_pass && mono_vulkan_init_info.ImageCount == image_count) {
+    return true;
+  }
+  if (render_pass == VK_NULL_HANDLE || image_count < 2) {
+    return false;
+  }
+
+  mono_vulkan_init_info.RenderPass = render_pass;
+  mono_vulkan_init_info.MinImageCount = std::max(2u, std::min(min_image_count, image_count));
+  mono_vulkan_init_info.ImageCount = image_count;
+  ImGui_ImplVulkan_Shutdown();
+  if (!ImGui_ImplVulkan_Init(&mono_vulkan_init_info)) {
+    return false;
+  }
+  for (ImTextureData *texture : ImGui::GetPlatformIO().Textures) {
+    if (texture != nullptr && texture->Status == ImTextureStatus_OK) {
+      texture->SetStatus(ImTextureStatus_WantDestroy);
+    }
+  }
+  return true;
+}
+
+void mono_ui_vulkan_mark_device_lost() {
+  mono_vulkan_device_lost = true;
 }
 
 void mono_ui_shutdown(const bool release_graphics_resources) {
@@ -312,7 +419,8 @@ void mono_ui_shutdown(const bool release_graphics_resources) {
     return;
   }
 
-  const bool using_opengl = mono_opengl_backend;
+  const bool using_opengl = mono_backend == mono_backend_kind::opengl;
+  const bool using_vulkan = mono_backend == mono_backend_kind::vulkan;
   const SDL_GLContext current_context = using_opengl ? SDL_GL_GetCurrentContext() : nullptr;
   mono_skip_opengl_backend_shutdown = using_opengl &&
       (!release_graphics_resources || current_context == nullptr || current_context != mono_opengl_context);
@@ -320,8 +428,13 @@ void mono_ui_shutdown(const bool release_graphics_resources) {
     print("[renderer] abandoning OpenGL overlay resources without driver cleanup (context no longer safe)\n");
   }
 
+  if (using_vulkan && release_graphics_resources && !mono_vulkan_device_lost) {
+    mono_ui_vulkan_device_idle();
+  }
+
   const bool graphics_context_unavailable = !release_graphics_resources ||
-      (using_opengl && mono_skip_opengl_backend_shutdown);
+      (using_opengl && mono_skip_opengl_backend_shutdown) ||
+      (using_vulkan && mono_vulkan_device_lost);
   if (graphics_context_unavailable) {
     mono_runtime.abandon();
     ImGui::SetCurrentContext(nullptr);
@@ -329,12 +442,17 @@ void mono_ui_shutdown(const bool release_graphics_resources) {
     mono_runtime.shutdown();
   }
 
+  if (using_vulkan) {
+    mono_ui_vulkan_resources_shutdown(release_graphics_resources);
+  }
+
   mono_skip_opengl_backend_shutdown = false;
-  mono_opengl_backend = false;
-  mono_backend_selected = false;
+  mono_backend = mono_backend_kind::none;
   mono_opengl_context = nullptr;
-  mono_opengl_overlay_disabled.store(false, std::memory_order_release);
-  mono_opengl_frame_ready = false;
+  mono_overlay_disabled.store(false, std::memory_order_release);
+  mono_frame_ready = false;
+  mono_vulkan_device_lost = false;
+  mono_vulkan_init_info = {};
   mono_last_imgui_frame_time = {};
   reset_mono_input_edges();
 }
@@ -402,6 +520,7 @@ void mono_ui_release_frame() {
 }
 
 int SDLCALL event_filter(void* userdata, SDL_Event* event) {
+  sdl_hook_call_guard guard{};
   if (sdl_hooks_uninstalling.load(std::memory_order_acquire)) {
     return 1;
   }
@@ -467,29 +586,10 @@ bool poll_event_hook(SDL_Event* event) {
   return ret;
 }
 
-int peep_events_hook(SDL_Event* events, int numevents, SDL_eventaction action, int min, int max) {
-  CATHOOK_HOOK_GUARD();
-  if (sdl_hooks_uninstalling.load(std::memory_order_acquire)) {
-    return peep_events_original != nullptr ? peep_events_original(events, numevents, action, min, max) : -1;
-  }
-
-  sdl_hook_call_guard guard{};
-
-  int ret = peep_events_original(events, numevents, action, min, max);
-
-  if (ret > 0 && events != nullptr && action == SDL_GETEVENT) {
-    for (int index = 0; index < ret; ++index) {
-      get_input(&events[index]);
-    }
-  }
-
-  return ret;
-}
-
-bool mono_ui_build_opengl_frame() {
+bool mono_ui_build_frame() {
   if (engine == nullptr || nographics::should_skip_rendering_hooks() ||
-      mono_opengl_overlay_disabled.load(std::memory_order_acquire) ||
-      !mono_ui_backend_matches(false) || !mono_ui_begin_frame()) {
+      mono_overlay_disabled.load(std::memory_order_acquire) ||
+      !mono_ui_backend_ready() || !mono_ui_begin_frame()) {
     return false;
   }
 
@@ -538,7 +638,7 @@ bool mono_ui_build_opengl_frame() {
   ImGui::End();
 
   mono_ui_end_frame();
-  mono_opengl_frame_ready = true;
+  mono_frame_ready = true;
   mono_ui_release_frame();
   return true;
 }
@@ -561,7 +661,10 @@ void swap_window_hook(SDL_Window* window) {
   {
     sdl_hook_call_guard guard{};
     bool render_overlay = !nographics::should_skip_rendering_hooks() && engine != nullptr &&
-        !mono_opengl_overlay_disabled.load(std::memory_order_acquire);
+        !mono_overlay_disabled.load(std::memory_order_acquire);
+    if (render_overlay && mono_backend == mono_backend_kind::vulkan) {
+      render_overlay = false;
+    }
     if (render_overlay) {
 
       const SDL_GLContext current_gl_context = SDL_GL_GetCurrentContext();
@@ -569,7 +672,7 @@ void swap_window_hook(SDL_Window* window) {
         render_overlay = false;
       } else if (mono_ui_initialized() && current_gl_context != mono_opengl_context) {
         render_overlay = false;
-        if (!mono_opengl_overlay_disabled.exchange(true, std::memory_order_acq_rel)) {
+        if (!mono_overlay_disabled.exchange(true, std::memory_order_acq_rel)) {
           print("[renderer] TF2 replaced its GL context; disabling the overlay to avoid stale driver state "
                 "(expected=%p, current=%p)\n", mono_opengl_context, current_gl_context);
         }
@@ -580,7 +683,7 @@ void swap_window_hook(SDL_Window* window) {
 
     if (render_overlay) {
       std::lock_guard<std::recursive_mutex> lock(mono_ui_mutex);
-      if (mono_opengl_frame_ready && mono_runtime.initialized() &&
+      if (mono_frame_ready && mono_runtime.initialized() &&
           SDL_GL_GetCurrentContext() == mono_opengl_context) {
 
         ImGui_ImplOpenGL3_NewFrame();
@@ -595,6 +698,7 @@ void swap_window_hook(SDL_Window* window) {
             glEnable(GL_FRAMEBUFFER_SRGB);
           }
         }
+        mono_frame_ready = false;
       }
     }
 
@@ -616,6 +720,10 @@ Uint32 get_window_flags_hook(SDL_Window* window) {
     return 0;
   }
 
+  if (window != nullptr) {
+    sdl_window = window;
+  }
+
   return get_window_flags_original(window);
 }
 
@@ -629,6 +737,10 @@ SDL_bool get_window_WM_info_hook(SDL_Window* window, SDL_SysWMinfo* info) {
 
   if (get_window_WM_info_original == nullptr) {
     return SDL_FALSE;
+  }
+
+  if (window != nullptr) {
+    sdl_window = window;
   }
 
   return get_window_WM_info_original(window, info);

@@ -20,9 +20,12 @@ V  o o  V  file: src/features/automation/navbot/navbot_controller.cpp
 #include "core/entity_cache.hpp"
 #include "core/math/math.hpp"
 #include "core/print.hpp"
+#include "features/automation/followbot/followbot.hpp"
 #include "features/automation/medic_automation/medic_automation.hpp"
+#include "features/automation/misc/misc.hpp"
 #include "features/combat/aimbot/aimbot.hpp"
 #include "features/menu/config.hpp"
+#include "games/tf2/sdk/entities/building.hpp"
 #include "games/tf2/sdk/entities/entity.hpp"
 #include "games/tf2/sdk/entities/player.hpp"
 #include "games/tf2/sdk/entities/team_objective_resource.hpp"
@@ -44,7 +47,7 @@ navbot_controller* global_controller = nullptr;
 constexpr float goal_refresh_interval = 1.0f;
 constexpr float goal_retry_interval = 0.2f;
 constexpr float path_retry_interval = 1.0f;
-constexpr float transition_failure_retry_seconds = 5.0f;
+constexpr float transition_failure_retry_seconds = 12.0f;
 constexpr float path_job_timeout = 5.0f;
 constexpr uint32_t hazard_intersection_blacklist_failures = 8;
 constexpr float weapon_switch_interval = 0.35f;
@@ -812,6 +815,12 @@ bool should_replace_goal(const navbot_goal_state& active_goal, const navbot_goal
     return true;
   }
 
+  if (active_goal.goal.type == goal_type::command_path)
+  {
+    return next_goal.goal.type == goal_type::command_path
+      && goal_destination_shift_sq(active_goal, next_goal) > 64.0f * 64.0f;
+  }
+
   if (active_goal.goal.type == goal_type::heal_follow)
   {
     auto* heal_target = medic_automation::controller().heal_target();
@@ -1028,10 +1037,10 @@ bool path_spin_active(user_cmd* user_cmd, const std::vector<crumb>& crumbs, size
   return g_path_spin_state.active && g_path_spin_state.remaining_degrees > 0.0f;
 }
 
-float path_spin_yaw_move(float tick_interval)
+float path_spin_yaw_move(float interval)
 {
   constexpr float path_spin_speed = 720.0f;
-  const float spin_step = std::min(g_path_spin_state.remaining_degrees, path_spin_speed * tick_interval);
+  const float spin_step = std::min(g_path_spin_state.remaining_degrees, path_spin_speed * interval);
   g_path_spin_state.remaining_degrees -= spin_step;
   if (g_path_spin_state.remaining_degrees <= 0.001f)
   {
@@ -1041,8 +1050,6 @@ float path_spin_yaw_move(float tick_interval)
   return spin_step * g_path_spin_state.direction;
 }
 
-float normalize_angle_180(float angle);
-
 bool apply_path_spin(user_cmd* user_cmd, const std::vector<crumb>& crumbs, size_t current_index)
 {
   if (user_cmd == nullptr || !path_spin_active(user_cmd, crumbs, current_index))
@@ -1050,10 +1057,7 @@ bool apply_path_spin(user_cmd* user_cmd, const std::vector<crumb>& crumbs, size_
     return false;
   }
 
-  const float tick_interval = global_vars != nullptr && global_vars->interval_per_tick > 0.0f
-    ? global_vars->interval_per_tick
-    : static_cast<float>(TICK_INTERVAL);
-  user_cmd->view_angles.y = normalize_angle_180(user_cmd->view_angles.y + path_spin_yaw_move(tick_interval));
+  user_cmd->view_angles.y = azimuth_to_signed(user_cmd->view_angles.y + path_spin_yaw_move(tick_interval()));
   user_cmd->view_angles.z = 0.0f;
   return true;
 }
@@ -1069,18 +1073,7 @@ void apply_reload_controls(user_cmd* user_cmd)
   user_cmd->buttons |= IN_RELOAD;
 }
 
-float normalize_angle_180(float angle)
-{
-  while (angle > 180.0f)
-  {
-    angle -= 360.0f;
-  }
-  while (angle < -180.0f)
-  {
-    angle += 360.0f;
-  }
-  return angle;
-}
+
 
 bool apply_look_at_path(Player* localplayer, user_cmd* user_cmd, const std::vector<crumb>& crumbs, size_t current_index)
 {
@@ -1122,11 +1115,11 @@ bool apply_look_at_path(Player* localplayer, user_cmd* user_cmd, const std::vect
 
   const float current_pitch = silent ? g_path_look_silent_state.pitch : user_cmd->view_angles.x;
   const float current_yaw = silent ? g_path_look_silent_state.yaw : user_cmd->view_angles.y;
-  const float yaw_delta = normalize_angle_180(desired_yaw - current_yaw);
+  const float yaw_delta = azimuth_to_signed(desired_yaw - current_yaw);
   const float pitch_delta = -current_pitch;
 
   user_cmd->view_angles.x = std::clamp(current_pitch + (pitch_delta / slow_aim), -89.0f, 89.0f);
-  user_cmd->view_angles.y = normalize_angle_180(current_yaw + (yaw_delta / slow_aim));
+  user_cmd->view_angles.y = azimuth_to_signed(current_yaw + (yaw_delta / slow_aim));
   user_cmd->view_angles.z = 0.0f;
 
   if (silent)
@@ -1136,18 +1129,7 @@ bool apply_look_at_path(Player* localplayer, user_cmd* user_cmd, const std::vect
     return true;
   }
 
-  if (prediction != nullptr)
-  {
-    Vec3 predicted_angles = user_cmd->view_angles;
-    prediction->set_local_view_angles(predicted_angles);
-    prediction->set_view_angles(predicted_angles);
-  }
-
-  if (engine != nullptr)
-  {
-    Vec3 engine_angles = user_cmd->view_angles;
-    engine->set_view_angles(engine_angles);
-  }
+  push_view_angles(user_cmd->view_angles);
 
   return true;
 }
@@ -1320,12 +1302,18 @@ bool navbot_controller::active_goal_needs_reset(Player* localplayer) const
     {
       return true;
     }
-    if (active_goal_.goal.type == goal_type::mvm_upgrade_station
-      && !target->is_network_class("CFuncUpgrades")
-      && !target->is_network_class("CUpgrades")
-      && !target->is_network_class("CFuncUpgradeStation"))
+    if (active_goal_.goal.type == goal_type::mvm_upgrade_station)
     {
-      return true;
+      if (localplayer->in_upgrade_zone())
+      {
+        return true;
+      }
+      if (!target->is_network_class("CFuncUpgrades")
+        && !target->is_network_class("CUpgrades")
+        && !target->is_network_class("CFuncUpgradeStation"))
+      {
+        return true;
+      }
     }
   }
 
@@ -1363,10 +1351,69 @@ void navbot_controller::refresh_goal(Player* localplayer, float current_time)
   next_goal_refresh_time_ = current_time + goal_refresh_interval;
   next_goal_retry_time_ = current_time + goal_retry_interval;
 
-  auto next_goal = goals_.select_goal(mesh_, localplayer, current_time, mvm_wave_started_);
+  auto next_goal = navbot_goal_state{};
+  const bool buybot_busy = automation::controller().is_buybot_busy();
+  if (command_path_active_)
+  {
+    next_goal.valid = command_area_.valid();
+    next_goal.score = std::numeric_limits<float>::max();
+    next_goal.goal.type = goal_type::command_path;
+    next_goal.goal.score = next_goal.score;
+    next_goal.goal.destination = command_destination_;
+    next_goal.goal.destination_area = command_area_;
+  }
+  else if (buybot_busy)
+  {
+    if (localplayer != nullptr && !localplayer->in_upgrade_zone())
+    {
+      goal_candidate best{};
+      best.score = -1.0f;
+      const auto local_origin = localplayer->get_origin();
+      for (auto* entity : entity_cache[class_id::MVM_UPGRADE_STATION])
+      {
+        if (entity == nullptr || entity->is_dormant())
+        {
+          continue;
+        }
+        const auto area_id = mesh_.find_closest_area(entity->get_origin());
+        if (!area_id.valid())
+        {
+          continue;
+        }
+        const auto distance = std::sqrt(distance_squared_2d(local_origin, entity->get_origin()));
+        if (320.0f - distance * 0.03f > best.score)
+        {
+          best.type = goal_type::mvm_upgrade_station;
+          best.score = 320.0f - distance * 0.03f;
+          best.destination = entity->get_origin();
+          best.destination_area = area_id;
+          best.entity_index = entity->get_index();
+        }
+      }
+      if (best.destination_area.valid())
+      {
+        next_goal.valid = true;
+        next_goal.score = best.score;
+        next_goal.goal = best;
+      }
+    }
+    if (!next_goal.valid)
+    {
+      if (active_goal_.valid && active_goal_.goal.type != goal_type::mvm_upgrade_station)
+      {
+        invalidate_active_path(true);
+      }
+      return;
+    }
+  }
+  else if (config.misc.automation.navbot_enabled)
+  {
+    next_goal = goals_.select_goal(mesh_, localplayer, current_time, mvm_wave_started_);
+  }
   Vec3 follow_destination{};
   int follow_entity_index = 0;
-  if (!goal_is_disabled(goal_type::followbot)
+  if (!command_path_active_ && !buybot_busy
+    && !goal_is_disabled(goal_type::followbot)
     && followbot::controller().get_nav_target(&follow_destination, &follow_entity_index))
   {
     auto follow_goal = goal_candidate{
@@ -1593,12 +1640,12 @@ bool navbot_controller::should_block_pathing(Player* localplayer) const
   int round_state = -1;
   if (entity_list != nullptr)
   {
-    auto* proxy = entity_list->get_game_rules_proxy();
-    if (proxy != nullptr)
+    void* rules = tf2_netvars::game_rules_object();
+    if (rules != nullptr)
     {
-      static const int waiting_offset = tf2_netvars::find_offset("DT_TFGameRulesProxy", { "m_bInWaitingForPlayers" });
-      static const int state_offset = tf2_netvars::find_offset("DT_TFGameRulesProxy", { "m_iRoundState" });
-      const auto proxy_address = reinterpret_cast<std::uintptr_t>(proxy);
+      static tf2_netvars::lazy_offset waiting_offset{"DT_TFGameRulesProxy", { "m_bInWaitingForPlayers" }};
+      static tf2_netvars::lazy_offset state_offset{"DT_TFGameRulesProxy", { "m_iRoundState" }};
+      const auto proxy_address = reinterpret_cast<std::uintptr_t>(rules);
       waiting_for_players = waiting_offset > 0
         && *reinterpret_cast<bool*>(proxy_address + waiting_offset);
       round_state = state_offset > 0
@@ -1611,11 +1658,104 @@ bool navbot_controller::should_block_pathing(Player* localplayer) const
     || round_state == gr_state_preround
     || round_state == gr_state_between_rounds)
   {
-    return true;
+    const char* level_name = engine != nullptr ? engine->get_level_name() : nullptr;
+    const bool mvm_map = level_name != nullptr && std::strstr(level_name, "mvm_") != nullptr;
+    if (!command_path_active_ && !mvm_map && !automation::controller().is_buybot_busy())
+    {
+      return true;
+    }
+  }
+
+  if (command_path_active_ || automation::controller().is_buybot_busy())
+  {
+    return false;
+  }
+
+  const char* level_name = engine != nullptr ? engine->get_level_name() : nullptr;
+  if (level_name != nullptr && std::strstr(level_name, "mvm_") != nullptr)
+  {
+    return false;
   }
 
   return config.misc.automation.navbot_dont_path_during_warmup
     && automation::controller().is_setup_time();
+}
+
+bool navbot_controller::should_run() const
+{
+  return config.misc.automation.navbot_enabled
+    || followbot::controller().wants_nav()
+    || command_path_active_
+    || automation::controller().is_buybot_busy();
+}
+
+bool navbot_controller::has_command_path() const
+{
+  return command_path_active_;
+}
+
+bool navbot_controller::is_pathing() const
+{
+  return follower_.has_path();
+}
+
+bool navbot_controller::path_to(const Vec3& destination)
+{
+  ensure_started();
+  rebuild_mesh_if_needed();
+  const auto area = mesh_.find_closest_area(destination);
+  if (!area.valid())
+  {
+    return false;
+  }
+
+  command_path_active_ = true;
+  command_destination_ = destination;
+  command_area_ = area;
+  invalidate_active_path(true);
+  next_goal_refresh_time_ = 0.0f;
+  next_goal_retry_time_ = 0.0f;
+  return true;
+}
+
+void navbot_controller::cancel_path()
+{
+  command_path_active_ = false;
+  command_area_ = {};
+  invalidate_active_path(true);
+}
+
+bool navbot_controller::path_to_teleporter()
+{
+  auto* localplayer = entity_list != nullptr ? entity_list->get_localplayer() : nullptr;
+  if (localplayer == nullptr || !localplayer->is_alive())
+  {
+    return false;
+  }
+
+  Building* best = nullptr;
+  auto best_distance = std::numeric_limits<float>::max();
+  for (auto* entity : entity_cache[class_id::TELEPORTER])
+  {
+    auto* teleporter = reinterpret_cast<Building*>(entity);
+    if (teleporter == nullptr || teleporter->is_dormant()
+      || teleporter->get_team() != localplayer->get_team()
+      || teleporter->get_object_mode() != 0
+      || teleporter->is_placing() || teleporter->is_carried() || teleporter->is_disabled()
+      || teleporter->get_health() <= 0)
+    {
+      continue;
+    }
+    const auto distance = distance_squared_2d(localplayer->get_origin(), teleporter->get_origin());
+    if (distance >= best_distance)
+    {
+      continue;
+    }
+    best_distance = distance;
+    best = teleporter;
+  }
+
+  return best != nullptr && path_to(best->get_origin());
 }
 
 void navbot_controller::on_create_move(user_cmd* user_cmd)
@@ -1623,7 +1763,7 @@ void navbot_controller::on_create_move(user_cmd* user_cmd)
   suppress_aimbot_for_reload_ = false;
   silent_path_look_ = false;
   silent_path_look_angles_ = {};
-  if (!config.misc.automation.navbot_enabled && !followbot::controller().wants_nav())
+  if (!should_run())
   {
     return;
   }
@@ -1655,6 +1795,12 @@ void navbot_controller::on_create_move(user_cmd* user_cmd)
     clear_runtime_state();
     debug_state_.runtime_state = "waiting for local player";
     return;
+  }
+
+  if (command_path_active_
+    && distance_squared_2d(localplayer->get_origin(), command_destination_) <= crumb_reach_distance * crumb_reach_distance)
+  {
+    cancel_path();
   }
 
   rebuild_mesh_if_needed();
@@ -1831,11 +1977,6 @@ void navbot_controller::update_weapon_choice(Player* localplayer, user_cmd* user
   }
 
   auto* active_weapon = localplayer->get_weapon();
-  if (active_weapon != nullptr)
-  {
-    (void)active_weapon;
-  }
-
   auto current_slot = weapon_slot_for(active_weapon, localplayer->get_tf_class());
   auto desired_slot_value = static_cast<int>(desired_slot);
   if (current_slot == desired_slot && !mode_changed)
@@ -2000,7 +2141,8 @@ void navbot_controller::apply_mvm_combat_controls(Player* localplayer, user_cmd*
 
 void navbot_controller::on_frame_stage_notify()
 {
-  if (!config.misc.automation.navbot_enabled || !engine->is_in_game())
+  if (!should_run()
+    || engine == nullptr || !engine->is_in_game())
   {
     return;
   }
@@ -2015,7 +2157,7 @@ void navbot_controller::on_frame_stage_notify()
 
 void navbot_controller::on_game_event(GameEvent* event)
 {
-  if (!config.misc.automation.navbot_enabled || event == nullptr)
+  if (!should_run() || event == nullptr)
   {
     return;
   }
@@ -2451,8 +2593,8 @@ void navbot_controller::update_hazards()
       slot.kind = kind;
       slot.policy = hazard_policy::soft_cost;
       slot.area_id = area_id;
-      slot.cost = std::max(slot.cost, cost);
-      slot.expire_time = std::max(slot.expire_time, expire_time);
+      slot.cost = cost;
+      slot.expire_time = expire_time;
     }
     else if (incoming_priority == existing_priority)
     {

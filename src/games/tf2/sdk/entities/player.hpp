@@ -15,9 +15,11 @@ V  o o  V  file: src/games/tf2/sdk/entities/player.hpp
 #include "games/tf2/sdk/interfaces/attribute_manager.hpp"
 #include "games/tf2/sdk/interfaces/model_info.hpp"
 #include "games/tf2/sdk/interfaces/global_vars.hpp"
+#include "games/tf2/sdk/interfaces/input.hpp"
 #include "games/tf2/sdk/interfaces/utl_vector.hpp"
 #include "games/tf2/sdk/netvars.hpp"
 #include "core/entity_cache.hpp"
+#include "core/memory/resolve.hpp"
 #include "core/ipc/ipc_client.hpp"
 #include "core/player_manager.hpp"
 #include "core/detach.hpp"
@@ -33,15 +35,15 @@ V  o o  V  file: src/games/tf2/sdk/entities/player.hpp
 #include <cstring>
 
 namespace tf2_player_offsets {
-inline int cached_bone_data() {
+inline int max_health() {
   static const int v = [] {
-    const auto* p = reinterpret_cast<const uint8_t*>(sigscan_module("client.so", "48 8B B3 ? ? ? ? 48 8D 14 52 41 BC 01 00 00"));
+    const auto* p = reinterpret_cast<const uint8_t*>(sigscan_module("client.so",
+      "48 8B 13 4C 8D 35 ? ? ? ? 44 8B BB ? ? ? ? 48 8B 82 C8 04 00 00 4C 39 F0"));
     if (p) {
-      int32_t d = 0;
-      std::memcpy(&d, p + 3, sizeof(d));
-      if (d > 0x500 && d < 0x2000) return static_cast<int>(d);
+      const int32_t d = cathook::core::memory::read_disp32(p, 13);
+      if (d > 0x1000 && d < 0x4000) return static_cast<int>(d);
     }
-    return 0xB78;
+    return 0;
   }();
   return v;
 }
@@ -239,7 +241,6 @@ enum tf_cond {
   TF_COND_LAST
 };
 
-extern bool (*in_cond_original)(void*, int);
 
 inline bool tf_player_shared_in_cond(void* shared, int condition)
 {
@@ -248,18 +249,22 @@ inline bool tf_player_shared_in_cond(void* shared, int condition)
     return false;
   }
 
-  static const int player_cond_offset = tf2_netvars::find_offset("DT_TFPlayerShared", {"m_nPlayerCond"});
-  static const int player_cond_ex_offset = tf2_netvars::find_offset("DT_TFPlayerShared", {"m_nPlayerCondEx"});
-  static const int player_cond_ex2_offset = tf2_netvars::find_offset("DT_TFPlayerShared", {"m_nPlayerCondEx2"});
-  static const int player_cond_ex3_offset = tf2_netvars::find_offset("DT_TFPlayerShared", {"m_nPlayerCondEx3"});
+  static tf2_netvars::lazy_offset player_cond_offset{"DT_TFPlayerShared", {"m_nPlayerCond"}};
+  static tf2_netvars::lazy_offset player_cond_ex_offset{"DT_TFPlayerShared", {"m_nPlayerCondEx"}};
+  static tf2_netvars::lazy_offset player_cond_ex2_offset{"DT_TFPlayerShared", {"m_nPlayerCondEx2"}};
+  static tf2_netvars::lazy_offset player_cond_ex3_offset{"DT_TFPlayerShared", {"m_nPlayerCondEx3"}};
 
   const auto shared_address = reinterpret_cast<uintptr_t>(shared);
 
   if (condition < 32) {
-    constexpr uintptr_t condition_list_bits_offset = 0x128;
-    const auto condition_list_bits = *reinterpret_cast<const uint32_t*>(shared_address + condition_list_bits_offset);
-    if ((condition_list_bits & (1u << static_cast<uint32_t>(condition))) != 0) {
-      return true;
+    static tf2_netvars::lazy_offset condition_list_bits_offset{
+      "DT_TFPlayerShared", {"m_ConditionList", "_condition_bits"}};
+    if (condition_list_bits_offset > 0) {
+      const auto condition_list_bits = *reinterpret_cast<const uint32_t*>(
+        shared_address + static_cast<uintptr_t>(condition_list_bits_offset));
+      if ((condition_list_bits & (1u << static_cast<uint32_t>(condition))) != 0) {
+        return true;
+      }
     }
   }
 
@@ -282,11 +287,15 @@ inline bool tf_player_shared_in_cond(void* shared, int condition)
 
 class Player : public Entity {
 public:
-  static constexpr int weapon_inventory_offset = 0x1110;
+  static int weapon_inventory_offset() {
+    static tf2_netvars::lazy_offset offset{"DT_BaseCombatCharacter", {"m_hMyWeapons"}};
+    return offset;
+  }
   static constexpr int max_weapon_count = 48;
 
   int get_weapon_handle(void) {
-    return *(int*)(this + 0x11D0);
+    static tf2_netvars::lazy_offset offset{"DT_BaseCombatCharacter", {"m_hActiveWeapon"}};
+    return offset > 0 ? *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)) : 0;
   }
 
   Weapon* get_weapon(void) {
@@ -303,7 +312,12 @@ public:
       return 0;
     }
 
-    auto* weapon_handles = reinterpret_cast<int*>(this + weapon_inventory_offset);
+    const int inventory_offset = weapon_inventory_offset();
+    if (inventory_offset <= 0) {
+      return 0;
+    }
+
+    auto* weapon_handles = reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(inventory_offset));
     return weapon_handles[index];
   }
 
@@ -322,7 +336,7 @@ public:
       return 0;
     }
 
-    static const int offset = tf2_netvars::find_offset("DT_BasePlayer", {"localdata", "m_iAmmo"});
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"localdata", "m_iAmmo"}};
     if (offset <= 0) {
       return 0;
     }
@@ -365,28 +379,23 @@ public:
   }
 
   int get_health(void) {
-    return *(int*)(this + 0xD4);
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_iHealth"}};
+    return offset > 0 ? *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)) : 0;
   }
 
   int get_max_health(void) {
-    return *(int*)(this + 0x1DF8);
+    static const int offset = tf2_player_offsets::max_health();
+    return offset > 0 ? *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)) : 0;
   }
 
   int get_default_fov(void) {
-    static const int offset = [] {
-      const int netvar_offset = tf2_netvars::find_offset("DT_BasePlayer", {"m_iDefaultFOV"});
-      return netvar_offset > 0 ? netvar_offset : 0x15E4;
-    }();
-    return *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + offset);
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_iDefaultFOV"}};
+    return offset > 0 ? *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)) : 90;
   }
 
   int get_fov(void) {
-    static const int offset = [] {
-      const int netvar_offset = tf2_netvars::find_offset("DT_BasePlayer", {"m_iFOV"});
-
-      return netvar_offset > 0 ? netvar_offset : 0x15D8;
-    }();
-    return *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + offset);
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_iFOV"}};
+    return offset > 0 ? *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)) : 90;
   }
 
   unsigned int get_player_name(wchar_t name[32]) {
@@ -400,23 +409,33 @@ public:
   }
 
   void set_head_size(float size) {
-    *(float*)(this + 0x39D8) = size;
+    static tf2_netvars::lazy_offset offset{"DT_TFPlayer", {"m_flHeadScale"}};
+    if (offset > 0) {
+      *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)) = size;
+    }
   }
 
   void set_torso_length(float length) {
-    *(float*)(this + 0x39DC) = length;
+    static tf2_netvars::lazy_offset offset{"DT_TFPlayer", {"m_flTorsoScale"}};
+    if (offset > 0) {
+      *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)) = length;
+    }
   }
 
   void set_taunt_cam(bool value) {
-    *(int*)(this + 0x2414) = value ? 1 : 0;
+    static tf2_netvars::lazy_offset offset{"DT_TFPlayer", {"m_nForceTauntCam"}};
+    if (offset > 0) {
+      *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)) = value ? 1 : 0;
+    }
   }
 
   int get_force_taunt_cam(void) {
-    return *(int*)(this + 0x2414);
+    static tf2_netvars::lazy_offset offset{"DT_TFPlayer", {"m_nForceTauntCam"}};
+    return offset > 0 ? *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)) : 0;
   }
 
   bool allow_move_during_taunt() {
-    static const int allow_move_during_taunt_offset = tf2_netvars::find_offset("DT_TFPlayer", {"m_bAllowMoveDuringTaunt"});
+    static tf2_netvars::lazy_offset allow_move_during_taunt_offset{"DT_TFPlayer", {"m_bAllowMoveDuringTaunt"}};
     if (allow_move_during_taunt_offset <= 0) {
       return false;
     }
@@ -425,7 +444,7 @@ public:
   }
 
   bool taunt_force_move_forward() {
-    static const int allow_move_during_taunt_offset = tf2_netvars::find_offset("DT_TFPlayer", {"m_bAllowMoveDuringTaunt"});
+    static tf2_netvars::lazy_offset allow_move_during_taunt_offset{"DT_TFPlayer", {"m_bAllowMoveDuringTaunt"}};
     if (allow_move_during_taunt_offset <= 0) {
       return false;
     }
@@ -434,7 +453,7 @@ public:
   }
 
   float taunt_force_move_forward_speed() {
-    static const int allow_move_during_taunt_offset = tf2_netvars::find_offset("DT_TFPlayer", {"m_bAllowMoveDuringTaunt"});
+    static tf2_netvars::lazy_offset allow_move_during_taunt_offset{"DT_TFPlayer", {"m_bAllowMoveDuringTaunt"}};
     if (allow_move_during_taunt_offset <= 0) {
       return 0.0f;
     }
@@ -443,7 +462,7 @@ public:
   }
 
   life_state get_lifestate(void) {
-    static const int life_state_offset = tf2_netvars::find_offset("DT_BasePlayer", {"m_lifeState"});
+    static tf2_netvars::lazy_offset life_state_offset{"DT_BasePlayer", {"m_lifeState"}};
     if (life_state_offset <= 0) {
       return life_state::dead;
     }
@@ -457,7 +476,7 @@ public:
   }
 
   observer_mode get_observer_mode() {
-    static const int observer_mode_offset = tf2_netvars::find_offset("DT_BasePlayer", {"m_iObserverMode"});
+    static tf2_netvars::lazy_offset observer_mode_offset{"DT_BasePlayer", {"m_iObserverMode"}};
     if (observer_mode_offset <= 0) {
       return observer_mode::none;
     }
@@ -466,13 +485,35 @@ public:
   }
 
   Entity* get_observer_target() {
-    static const int observer_target_offset = tf2_netvars::find_offset("DT_BasePlayer", {"m_hObserverTarget"});
+    static tf2_netvars::lazy_offset observer_target_offset{"DT_BasePlayer", {"m_hObserverTarget"}};
     if (observer_target_offset <= 0) {
       return nullptr;
     }
 
     const int handle = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + observer_target_offset);
     return entity_list->entity_from_handle(handle);
+  }
+
+  void set_observer_mode(observer_mode mode) {
+    static tf2_netvars::lazy_offset observer_mode_offset{"DT_BasePlayer", {"m_iObserverMode"}};
+    if (observer_mode_offset > 0) {
+      *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + observer_mode_offset) = static_cast<int>(mode);
+    }
+  }
+
+  int get_observer_target_handle() {
+    static tf2_netvars::lazy_offset observer_target_offset{"DT_BasePlayer", {"m_hObserverTarget"}};
+    if (observer_target_offset <= 0) {
+      return 0;
+    }
+    return *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + observer_target_offset);
+  }
+
+  void set_observer_target_handle(int handle) {
+    static tf2_netvars::lazy_offset observer_target_offset{"DT_BasePlayer", {"m_hObserverTarget"}};
+    if (observer_target_offset > 0) {
+      *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + observer_target_offset) = handle;
+    }
   }
 
   Vec3 get_shoot_pos(void) {
@@ -484,16 +525,26 @@ public:
   }
 
   Vec3 get_punch_angles(void) {
-    return *reinterpret_cast<Vec3*>(reinterpret_cast<std::uintptr_t>(this) + 0x74);
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"localdata", "m_Local", "m_vecPunchAngle"}};
+    return offset > 0
+      ? *reinterpret_cast<Vec3*>(reinterpret_cast<std::uintptr_t>(this) + static_cast<std::uintptr_t>(offset))
+      : Vec3{};
+  }
+
+  void set_punch_angles(const Vec3& angles) {
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"localdata", "m_Local", "m_vecPunchAngle"}};
+    if (offset > 0) {
+      *reinterpret_cast<Vec3*>(reinterpret_cast<std::uintptr_t>(this) + static_cast<std::uintptr_t>(offset)) = angles;
+    }
   }
 
   static int get_eye_pitch_offset(void) {
-    static const int offset = tf2_netvars::find_offset("DT_TFPlayer", {"m_angEyeAngles[0]"});
+    static tf2_netvars::lazy_offset offset{"DT_TFPlayer", {"m_angEyeAngles[0]"}};
     return offset;
   }
 
   static int get_eye_yaw_offset(void) {
-    static const int offset = tf2_netvars::find_offset("DT_TFPlayer", {"m_angEyeAngles[1]"});
+    static tf2_netvars::lazy_offset offset{"DT_TFPlayer", {"m_angEyeAngles[1]"}};
     return offset;
   }
 
@@ -535,11 +586,14 @@ public:
   }
 
   enum tf_class get_tf_class(void) {
-    return (enum tf_class)*(int*)(this + 0x1BA0);
+    static tf2_netvars::lazy_offset offset{"DT_TFPlayer", {"m_PlayerClass", "m_iClass"}};
+    return offset > 0
+      ? static_cast<enum tf_class>(*reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)))
+      : tf_class::UNDEFINED;
   }
 
   bool in_upgrade_zone() {
-    static const int in_upgrade_zone_offset = tf2_netvars::find_offset("DT_TFPlayer", {"m_bInUpgradeZone"});
+    static tf2_netvars::lazy_offset in_upgrade_zone_offset{"DT_TFPlayer", {"m_bInUpgradeZone"}};
     if (in_upgrade_zone_offset <= 0) {
       return false;
     }
@@ -548,7 +602,7 @@ public:
   }
 
   int get_currency() {
-    static const int currency_offset = tf2_netvars::find_offset("DT_TFPlayer", {"m_nCurrency"});
+    static tf2_netvars::lazy_offset currency_offset{"DT_TFPlayer", {"m_nCurrency"}};
     if (currency_offset <= 0) {
       return 0;
     }
@@ -568,24 +622,77 @@ public:
       return false;
     }
 
+    constexpr int max_cached_players = 128;
+    const int player_index = get_index();
+    const int frame = global_vars->framecount;
+
+    struct bone_frame_cache {
+      int frame = -1;
+      int count = 0;
+      bool ok = false;
+      matrix_3x4 bones[128]{};
+    };
+    static thread_local bone_frame_cache cache[max_cached_players]{};
+
+    bone_frame_cache* slot = nullptr;
+    if (player_index > 0 && player_index < max_cached_players) {
+      slot = &cache[player_index];
+      if (slot->frame == frame) {
+        if (!slot->ok || slot->count <= 0) {
+          return false;
+        }
+        const int copy_count = std::min(max_bones, slot->count);
+        std::memcpy(bone_to_world_out, slot->bones, static_cast<std::size_t>(copy_count) * sizeof(matrix_3x4));
+        if (bone_count_out != nullptr) {
+          *bone_count_out = copy_count;
+        }
+        return true;
+      }
+    }
+
     if (model_info == nullptr) {
       return false;
     }
     const auto* model = get_model();
     const auto* studio = model != nullptr ? model_info->get_studio_model(model) : nullptr;
-    if (studio == nullptr || studio->num_bones <= 0 || studio->num_bones > max_bones) {
+    if (studio == nullptr || studio->num_bones <= 0 || studio->num_bones > 128) {
+      return false;
+    }
+    if (studio->num_bones > max_bones) {
       return false;
     }
     const int bone_count = studio->num_bones;
-    if (!setup_bones(bone_to_world_out, bone_count, 0x7FF00, global_vars->curtime)) {
+    matrix_3x4* dest = slot != nullptr ? slot->bones : bone_to_world_out;
+    if (!setup_bones(dest, bone_count, 0x7FF00, global_vars->curtime)) {
+      if (slot != nullptr) {
+        slot->frame = frame;
+        slot->ok = false;
+        slot->count = 0;
+      }
       return false;
     }
 
     for (int bone = 0; bone < bone_count; ++bone) {
       for (int row = 0; row < 3; ++row) {
         for (int column = 0; column < 4; ++column) {
-          if (!std::isfinite(bone_to_world_out[bone].mat[row][column])) return false;
+          if (!std::isfinite(dest[bone].mat[row][column])) {
+            if (slot != nullptr) {
+              slot->frame = frame;
+              slot->ok = false;
+              slot->count = 0;
+            }
+            return false;
+          }
         }
+      }
+    }
+
+    if (slot != nullptr) {
+      slot->frame = frame;
+      slot->count = bone_count;
+      slot->ok = true;
+      if (dest != bone_to_world_out) {
+        std::memcpy(bone_to_world_out, dest, static_cast<std::size_t>(bone_count) * sizeof(matrix_3x4));
       }
     }
 
@@ -612,7 +719,7 @@ public:
   }
 
   int get_hitbox_set(void) {
-    static const int offset = tf2_netvars::find_offset("DT_BaseAnimating", {"m_nHitboxSet"});
+    static tf2_netvars::lazy_offset offset{"DT_BaseAnimating", {"m_nHitboxSet"}};
     if (offset <= 0) {
       return 0;
     }
@@ -688,35 +795,49 @@ public:
   }
 
   void set_thirdperson(bool value) {
-    *(bool*)(this + 0x240C) = value;
+    if (input == nullptr) return;
+    if (value) {
+      input->to_thirdperson();
+    } else {
+      input->to_firstperson();
+    }
   }
 
   void switch_thirdperson(void) {
-    void** vtable = *(void ***)this;
-
-    void (*switch_thirdperson_fn)(void*) = (void (*)(void*))vtable[256];
-
-    return switch_thirdperson_fn(this);
+    if (input == nullptr) return;
+    if (input->is_thirdperson()) {
+      input->to_firstperson();
+    } else {
+      input->to_thirdperson();
+    }
   }
 
   bool is_thirdperson(void) {
-    return *(bool*)(this + 0x240C);
+    return input != nullptr && input->is_thirdperson();
   }
 
   float get_model_scale(void) {
-    return *(float*)(this + 0x914);
+    static tf2_netvars::lazy_offset offset{"DT_BaseAnimating", {"m_flModelScale"}};
+    return offset > 0 ? *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset.operator int())) : 1.0f;
   }
 
   int get_stun_flags(void) {
-    return *(int*)(this + 0x1E78 + 0x3B4);
+    static tf2_netvars::lazy_offset offset{"DT_TFPlayerShared", {"m_iStunFlags"}};
+    void* shared = get_shared();
+    return shared != nullptr && offset > 0
+      ? *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(shared) + static_cast<uintptr_t>(offset.operator int()))
+      : 0;
   }
 
   void* get_shared(void) {
-    return (void*)(this + 0x1E78);
+    static tf2_netvars::lazy_offset offset{"DT_TFPlayer", {"m_Shared"}};
+    return offset > 0
+      ? reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset.operator int()))
+      : nullptr;
   }
 
   int get_crit_mult_raw() {
-    static const int offset = tf2_netvars::find_offset("DT_TFPlayerShared", {"m_iCritMult"});
+    static tf2_netvars::lazy_offset offset{"DT_TFPlayerShared", {"m_iCritMult"}};
     if (offset <= 0) {
       return 0;
     }
@@ -730,11 +851,7 @@ public:
   }
 
   float get_invisibility(void) {
-    return *(float*)(this + 0x178);
-  }
-
-  void set_invisibility(float value) {
-    *(float*)(this + 0x178) = value;
+    return is_cloaked() ? 1.0f : 0.0f;
   }
 
   bool in_cond(tf_cond condition) {
@@ -789,7 +906,7 @@ public:
   }
 
   bool is_using_action_slot(void) {
-    static const int offset = tf2_netvars::find_offset("DT_TFPlayer", {"m_bUsingActionSlot"});
+    static tf2_netvars::lazy_offset offset{"DT_TFPlayer", {"m_bUsingActionSlot"}};
     return offset != 0 && *reinterpret_cast<const bool*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset));
   }
 
@@ -798,15 +915,23 @@ public:
   }
 
   int get_water_level(void) {
-    static int offset = tf2_netvars::find_offset("DT_TFPlayer", {"m_nWaterLevel"});
-    if (offset == 0) {
-      offset = tf2_netvars::find_offset("DT_LocalPlayerExclusive", {"m_nWaterLevel"});
+    static tf2_netvars::lazy_offset offset{"DT_TFPlayer", {"m_nWaterLevel"}};
+    static tf2_netvars::lazy_offset exclusive_offset{"DT_LocalPlayerExclusive", {"m_nWaterLevel"}};
+    const int resolved = offset != 0 ? static_cast<int>(offset) : static_cast<int>(exclusive_offset);
+    return resolved != 0 ? static_cast<int>(*reinterpret_cast<unsigned char*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(resolved))) : 0;
+  }
+
+  void set_water_level(int value) {
+    static tf2_netvars::lazy_offset offset{"DT_TFPlayer", {"m_nWaterLevel"}};
+    static tf2_netvars::lazy_offset exclusive_offset{"DT_LocalPlayerExclusive", {"m_nWaterLevel"}};
+    const int resolved = offset != 0 ? static_cast<int>(offset) : static_cast<int>(exclusive_offset);
+    if (resolved != 0) {
+      *reinterpret_cast<unsigned char*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(resolved)) = static_cast<unsigned char>(value);
     }
-    return offset != 0 ? static_cast<int>(*reinterpret_cast<unsigned char*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset))) : 0;
   }
 
   float get_max_speed(void) {
-    static int offset = tf2_netvars::find_offset("DT_BasePlayer", {"m_flMaxspeed"});
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_flMaxspeed"}};
     return offset != 0 ? *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)) : 0.0f;
   }
 
@@ -860,7 +985,8 @@ public:
   }
 
   int get_ground_entity_handle(void) {
-    return *(int*)(this + 0x31C);
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_hGroundEntity"}};
+    return offset > 0 ? *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)) : 0;
   }
 
   Entity* get_ground_entity(void) {
@@ -868,11 +994,14 @@ public:
   }
 
   void set_ground_entity_handle(int handle) {
-    *(int*)(this + 0x31C) = handle;
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_hGroundEntity"}};
+    if (offset > 0) {
+      *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)) = handle;
+    }
   }
 
   int get_constraint_entity_handle(void) {
-    static const int offset = tf2_netvars::find_offset("DT_BasePlayer", {"m_hConstraintEntity"});
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_hConstraintEntity"}};
     return offset != 0 ? *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)) : 0;
   }
 
@@ -881,143 +1010,186 @@ public:
   }
 
   Vec3 get_constraint_center(void) {
-    static const int offset = tf2_netvars::find_offset("DT_BasePlayer", {"m_vecConstraintCenter"});
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_vecConstraintCenter"}};
     return offset != 0 ? *reinterpret_cast<Vec3*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)) : Vec3{};
   }
 
   float get_constraint_radius(void) {
-    static const int offset = tf2_netvars::find_offset("DT_BasePlayer", {"m_flConstraintRadius"});
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_flConstraintRadius"}};
     return offset != 0 ? *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)) : 0.0f;
   }
 
   float get_constraint_width(void) {
-    static const int offset = tf2_netvars::find_offset("DT_BasePlayer", {"m_flConstraintWidth"});
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_flConstraintWidth"}};
     return offset != 0 ? *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)) : 0.0f;
   }
 
   float get_constraint_speed_factor(void) {
-    static const int offset = tf2_netvars::find_offset("DT_BasePlayer", {"m_flConstraintSpeedFactor"});
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_flConstraintSpeedFactor"}};
     return offset != 0 ? *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)) : 1.0f;
   }
 
   int get_buttons(void) {
-    static const int constraint_offset = tf2_netvars::find_offset("DT_BasePlayer", {"m_hConstraintEntity"});
+    static tf2_netvars::lazy_offset constraint_offset{"DT_BasePlayer", {"m_hConstraintEntity"}};
     return constraint_offset > 12 ? *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(constraint_offset - 12)) : 0;
   }
 
   void set_buttons(int buttons) {
-    static const int constraint_offset = tf2_netvars::find_offset("DT_BasePlayer", {"m_hConstraintEntity"});
+    static tf2_netvars::lazy_offset constraint_offset{"DT_BasePlayer", {"m_hConstraintEntity"}};
     if (constraint_offset > 12) {
       *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(constraint_offset - 12)) = buttons;
     }
   }
 
   int get_last_buttons(void) {
-    static const int constraint_offset = tf2_netvars::find_offset("DT_BasePlayer", {"m_hConstraintEntity"});
+    static tf2_netvars::lazy_offset constraint_offset{"DT_BasePlayer", {"m_hConstraintEntity"}};
     return constraint_offset > 24 ? *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(constraint_offset - 24)) : 0;
   }
 
   void set_last_buttons(int buttons) {
-    static const int constraint_offset = tf2_netvars::find_offset("DT_BasePlayer", {"m_hConstraintEntity"});
+    static tf2_netvars::lazy_offset constraint_offset{"DT_BasePlayer", {"m_hConstraintEntity"}};
     if (constraint_offset > 24) {
       *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(constraint_offset - 24)) = buttons;
     }
   }
 
   int get_flags(void) {
-    static const int off = tf2_netvars::find_offset("DT_BaseEntity", {"m_fFlags"});
-    const int use = off ? off : 0x460;
-    return *reinterpret_cast<int*>(reinterpret_cast<std::uintptr_t>(this) + static_cast<std::uintptr_t>(use));
+    static tf2_netvars::lazy_offset off{"DT_BasePlayer", {"m_fFlags"}};
+    const int use = off;
+    return use > 0 ? *reinterpret_cast<int*>(reinterpret_cast<std::uintptr_t>(this) + static_cast<std::uintptr_t>(use)) : 0;
   }
 
   void set_flags(int flags) {
-    static const int off = tf2_netvars::find_offset("DT_BaseEntity", {"m_fFlags"});
-    const int use = off ? off : 0x460;
-    *reinterpret_cast<int*>(reinterpret_cast<std::uintptr_t>(this) + static_cast<std::uintptr_t>(use)) = flags;
+    static tf2_netvars::lazy_offset off{"DT_BasePlayer", {"m_fFlags"}};
+    const int use = off;
+    if (use > 0) {
+      *reinterpret_cast<int*>(reinterpret_cast<std::uintptr_t>(this) + static_cast<std::uintptr_t>(use)) = flags;
+    }
   }
 
   Vec3 get_velocity(void) {
-    return *(Vec3*)(this + 0x168);
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_vecVelocity[0]"}};
+    return offset > 0 ? *reinterpret_cast<Vec3*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset.operator int())) : Vec3{};
   }
 
   void set_velocity(const Vec3& velocity) {
-    *(Vec3*)(this + 0x168) = velocity;
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_vecVelocity[0]"}};
+    if (offset > 0) {
+      *reinterpret_cast<Vec3*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset.operator int())) = velocity;
+    }
   }
 
   Vec3 get_base_velocity(void) {
-    return *(Vec3*)(this + 0x1F0);
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_vecBaseVelocity"}};
+    return offset > 0 ? *reinterpret_cast<Vec3*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset.operator int())) : Vec3{};
   }
 
   void set_base_velocity(const Vec3& velocity) {
-    *(Vec3*)(this + 0x1F0) = velocity;
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_vecBaseVelocity"}};
+    if (offset > 0) {
+      *reinterpret_cast<Vec3*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset.operator int())) = velocity;
+    }
   }
 
   bool get_ducked(void) {
-    return *(bool*)(this + 0x1288);
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_Local", "m_bDucked"}};
+    return offset > 0 && *reinterpret_cast<bool*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset.operator int()));
   }
 
   void set_ducked(bool value) {
-    *(bool*)(this + 0x1288) = value;
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_Local", "m_bDucked"}};
+    if (offset > 0) {
+      *reinterpret_cast<bool*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset.operator int())) = value;
+    }
   }
 
   bool get_ducking_state(void) {
-    return *(bool*)(this + 0x1289);
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_Local", "m_bDucking"}};
+    return offset > 0 && *reinterpret_cast<bool*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset.operator int()));
   }
 
   void set_ducking_state(bool value) {
-    *(bool*)(this + 0x1289) = value;
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_Local", "m_bDucking"}};
+    if (offset > 0) {
+      *reinterpret_cast<bool*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset.operator int())) = value;
+    }
   }
 
   bool get_in_duck_jump(void) {
-    return *(bool*)(this + 0x128A);
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_Local", "m_bInDuckJump"}};
+    return offset > 0 && *reinterpret_cast<bool*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset.operator int()));
   }
 
   void set_in_duck_jump(bool value) {
-    *(bool*)(this + 0x128A) = value;
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_Local", "m_bInDuckJump"}};
+    if (offset > 0) {
+      *reinterpret_cast<bool*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset.operator int())) = value;
+    }
   }
 
   float get_duck_time(void) {
-    return *(float*)(this + 0x128C);
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_Local", "m_flDucktime"}};
+    return offset > 0 ? *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset.operator int())) : 0.0f;
   }
 
   void set_duck_time(float value) {
-    *(float*)(this + 0x128C) = value;
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_Local", "m_flDucktime"}};
+    if (offset > 0) {
+      *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset.operator int())) = value;
+    }
   }
 
   float get_duck_jump_time(void) {
-    return *(float*)(this + 0x1290);
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_Local", "m_flDuckJumpTime"}};
+    return offset > 0 ? *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset.operator int())) : 0.0f;
   }
 
   void set_duck_jump_time(float value) {
-    *(float*)(this + 0x1290) = value;
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_Local", "m_flDuckJumpTime"}};
+    if (offset > 0) {
+      *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset.operator int())) = value;
+    }
   }
 
   float get_fall_velocity(void) {
-    return *(float*)(this + 0x129C);
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_Local", "m_flFallVelocity"}};
+    return offset > 0 ? *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset.operator int())) : 0.0f;
   }
 
   void set_fall_velocity(float value) {
-    *(float*)(this + 0x129C) = value;
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_Local", "m_flFallVelocity"}};
+    if (offset > 0) {
+      *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset.operator int())) = value;
+    }
   }
 
   Vec3 get_view_offset(void) {
-    return *(Vec3*)(this + 0x144);
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_vecViewOffset[0]"}};
+    return offset > 0 ? *reinterpret_cast<Vec3*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset.operator int())) : Vec3{};
   }
 
   void set_view_offset(const Vec3& value) {
-    *(Vec3*)(this + 0x144) = value;
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_vecViewOffset[0]"}};
+    if (offset > 0) {
+      *reinterpret_cast<Vec3*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset.operator int())) = value;
+    }
   }
 
   float get_fov_time(void) {
-    static const int offset = [] {
-      const int netvar_offset = tf2_netvars::find_offset("DT_BasePlayer", {"m_flFOVTime"});
-      return netvar_offset > 0 ? netvar_offset : 0x15E0;
-    }();
-    return *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(this) + offset);
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_flFOVTime"}};
+    return offset > 0 ? *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset.operator int())) : 0.0f;
   }
 
   float get_next_attack(void) {
-    return *(float*)(this + 0x1088);
+    static tf2_netvars::lazy_offset offset{"DT_BaseCombatCharacter", {"m_flNextAttack"}};
+    return offset > 0 ? *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset.operator int())) : 0.0f;
+  }
+
+  void set_next_attack(const float next_attack) {
+    static tf2_netvars::lazy_offset offset{"DT_BaseCombatCharacter", {"m_flNextAttack"}};
+    if (offset > 0) {
+      *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset.operator int())) = next_attack;
+    }
   }
 
   bool can_shoot(Entity* target_entity) {
@@ -1037,7 +1209,7 @@ public:
   }
 
   user_cmd* get_current_cmd(void) {
-    static const int constraint_offset = tf2_netvars::find_offset("DT_BasePlayer", {"m_hConstraintEntity"});
+    static tf2_netvars::lazy_offset constraint_offset{"DT_BasePlayer", {"m_hConstraintEntity"}};
     return constraint_offset > 8 ? reinterpret_cast<user_cmd*>(*reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(constraint_offset - 8))) : nullptr;
   }
 
@@ -1046,7 +1218,7 @@ public:
   }
 
   void set_current_cmd(user_cmd* user_cmd) {
-    static const int constraint_offset = tf2_netvars::find_offset("DT_BasePlayer", {"m_hConstraintEntity"});
+    static tf2_netvars::lazy_offset constraint_offset{"DT_BasePlayer", {"m_hConstraintEntity"}};
     if (constraint_offset > 8) {
       *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(constraint_offset - 8)) = user_cmd;
     }

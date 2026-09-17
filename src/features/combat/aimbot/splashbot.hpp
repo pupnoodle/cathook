@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include "projectile_helpers.hpp"
 
 namespace projectile_aim {
@@ -110,13 +111,13 @@ class splashbot final {
 
   void ensure_fresh() {
     const char* raw_name = engine != nullptr ? engine->get_level_name() : nullptr;
-    const std::string current = raw_name != nullptr ? std::string(raw_name) : std::string{};
+    const std::string_view current = raw_name != nullptr ? raw_name : std::string_view{};
     const float now = global_vars != nullptr ? global_vars->curtime : 0.0f;
     const bool restarted = now + 0.5f < last_curtime_;
     const bool expired = now - cache_time_ > 60.0f;
     last_curtime_ = now;
     if (current != map_name_ || restarted || expired) {
-      map_name_ = current;
+      map_name_.assign(current);
       reset_cache();
     }
   }
@@ -146,33 +147,16 @@ class splashbot final {
     }
 
     const Vec3 center = (target.mins + target.maxs) * 0.5f;
-    const Vec3 extents = (target.maxs - target.mins) * 0.5f;
-    const std::array<Vec3, 15> probes{
+    const std::array<Vec3, 7> probes{
       center,
       {target.mins.x, center.y, center.z}, {target.maxs.x, center.y, center.z},
       {center.x, target.mins.y, center.z}, {center.x, target.maxs.y, center.z},
-      {center.x, center.y, target.mins.z}, {center.x, center.y, target.maxs.z},
-      {center.x - extents.x, center.y - extents.y, center.z},
-      {center.x - extents.x, center.y + extents.y, center.z},
-      {center.x + extents.x, center.y - extents.y, center.z},
-      {center.x + extents.x, center.y + extents.y, center.z},
-      {center.x, center.y - extents.y, center.z - extents.z},
-      {center.x, center.y + extents.y, center.z - extents.z},
-      {center.x, center.y - extents.y, center.z + extents.z},
-      {center.x, center.y + extents.y, center.z + extents.z}
+      {center.x, center.y, target.mins.z}, {center.x, center.y, target.maxs.z}
     };
-    const std::array<Vec3, 14> directions{
+    const std::array<Vec3, 6> directions{
       Vec3{1.0f, 0.0f, 0.0f}, Vec3{-1.0f, 0.0f, 0.0f},
       Vec3{0.0f, 1.0f, 0.0f}, Vec3{0.0f, -1.0f, 0.0f},
-      Vec3{0.0f, 0.0f, 1.0f}, Vec3{0.0f, 0.0f, -1.0f},
-      aimbot_normalize_vector(Vec3{1.0f, 1.0f, 0.0f}),
-      aimbot_normalize_vector(Vec3{1.0f, -1.0f, 0.0f}),
-      aimbot_normalize_vector(Vec3{-1.0f, 1.0f, 0.0f}),
-      aimbot_normalize_vector(Vec3{-1.0f, -1.0f, 0.0f}),
-      aimbot_normalize_vector(Vec3{1.0f, 0.0f, 1.0f}),
-      aimbot_normalize_vector(Vec3{-1.0f, 0.0f, 1.0f}),
-      aimbot_normalize_vector(Vec3{0.0f, 1.0f, 1.0f}),
-      aimbot_normalize_vector(Vec3{0.0f, -1.0f, 1.0f})
+      Vec3{0.0f, 0.0f, 1.0f}, Vec3{0.0f, 0.0f, -1.0f}
     };
 
     for (int index = 0; index < face_count_ && count < capacity; ++index) {
@@ -181,6 +165,10 @@ class splashbot final {
         add_candidate(target, radius, hull, face.point, face.normal, face.order,
                       splash_point_kind::geometry, out, count, capacity);
       }
+    }
+
+    if (face_count_ >= 8 && count > 0) {
+      return;
     }
 
     const float hull_length = length(hull);

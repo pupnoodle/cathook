@@ -13,11 +13,12 @@ V  o o  V  file: src/core/entity_cache.hpp
 #define ENTITY_CACHE_HPP
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
+#include <unordered_map>
 #include <utility>
 #include <vector>
-#include <unordered_map>
 
 #include "types.hpp"
 
@@ -46,10 +47,48 @@ struct entity_cache_player_entry {
 struct entity_cache_snapshot {
   std::uint32_t serial = 0;
   std::vector<entity_cache_player_entry> players{};
-  std::unordered_map<enum class_id, std::vector<Entity*>> entities{};
 };
 
-inline static std::unordered_map<enum class_id, std::vector<Entity*>> entity_cache;
+inline constexpr int entity_cache_id_min = -5;
+inline constexpr int entity_cache_id_max = 512;
+inline constexpr std::size_t entity_cache_bucket_count =
+  static_cast<std::size_t>(entity_cache_id_max - entity_cache_id_min + 1);
+
+struct entity_cache_table {
+  std::array<std::vector<Entity*>, entity_cache_bucket_count> buckets{};
+
+  static bool in_range(const int id) {
+    return id >= entity_cache_id_min && id <= entity_cache_id_max;
+  }
+
+  static std::size_t index_of(const int id) {
+    return static_cast<std::size_t>(id - entity_cache_id_min);
+  }
+
+  std::vector<Entity*>& operator[](enum class_id id) {
+    const int raw = static_cast<int>(id);
+    if (!in_range(raw)) {
+      static std::vector<Entity*> discarded{};
+      discarded.clear();
+      return discarded;
+    }
+    return buckets[index_of(raw)];
+  }
+
+  const std::vector<Entity*>& operator[](enum class_id id) const {
+    static const std::vector<Entity*> empty{};
+    const int raw = static_cast<int>(id);
+    return in_range(raw) ? buckets[index_of(raw)] : empty;
+  }
+
+  void clear_lists() {
+    for (auto& bucket : buckets) {
+      bucket.clear();
+    }
+  }
+};
+
+inline static entity_cache_table entity_cache;
 inline static entity_cache_snapshot g_entity_cache_snapshot;
 inline static std::vector<Entity*> g_entity_cache_npcs;
 inline static std::unordered_map<unsigned long, bool> friend_cache;
@@ -72,9 +111,7 @@ inline const std::vector<entity_cache_player_entry>& entity_cache_players() {
 }
 
 inline const std::vector<Entity*>& entity_cache_entities(enum class_id id) {
-  static const std::vector<Entity*> empty_entities{};
-  const auto found = entity_cache.find(id);
-  return found != entity_cache.end() ? found->second : empty_entities;
+  return entity_cache[id];
 }
 
 inline const std::vector<Entity*>& entity_cache_npcs() {
@@ -102,9 +139,7 @@ inline void entity_cache_clear_snapshot() {
 }
 
 inline void entity_cache_clear_lists() {
-  for (auto& entry : entity_cache) {
-    entry.second.clear();
-  }
+  entity_cache.clear_lists();
   g_entity_cache_npcs.clear();
 }
 

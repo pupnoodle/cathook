@@ -557,6 +557,10 @@ inline auto allowed_console_command(std::string_view command) -> bool
     std::string_view{"cat_dump_achievements"}, std::string_view{"cat_medal_flip"}, std::string_view{"cat_medal_changer"},
     std::string_view{"cat_autoitem_rent"}, std::string_view{"cat_autoitem_craft"},
     std::string_view{"cat_queue"}, std::string_view{"cat_cancelqueue"}, std::string_view{"cat_abandon"},
+    std::string_view{"cat_mvm_fix"}, std::string_view{"cat_mvm_quit"}, std::string_view{"cat_mvm_tele"},
+    std::string_view{"cat_mvm_rent"}, std::string_view{"cat_path_to"}, std::string_view{"cat_cancel_path"},
+    std::string_view{"cat_kill"}, std::string_view{"cat_menu"}, std::string_view{"cat_party_givelead"},
+    std::string_view{"cat_setcvar"}, std::string_view{"cat_getcvar"},
     std::string_view{"cat_criteria"}, std::string_view{"cat_commands"}, std::string_view{"cat_playerlist_print"},
     std::string_view{"cat_playerlist_info"}, std::string_view{"cat_config_get"}, std::string_view{"cat_config_set"},
     std::string_view{"cat_config_toggle"}, std::string_view{"cat_config_reset"}, std::string_view{"cat_config_list"}
@@ -692,30 +696,6 @@ inline void sweep_dead_peers(shared_state* state)
   }
 
   state->peer_count = count;
-}
-
-inline auto find_peer_by_start_time(shared_state* state, unsigned long start_time) -> std::optional<int>
-{
-  if (state == nullptr || start_time == 0)
-  {
-    return std::nullopt;
-  }
-
-  scoped_lock lock{state};
-  if (!lock.locked())
-  {
-    return std::nullopt;
-  }
-  for (auto index = 0u; index < max_peers; ++index)
-  {
-    const auto& peer = state->peer_data[index];
-    if (peer_alive(peer) && peer.starttime == start_time)
-    {
-      return static_cast<int>(index);
-    }
-  }
-
-  return std::nullopt;
 }
 
 }

@@ -37,7 +37,6 @@ namespace
 
 std::atomic<std::uint32_t> g_ipc_target{0};
 
-constexpr float pi_degrees = 57.29577951308232f;
 constexpr float follow_jump_height = 28.0f;
 constexpr float follow_jump_run = 60.0f;
 constexpr float trail_node_spacing = 20.0f;
@@ -46,47 +45,17 @@ constexpr float follow_move_speed = 450.0f;
 constexpr float stuck_jump_delay = 0.5f;
 constexpr float afk_timeout = 8.0f;
 
-bool finite_origin(const Vec3& origin)
-{
-  return std::isfinite(origin.x) && std::isfinite(origin.y) && std::isfinite(origin.z);
-}
-
-float distance_sq_2d(const Vec3& left, const Vec3& right)
-{
-  const float x = left.x - right.x;
-  const float y = left.y - right.y;
-  return x * x + y * y;
-}
-
-float distance_2d(const Vec3& left, const Vec3& right)
-{
-  return std::sqrt(distance_sq_2d(left, right));
-}
-
-float normalize_yaw(float yaw)
-{
-  while (yaw > 180.0f) yaw -= 360.0f;
-  while (yaw < -180.0f) yaw += 360.0f;
-  return yaw;
-}
-
 Vec3 clamp_angles(Vec3 angles)
 {
   angles.x = std::clamp(angles.x, -89.0f, 89.0f);
-  angles.y = normalize_yaw(angles.y);
+  angles.y = azimuth_to_signed(angles.y);
   angles.z = 0.0f;
   return angles;
 }
 
 Vec3 calculate_angles(const Vec3& source, const Vec3& target)
 {
-  const auto delta = target - source;
-  const auto planar = std::sqrt(delta.x * delta.x + delta.y * delta.y);
-  return clamp_angles(Vec3{
-    -std::atan2(delta.z, planar) * pi_degrees,
-    std::atan2(delta.y, delta.x) * pi_degrees,
-    0.0f
-  });
+  return clamp_angles(direction_to_angles(target - source));
 }
 
 int role_priority(std::uint32_t account_id)
@@ -166,8 +135,8 @@ struct controller_t::impl
     const auto origin = player->get_origin();
     const auto angles = player->get_eye_angles();
     const bool moved = last_origins[index].x == 0.0f && last_origins[index].y == 0.0f && last_origins[index].z == 0.0f
-      ? true : distance_sq_2d(origin, last_origins[index]) > 64.0f;
-    const bool looked = std::fabs(normalize_yaw(angles.y - last_angles[index].y)) > 2.0f ||
+      ? true : distance_squared_2d(origin, last_origins[index]) > 64.0f;
+    const bool looked = std::fabs(azimuth_to_signed(angles.y - last_angles[index].y)) > 2.0f ||
       std::fabs(angles.x - last_angles[index].x) > 2.0f;
     const auto velocity = player->get_velocity();
     const bool moving = std::hypot(velocity.x, velocity.y) > 10.0f;
@@ -227,10 +196,10 @@ struct controller_t::impl
     candidate best{};
     const auto choose = [&](const candidate& value) {
       if (value.player == nullptr) return;
-      if (best.player == nullptr || value.priority != best.priority) { if (best.player == nullptr || value.priority > best.priority) best = value; return; }
-      if (value.preference != best.preference) { if (value.preference > best.preference) best = value; return; }
-      if (value.class_preference != best.class_preference) { if (value.class_preference > best.class_preference) best = value; return; }
-      if (value.distance < best.distance) best = value;
+      if (best.player == nullptr) { best = value; return; }
+      const auto value_rank = std::tie(value.priority, value.preference, value.class_preference);
+      const auto best_rank = std::tie(best.priority, best.preference, best.class_preference);
+      if (value_rank > best_rank || (value_rank == best_rank && value.distance < best.distance)) best = value;
     };
 
     for (const auto& entry : entity_cache_players())
@@ -272,7 +241,7 @@ struct controller_t::impl
 
   void append_target_node(const Vec3& origin, const Vec3& angles)
   {
-    if (!finite_origin(origin)) return;
+    if (!vec3_finite(origin)) return;
     if (trail.empty() || distance_2d(trail.back().origin, origin) >= trail_node_spacing)
       trail.push_back({origin, angles});
     else
@@ -295,8 +264,8 @@ struct controller_t::impl
 
     if (config.misc.automation.followbot_look_no_snap)
     {
-      const auto delta = normalize_yaw(angles.y - user_cmd->view_angles.y);
-      angles.y = normalize_yaw(user_cmd->view_angles.y + std::clamp(delta, -12.0f, 12.0f));
+      const auto delta = azimuth_to_signed(angles.y - user_cmd->view_angles.y);
+      angles.y = azimuth_to_signed(user_cmd->view_angles.y + std::clamp(delta, -12.0f, 12.0f));
       angles.x = user_cmd->view_angles.x + std::clamp(angles.x - user_cmd->view_angles.x, -12.0f, 12.0f);
     }
     user_cmd->view_angles = clamp_angles(angles);
@@ -357,17 +326,22 @@ struct controller_t::impl
       destination = trail.front();
     }
 
-    const auto yaw = std::atan2(destination.origin.y - local_origin.y, destination.origin.x - local_origin.x) * pi_degrees;
-    const auto yaw_delta = (yaw - user_cmd->view_angles.y) * (1.0f / pi_degrees);
+    const auto yaw = std::atan2(destination.origin.y - local_origin.y, destination.origin.x - local_origin.x) * radpi;
+    const auto yaw_delta = (yaw - user_cmd->view_angles.y) * pideg;
     const auto speed = std::clamp(distance_2d(local_origin, destination.origin) / std::max(1.0f, config.misc.automation.followbot_follow_distance), 0.25f, 1.0f) * follow_move_speed;
     user_cmd->forwardmove = std::cos(yaw_delta) * speed;
     user_cmd->sidemove = -std::sin(yaw_delta) * speed;
-    if (destination.origin.z - local_origin.z > follow_jump_height && planar_distance <= follow_jump_run && localplayer->is_on_ground())
+    const auto on_ground = localplayer->is_on_ground();
+    if (destination.origin.z - local_origin.z > follow_jump_height && planar_distance <= follow_jump_run && on_ground)
     {
       user_cmd->buttons |= IN_JUMP;
       last_jump_time = current_time;
     }
-    else if (current_time - last_jump_time >= stuck_jump_delay && localplayer->is_on_ground() && trail.size() > 1)
+    else if (!on_ground && destination.origin.z - local_origin.z > 18.0f)
+    {
+      user_cmd->buttons |= IN_DUCK;
+    }
+    else if (current_time - last_jump_time >= stuck_jump_delay && on_ground && trail.size() > 1)
     {
 
       user_cmd->buttons |= IN_JUMP;

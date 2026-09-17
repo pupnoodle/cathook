@@ -55,9 +55,9 @@ bool any_medic_feature_enabled()
     || config.misc.automation.medic_autouber;
 }
 
-Weapon* find_weapon(Player* localplayer, bool (*predicate)(Weapon*))
+Weapon* find_medigun(Player* localplayer)
 {
-  if (localplayer == nullptr || predicate == nullptr)
+  if (localplayer == nullptr)
   {
     return nullptr;
   }
@@ -65,18 +65,13 @@ Weapon* find_weapon(Player* localplayer, bool (*predicate)(Weapon*))
   for (int index = 0; index < Player::max_weapon_count; ++index)
   {
     auto* weapon = localplayer->get_weapon_at(index);
-    if (predicate(weapon))
+    if (weapon != nullptr && weapon->is_medigun())
     {
       return weapon;
     }
   }
 
   return nullptr;
-}
-
-bool is_medigun_weapon(Weapon* weapon)
-{
-  return weapon != nullptr && weapon->is_medigun();
 }
 
 int player_account_id(Player* player)
@@ -166,52 +161,42 @@ Player* choose_heal_target(Player* localplayer)
     return nullptr;
   }
 
-  Player* best_target = nullptr;
-  auto best_score = -std::numeric_limits<float>::max();
+  Player* best_wounded = nullptr;
+  Player* best_other = nullptr;
+  auto best_wounded_score = -std::numeric_limits<float>::max();
+  auto best_other_score = -std::numeric_limits<float>::max();
   const auto local_origin = localplayer->get_origin();
-  const bool any_urgent_target = std::any_of(entity_cache[class_id::PLAYER].begin(), entity_cache[class_id::PLAYER].end(), [localplayer](Entity* entity)
-  {
-    auto* player = reinterpret_cast<Player*>(entity);
-    return valid_heal_target(localplayer, player) && player_wounded(player) && medigun_target_visible(localplayer, player);
-  });
 
   for (auto* entity : entity_cache[class_id::PLAYER])
   {
     auto* player = reinterpret_cast<Player*>(entity);
-    if (!valid_heal_target(localplayer, player))
-    {
-      continue;
-    }
-    if (!medigun_target_visible(localplayer, player))
+    if (!valid_heal_target(localplayer, player) || !medigun_target_visible(localplayer, player))
     {
       continue;
     }
 
-    const bool wounded = player_wounded(player);
-    if (any_urgent_target && !wounded)
-    {
-      continue;
-    }
-
-    auto score = 0.0f;
-    if (wounded)
+    float score = -std::sqrt(distance_squared_2d(local_origin, player->get_origin())) * 0.05f;
+    if (player_wounded(player))
     {
       score += (1.0f - health_ratio(player)) * 300.0f;
+      if (score > best_wounded_score)
+      {
+        best_wounded_score = score;
+        best_wounded = player;
+      }
     }
     else
     {
       score -= 30.0f;
-    }
-
-    score -= std::sqrt(distance_squared_2d(local_origin, player->get_origin())) * 0.05f;
-    if (score > best_score)
-    {
-      best_score = score;
-      best_target = player;
+      if (score > best_other_score)
+      {
+        best_other_score = score;
+        best_other = player;
+      }
     }
   }
 
-  return best_target;
+  return best_wounded != nullptr ? best_wounded : best_other;
 }
 
 Vec3 target_aim_position(Player* player)
@@ -254,25 +239,6 @@ bool medigun_target_visible(Player* localplayer, Player* target)
   return world_visible_to_position(localplayer, target_aim_position(target))
     || world_visible_to_position(localplayer, origin + Vec3{0.0f, 0.0f, 36.0f})
     || world_visible_to_position(localplayer, origin + Vec3{0.0f, 0.0f, std::max(view_offset.z * 0.45f, 28.0f)});
-}
-
-void apply_visible_view(user_cmd* user_cmd)
-{
-  if (user_cmd == nullptr)
-  {
-    return;
-  }
-
-  auto angles = user_cmd->view_angles;
-  if (prediction != nullptr)
-  {
-    prediction->set_local_view_angles(angles);
-    prediction->set_view_angles(angles);
-  }
-  if (engine != nullptr)
-  {
-    engine->set_view_angles(angles);
-  }
 }
 
 bool visible_enemy_near(Player* localplayer, Player* patient, damage_type* fallback_type)
@@ -375,7 +341,7 @@ void apply_autoheal(user_cmd* user_cmd, Player* localplayer, Player* target, Wea
   {
     user_cmd->buttons |= IN_ATTACK;
   }
-  apply_visible_view(user_cmd);
+  push_view_angles(user_cmd->view_angles);
 }
 
 damage_type classify_weapon_damage(std::string_view weapon_name)
@@ -399,11 +365,6 @@ damage_type classify_weapon_damage(std::string_view weapon_name)
   return damage_type::bullet;
 }
 
-int vacc_resist_index(damage_type type)
-{
-  return static_cast<int>(type);
-}
-
 bool should_pop_uber(medic_controller& controller, Player* localplayer, Player* patient, damage_type* desired_type)
 {
   if (localplayer == nullptr)
@@ -411,7 +372,7 @@ bool should_pop_uber(medic_controller& controller, Player* localplayer, Player* 
     return false;
   }
 
-  int recent_damage_type = vacc_resist_index(damage_type::bullet);
+  int recent_damage_type = static_cast<int>(damage_type::bullet);
   if (controller.recent_danger_matches(localplayer, patient, &recent_damage_type))
   {
     if (desired_type != nullptr)
@@ -445,7 +406,7 @@ void apply_autovacc(medic_controller& controller, user_cmd* user_cmd, Player* lo
   damage_type desired_type = damage_type::bullet;
   const bool danger = should_pop_uber(controller, localplayer, patient, &desired_type);
   const auto current_time = global_vars != nullptr ? global_vars->curtime : 0.0f;
-  const int desired_resist = vacc_resist_index(desired_type);
+  const int desired_resist = static_cast<int>(desired_type);
 
   if (medigun->vaccinator_resist_type() != desired_resist && controller.can_cycle_resist(current_time))
   {
@@ -485,8 +446,6 @@ void apply_autouber(medic_controller& controller, user_cmd* user_cmd, Player* lo
   controller.delay_uber(current_time + uber_input_interval);
 }
 
-medic_controller* global_controller = nullptr;
-
 }
 
 void medic_controller::clear_runtime_state()
@@ -496,9 +455,8 @@ void medic_controller::clear_runtime_state()
   suppress_aimbot_ = false;
 }
 
-void medic_controller::on_pre_navbot_create_move(user_cmd* user_cmd)
+void medic_controller::on_pre_navbot_create_move()
 {
-  (void)user_cmd;
   clear_runtime_state();
   if (!any_medic_feature_enabled() || engine == nullptr || entity_list == nullptr || !engine->is_in_game())
   {
@@ -511,7 +469,7 @@ void medic_controller::on_pre_navbot_create_move(user_cmd* user_cmd)
     return;
   }
 
-  auto* medigun = find_weapon(localplayer, is_medigun_weapon);
+  auto* medigun = find_medigun(localplayer);
   auto* target = choose_heal_target(localplayer);
   if (target == nullptr && medigun != nullptr && valid_attached_patient(localplayer, medigun->medigun_healing_target()))
   {
@@ -582,7 +540,7 @@ void medic_controller::on_game_event(GameEvent* event)
   }
 
   recent_damage_target_index_ = victim->get_index();
-  recent_damage_type_ = vacc_resist_index(classify_weapon_damage(event->get_string("weapon")));
+  recent_damage_type_ = static_cast<int>(classify_weapon_damage(event->get_string("weapon")));
   recent_damage_time_ = global_vars->curtime;
 }
 
@@ -654,13 +612,8 @@ void medic_controller::delay_uber(float next_time)
 
 medic_controller& controller()
 {
-  if (global_controller == nullptr)
-  {
-    static medic_controller instance{};
-    global_controller = &instance;
-  }
-
-  return *global_controller;
+  static medic_controller instance{};
+  return instance;
 }
 
 }

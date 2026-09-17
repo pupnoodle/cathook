@@ -22,16 +22,26 @@ void override_view_hook(void* me, view_setup* setup) {
   CATHOOK_HOOK_GUARD();
   thirdperson::update_taunt_camera();
 
-  Player* localplayer = entity_list->get_localplayer();
+  if (setup == nullptr) {
+    if (override_view_original != nullptr) {
+      override_view_original(me, setup);
+    }
+    return;
+  }
+
+  Player* localplayer = entity_list != nullptr ? entity_list->get_localplayer() : nullptr;
   Vec3 original_punch{};
   Vec3* punch = nullptr;
-  if (config.visuals.removals.view_punch && localplayer != nullptr) {
-    punch = reinterpret_cast<Vec3*>(reinterpret_cast<std::uintptr_t>(localplayer) + 0x74);
+  static tf2_netvars::lazy_offset punch_offset{"DT_BasePlayer", {"localdata", "m_Local", "m_vecPunchAngle"}};
+  if (config.visuals.removals.view_punch && localplayer != nullptr && punch_offset > 0) {
+    punch = reinterpret_cast<Vec3*>(reinterpret_cast<std::uintptr_t>(localplayer) + static_cast<std::uintptr_t>(punch_offset.operator int()));
     original_punch = *punch;
     *punch = {};
   }
 
-  override_view_original(me, setup);
+  if (override_view_original != nullptr) {
+    override_view_original(me, setup);
+  }
 
   if (punch != nullptr) {
     *punch = original_punch;
@@ -53,7 +63,7 @@ void override_view_hook(void* me, view_setup* setup) {
     }
   }
 
-  static Convar* viewmodel_fov = convar_system->find_var("viewmodel_fov");
+  static Convar* viewmodel_fov = convar_system != nullptr ? convar_system->find_var("viewmodel_fov") : nullptr;
   if (viewmodel_fov != nullptr && config.visuals.override_viewmodel_fov == true) {
     viewmodel_fov->set_float(config.visuals.custom_viewmodel_fov);
   }

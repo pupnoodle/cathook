@@ -29,13 +29,16 @@ V  o o  V  file: src/core/hooks/client_mode_create_move.cpp
 #include "features/automation/medic_automation/medic_automation.hpp"
 #include "features/automation/misc/misc.hpp"
 #include "features/automation/navbot/navbot_controller.hpp"
+#include "features/automation/spectate/spectate.hpp"
+#include "features/automation/anti_cheat_compat/anti_cheat_compat.hpp"
 #include "features/visuals/thirdperson.hpp"
 #include "features/visuals/esp/esp.hpp"
+#include "features/combat/tickbase/tickbase.hpp"
 #include "core/detach.hpp"
 
 bool (*client_mode_create_move_original)(void*, float, user_cmd*);
 bool g_client_create_move_owns_features = false;
-thread_local bool g_client_mode_pipeline_ran = false;
+bool g_client_mode_pipeline_ran = false;
 
 void refresh_prediction_state();
 
@@ -150,7 +153,6 @@ static bool call_client_mode_create_move(void* me, float sample_time, user_cmd* 
 
 struct move_features_result {
   bool use_psilent = false;
-  bool attack_suppressed = false;
 };
 
 static move_features_result run_move_features(user_cmd* user_cmd) {
@@ -164,8 +166,9 @@ static move_features_result run_move_features(user_cmd* user_cmd) {
 
   force_aimbot_autoreload_convar();
 
-  medic_automation::controller().on_pre_navbot_create_move(user_cmd);
+  medic_automation::controller().on_pre_navbot_create_move();
   bhop(user_cmd);
+  spectate::on_create_move(user_cmd);
   followbot::controller().on_create_move(user_cmd);
   navbot::controller().on_create_move(user_cmd);
   navbot::controller().apply_post_anti_aim(user_cmd);
@@ -224,9 +227,11 @@ static move_features_result run_move_features(user_cmd* user_cmd) {
   const bool moonwalk_psilent = !menu_movement_blocked && moonwalk_create_move(user_cmd);
 
   const crit_hack::create_move_result crit_result = crit_hack::on_create_move(user_cmd, aimbot_result.requested_shot);
-  result.attack_suppressed = crit_result.attack_suppressed;
-  if (crit_result.attack_suppressed && aimbot_result.psilent_command) {
-    user_cmd->view_angles = pre_aimbot_view_angles;
+  if (crit_result.attack_suppressed) {
+    user_cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2 | IN_ATTACK3);
+    if (aimbot_result.psilent_command) {
+      user_cmd->view_angles = pre_aimbot_view_angles;
+    }
   }
 
   result.use_psilent = (aimbot_result.psilent_command && !crit_result.attack_suppressed) ||
@@ -244,7 +249,27 @@ static void run_post_create_move_features(user_cmd* user_cmd) {
     tickbase::on_create_move(user_cmd);
     anti_aim::on_create_move(user_cmd);
   }
+  anti_cheat_compat::on_create_move(user_cmd);
   aimbot::update_local_client_side_animation();
+}
+
+static move_features_result run_move_feature_pipeline(user_cmd* user_cmd, Player* localplayer) {
+  move_features_result result{};
+  anti_cheat_compat::enforce_settings();
+  const bool can_run_features = can_run_move_features(user_cmd);
+  const bool taunting = localplayer != nullptr && localplayer->is_taunting();
+  if (!can_run_features || taunting) {
+    if (should_run_taunt_slide(localplayer)) {
+      apply_taunt_slide(localplayer, user_cmd);
+    }
+    run_post_create_move_features(user_cmd);
+    return result;
+  }
+
+  update_player_head_emoji_cache();
+  result = run_move_features(user_cmd);
+  run_post_create_move_features(user_cmd);
+  return result;
 }
 
 bool client_mode_create_move_hook(void* me, float sample_time, user_cmd* user_cmd) {
@@ -268,28 +293,15 @@ bool client_mode_create_move_hook(void* me, float sample_time, user_cmd* user_cm
   }
   const bool rc = call_client_mode_create_move(me, sample_time, user_cmd, localplayer);
   if (called_from_client_create_move) {
-    refresh_prediction_state();
+    if (tickbase::should_rebuild_cl_move()) {
+      refresh_prediction_state();
+    }
     cat_bind::run();
     automation::controller().on_create_move(user_cmd);
     thirdperson::update_taunt_camera();
   }
 
-  const bool can_run_features = can_run_move_features(user_cmd);
-  const bool taunting = localplayer != nullptr && localplayer->is_taunting();
-  const bool taunt_slide = should_run_taunt_slide(localplayer);
-
-  if (!can_run_features || taunting) {
-    if (taunt_slide) {
-      apply_taunt_slide(localplayer, user_cmd);
-    }
-    run_post_create_move_features(user_cmd);
-    return rc;
-  }
-
-  update_player_head_emoji_cache();
-
-  const move_features_result move_result = run_move_features(user_cmd);
-  run_post_create_move_features(user_cmd);
+  const move_features_result move_result = run_move_feature_pipeline(user_cmd, localplayer);
   if (move_result.use_psilent || navbot::controller().has_silent_path_look()) {
     return false;
   }

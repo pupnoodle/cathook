@@ -104,11 +104,70 @@ inline static float distance_squared_2d(Vec3 location_one, Vec3 location_two) {
   return (location_one.x - location_two.x)*(location_one.x - location_two.x) + (location_one.y - location_two.y)*(location_one.y - location_two.y);
 }
 
+inline static float distance_2d(Vec3 location_one, Vec3 location_two) {
+  return std::sqrt(distance_squared_2d(location_one, location_two));
+}
+
 inline static float azimuth_to_signed(float yaw) {
   yaw = std::fmod(yaw, 360.0f);
   if (yaw > 180.0f) yaw -= 360.0f;
   if (yaw <= -180.0f) yaw += 360.0f;
   return yaw;
+}
+
+inline static float dot(const Vec3& left, const Vec3& right) {
+  return left.x * right.x + left.y * right.y + left.z * right.z;
+}
+
+inline static float length_squared(const Vec3& value) {
+  return value.x * value.x + value.y * value.y + value.z * value.z;
+}
+
+inline static float length(const Vec3& value) {
+  return std::sqrt(length_squared(value));
+}
+
+inline static Vec3 normalized(const Vec3& value) {
+  const float magnitude = length(value);
+  return magnitude > 0.0001f ? value * (1.0f / magnitude) : Vec3{};
+}
+
+inline static bool vec3_finite(const Vec3& value) {
+  return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+}
+
+inline static float vector_yaw(const Vec3& value) {
+  return std::atan2(value.y, value.x) * radpi;
+}
+
+inline static Vec3 direction_to_angles(const Vec3& direction) {
+  const float planar_squared = (direction.x * direction.x) + (direction.y * direction.y);
+  if (planar_squared <= 1e-12f) {
+    return Vec3{
+      direction.z > 0.0f ? -89.0f : (direction.z < 0.0f ? 89.0f : 0.0f),
+      0.0f,
+      0.0f
+    };
+  }
+  const float planar_length = std::sqrt(planar_squared);
+  return Vec3{
+    std::atan2(-direction.z, planar_length) * radpi,
+    std::atan2(direction.y, direction.x) * radpi,
+    0.0f
+  };
+}
+
+inline static Vec3 angles_to_position(const Vec3& start, const Vec3& target) {
+  return direction_to_angles(target - start);
+}
+
+inline static float remap_clamped(float value, float in_min, float in_max, float out_min,
+                                  float out_max) {
+  if (in_max - in_min <= 0.0001f) {
+    return out_max >= out_min ? out_min : out_max;
+  }
+  const float fraction = std::clamp((value - in_min) / (in_max - in_min), 0.0f, 1.0f);
+  return out_min + (out_max - out_min) * fraction;
 }
 
 inline static void angle_vectors(Vec3 angles, Vec3* forward, Vec3* right, Vec3* up) {

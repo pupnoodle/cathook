@@ -22,9 +22,7 @@ public:
     return entity_from_index_fn(this, index);
   }
 
-  Player* player_from_index(unsigned int index) {
-    return (Player*)this->entity_from_index(index);
-  }
+  Player* player_from_index(unsigned int index);
 
   Entity* entity_from_handle(int handle) {
     const auto raw_handle = static_cast<std::uint32_t>(handle);

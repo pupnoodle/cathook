@@ -50,9 +50,6 @@ struct health_history_t {
 
 struct create_move_result {
   bool attack_suppressed = false;
-  bool attack_allowed = false;
-  bool crit_requested = false;
-  bool skip_requested = false;
 };
 
 [[nodiscard]] create_move_result on_create_move(user_cmd* cmd, bool aimbot_requested_shot = false);
@@ -60,9 +57,6 @@ void on_game_event(GameEvent* event);
 void reset();
 void store_health_history(int index, int health, Player* player = nullptr);
 [[nodiscard]] bool weapon_can_crit(Weapon* weapon, bool weapon_only = false);
-[[nodiscard]] bool is_command_crit(user_cmd* cmd, int command_number);
-[[nodiscard]] int find_queued_crit_command(user_cmd* cmd, int max_commands);
-void notify_queued_release(int command_number);
 [[nodiscard]] crit_stats_t get_stats();
 
 }

@@ -12,6 +12,8 @@ V  o o  V  file: src/games/tf2/sdk/interfaces/global_vars.hpp
 #ifndef GLOBAL_VARS_HPP
 #define GLOBAL_VARS_HPP
 
+#include <cmath>
+
 class GlobalVars {
 public:
   float realtime;
@@ -32,5 +34,21 @@ public:
 };
 
 inline static GlobalVars* global_vars;
+
+inline float tick_interval() {
+  if (global_vars != nullptr && std::isfinite(global_vars->interval_per_tick) &&
+      global_vars->interval_per_tick > 0.0001f) {
+    return global_vars->interval_per_tick;
+  }
+  return 0.015f;
+}
+
+inline int time_to_ticks(float seconds) {
+  return static_cast<int>(0.5f + seconds / tick_interval());
+}
+
+inline float ticks_to_time(int ticks) {
+  return static_cast<float>(ticks) * tick_interval();
+}
 
 #endif

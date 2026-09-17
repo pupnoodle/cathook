@@ -112,8 +112,8 @@ bool mvm_game_rules_active()
     return true;
   }
 
-  static const int mvm_offset = tf2_netvars::find_offset(
-    "DT_TFGameRulesProxy", {"m_bPlayingMannVsMachine"});
+  static tf2_netvars::lazy_offset mvm_offset{
+    "DT_TFGameRulesProxy", {"m_bPlayingMannVsMachine"}};
   return mvm_offset <= 0
     || *reinterpret_cast<const bool*>(reinterpret_cast<uintptr_t>(proxy) + mvm_offset);
 }
@@ -217,7 +217,7 @@ goal_candidate choose_mvm_money_goal(const navbot_mesh& mesh, Player* localplaye
     {
       continue;
     }
-    static const int distributed_offset = tf2_netvars::find_offset("DT_CurrencyPack", {"m_bDistributed"});
+    static tf2_netvars::lazy_offset distributed_offset{"DT_CurrencyPack", {"m_bDistributed"}};
     if (distributed_offset > 0
       && *reinterpret_cast<const bool*>(reinterpret_cast<uintptr_t>(entity) + distributed_offset))
     {
@@ -406,16 +406,7 @@ float clamp01(float value)
 
 float normalize_yaw(float yaw)
 {
-  while (yaw > 180.0f)
-  {
-    yaw -= 360.0f;
-  }
-  while (yaw < -180.0f)
-  {
-    yaw += 360.0f;
-  }
-
-  return yaw;
+  return azimuth_to_signed(yaw);
 }
 
 bool goal_enabled(goal_type type)
@@ -1008,14 +999,12 @@ bool enemy_close_to_payload_cart(Player* localplayer)
 
   constexpr float payload_threat_distance = 325.0f;
   auto payload_threat_distance_sq = payload_threat_distance * payload_threat_distance;
-  auto max_entities = entity_list->get_max_entities();
 
-  for (int entity_index = 1; entity_index < max_entities; ++entity_index)
+  auto check_cart = [&](Entity* entity) -> bool
   {
-    auto* entity = entity_list->entity_from_index(entity_index);
     if (entity == nullptr || entity->is_dormant() || !is_payload_cart(entity))
     {
-      continue;
+      return false;
     }
 
     auto cart_origin = payload_origin(entity);
@@ -1036,6 +1025,30 @@ bool enemy_close_to_payload_cart(Player* localplayer)
         return true;
       }
     }
+    return false;
+  };
+
+  const auto& dispensers = entity_cache[class_id::OBJECT_CART_DISPENSER];
+  for (auto* entity : dispensers)
+  {
+    if (check_cart(entity))
+    {
+      return true;
+    }
+  }
+
+  if (!dispensers.empty())
+  {
+    return false;
+  }
+
+  auto max_entities = entity_list->get_max_entities();
+  for (int entity_index = 1; entity_index < max_entities; ++entity_index)
+  {
+    if (check_cart(entity_list->entity_from_index(entity_index)))
+    {
+      return true;
+    }
   }
 
   return false;
@@ -1052,25 +1065,18 @@ goal_candidate choose_payload_goal(const navbot_mesh& mesh, Player* localplayer)
   }
 
   auto local_origin = localplayer->get_origin();
-  auto max_entities = entity_list->get_max_entities();
-  for (int entity_index = 1; entity_index < max_entities; ++entity_index)
+  auto consider_cart = [&](Entity* entity)
   {
-    auto* entity = entity_list->entity_from_index(entity_index);
-    if (entity == nullptr || entity->is_dormant())
+    if (entity == nullptr || entity->is_dormant() || !is_payload_cart(entity))
     {
-      continue;
-    }
-
-    if (!is_payload_cart(entity))
-    {
-      continue;
+      return;
     }
 
     auto origin = payload_origin(entity);
     auto area_id = mesh.find_closest_area(origin);
     if (!area_id.valid())
     {
-      continue;
+      return;
     }
 
     auto goal = entity->get_team() == localplayer->get_team()
@@ -1078,22 +1084,38 @@ goal_candidate choose_payload_goal(const navbot_mesh& mesh, Player* localplayer)
       : goal_type::defend_payload;
     if (!goal_enabled(goal))
     {
-      continue;
+      return;
     }
     if (goal == goal_type::push_payload)
     {
       auto destination = choose_payload_push_destination(mesh, localplayer, origin, area_id);
       if (!payload_push_destination_in_range(destination, origin))
       {
-        continue;
+        return;
       }
 
       choose_best(best, make_candidate(goal, payload_distance_score(65.0f, local_origin, origin), destination, area_id));
-      continue;
+      return;
     }
 
     auto defend_goal = choose_payload_defend_destination(mesh, localplayer, origin, area_id, payload_distance_score(48.0f, local_origin, origin));
     choose_best(best, defend_goal);
+  };
+
+  const auto& dispensers = entity_cache[class_id::OBJECT_CART_DISPENSER];
+  for (auto* entity : dispensers)
+  {
+    consider_cart(entity);
+  }
+  if (!dispensers.empty())
+  {
+    return best;
+  }
+
+  auto max_entities = entity_list->get_max_entities();
+  for (int entity_index = 1; entity_index < max_entities; ++entity_index)
+  {
+    consider_cart(entity_list->entity_from_index(entity_index));
   }
 
   return best;
@@ -1165,10 +1187,6 @@ float choose_enemy_orbit_phase(float current_time)
   return phase;
 }
 
-bool vec3_is_finite(const Vec3& value)
-{
-  return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
-}
 
 unsigned int enemy_line_of_fire_trace_mask()
 {
@@ -1181,13 +1199,13 @@ unsigned int enemy_line_of_fire_trace_mask()
   return trace_mask;
 }
 
-bool enemy_line_of_fire_clear(Player* localplayer, Player* enemy, const Vec3& shoot_pos, const Vec3& target_pos)
+bool enemy_line_of_fire_clear(Player* localplayer, Entity* enemy, const Vec3& shoot_pos, const Vec3& target_pos)
 {
   if (localplayer == nullptr || enemy == nullptr || engine_trace == nullptr)
   {
     return false;
   }
-  if (!vec3_is_finite(shoot_pos) || !vec3_is_finite(target_pos))
+  if (!vec3_finite(shoot_pos) || !vec3_finite(target_pos))
   {
     return false;
   }
@@ -1517,6 +1535,179 @@ goal_candidate choose_heal_follow_goal(const navbot_mesh& mesh, Player* localpla
     score += (1.0f - std::clamp(static_cast<float>(target->get_health()) / static_cast<float>(target->get_max_health()), 0.0f, 1.0f)) * 18.0f;
   }
   return make_entity_candidate(goal_type::heal_follow, score, destination, area_id, target->get_index());
+}
+
+bool building_owned_by_local(Entity* building, Player* localplayer)
+{
+  static tf2_netvars::lazy_offset builder_offset{"DT_BaseObject", {"m_hBuilder"}};
+  if (builder_offset <= 0 || building == nullptr || localplayer == nullptr)
+  {
+    return false;
+  }
+
+  return *reinterpret_cast<const int*>(reinterpret_cast<uintptr_t>(building) + builder_offset)
+    == localplayer->get_ref_handle();
+}
+
+template<typename F>
+void for_each_local_building(Player* localplayer, F&& callback)
+{
+  constexpr class_id building_ids[] = {class_id::SENTRY, class_id::DISPENSER, class_id::TELEPORTER};
+  for (auto id : building_ids)
+  {
+    for (auto* entity : entity_cache[id])
+    {
+      auto* building = reinterpret_cast<Building*>(entity);
+      if (building == nullptr || building->is_dormant() || building->get_health() <= 0
+        || building->get_team() != localplayer->get_team()
+        || !building_owned_by_local(building, localplayer))
+      {
+        continue;
+      }
+      callback(building);
+    }
+  }
+}
+
+goal_candidate choose_engineer_maintain_goal(const navbot_mesh& mesh, Player* localplayer)
+{
+  goal_candidate best{};
+  best.score = -1.0f;
+  if (localplayer == nullptr || localplayer->get_tf_class() != tf_class::ENGINEER)
+  {
+    return best;
+  }
+
+  const auto local_origin = localplayer->get_origin();
+  for_each_local_building(localplayer, [&](Building* building)
+  {
+    const auto max_health = building->get_max_health();
+    const auto health_ratio = max_health > 0
+      ? std::clamp(static_cast<float>(building->get_health()) / max_health, 0.0f, 1.0f)
+      : 1.0f;
+    const auto sapped = building->is_sapped();
+    if (!sapped && health_ratio >= 1.0f)
+    {
+      return;
+    }
+
+    const auto area_id = mesh.find_closest_area(building->get_origin());
+    if (!area_id.valid())
+    {
+      return;
+    }
+
+    const auto distance = std::sqrt(distance_squared_2d(local_origin, building->get_origin()));
+    const auto score = (sapped ? 220.0f : 150.0f) - health_ratio * 30.0f - distance * 0.03f;
+    choose_best(best, make_entity_candidate(goal_type::engineer_maintain, score,
+      building->get_origin(), area_id, building->get_index()));
+  });
+  return best;
+}
+
+goal_candidate choose_engineer_build_goal(const navbot_mesh& mesh, Player* localplayer)
+{
+  goal_candidate best{};
+  best.score = -1.0f;
+  if (localplayer == nullptr || localplayer->get_tf_class() != tf_class::ENGINEER)
+  {
+    return best;
+  }
+
+  auto has_sentry = false;
+  for_each_local_building(localplayer, [&](Building* building)
+  {
+    if (building->get_class_id() == class_id::SENTRY)
+    {
+      has_sentry = true;
+    }
+  });
+  if (has_sentry)
+  {
+    return best;
+  }
+
+  const auto local_origin = localplayer->get_origin();
+  for (auto area_id : mesh.cache().sentry_spot_areas)
+  {
+    auto* area = mesh.find_area(area_id);
+    if (area == nullptr
+      || (area->flags & (nav_area_flag_blocked | nav_area_flag_setup_gate | nav_area_flag_spawn_room)) != 0)
+    {
+      continue;
+    }
+
+    const auto distance = std::sqrt(distance_squared_2d(local_origin, area->center));
+    choose_best(best, make_candidate(goal_type::engineer_build,
+      145.0f - distance * 0.02f, area->center, area_id));
+  }
+  return best;
+}
+
+goal_candidate choose_sentry_snipe_goal(const navbot_mesh& mesh, Player* localplayer, float current_time)
+{
+  goal_candidate best{};
+  best.score = -1.0f;
+  if (localplayer == nullptr)
+  {
+    return best;
+  }
+
+  const auto local_origin = localplayer->get_origin();
+  const auto view_offset = localplayer->get_view_offset();
+  const auto orbit_phase = choose_enemy_orbit_phase(current_time);
+  constexpr float orbit_offsets[] = {0.0f, 45.0f, -45.0f, 90.0f, -90.0f, 135.0f, -135.0f, 180.0f};
+  constexpr float desired_distance = 850.0f;
+
+  for (auto* entity : entity_cache[class_id::SENTRY])
+  {
+    auto* sentry = reinterpret_cast<Building*>(entity);
+    if (sentry == nullptr || sentry->is_dormant() || sentry->get_health() <= 0
+      || sentry->get_team() == localplayer->get_team())
+    {
+      continue;
+    }
+
+    const auto sentry_origin = sentry->get_origin();
+    if (distance_squared_2d(local_origin, sentry_origin) > 4000.0f * 4000.0f)
+    {
+      continue;
+    }
+
+    const auto sentry_center = sentry_origin + Vec3{0.0f, 0.0f, 50.0f};
+    for (auto orbit_offset : orbit_offsets)
+    {
+      const auto angle = (orbit_phase + orbit_offset) * pideg;
+      const Vec3 orbit_point{
+        sentry_origin.x + std::cos(angle) * desired_distance,
+        sentry_origin.y + std::sin(angle) * desired_distance,
+        sentry_origin.z
+      };
+      const auto area_id = mesh.find_closest_area(orbit_point);
+      if (!area_id.valid())
+      {
+        continue;
+      }
+
+      auto* area = mesh.find_area(area_id);
+      if (area == nullptr || (area->flags & (nav_area_flag_blocked | nav_area_flag_spawn_room)) != 0)
+      {
+        continue;
+      }
+
+      const auto destination = mesh.get_nearest_point(area_id, orbit_point);
+      const auto shoot_pos = destination + view_offset;
+      if (!enemy_line_of_fire_clear(localplayer, sentry, shoot_pos, sentry_center))
+      {
+        continue;
+      }
+
+      const auto distance = std::sqrt(distance_squared_2d(local_origin, destination));
+      choose_best(best, make_entity_candidate(goal_type::sentry_snipe,
+        175.0f - distance * 0.04f, destination, area_id, sentry->get_index()));
+    }
+  }
+  return best;
 }
 
 }
@@ -1939,6 +2130,23 @@ navbot_goal_state navbot_goals::select_goal(const navbot_mesh& mesh, Player* loc
   if (goal_enabled(goal_type::heal_follow))
   {
     consider(choose_heal_follow_goal(mesh, localplayer));
+  }
+
+  if (localplayer->get_tf_class() == tf_class::ENGINEER)
+  {
+    if (goal_enabled(goal_type::engineer_maintain))
+    {
+      consider(choose_engineer_maintain_goal(mesh, localplayer));
+    }
+    if (goal_enabled(goal_type::engineer_build))
+    {
+      consider(choose_engineer_build_goal(mesh, localplayer));
+    }
+  }
+
+  if (goal_enabled(goal_type::sentry_snipe))
+  {
+    consider(choose_sentry_snipe_goal(mesh, localplayer, current_time));
   }
 
   auto have_priority_objective = goal_is_objective(best.type) && best.score > best_before_objectives.score;

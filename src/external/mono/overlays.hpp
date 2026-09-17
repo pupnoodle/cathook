@@ -27,7 +27,6 @@ struct overlay_text_line final
 };
 
 void corner_text(const std::vector<overlay_text_line> &lines, ImVec2 origin = { 8.0f, 8.0f }, ImFont *font = nullptr);
-void center_notice(std::string_view title, std::string_view message, color title_color, color message_color, ImFont *title_font = nullptr, ImFont *message_font = nullptr);
 
 ImVec2 indicator_panel(
 	const char *id,

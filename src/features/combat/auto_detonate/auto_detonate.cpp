@@ -67,7 +67,7 @@ bool owned_by_local(Player* localplayer, Entity* projectile)
     return true;
   }
 
-  static const int thrower_offset = tf2_netvars::find_offset("DT_BaseGrenade", { "m_hThrower" });
+  static tf2_netvars::lazy_offset thrower_offset{"DT_BaseGrenade", { "m_hThrower" }};
   if (thrower_offset > 0 && engine != nullptr)
   {
     const int handle = *reinterpret_cast<int*>(
@@ -83,8 +83,7 @@ bool owned_by_local(Player* localplayer, Entity* projectile)
 
 int pipe_type_of(Entity* projectile)
 {
-  static const int pipe_type_offset =
-    tf2_netvars::find_offset("DT_TFGrenadePipebombProjectile", { "m_iPipeType" });
+  static tf2_netvars::lazy_offset pipe_type_offset{"DT_TFProjectile_Pipebomb", { "m_iType" }};
   if (pipe_type_offset <= 0)
   {
     return -1;
@@ -96,8 +95,7 @@ int pipe_type_of(Entity* projectile)
 
 bool projectile_touched(Entity* projectile)
 {
-  static const int touched_offset =
-    tf2_netvars::find_offset("DT_TFGrenadePipebombProjectile", { "m_bTouched" });
+  static tf2_netvars::lazy_offset touched_offset{"DT_TFProjectile_Pipebomb", { "m_bTouched" }};
   if (touched_offset <= 0)
   {
     return true;
@@ -114,16 +112,10 @@ void aim_at(user_cmd* cmd, const Vec3& from, const Vec3& to)
     return;
   }
 
-  const Vec3 delta = to - from;
-  const float horizontal = std::sqrt(delta.x * delta.x + delta.y * delta.y);
-  cmd->view_angles = Vec3{
-    -std::atan2(delta.z, horizontal) * radpi,
-    std::atan2(delta.y, delta.x) * radpi,
-    0.0f
-  };
+  cmd->view_angles = angles_to_position(from, to);
 }
 
-bool target_player_valid(Player* localplayer, Player* player, bool ignore_cloaked)
+bool target_player_valid(Player* player, bool ignore_cloaked)
 {
   if (player == nullptr ||
       !player->is_alive() ||
@@ -132,7 +124,6 @@ bool target_player_valid(Player* localplayer, Player* player, bool ignore_cloake
   {
     return false;
   }
-  (void)localplayer;
   return true;
 }
 
@@ -178,7 +169,7 @@ bool for_each_enemy_target(Player* localplayer, bool include_buildings, bool ign
       continue;
     }
 
-    if (!target_player_valid(localplayer, entry.player, ignore_cloaked))
+    if (!target_player_valid(entry.player, ignore_cloaked))
     {
       continue;
     }

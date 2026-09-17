@@ -56,6 +56,13 @@ struct snapshot_state {
   int tickcount = 0;
   bool in_prediction = false;
   bool first_time_predicted = false;
+  int move_type = 0;
+  int water_level = 0;
+  float charge_meter = 0.0f;
+  void* shared = nullptr;
+  std::uint32_t player_cond = 0;
+  std::uint32_t condition_bits = 0;
+  Player* move_helper_host = nullptr;
 };
 
 struct storage {
@@ -144,44 +151,13 @@ inline const std::vector<move_record>& record_view(int entindex) {
   const auto found = records.find(entindex);
   return found != records.end() ? found->second : empty;
 }
-inline float tick_interval() {
-  if (global_vars != nullptr && std::isfinite(global_vars->interval_per_tick) &&
-      global_vars->interval_per_tick > 0.0001f) {
-    return global_vars->interval_per_tick;
-  }
-  return 0.015f;
-}
-
-inline int time_to_ticks(float seconds) {
-  return static_cast<int>(0.5f + seconds / tick_interval());
-}
 
 inline float round_to_ticks(float seconds) {
   return static_cast<float>(time_to_ticks(seconds)) * tick_interval();
 }
 
-inline float dot(const Vec3& left, const Vec3& right) {
-  return left.x * right.x + left.y * right.y + left.z * right.z;
-}
-
-inline float length_squared(const Vec3& value) {
-  return value.x * value.x + value.y * value.y + value.z * value.z;
-}
-
-inline float length(const Vec3& value) {
-  return std::sqrt(length_squared(value));
-}
-
 inline float length_2d(const Vec3& value) {
   return std::sqrt(value.x * value.x + value.y * value.y);
-}
-
-inline Vec3 normalized_2d(const Vec3& value) {
-  const float magnitude = length_2d(value);
-  if (!(magnitude > 0.0001f)) {
-    return Vec3{};
-  }
-  return Vec3{value.x / magnitude, value.y / magnitude, 0.0f};
 }
 
 inline float sign(float value) {
@@ -189,14 +165,7 @@ inline float sign(float value) {
 }
 
 inline float normalize_angle(float angle) {
-  angle = std::fmod(angle, 360.0f);
-  if (angle > 180.0f) {
-    angle -= 360.0f;
-  }
-  if (angle <= -180.0f) {
-    angle += 360.0f;
-  }
-  return angle;
+  return azimuth_to_signed(angle);
 }
 
 inline float direction_yaw(const Vec3& direction) {
@@ -204,15 +173,6 @@ inline float direction_yaw(const Vec3& direction) {
     return 0.0f;
   }
   return normalize_angle(std::atan2(direction.y, direction.x) * radpi);
-}
-
-inline float remap_clamped(float value, float in_min, float in_max, float out_min,
-                           float out_max) {
-  if (in_max - in_min <= 0.0001f) {
-    return out_max >= out_min ? out_min : out_max;
-  }
-  const float fraction = std::clamp((value - in_min) / (in_max - in_min), 0.0f, 1.0f);
-  return out_min + (out_max - out_min) * fraction;
 }
 
 inline float air_friction_scale(float velocity_xy, float turn, float velocity_z,
@@ -239,7 +199,7 @@ inline surface_mode surface_mode_of(Player* player) {
 }
 
 inline float charge_meter_value(Player* player) {
-  static const int offset = tf2_netvars::find_offset("DT_TFPlayer", {"m_flChargeMeter"});
+  static tf2_netvars::lazy_offset offset{"DT_TFPlayer", {"m_flChargeMeter"}};
   if (offset <= 0 || player == nullptr) {
     return 0.0f;
   }
@@ -248,7 +208,7 @@ inline float charge_meter_value(Player* player) {
 }
 
 inline void set_charge_meter_value(Player* player, float value) {
-  static const int offset = tf2_netvars::find_offset("DT_TFPlayer", {"m_flChargeMeter"});
+  static tf2_netvars::lazy_offset offset{"DT_TFPlayer", {"m_flChargeMeter"}};
   if (offset <= 0 || player == nullptr) {
     return;
   }
@@ -256,18 +216,42 @@ inline void set_charge_meter_value(Player* player, float value) {
                             static_cast<uintptr_t>(offset)) = value;
 }
 
+inline int player_cond_offset() {
+  static tf2_netvars::lazy_offset offset{"DT_TFPlayerShared", {"m_nPlayerCond"}};
+  return offset;
+}
+
+inline int condition_list_bits_offset() {
+  static tf2_netvars::lazy_offset offset{
+    "DT_TFPlayerShared", {"m_ConditionList", "_condition_bits"}};
+  return offset;
+}
+
+inline uint32_t read_shared_u32(void* shared_ptr, int offset) {
+  return shared_ptr != nullptr && offset > 0
+    ? *reinterpret_cast<const uint32_t*>(reinterpret_cast<uintptr_t>(shared_ptr) + static_cast<uintptr_t>(offset))
+    : 0;
+}
+
+inline void write_shared_u32(void* shared_ptr, int offset, uint32_t value) {
+  if (shared_ptr != nullptr && offset > 0) {
+    *reinterpret_cast<uint32_t*>(reinterpret_cast<uintptr_t>(shared_ptr) + static_cast<uintptr_t>(offset)) = value;
+  }
+}
+
 inline void remove_shield_charge(Player* player) {
   if (player == nullptr) {
     return;
   }
-  const auto shared = reinterpret_cast<uintptr_t>(player->get_shared());
-  static const int cond_offset =
-    tf2_netvars::find_offset("DT_TFPlayerShared", {"m_nPlayerCond"});
-  constexpr uint32_t shield_bit = 1u << static_cast<uint32_t>(TF_COND_SHIELD_CHARGE);
-  *reinterpret_cast<uint32_t*>(shared + 0x128) &= ~shield_bit;
-  if (cond_offset > 0) {
-    *reinterpret_cast<uint32_t*>(shared + static_cast<uintptr_t>(cond_offset)) &= ~shield_bit;
+  void* shared_ptr = player->get_shared();
+  if (shared_ptr == nullptr) {
+    return;
   }
+  constexpr uint32_t shield_bit = 1u << static_cast<uint32_t>(TF_COND_SHIELD_CHARGE);
+  const int bits_offset = condition_list_bits_offset();
+  const int cond_offset = player_cond_offset();
+  write_shared_u32(shared_ptr, bits_offset, read_shared_u32(shared_ptr, bits_offset) & ~shield_bit);
+  write_shared_u32(shared_ptr, cond_offset, read_shared_u32(shared_ptr, cond_offset) & ~shield_bit);
 }
 
 inline float max_speed_of(Player* player) {
@@ -441,6 +425,13 @@ inline void capture_snapshot(storage& state) {
   snap.duck_time = player->get_duck_time();
   snap.duck_jump_time = player->get_duck_jump_time();
   snap.fall_velocity = player->get_fall_velocity();
+  snap.move_type = player->get_move_type();
+  snap.water_level = player->get_water_level();
+  snap.charge_meter = detail::charge_meter_value(player);
+  snap.shared = player->get_shared();
+  snap.player_cond = detail::read_shared_u32(snap.shared, detail::player_cond_offset());
+  snap.condition_bits = detail::read_shared_u32(snap.shared, detail::condition_list_bits_offset());
+  snap.move_helper_host = move_helper != nullptr ? move_helper->get_host() : nullptr;
   if (global_vars != nullptr) {
     snap.curtime = global_vars->curtime;
     snap.frametime = global_vars->frametime;
@@ -509,14 +500,16 @@ inline void synthesize_record(Player* player, storage& state) {
     angle_vectors(command->view_angles, &forward, &right, nullptr);
     direction = forward * command->forwardmove + right * command->sidemove;
     if (length_squared(direction) <= 0.0001f) {
-      direction = normalized_2d(player->get_velocity()) * charge_speed_reference;
+      const Vec3 velocity = player->get_velocity();
+      direction = Vec3{velocity.x, velocity.y, 0.0f};
     }
   } else if (charging) {
     Vec3 forward{};
     angle_vectors(player->get_eye_angles(), &forward, nullptr, nullptr);
     direction = forward * charge_speed_reference;
   } else {
-    direction = normalized_2d(player->get_velocity()) * charge_speed_reference;
+    const Vec3 velocity = player->get_velocity();
+    direction = Vec3{velocity.x, velocity.y, 0.0f};
   }
   record.direction = direction;
   record.sim_time = player->get_simulation_time();
@@ -530,6 +523,12 @@ inline void synthesize_record(Player* player, storage& state) {
 
 inline void push_record(int entindex, const move_record& record) {
   std::vector<move_record>& records = detail::record_map()[entindex];
+  if (!records.empty() && record.sim_time <= records.back().sim_time) {
+    if (record.sim_time == records.back().sim_time) {
+      return;
+    }
+    records.clear();
+  }
   records.push_back(record);
   if (records.size() > detail::max_records) {
     records.erase(records.begin());
@@ -558,7 +557,7 @@ inline bool average_yaw(int entindex, float sample_window_seconds, float* out_ya
   }
 
   const float newest_time = records.back().sim_time;
-  const float cutoff = newest_time - std::max(sample_window_seconds, detail::tick_interval());
+  const float cutoff = newest_time - std::max(sample_window_seconds, tick_interval());
   std::size_t begin = records.size();
   while (begin > 0 && records[begin - 1].sim_time >= cutoff) {
     --begin;
@@ -588,7 +587,7 @@ inline bool average_yaw(int entindex, float sample_window_seconds, float* out_ya
       break;
     }
     accumulated += yaw;
-    ticks += std::max(detail::time_to_ticks(recent.sim_time - older.sim_time), 1);
+    ticks += std::max(time_to_ticks(recent.sim_time - older.sim_time), 1);
     ++valid_pairs;
   }
 
@@ -603,7 +602,7 @@ inline bool average_yaw(int entindex, float sample_window_seconds, float* out_ya
     if (local != nullptr) {
       local_origin = local->get_origin();
     }
-    minimum_ticks = detail::remap_clamped(
+    minimum_ticks = remap_clamped(
       distance_3d(local_origin, records.back().origin), 0.0f, 1000.0f, 17.0f, 34.0f);
   }
 
@@ -618,8 +617,7 @@ inline bool average_yaw(int entindex, float sample_window_seconds, float* out_ya
   return true;
 }
 
-inline float strafe_hitchance(int entindex, int group_size, float minimum_confidence) {
-  (void)minimum_confidence;
+inline float strafe_hitchance(int entindex, int group_size) {
   const std::vector<move_record>& records = detail::record_view(entindex);
   const int group = std::max(group_size, 1);
   if (records.size() < 3) {
@@ -635,7 +633,7 @@ inline float strafe_hitchance(int entindex, int group_size, float minimum_confid
   for (std::size_t index = records.size(); index > 1; --index) {
     const move_record& recent = records[index - 1];
     const move_record& older = records[index - 2];
-    const int ticks = std::max(detail::time_to_ticks(recent.sim_time - older.sim_time), 1);
+    const int ticks = std::max(time_to_ticks(recent.sim_time - older.sim_time), 1);
     const float yaw = detail::normalize_angle(detail::direction_yaw(recent.direction) -
                                               detail::direction_yaw(older.direction));
     float scaled = yaw / static_cast<float>(ticks);
@@ -644,7 +642,7 @@ inline float strafe_hitchance(int entindex, int group_size, float minimum_confid
     } else if (recent.mode == surface_mode::air) {
       scaled /= detail::air_friction_scale(
         detail::length_2d(recent.velocity), scaled * static_cast<float>(ticks),
-        recent.velocity.z + detail::gravity_value * detail::tick_interval());
+        recent.velocity.z + detail::gravity_value * tick_interval());
     }
     overall_total += scaled;
     scaled_yaws.push_back(scaled);
@@ -763,15 +761,14 @@ inline bool initialize(Player* player, storage& state, const init_options& optio
   if (options.strafe_prediction) {
     float yaw_per_tick = 0.0f;
     if (average_yaw(player->get_index(),
-                    static_cast<float>(detail::strafe_samples) * detail::tick_interval(),
+                    static_cast<float>(detail::strafe_samples) * tick_interval(),
                     &yaw_per_tick)) {
       state.average_yaw = yaw_per_tick;
     }
     if (options.hitchance_gate &&
         detail::length_2d(state.move_data.m_vecVelocity) > 1.0f) {
       const float confidence =
-        strafe_hitchance(player->get_index(), detail::strafe_samples,
-                         options.hitchance_minimum);
+        strafe_hitchance(player->get_index(), detail::strafe_samples);
       if (confidence < options.hitchance_minimum) {
         state.failed = true;
         return false;
@@ -796,7 +793,7 @@ inline bool run_tick(storage& state) {
 
   Player* player = state.player;
   MoveData& move_data = state.move_data;
-  const float interval = detail::tick_interval();
+  const float interval = tick_interval();
 
   if (prediction != nullptr) {
     prediction->in_prediction = true;
@@ -831,10 +828,14 @@ inline bool run_tick(storage& state) {
 
   float correction = 0.0f;
   if (state.average_yaw != 0.0f) {
+    float yaw_scale = 1.0f;
     if (!state.direct_move && !player->in_cond(TF_COND_SHIELD_CHARGE)) {
       correction = 90.0f * detail::sign(state.average_yaw);
+      yaw_scale = detail::air_friction_scale(
+        detail::length_2d(move_data.m_vecVelocity), state.average_yaw,
+        move_data.m_vecVelocity.z + detail::gravity_value * interval);
     }
-    move_data.m_vecViewAngles.y += state.average_yaw + correction;
+    move_data.m_vecViewAngles.y += state.average_yaw * yaw_scale + correction;
   }
 
   const bool swimming = player->get_water_level() > 1;
@@ -859,8 +860,8 @@ inline bool run_tick(storage& state) {
 
   state.sim_time = detail::round_to_ticks(state.sim_time + interval);
   if (state.predict_requested &&
-      detail::time_to_ticks(state.sim_time) >=
-        detail::time_to_ticks(state.predicted_sim_time)) {
+      time_to_ticks(state.sim_time) >=
+        time_to_ticks(state.predicted_sim_time)) {
     state.predict_networked = true;
   }
   state.predicted_origin = post_origin;
@@ -876,17 +877,16 @@ inline bool run_tick(storage& state) {
     } else if (move_data.m_flForwardMove == 0.0f && move_data.m_flSideMove == 0.0f &&
                detail::length_2d(move_data.m_vecVelocity) >
                  move_data.m_flMaxSpeed * 0.015f) {
-      detail::reconstruct_wish_move(
-        state,
-        detail::normalized_2d(move_data.m_vecVelocity) * detail::charge_speed_reference);
+      const Vec3 velocity = move_data.m_vecVelocity;
+      detail::reconstruct_wish_move(state, Vec3{velocity.x, velocity.y, 0.0f});
     }
   }
 
   bool ok = std::isfinite(post_origin.x) && std::isfinite(post_origin.y) &&
             std::isfinite(post_origin.z);
   if (ok && !paused) {
-    const float moved = detail::length(post_origin - pre_origin);
-    const float speed = detail::length(move_data.m_vecVelocity);
+    const float moved = length(post_origin - pre_origin);
+    const float speed = length(move_data.m_vecVelocity);
     if (speed > detail::stuck_min_speed && moved < detail::stuck_max_step) {
       ++state.frozen_ticks;
     } else {
@@ -926,6 +926,11 @@ inline void restore(storage& state) {
   player->set_duck_time(snap.duck_time);
   player->set_duck_jump_time(snap.duck_jump_time);
   player->set_fall_velocity(snap.fall_velocity);
+  player->set_move_type(snap.move_type);
+  player->set_water_level(snap.water_level);
+  detail::set_charge_meter_value(player, snap.charge_meter);
+  detail::write_shared_u32(snap.shared, detail::player_cond_offset(), snap.player_cond);
+  detail::write_shared_u32(snap.shared, detail::condition_list_bits_offset(), snap.condition_bits);
   if (global_vars != nullptr) {
     global_vars->curtime = snap.curtime;
     global_vars->frametime = snap.frametime;
@@ -935,7 +940,9 @@ inline void restore(storage& state) {
     prediction->in_prediction = snap.in_prediction;
     prediction->first_time_predicted = snap.first_time_predicted;
   }
-  move_helper->set_host(nullptr);
+  if (move_helper != nullptr) {
+    move_helper->set_host(snap.move_helper_host);
+  }
   state.restored = true;
 }
 

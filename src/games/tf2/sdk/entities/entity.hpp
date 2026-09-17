@@ -136,9 +136,10 @@ enum move_type {
 class Entity {
 public:
   int get_owner_entity_handle(void) {
-    static const int netvar_offset = tf2_netvars::find_offset("DT_BaseEntity", {"m_hOwnerEntity"});
-    const auto offset = netvar_offset > 0 ? netvar_offset : 0x754;
-    return *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset));
+    static tf2_netvars::lazy_offset offset{"DT_BaseEntity", {"m_hOwnerEntity"}};
+    return offset > 0
+      ? *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset))
+      : 0;
   }
 
   Entity* get_owner_entity(void) {
@@ -150,53 +151,48 @@ public:
   }
 
   Vec3 get_origin(void) {
-
-    return *(Vec3*)(this + 0x328);
+    return get_abs_origin();
   }
 
   void set_origin(const Vec3& origin) {
-    *(Vec3*)(this + 0x328) = origin;
+    set_abs_origin(origin);
   }
 
   float get_gravity(void) {
-    return *reinterpret_cast<float*>(reinterpret_cast<std::uintptr_t>(this) + 0x1FC);
+    static tf2_netvars::lazy_offset offset{"DT_BaseEntity", {"m_flGravity"}};
+    return offset > 0
+      ? *reinterpret_cast<float*>(reinterpret_cast<std::uintptr_t>(this) + static_cast<std::uintptr_t>(offset))
+      : 0.0f;
   }
 
   void set_gravity(float value) {
-    *reinterpret_cast<float*>(reinterpret_cast<std::uintptr_t>(this) + 0x1FC) = value;
+    static tf2_netvars::lazy_offset offset{"DT_BaseEntity", {"m_flGravity"}};
+    if (offset > 0) {
+      *reinterpret_cast<float*>(reinterpret_cast<std::uintptr_t>(this) + static_cast<std::uintptr_t>(offset)) = value;
+    }
+  }
+
+  static int move_type_offset() {
+    static int offset = 0;
+    if (offset <= 0) {
+      if (const auto* prop = tf2_netvars::find_prop("DT_BaseEntity", {"movetype"});
+          prop != nullptr && prop->proxy_fn != nullptr) {
+        offset = tf2_netvars::proxy_store_disp(prop->proxy_fn);
+        if (offset <= 0 || offset > 0x2000) {
+          offset = 0;
+        }
+      }
+    }
+    return offset;
   }
 
   int get_move_type(void) {
-    static const int offset = [] {
-      int netvar_offset = tf2_netvars::find_offset("DT_BaseEntity", {"movetype"});
-      if (netvar_offset == 0) {
-        netvar_offset = tf2_netvars::find_offset("DT_BaseEntity", {"m_MoveType"});
-      }
-      if (netvar_offset == 0) {
-        const int water_level_offset = tf2_netvars::find_offset("DT_BaseEntity", {"m_nWaterLevel"});
-        if (water_level_offset > 4) {
-          netvar_offset = water_level_offset - 4;
-        }
-      }
-      return netvar_offset;
-    }();
+    const int offset = move_type_offset();
     return offset != 0 ? static_cast<int>(*reinterpret_cast<unsigned char*>(reinterpret_cast<std::uintptr_t>(this) + static_cast<std::uintptr_t>(offset))) : MOVETYPE_WALK;
   }
 
   void set_move_type(int value) {
-    static const int offset = [] {
-      int netvar_offset = tf2_netvars::find_offset("DT_BaseEntity", {"movetype"});
-      if (netvar_offset == 0) {
-        netvar_offset = tf2_netvars::find_offset("DT_BaseEntity", {"m_MoveType"});
-      }
-      if (netvar_offset == 0) {
-        const int water_level_offset = tf2_netvars::find_offset("DT_BaseEntity", {"m_nWaterLevel"});
-        if (water_level_offset > 4) {
-          netvar_offset = water_level_offset - 4;
-        }
-      }
-      return netvar_offset;
-    }();
+    const int offset = move_type_offset();
     if (offset != 0) {
       *reinterpret_cast<unsigned char*>(reinterpret_cast<std::uintptr_t>(this) + static_cast<std::uintptr_t>(offset)) = static_cast<unsigned char>(value);
     }
@@ -226,7 +222,8 @@ public:
   }
 
   int get_ent_flags(void) {
-    return *(int*)(this + 0x460);
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_fFlags"}};
+    return offset > 0 ? *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)) : 0;
   }
 
   void* get_networkable(void) {
@@ -299,12 +296,15 @@ public:
   }
 
   enum tf_team get_team(void)  {
-    return (enum tf_team)*(int*)(this + 0xDC);
+    static tf2_netvars::lazy_offset offset{"DT_BaseEntity", {"m_iTeamNum"}};
+    return offset > 0 ? static_cast<enum tf_team>(*reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset))) : tf_team::UNKNOWN;
   }
 
   int get_index(void) {
     void* networkable = get_networkable();
+    if (networkable == nullptr) return -1;
     void** vtable = *(void***)networkable;
+    if (vtable == nullptr || vtable[9] == nullptr) return -1;
 
     int (*get_index_fn)(void*) = (int (*)(void*))vtable[9];
 
@@ -312,7 +312,10 @@ public:
   }
 
   const CBaseHandle& get_ref_ehandle(void) {
+    static const CBaseHandle invalid_handle{invalid_ehandle_index};
+    if (this == nullptr) return invalid_handle;
     void** vtable = *(void***)this;
+    if (vtable == nullptr || vtable[3] == nullptr) return invalid_handle;
     const CBaseHandle& (*get_ref_ehandle_fn)(void*) = (const CBaseHandle& (*)(void*))vtable[3];
     return get_ref_ehandle_fn(this);
   }
@@ -322,10 +325,10 @@ public:
   }
 
   const char* get_model_name(void) {
-    uintptr_t base_class = *(uintptr_t*)(this + 0x88);
-    if (base_class == 0) return "";
+    const model_t* model = get_model();
+    if (model == nullptr || model->name == nullptr) return "";
 
-    return (const char*)*(unsigned long*)(base_class + 0x8);
+    return model->name;
   }
 
   const model_t* get_model(void) {
@@ -363,11 +366,18 @@ public:
     return draw_model_fn(renderable, flags);
   }
 
+  static int moveparent_field_offset() {
+    static int offset = 0;
+    if (offset <= 0) {
+      static tf2_netvars::lazy_offset moveparent{"DT_BaseEntity", {"moveparent"}};
+      offset = moveparent;
+    }
+    return offset;
+  }
+
   Entity* first_move_child(void) {
-    static const int move_child_offset = [] {
-      const int moveparent_offset = tf2_netvars::find_offset("DT_BaseEntity", { "moveparent" });
-      return moveparent_offset > 12 ? moveparent_offset - 12 : 0;
-    }();
+    const int base = moveparent_field_offset();
+    const int move_child_offset = base > 12 ? base - 12 : 0;
     if (move_child_offset == 0 || entity_list == nullptr) {
       return nullptr;
     }
@@ -377,10 +387,8 @@ public:
   }
 
   Entity* next_move_peer(void) {
-    static const int move_peer_offset = [] {
-      const int moveparent_offset = tf2_netvars::find_offset("DT_BaseEntity", { "moveparent" });
-      return moveparent_offset > 8 ? moveparent_offset - 8 : 0;
-    }();
+    const int base = moveparent_field_offset();
+    const int move_peer_offset = base > 8 ? base - 8 : 0;
     if (move_peer_offset == 0 || entity_list == nullptr) {
       return nullptr;
     }
@@ -390,10 +398,8 @@ public:
   }
 
   Entity* move_parent(void) {
-    static const int move_parent_offset = [] {
-      const int moveparent_offset = tf2_netvars::find_offset("DT_BaseEntity", { "moveparent" });
-      return moveparent_offset > 16 ? moveparent_offset - 16 : 0;
-    }();
+    const int base = moveparent_field_offset();
+    const int move_parent_offset = base > 16 ? base - 16 : 0;
     if (move_parent_offset == 0 || entity_list == nullptr) {
       return nullptr;
     }
@@ -430,20 +436,22 @@ public:
     if (client_class == nullptr) return nullptr;
     const auto client_class_address = reinterpret_cast<std::uintptr_t>(client_class);
     if (client_class_address < 0x10000 || client_class_address >= 0x0000800000000000ULL) return nullptr;
-    const auto class_id_value = *reinterpret_cast<const int*>(reinterpret_cast<std::uintptr_t>(client_class) + 0x28);
-    const auto* network_name = *reinterpret_cast<const char* const*>(reinterpret_cast<std::uintptr_t>(client_class) + 0x10);
-    if (class_id_value < 0 || class_id_value > 512 || network_name == nullptr || network_name[0] == '\0') return nullptr;
+    const auto* typed_client_class = reinterpret_cast<const tf2_netvars::client_class*>(client_class);
+    if (typed_client_class->class_id < 0 || typed_client_class->class_id > 512 ||
+        typed_client_class->network_name == nullptr || typed_client_class->network_name[0] == '\0') return nullptr;
     return client_class;
   }
 
+  const tf2_netvars::client_class* get_typed_client_class(void) {
+    return reinterpret_cast<const tf2_netvars::client_class*>(get_client_class());
+  }
+
   const char* get_network_name(void) {
-    void* client_class = get_client_class();
-    if (client_class == nullptr) {
+    const auto* client_class = get_typed_client_class();
+    if (client_class == nullptr || client_class->network_name == nullptr) {
       return "";
     }
-
-    const char* network_name = *(const char**)((unsigned long)(client_class) + 0x10);
-    return network_name != nullptr ? network_name : "";
+    return client_class->network_name;
   }
 
   bool is_network_class(const char* network_name) {
@@ -451,21 +459,25 @@ public:
   }
 
   class_id get_class_id(void) {
-    void* client_class = get_client_class();
-    return client_class == nullptr ? static_cast<class_id>(-1) :
-      static_cast<class_id>(*reinterpret_cast<const int*>(reinterpret_cast<std::uintptr_t>(client_class) + 0x28));
+    const auto* client_class = get_typed_client_class();
+    return client_class == nullptr ? static_cast<class_id>(-1) : static_cast<class_id>(client_class->class_id);
   }
 
   int get_tickbase(void) {
-    return *(int*)(this + 0x1718);
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_nTickBase"}};
+    return offset > 0 ? *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)) : 0;
   }
 
   void set_tickbase(int tickbase) {
-    *(int*)(this + 0x1718) = tickbase;
+    static tf2_netvars::lazy_offset offset{"DT_BasePlayer", {"m_nTickBase"}};
+    if (offset > 0) {
+      *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)) = tickbase;
+    }
   }
 
   float get_simulation_time(void) {
-    return *(float*)(this + 0x98);
+    static tf2_netvars::lazy_offset offset{"DT_BaseEntity", {"m_flSimulationTime"}};
+    return offset > 0 ? *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)) : 0.0f;
   }
 
   bool is_building(void) {
@@ -523,6 +535,14 @@ public:
   }
 
 };
+
+inline Player* EntityList::player_from_index(unsigned int index) {
+  Entity* entity = entity_from_index(index);
+  if (entity == nullptr || entity->get_class_id() != class_id::PLAYER) {
+    return nullptr;
+  }
+  return reinterpret_cast<Player*>(entity);
+}
 
 inline Entity* EntityList::get_game_rules_proxy() {
   static int cached_index = -1;

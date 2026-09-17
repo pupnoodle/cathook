@@ -221,14 +221,7 @@ void apply_visible_view(user_cmd* cmd, bool force_visible = false) {
     return;
   }
 
-  Vec3 angles = cmd->view_angles;
-  if (prediction != nullptr) {
-    prediction->set_local_view_angles(angles);
-    prediction->set_view_angles(angles);
-  }
-  if (engine != nullptr) {
-    engine->set_view_angles(angles);
-  }
+  push_view_angles(cmd->view_angles);
 }
 
 bool apply_scope_command(aimbot_run_context& ctx, const aim_scope::decision& command) {
@@ -385,18 +378,15 @@ aimbot_candidate find_best_hitscan_target(Player* localplayer,
       continue;
     }
 
-    const aimbot_candidate current_candidate = hitscan_aim_find_candidate(localplayer, weapon, player, view_angles);
-    const aimbot_candidate backtrack_candidate = backtrack::find_hitscan_candidate(
-      localplayer, weapon, player, view_angles, has_preference(player));
-    aimbot_candidate candidate = current_candidate;
-    const bool current_ready = aim_spread::hitscan_candidate_ready_for_selection(localplayer, weapon, cmd, current_candidate);
-    const bool backtrack_ready = aim_spread::hitscan_candidate_ready_for_selection(localplayer, weapon, cmd, backtrack_candidate);
-    if (backtrack_candidate.entity != nullptr &&
-        (aim_targeting::hitscan_fast_head_backtrack_better(backtrack_candidate, candidate) ||
-          (!current_ready && backtrack_ready && aimbot_candidate_better(backtrack_candidate, candidate)))) {
-      candidate = backtrack_candidate;
+    const Vec3 shoot_pos = localplayer->get_shoot_pos();
+    const Vec3 coarse_angles = aimbot_calculate_angles_to_position(
+      shoot_pos, player->get_origin() + player->get_view_offset());
+    if (aimbot_fov_exceeds_limit(aimbot_calculate_fov(coarse_angles, view_angles), 1.35f, 0.0f, 12.0f)) {
+      aim_state::record_reject(aim_state::make_reject_debug(player, aimbot_reject_reason::fov));
+      continue;
     }
 
+    const aimbot_candidate candidate = hitscan_aim_find_candidate(localplayer, weapon, player, view_angles);
     if (candidate.entity == nullptr) {
       const aimbot_reject_debug reject = candidate.reject_debug.reason != aimbot_reject_reason::none
         ? candidate.reject_debug
@@ -422,16 +412,9 @@ aimbot_candidate find_best_hitscan_target(Player* localplayer,
       best = candidate;
     }
 
-    for (const aimbot_candidate& ready_candidate : {current_candidate, backtrack_candidate}) {
-      if (ready_candidate.entity == nullptr ||
-          !hitscan_aim_candidate_matches_configured_hitbox(ready_candidate, localplayer, weapon) ||
-          !aimbot_fov_within_limit(ready_candidate.fov, ready_candidate.preferred ? 1.35f : 1.0f)) {
-        continue;
-      }
-      if (aim_spread::hitscan_candidate_ready_for_selection(localplayer, weapon, cmd, ready_candidate) &&
-          aim_targeting::hitscan_ready_candidate_better(ready_candidate, best_ready)) {
-        best_ready = ready_candidate;
-      }
+    if (aim_spread::hitscan_candidate_ready_for_selection(localplayer, weapon, cmd, candidate) &&
+        aim_targeting::hitscan_ready_candidate_better(candidate, best_ready)) {
+      best_ready = candidate;
     }
   }
 
@@ -493,8 +476,7 @@ void compute_angles(aimbot_run_context& ctx) {
     ctx.source_angles,
     ctx.target_angles,
     state.last_input_angles,
-    state.last_input_angles_valid,
-    ctx.target);
+    state.last_input_angles_valid);
   ctx.cmd->view_angles = ctx.applied_angles;
 }
 
@@ -612,9 +594,8 @@ void apply_fire_state(aimbot_run_context& ctx) {
     Convar* interp = convar_system->find_var("cl_interp");
     if (interp) {
       float interp_val = interp->get_float();
-      float interval = global_vars->interval_per_tick > 0.0f ? global_vars->interval_per_tick : 0.015f;
-      if (std::isfinite(interp_val) && interp_val > 0.0f && std::isfinite(interval) && interval > 0.0f) {
-        ctx.cmd->tick_count += static_cast<int>(0.5f + interp_val / interval);
+      if (std::isfinite(interp_val) && interp_val > 0.0f) {
+        ctx.cmd->tick_count += static_cast<int>(0.5f + interp_val / tick_interval());
       }
     }
   }

@@ -7,6 +7,7 @@ const CONSOLE_PATH = `${CATHOOK_ROOT}/ipc/bin/console`;
 const IPC_COMMAND_TIMEOUT_BASE = Number.parseInt(process.env.CAT_IPC_COMMAND_TIMEOUT_SECONDS || '30', 10) * 1000;
 const IPC_COMMAND_TIMEOUT_MAX = Number.parseInt(process.env.CAT_IPC_COMMAND_TIMEOUT_MAX_SECONDS || '120', 10) * 1000;
 const IPC_RESPAWN_DELAY_MS = Number.parseInt(process.env.CAT_IPC_CONSOLE_RESPAWN_MS || '2000', 10);
+const MAX_CONSECUTIVE_TIMEOUTS = Math.max(1, Number.parseInt(process.env.CAT_IPC_MAX_CONSECUTIVE_TIMEOUTS || '3', 10));
 
 class CathookConsole extends EventEmitter {
     constructor() {
@@ -21,6 +22,7 @@ class CathookConsole extends EventEmitter {
         this.respawning = false;
         this.stopping = false;
         this.stdout_buffer = '';
+        this.consecutive_timeouts = 0;
         this.spawn_process();
         this.on('data', (data) => {
             if (!data)
@@ -28,6 +30,9 @@ class CathookConsole extends EventEmitter {
             if (data.init) {
                 this.init = true;
                 this.emit('init');
+            }
+            if (data.cmdid !== undefined) {
+                this.consecutive_timeouts = 0;
             }
         });
     }
@@ -99,6 +104,7 @@ class CathookConsole extends EventEmitter {
         if (this.stopping)
             return;
         this.respawning = true;
+        this.consecutive_timeouts = 0;
         this.settle_entry(this.in_flight_entry, { status: 'error', error: reason });
         if (this.process) {
             try {
@@ -150,7 +156,13 @@ class CathookConsole extends EventEmitter {
             entry.handler = handler;
             this.on('data', handler);
             callback_timeout = setTimeout(() => {
-                this.respawn('cathook console command timed out');
+                console.log('[!] cathook console command timed out (cmdid', cmdid + ')');
+                this.consecutive_timeouts += 1;
+                this.settle_entry(entry, { status: 'error', error: 'cathook console command timed out' }, entry.handler);
+                if (this.consecutive_timeouts >= MAX_CONSECUTIVE_TIMEOUTS) {
+                    console.log('[!] cathook console unresponsive after', this.consecutive_timeouts, 'timeouts; respawning');
+                    this.respawn('cathook console unresponsive');
+                }
             }, this.ipc_command_timeout_ms());
             entry.timeout = callback_timeout;
             if (callback_timeout.unref)

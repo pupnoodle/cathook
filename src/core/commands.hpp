@@ -30,6 +30,8 @@ V  o o  V  file: src/core/commands.hpp
 #include "core/print.hpp"
 #include "features/automation/autoitem/autoitem.hpp"
 #include "features/automation/misc/misc.hpp"
+#include "features/automation/navbot/navbot_controller.hpp"
+#include "features/automation/spectate/spectate.hpp"
 #include "features/menu/binds.hpp"
 #include "games/tf2/sdk/interfaces/convar_system.hpp"
 #include "games/tf2/sdk/interfaces/engine.hpp"
@@ -887,6 +889,143 @@ inline void command_criteria_callback(const command_args&)
   console_print("[cat_criteria] reloaded casual criteria\n");
 }
 
+inline void command_kill_callback(const command_args&)
+{
+  execute_client_command("cat_kill", (std::rand() & 1) != 0 ? "kill" : "explode");
+}
+
+inline void command_setcvar_callback(const command_args& args)
+{
+  const char* command_name = command_invocation_name(args, "cat_setcvar");
+  if (args.argc() < 3)
+  {
+    console_print("[%s] usage: %s <cvar> <value>\n", command_name, command_name);
+    return;
+  }
+
+  const char* name = args.argv(1);
+  if (convar_system == nullptr || convar_system->find_var(name) == nullptr)
+  {
+    console_print("[%s] could not find %s\n", command_name, name);
+    return;
+  }
+
+  std::string command_text{ name };
+  command_text.push_back(' ');
+  command_text += join_command_args(args, 2);
+  execute_client_command(command_name, command_text.c_str());
+  console_print("[%s] set %s\n", command_name, command_text.c_str());
+}
+
+inline void command_getcvar_callback(const command_args& args)
+{
+  const char* command_name = command_invocation_name(args, "cat_getcvar");
+  if (args.argc() != 2)
+  {
+    console_print("[%s] usage: %s <cvar>\n", command_name, command_name);
+    return;
+  }
+
+  const char* name = args.argv(1);
+  auto* convar = convar_system != nullptr ? convar_system->find_var(name) : nullptr;
+  if (convar == nullptr)
+  {
+    console_print("[%s] could not find %s\n", command_name, name);
+    return;
+  }
+
+  console_print("[%s] value of %s is %s\n", command_name, name, convar->get_string());
+}
+
+inline void command_path_to_callback(const command_args& args)
+{
+  const char* command_name = command_invocation_name(args, "cat_path_to");
+  if (args.argc() < 4)
+  {
+    console_print("[%s] usage: %s <x> <y> <z>\n", command_name, command_name);
+    return;
+  }
+
+  Vec3 destination{
+    static_cast<float>(std::atof(args.argv(1))),
+    static_cast<float>(std::atof(args.argv(2))),
+    static_cast<float>(std::atof(args.argv(3)))
+  };
+  if (!navbot::controller().path_to(destination))
+  {
+    console_print("[%s] no nav area near %.0f %.0f %.0f\n",
+      command_name, destination.x, destination.y, destination.z);
+    return;
+  }
+
+  console_print("[%s] pathing to %.0f %.0f %.0f\n",
+    command_name, destination.x, destination.y, destination.z);
+}
+
+inline void command_cancel_path_callback(const command_args&)
+{
+  navbot::controller().cancel_path();
+  console_print("[cat_cancel_path] canceled\n");
+}
+
+inline void command_menu_callback(const command_args&)
+{
+  cat_bind::set_menu_open(!cat_bind::menu_open_state());
+}
+
+inline void command_mvm_fix_callback(const command_args&)
+{
+  automation::controller().mvm_fix();
+}
+
+inline void command_mvm_quit_callback(const command_args&)
+{
+  automation::mvm_quit();
+  console_print("[cat_mvm_quit] abandoned match and disconnected\n");
+}
+
+inline void command_mvm_tele_callback(const command_args&)
+{
+  if (!navbot::controller().path_to_teleporter())
+  {
+    console_print("[cat_mvm_tele] no reachable teleporter entrance found\n");
+    return;
+  }
+
+  console_print("[cat_mvm_tele] pathing to closest teleporter entrance\n");
+}
+
+inline void command_mvm_rent_callback(const command_args&)
+{
+  autoitem::mvm_rent();
+  console_print("[cat_mvm_rent] requested vaccinator and heatmaker\n");
+}
+
+inline void command_party_givelead_callback(const command_args& args)
+{
+  const char* command_name = command_invocation_name(args, "cat_party_givelead");
+  if (args.argc() < 2)
+  {
+    console_print("[%s] usage: %s <account_id>\n", command_name, command_name);
+    return;
+  }
+
+  const auto account_id = read_int_arg(args, command_name, 1, "account_id");
+  if (!account_id || *account_id <= 0)
+  {
+    return;
+  }
+
+  const auto id = static_cast<std::uint32_t>(*account_id);
+  if (!automation::promote_party_leader(id))
+  {
+    console_print("[%s] failed to promote %u\n", command_name, id);
+    return;
+  }
+
+  console_print("[%s] gave party leadership to %u\n", command_name, id);
+}
+
 inline void command_commands_callback(const command_args&)
 {
   console_print("[cat_commands] %d registered commands\n", static_cast<int>(registered_commands().size()));
@@ -1016,6 +1155,74 @@ inline void command_playerlist_load_callback(const command_args& args)
   }
 
   console_print("[%s] loaded player list\n", command_name);
+}
+
+inline void command_spectate_callback(const command_args& args)
+{
+  const char* command_name = command_invocation_name(args, "cat_spectate");
+  if (args.argc() <= 1)
+  {
+    spectate::set_target_userid(-1);
+    console_print("[%s] cleared spectate target\n", command_name);
+    return;
+  }
+
+  if (engine == nullptr)
+  {
+    console_print("[%s] engine unavailable\n", command_name);
+    return;
+  }
+
+  const std::string_view value{args.argv(1)};
+  int player_index = -1;
+  if (value.size() > 1 && value.front() == '#')
+  {
+    if (const auto user_id = parse_account_id_arg(value.substr(1)))
+    {
+      player_index = engine->get_player_index_from_id(static_cast<int>(*user_id));
+    }
+  }
+  else if (const auto index = parse_account_id_arg(value))
+  {
+    player_index = static_cast<int>(*index);
+  }
+  else
+  {
+    const auto wanted_name = lowercase_copy(value);
+    for (int index = 1; index <= 64; ++index)
+    {
+      player_info info{};
+      if (!engine->get_player_info(index, &info) || info.fakeplayer)
+      {
+        continue;
+      }
+      if (lowercase_copy(info.name).find(wanted_name) == std::string::npos)
+      {
+        continue;
+      }
+      if (player_index != -1)
+      {
+        console_print("[%s] player name '%s' is ambiguous; use #userid\n", command_name, args.argv(1));
+        return;
+      }
+      player_index = index;
+    }
+  }
+
+  player_info info{};
+  if (player_index <= 0 || !engine->get_player_info(player_index, &info))
+  {
+    console_print("[%s] player '%s' not found\n", command_name, args.argv(1));
+    return;
+  }
+
+  spectate::set_target_userid(info.user_id);
+  if (spectate::target_userid() < 0)
+  {
+    console_print("[%s] cleared spectate target\n", command_name);
+    return;
+  }
+  console_print("[%s] spectating %s\n", command_name, info.name);
 }
 
 inline void command_playerlist_save_callback(const command_args& args)
@@ -1159,7 +1366,7 @@ inline void register_commands() {
     return;
   }
 
-  registered_commands().reserve(30);
+  registered_commands().reserve(48);
   add_command("cat_detach", command_detach_callback, "Detach cathook from TF2");
   add_command("cat_exec", command_cat_exec_callback, "Execute tf/cfg/cat_autoexec.cfg");
   add_command("cat_exec_textmode", command_cat_exec_textmode_callback, "Execute tf/cfg/cat_autoexec_textmode.cfg");
@@ -1184,11 +1391,23 @@ inline void register_commands() {
   add_command("cat_cancelqueue", command_cancel_queue_callback, "Cancel casual matchmaking queue");
   add_command("cat_abandon", command_abandon_callback, "Abandon the current matchmaking match");
   add_command("cat_criteria", command_criteria_callback, "Reload saved casual matchmaking criteria");
+  add_command("cat_kill", command_kill_callback, "Kill or explode the local player");
+  add_command("cat_setcvar", command_setcvar_callback, "Set a Source convar through the engine");
+  add_command("cat_getcvar", command_getcvar_callback, "Print a Source convar value");
+  add_command("cat_path_to", command_path_to_callback, "Path navbot to a world position");
+  add_command("cat_cancel_path", command_cancel_path_callback, "Cancel the current navbot command path");
+  add_command("cat_menu", command_menu_callback, "Toggle the cathook menu");
+  add_command("cat_mvm_fix", command_mvm_fix_callback, "Mark buybot funded and retry the server");
+  add_command("cat_mvm_quit", command_mvm_quit_callback, "Abandon the current match and disconnect");
+  add_command("cat_mvm_tele", command_mvm_tele_callback, "Path to the nearest teammate teleporter entrance");
+  add_command("cat_mvm_rent", command_mvm_rent_callback, "Rent and equip MvM vaccinator and heatmaker");
+  add_command("cat_party_givelead", command_party_givelead_callback, "Promote a party member to leader by account id");
   add_command("cat_commands", command_commands_callback, "Print registered Cat commands");
   add_command("cat_playerlist_load", command_playerlist_load_callback, "Load the persistent player list");
   add_command("cat_playerlist_save", command_playerlist_save_callback, "Save the persistent player list");
   add_command("cat_playerlist_print", command_playerlist_print_callback, "Print player list entries; pass 'all' to include runtime IPC entries");
   add_command("cat_setrole", command_setrole_callback, "Set a player role: default friend ignored cheater party f2p cat");
+  add_command("cat_spectate", command_spectate_callback, "Spectate a player while alive: cat_spectate <#userid|index|name>");
   add_command("cat_playerlist_clear", command_playerlist_clear_callback, "Clear a player list state");
   add_command("cat_playerlist_info", command_playerlist_info_callback, "Show one player list entry");
   add_command("cat_config_get", command_config_get_callback, "Read a cathook config setting");

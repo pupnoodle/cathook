@@ -175,7 +175,7 @@ inline float sticky_air_radius_scale(int sim_tick) {
   const float livetime = game_convar_float("tf_grenadelauncher_livetime", 0.8f);
   const float ramp = game_convar_float("tf_sticky_radius_ramp_time", 0.15f);
   const float airdet = game_convar_float("tf_sticky_airdet_radius", 0.4f);
-  return remap_val_clamped(ticks_to_time(sim_tick), livetime, livetime + ramp, airdet, 1.0f);
+  return remap_clamped(ticks_to_time(sim_tick), livetime, livetime + ramp, airdet, 1.0f);
 }
 
 inline splash_target_state make_target_state(const target_seed& seed, const Vec3& origin) {
@@ -238,8 +238,6 @@ inline bool validate_shot(Player* local, const projectile_info& info, const shot
   params.drag = test.drag;
   params.hull = info.hull;
   params.collision_mask = info.collision_mask;
-  params.local_player = local->to_entity();
-  params.ignore_target = !direct;
   engine_trace->init_projectile_trace_filter(&params.filter, local->to_entity(),
                                              ignored_target, !direct);
 
@@ -251,25 +249,19 @@ inline bool validate_shot(Player* local, const projectile_info& info, const shot
   const int tolerance_ticks =
     std::max(time_to_ticks(length(test.state.maxs - test.state.mins) /
                            std::max(length(test.velocity), 1.0f)), 1);
-  Vec3 previous = simulation.position;
 
   for (int tick = 1; tick <= test.sim_ticks; ++tick) {
-    const Vec3 segment_start = previous;
     if (!simulation.step()) {
       return false;
     }
     const Vec3 current = simulation.position;
-    previous = current;
     const bool sweep = test.trace_interval <= 1 || (tick % test.trace_interval) == 0 ||
       tick == test.sim_ticks;
     if (!sweep) {
       continue;
     }
 
-    trace_t segment{};
-    if (!trace_hull_segment(local, info, ignored_target, segment_start, current, segment)) {
-      return false;
-    }
+    const trace_t& segment = simulation.last_trace;
     const bool solid_hit = segment.start_solid || segment.all_solid ||
       segment.fraction < 1.0f || segment.entity != nullptr;
     bool candidate_hit = false;
@@ -1147,7 +1139,7 @@ inline apply_result apply(user_cmd* cmd, Player* local, Weapon* weapon,
     const aimbot::aimbot_state& state = aimbot::current_state();
     target_angles = aimbot_apply_mode_angles(original_view_angles, target_angles,
                                              state.last_input_angles,
-                                             state.last_input_angles_valid, target);
+                                             state.last_input_angles_valid);
   }
 
   bool release_requested =
@@ -1219,12 +1211,8 @@ inline apply_result apply(user_cmd* cmd, Player* local, Weapon* weapon,
   }
   cmd->view_angles = aimbot_clamp_angles(target_angles);
 
-  if ((aim_mode != Aim::AimMode::PSILENT || manual_attack) && prediction != nullptr) {
-    prediction->set_local_view_angles(cmd->view_angles);
-    prediction->set_view_angles(cmd->view_angles);
-  }
-  if ((aim_mode != Aim::AimMode::PSILENT || manual_attack) && engine != nullptr) {
-    engine->set_view_angles(cmd->view_angles);
+  if (aim_mode != Aim::AimMode::PSILENT || manual_attack) {
+    push_view_angles(cmd->view_angles);
   }
 
   projectile_charge_state.weapon = weapon;

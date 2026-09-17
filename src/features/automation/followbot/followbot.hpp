@@ -9,6 +9,8 @@ V  o o  V  file: src/features/automation/followbot/followbot.hpp
   || (___\====
 */
 
+#pragma once
+
 struct user_cmd;
 class Player;
 

@@ -12,7 +12,6 @@ V  o o  V  file: src/core/detach.hpp
 #define DETACH_HPP
 #include "print.hpp"
 #include <atomic>
-#include <chrono>
 #include <cstdint>
 
 namespace cathook::core
@@ -68,10 +67,10 @@ inline void service_detach_request()
   detach_requested.store(false, std::memory_order_release);
 
   if (!unload_module_runtime()) {
-    print("Detach cleanup failed\n");
+    print("Detach cleanup failed; retry scheduled\n");
     detach_complete.store(false, std::memory_order_release);
-    detach_requested.store(true, std::memory_order_release);
     detach_started.store(false, std::memory_order_release);
+    detach_requested.store(true, std::memory_order_release);
   }
 }
 

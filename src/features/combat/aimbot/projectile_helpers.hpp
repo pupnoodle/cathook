@@ -67,23 +67,11 @@ struct projectile_info {
 };
 
 inline float interval() {
-  if (global_vars != nullptr && std::isfinite(global_vars->interval_per_tick) &&
-      global_vars->interval_per_tick > 0.0001f) {
-    return global_vars->interval_per_tick;
-  }
-  return static_cast<float>(TICK_INTERVAL);
+  return tick_interval();
 }
 
 inline bool finite(const Vec3& value) {
   return aimbot_vec3_is_finite(value);
-}
-
-inline int time_to_ticks(float seconds) {
-  return static_cast<int>(0.5f + seconds / interval());
-}
-
-inline float ticks_to_time(int ticks) {
-  return static_cast<float>(ticks) * interval();
 }
 
 inline float attribute(float fallback, const char* name, Entity* entity) {
@@ -92,40 +80,22 @@ inline float attribute(float fallback, const char* name, Entity* entity) {
     : fallback;
 }
 
-inline float dot(const Vec3& left, const Vec3& right) {
-  return left.x * right.x + left.y * right.y + left.z * right.z;
-}
 
-inline float length_squared(const Vec3& value) {
-  return value.x * value.x + value.y * value.y + value.z * value.z;
-}
-
-inline float length(const Vec3& value) {
-  return std::sqrt(length_squared(value));
-}
-
-inline Vec3 normalized(const Vec3& value) {
-  const float magnitude = length(value);
-  return magnitude > 0.0001f ? value * (1.0f / magnitude) : Vec3{};
-}
-
-inline float remap_val_clamped(float value, float in_min, float in_max, float out_min, float out_max) {
-  if (in_max - in_min <= 0.0001f) {
-    return out_max >= out_min ? out_min : out_max;
-  }
-  const float fraction = std::clamp((value - in_min) / (in_max - in_min), 0.0f, 1.0f);
-  return out_min + (out_max - out_min) * fraction;
-}
 
 inline float game_convar_float(const char* name, float fallback) {
   if (name == nullptr || convar_system == nullptr) {
     return fallback;
   }
-  Convar* var = convar_system->find_var(name);
-  if (var == nullptr) {
+  static thread_local const char* cached_name = nullptr;
+  static thread_local Convar* cached_var = nullptr;
+  if (cached_name != name) {
+    cached_name = name;
+    cached_var = convar_system->find_var(name);
+  }
+  if (cached_var == nullptr) {
     return fallback;
   }
-  const float value = var->get_float();
+  const float value = cached_var->get_float();
   return std::isfinite(value) && value >= 0.0f ? value : fallback;
 }
 
@@ -278,19 +248,19 @@ inline float effective_drag(const projectile_info& info, float velocity, bool lo
   case TF_WEAPON_GRENADELAUNCHER: {
     const bool no_spin = info.spin_drag_key;
     if (lob) {
-      return no_spin ? remap_val_clamped(velocity, 1217.0f, max_velocity_reference, 0.030f, 0.033f)
-                     : remap_val_clamped(velocity, 1217.0f, max_velocity_reference, 0.056f, 0.062f);
+      return no_spin ? remap_clamped(velocity, 1217.0f, max_velocity_reference, 0.030f, 0.033f)
+                     : remap_clamped(velocity, 1217.0f, max_velocity_reference, 0.056f, 0.062f);
     }
-    return no_spin ? remap_val_clamped(velocity, 1217.0f, max_velocity_reference, 0.060f, 0.085f)
-                   : remap_val_clamped(velocity, 1217.0f, max_velocity_reference, 0.120f, 0.200f);
+    return no_spin ? remap_clamped(velocity, 1217.0f, max_velocity_reference, 0.060f, 0.085f)
+                   : remap_clamped(velocity, 1217.0f, max_velocity_reference, 0.120f, 0.200f);
   }
   case TF_WEAPON_CANNON:
-    return lob ? remap_val_clamped(velocity, 1454.0f, max_velocity_reference, 0.099f, 0.092f)
-               : remap_val_clamped(velocity, 1454.0f, max_velocity_reference, 0.385f, 0.530f);
+    return lob ? remap_clamped(velocity, 1454.0f, max_velocity_reference, 0.099f, 0.092f)
+               : remap_clamped(velocity, 1454.0f, max_velocity_reference, 0.385f, 0.530f);
   case TF_WEAPON_PIPEBOMBLAUNCHER:
   case TF_WEAPON_STICKY_BALL_LAUNCHER:
-    return lob ? remap_val_clamped(velocity, 922.0f, max_velocity_reference, 0.048f, 0.060f)
-               : remap_val_clamped(velocity, 922.0f, max_velocity_reference, 0.090f, 0.190f);
+    return lob ? remap_clamped(velocity, 922.0f, max_velocity_reference, 0.048f, 0.060f)
+               : remap_clamped(velocity, 922.0f, max_velocity_reference, 0.090f, 0.190f);
   case TF_WEAPON_CLEAVER:
   case TF_WEAPON_GRENADE_CLEAVER:
     return lob ? 0.075f : 0.310f;

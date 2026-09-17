@@ -408,21 +408,6 @@ float distance_to_area_sq(const nav_area_data& area, const Vec3& world)
   return dx * dx + dy * dy + dz * dz;
 }
 
-float distance_sq_2d_mesh(const Vec3& left, const Vec3& right)
-{
-  auto dx = left.x - right.x;
-  auto dy = left.y - right.y;
-  return dx * dx + dy * dy;
-}
-
-float distance_value_mesh(const Vec3& left, const Vec3& right)
-{
-  auto dx = left.x - right.x;
-  auto dy = left.y - right.y;
-  auto dz = left.z - right.z;
-  return std::sqrt(dx * dx + dy * dy + dz * dz);
-}
-
 bool point_inside_area_2d(const nav_area_data& area, const Vec3& point)
 {
   return point.x >= area.mins.x && point.x <= area.maxs.x
@@ -708,18 +693,15 @@ bool directed_height_delta_reachable(const Vec3& from, const Vec3& to)
   {
     return true;
   }
-  if (vertical_delta > player_jump_height)
+
+  const auto planar_distance = std::sqrt(distance_squared_2d(from, to));
+  if (vertical_delta <= planar_distance)
   {
-    return false;
+    return true;
   }
 
-  const auto planar_distance = std::sqrt(distance_sq_2d_mesh(from, to));
-  if (planar_distance <= 1.0f)
-  {
-    return false;
-  }
-
-  return vertical_delta <= (planar_distance * (walkable_ramp_height / walkable_ramp_run));
+  return vertical_delta <= player_ledge_mount_height
+    && planar_distance <= jump_trigger_run + half_player_width;
 }
 
 bool directed_area_segment_reachable(const nav_area_data& area, const Vec3& from, const Vec3& to)
@@ -729,7 +711,7 @@ bool directed_area_segment_reachable(const nav_area_data& area, const Vec3& from
     return false;
   }
 
-  const auto planar_distance = std::sqrt(distance_sq_2d_mesh(from, to));
+  const auto planar_distance = std::sqrt(distance_squared_2d(from, to));
   const auto sample_count = std::max(1, static_cast<int>(std::ceil(planar_distance / crumb_graph_sample_spacing)));
   auto previous = nearest_point_on_area(area, from);
   for (int i = 1; i <= sample_count; ++i)
@@ -800,22 +782,36 @@ bool directed_cross_area_segment_reachable(const nav_area_data& from_area, const
     return false;
   }
 
-  if (distance_value_mesh(from, to) <= player_step_height)
+  if (distance_3d(from, to) <= player_step_height)
   {
     return true;
   }
 
-  if (std::sqrt(distance_sq_2d_mesh(from, to)) > crumb_graph_spacing * 1.5f)
+  const auto planar_distance = std::sqrt(distance_squared_2d(from, to));
+  if (planar_distance > crumb_graph_spacing * 1.5f)
   {
     return false;
+  }
+
+  const auto vertical_delta = to.z - from.z;
+  if (vertical_delta <= player_ledge_mount_height)
+  {
+    return true;
   }
 
   return directed_height_delta_reachable(from, to);
 }
 
-bool is_dropdown_transition(const Vec3& from, const Vec3& next_center)
+bool is_dropdown_transition(const Vec3& from, const Vec3& to)
 {
-  return from.z - next_center.z > player_jump_height;
+  return from.z - to.z > player_jump_height;
+}
+
+bool segment_requires_jump(const Vec3& from, const Vec3& to)
+{
+  const auto vertical_delta = to.z - from.z;
+  return vertical_delta > player_step_height
+    && vertical_delta > std::sqrt(distance_squared_2d(from, to));
 }
 
 struct dropdown_waypoint
@@ -825,26 +821,23 @@ struct dropdown_waypoint
   Vec3 landing{};
 };
 
-dropdown_waypoint make_dropdown_waypoint(const Vec3& current, const Vec3& next_center, const nav_area_data& next_area)
+dropdown_waypoint make_dropdown_waypoint(const Vec3& current, const Vec3& landing)
 {
-  auto to_target = next_center - current;
-  if (current.z - next_center.z <= player_jump_height)
+  auto to_target = landing - current;
+  if (current.z - landing.z <= player_jump_height)
   {
     return {};
   }
 
   to_target.z = 0.0f;
-  const auto length = std::sqrt(distance_sq_2d_mesh(to_target, Vec3{}));
+  const auto length = std::sqrt(distance_squared_2d(to_target, Vec3{}));
   if (length <= 1.0f)
   {
-    return {};
+    return dropdown_waypoint{true, Vec3{landing.x, landing.y, current.z}, landing};
   }
 
-  return dropdown_waypoint{
-    true,
-    current + to_target * ((player_width * 2.0f) / length),
-    next_area.center
-  };
+  const auto overshoot = std::min(length, player_width);
+  return dropdown_waypoint{true, current + to_target * (overshoot / length), landing};
 }
 
 uint32_t convert_area_flags(uint32_t base_attributes, uint32_t tf_attributes)
@@ -1402,7 +1395,7 @@ void navbot_mesh::build_crumb_graph()
     for (auto node_index : area_nodes)
     {
       const auto& node = cache_->crumb_nodes[node_index];
-      if (distance_sq_2d_mesh(node.world, world) <= duplicate_distance_sq && std::fabs(node.world.z - world.z) <= player_step_height)
+      if (distance_squared_2d(node.world, world) <= duplicate_distance_sq && std::fabs(node.world.z - world.z) <= player_step_height)
       {
         return node_index;
       }
@@ -1454,6 +1447,7 @@ void navbot_mesh::build_crumb_graph()
     uint32_t to_node,
     nav_edge_id nav_edge,
     bool is_dropdown,
+    bool requires_jump,
     const dropdown_waypoint& waypoint)
   {
     if (from_node == to_node || from_node >= cache_->crumb_nodes.size() || to_node >= cache_->crumb_nodes.size())
@@ -1472,12 +1466,13 @@ void navbot_mesh::build_crumb_graph()
       }
     }
 
-    const auto cost = distance_value_mesh(cache_->crumb_nodes[from_node].world, cache_->crumb_nodes[to_node].world);
+    const auto cost = distance_3d(cache_->crumb_nodes[from_node].world, cache_->crumb_nodes[to_node].world);
     edges.push_back(nav_crumb_edge{
       to_node,
       nav_edge,
       cost,
       is_dropdown,
+      requires_jump,
       waypoint.valid,
       waypoint.approach,
       waypoint.landing
@@ -1502,18 +1497,18 @@ void navbot_mesh::build_crumb_graph()
         const auto to_node = area_nodes[j];
         const auto& from = cache_->crumb_nodes[from_node].world;
         const auto& to = cache_->crumb_nodes[to_node].world;
-        if (distance_sq_2d_mesh(from, to) > connect_distance_sq)
+        if (distance_squared_2d(from, to) > connect_distance_sq)
         {
           continue;
         }
 
         if (directed_area_segment_reachable(area, from, to))
         {
-          add_directed_edge(from_node, to_node, {}, false, {});
+          add_directed_edge(from_node, to_node, {}, false, segment_requires_jump(from, to), {});
         }
         if (directed_area_segment_reachable(area, to, from))
         {
-          add_directed_edge(to_node, from_node, {}, false, {});
+          add_directed_edge(to_node, from_node, {}, false, segment_requires_jump(to, from), {});
         }
       }
     }
@@ -1545,13 +1540,14 @@ void navbot_mesh::build_crumb_graph()
         continue;
       }
 
-      const auto dropdown = is_dropdown_transition(from, next->center);
-      const auto waypoint = dropdown ? make_dropdown_waypoint(from, next->center, *next) : dropdown_waypoint{};
+      const auto dropdown = is_dropdown_transition(from, to);
+      const auto waypoint = dropdown ? make_dropdown_waypoint(from, to) : dropdown_waypoint{};
       add_directed_edge(
         from_node,
         to_node,
         nav_edge_id{area.id.value, connection_index},
         dropdown,
+        segment_requires_jump(from, to),
         waypoint);
     }
   }

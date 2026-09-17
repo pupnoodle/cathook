@@ -13,6 +13,7 @@ V  o o  V  file: src/games/tf2/sdk/interfaces/prediction.hpp
 #define PREDICTION_HPP
 
 #include "core/types.hpp"
+#include "games/tf2/sdk/interfaces/engine.hpp"
 
 class MoveHelper;
 class MoveData;
@@ -77,5 +78,16 @@ public:
 };
 
 inline static Prediction* prediction;
+
+inline static void push_view_angles(Vec3 angles)
+{
+  if (prediction != nullptr) {
+    prediction->set_local_view_angles(angles);
+    prediction->set_view_angles(angles);
+  }
+  if (engine != nullptr) {
+    engine->set_view_angles(angles);
+  }
+}
 
 #endif

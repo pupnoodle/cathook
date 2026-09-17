@@ -27,6 +27,7 @@ bool shutdown();
 bool is_enabled();
 bool should_skip_rendering_hooks();
 bool is_noshaderapi();
+bool command_line_has_vulkan();
 const char* redirect_shaderapi_path(const char* library_path);
 
 }

@@ -55,11 +55,11 @@ app.use(session({
 }))
 
 app.use(express.static(path.join(__dirname, "public")));
-app.use(bodyparser.json());
-app.use(bodyparser.urlencoded({ extended: true }));
 
 const SimpleAuth = require('./auth');
 const basicAuth = new SimpleAuth(app);
+app.use(bodyparser.json());
+app.use(bodyparser.urlencoded({ extended: true }));
 fs.mkdirSync(runtime_dir, { recursive: true, mode: 0o700 });
 fs.chmodSync(runtime_dir, 0o700);
 fs.writeFileSync(path.join(runtime_dir, 'cat-webpanel-password'), basicAuth.password, { mode: 0o600 });

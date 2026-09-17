@@ -12,6 +12,7 @@ V  o o  V  file: src/games/tf2/sdk/interfaces/client_state.hpp
 #ifndef CLIENT_STATE_HPP
 #define CLIENT_STATE_HPP
 
+#include <cstddef>
 #include <cstdint>
 
 #include "games/tf2/sdk/interfaces/net_channel.hpp"
@@ -74,6 +75,9 @@ public:
   bool m_bMarkedCRCsUnverified;
 };
 
+static_assert(offsetof(ClientState, m_nDeltaTick) == 0x1B8);
+
 inline static ClientState* client_state;
+inline void (*client_state_force_full_update)(ClientState*) = nullptr;
 
 #endif

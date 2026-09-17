@@ -514,6 +514,30 @@ void config_store::import_config(const Config& config)
     set_bool("visuals.radar.axis_lines", config.visuals.radar.axis_lines);
     set_int("visuals.radar.range_rings", config.visuals.radar.range_rings);
     set_int("visuals.skybox_changer_index", config.visuals.skybox_changer_index);
+    set_bool("visuals.skin_changer.enabled", config.visuals.skin_changer.enabled);
+    set_bool("visuals.skin_changer.reskin", config.visuals.skin_changer.reskin);
+    const auto save_skin = [this](const std::string& prefix, const Visuals::SkinChanger::Skin& skin) {
+        set_int(prefix + "paintkit", skin.paintkit);
+        set_float(prefix + "wear", skin.wear);
+        set_int(prefix + "seed", skin.seed);
+        set_int(prefix + "quality", skin.quality);
+        set_bool(prefix + "festive", skin.festive);
+        set_bool(prefix + "australium", skin.australium);
+        set_int(prefix + "killstreak", skin.killstreak);
+        set_int(prefix + "sheen", skin.sheen);
+        set_int(prefix + "unusual", skin.unusual);
+    };
+    save_skin("visuals.skin_changer.", config.visuals.skin_changer.defaults);
+    std::vector<int> weapon_keys{};
+    weapon_keys.reserve(config.visuals.skin_changer.weapons.size());
+    for (const auto& [definition, skin] : config.visuals.skin_changer.weapons) {
+        if (skin.empty()) {
+            continue;
+        }
+        weapon_keys.push_back(definition);
+        save_skin("visuals.skin_changer.weapon." + std::to_string(definition) + ".", skin);
+    }
+    set_string("visuals.skin_changer.weapon_keys", serialize_int_list(weapon_keys));
     set_bool("visuals.override_fov", config.visuals.override_fov);
     set_float("visuals.custom_fov", config.visuals.custom_fov);
     set_bool("visuals.override_zoom_fov", config.visuals.override_zoom_fov);
@@ -567,6 +591,7 @@ void config_store::import_config(const Config& config)
     set_bool("misc.exploits.anti_aim_anti_overlap", config.misc.exploits.anti_aim_anti_overlap);
     set_bool("misc.exploits.antiwarp", config.misc.exploits.antiwarp);
     set_bool("misc.exploits.equip_region_unlock", config.misc.exploits.equip_region_unlock);
+    set_bool("misc.exploits.anti_cheat_compat", config.misc.exploits.anti_cheat_compat);
     set_bool("misc.exploits.ping_reducer", config.misc.exploits.ping_reducer);
     set_int("misc.exploits.ping_target", config.misc.exploits.ping_target);
     set_bool("misc.exploits.no_engine_sleep", config.misc.exploits.no_engine_sleep);
@@ -604,6 +629,21 @@ void config_store::import_config(const Config& config)
     set_bool("misc.automation.anti_motd_dont_close_during_warmup", config.misc.automation.anti_motd_dont_close_during_warmup);
     set_bool("misc.automation.auto_vote_map", config.misc.automation.auto_vote_map);
     set_int("misc.automation.auto_vote_map_option", config.misc.automation.auto_vote_map_option);
+    set_int("misc.automation.auto_vote", static_cast<int>(config.misc.automation.auto_vote));
+    set_bool("misc.automation.auto_vote_delay", config.misc.automation.auto_vote_delay);
+    set_float("misc.automation.auto_vote_delay_min", config.misc.automation.auto_vote_delay_min);
+    set_float("misc.automation.auto_vote_delay_max", config.misc.automation.auto_vote_delay_max);
+    set_bool("misc.automation.killstreak", config.misc.automation.killstreak);
+    set_int("misc.cheat_detection.methods", static_cast<int>(config.misc.cheat_detection.methods));
+    set_int("misc.cheat_detection.detections_required", config.misc.cheat_detection.detections_required);
+    set_float("misc.cheat_detection.min_flick", config.misc.cheat_detection.min_flick);
+    set_float("misc.cheat_detection.max_noise", config.misc.cheat_detection.max_noise);
+    set_int("misc.cheat_detection.min_choking_ticks", config.misc.cheat_detection.min_choking_ticks);
+    set_int("misc.cheat_detection.lagcomp_min_delta", config.misc.cheat_detection.lagcomp_min_delta);
+    set_float("misc.cheat_detection.lagcomp_window", config.misc.cheat_detection.lagcomp_window);
+    set_int("misc.cheat_detection.lagcomp_burst_count", config.misc.cheat_detection.lagcomp_burst_count);
+    set_int("misc.cheat_detection.crit_window", config.misc.cheat_detection.crit_window);
+    set_float("misc.cheat_detection.crit_threshold", config.misc.cheat_detection.crit_threshold);
     set_bool("misc.automation.noisemaker_spam", config.misc.automation.noisemaker_spam);
     set_int("misc.automation.voice_command_spam", static_cast<int>(config.misc.automation.voice_command_spam));
     set_bool("misc.automation.micspam", config.misc.automation.micspam);
@@ -632,6 +672,18 @@ void config_store::import_config(const Config& config)
     set_float("misc.automation.autotaunt_chance", config.misc.automation.autotaunt_chance);
     set_float("misc.automation.autotaunt_safety_distance", config.misc.automation.autotaunt_safety_distance);
     set_int("misc.automation.autotaunt_weapon_slot", config.misc.automation.autotaunt_weapon_slot);
+    set_bool("misc.automation.autoparty", config.misc.automation.autoparty);
+    set_int("misc.automation.autoparty_max_party_size", config.misc.automation.autoparty_max_party_size);
+    set_string("misc.automation.autoparty_party_hosts", config.misc.automation.autoparty_party_hosts);
+    set_bool("misc.automation.autoparty_kick_rage", config.misc.automation.autoparty_kick_rage);
+    set_bool("misc.automation.autoparty_auto_leave", config.misc.automation.autoparty_auto_leave);
+    set_bool("misc.automation.autoparty_auto_lock", config.misc.automation.autoparty_auto_lock);
+    set_bool("misc.automation.autoparty_auto_unlock", config.misc.automation.autoparty_auto_unlock);
+    set_bool("misc.automation.autoparty_log", config.misc.automation.autoparty_log);
+    set_bool("misc.automation.autoparty_message_kicks", config.misc.automation.autoparty_message_kicks);
+    set_bool("misc.automation.autoparty_ipc_mode", config.misc.automation.autoparty_ipc_mode);
+    set_int("misc.automation.autoparty_ipc_count", config.misc.automation.autoparty_ipc_count);
+    set_int("misc.automation.autoparty_run_frequency", config.misc.automation.autoparty_run_frequency);
     set_int("misc.automation.chatspam", static_cast<int>(config.misc.automation.chatspam));
     set_bool("misc.automation.chatspam_random", config.misc.automation.chatspam_random);
     set_bool("misc.automation.chatspam_team", config.misc.automation.chatspam_team);
@@ -650,6 +702,8 @@ void config_store::import_config(const Config& config)
     set_int("misc.automation.mvm_buybot_max_cash", config.misc.automation.mvm_buybot_max_cash);
     set_bool("misc.automation.mvm_buybot_auto_class", config.misc.automation.mvm_buybot_auto_class);
     set_int("misc.automation.mvm_buybot_class", static_cast<int>(config.misc.automation.mvm_buybot_class));
+    set_int("misc.automation.mvm_chat_commands", static_cast<int>(config.misc.automation.mvm_chat_commands));
+    set_int("misc.automation.mvm_chat_commands_role", config.misc.automation.mvm_chat_commands_role);
     set_bool("misc.automation.medic_autoheal", config.misc.automation.medic_autoheal);
     set_bool("misc.automation.medic_autovacc", config.misc.automation.medic_autovacc);
     set_bool("misc.automation.medic_autouber", config.misc.automation.medic_autouber);
@@ -679,6 +733,8 @@ void config_store::import_config(const Config& config)
     set_int("misc.automation.bootcamp_mission_bits", static_cast<int>(config.misc.automation.bootcamp_mission_bits));
     set_bool("misc.automation.stalker_enabled", config.misc.automation.stalker_enabled);
     set_int("misc.automation.stalker_interval", config.misc.automation.stalker_interval);
+    set_float("misc.automation.stalker_overlay_x", config.misc.automation.stalker_overlay_x);
+    set_float("misc.automation.stalker_overlay_y", config.misc.automation.stalker_overlay_y);
     set_bool("misc.automation.navbot_enabled", config.misc.automation.navbot_enabled);
     set_int("misc.automation.navbot_behavior", static_cast<int>(config.misc.automation.navbot_behavior));
     set_bool("misc.automation.navbot_draw_path", config.misc.automation.navbot_draw_path);
@@ -1184,6 +1240,38 @@ void config_store::export_config(Config& config) const
         get_int("visuals.radar.range_rings", config.visuals.radar.range_rings), 0, 8);
     config.visuals.skybox_changer_index = std::clamp(
         get_int("visuals.skybox_changer_index", config.visuals.skybox_changer_index), 0, 31);
+    config.visuals.skin_changer.enabled = get_bool("visuals.skin_changer.enabled", config.visuals.skin_changer.enabled);
+    config.visuals.skin_changer.reskin = get_bool("visuals.skin_changer.reskin", config.visuals.skin_changer.reskin);
+    const auto load_skin = [this](const std::string& prefix, Visuals::SkinChanger::Skin fallback) {
+        fallback.paintkit = get_int(prefix + "paintkit", fallback.paintkit);
+        fallback.wear = std::clamp(get_float(prefix + "wear", fallback.wear), 0.0f, 1.0f);
+        fallback.seed = std::clamp(get_int(prefix + "seed", fallback.seed), 0, 16);
+        fallback.quality = std::clamp(get_int(prefix + "quality", fallback.quality), -1, 15);
+        fallback.festive = get_bool(prefix + "festive", fallback.festive);
+        fallback.australium = get_bool(prefix + "australium", fallback.australium);
+        fallback.killstreak = std::clamp(get_int(prefix + "killstreak", fallback.killstreak), 0, 3);
+        fallback.sheen = std::clamp(get_int(prefix + "sheen", fallback.sheen), 0, 7);
+        fallback.unusual = std::clamp(get_int(prefix + "unusual", fallback.unusual), 0, 4);
+        return fallback;
+    };
+    config.visuals.skin_changer.defaults = load_skin("visuals.skin_changer.", config.visuals.skin_changer.defaults);
+    if (config.visuals.skin_changer.defaults.paintkit == 0) {
+        const std::string legacy_paintkit = get_string("visuals.skin_changer.paintkit", "");
+        int parsed = 0;
+        const auto conversion = std::from_chars(
+            legacy_paintkit.data(), legacy_paintkit.data() + legacy_paintkit.size(), parsed);
+        if (conversion.ec == std::errc{} && parsed > 0) {
+            config.visuals.skin_changer.defaults.paintkit = parsed;
+        }
+    }
+    config.visuals.skin_changer.weapons.clear();
+    for (const int definition : parse_int_list(get_string("visuals.skin_changer.weapon_keys", ""))) {
+        Visuals::SkinChanger::Skin skin = load_skin(
+            "visuals.skin_changer.weapon." + std::to_string(definition) + ".", {});
+        if (!skin.empty()) {
+            config.visuals.skin_changer.weapons[definition] = skin;
+        }
+    }
     config.visuals.override_fov = get_bool("visuals.override_fov", config.visuals.override_fov);
     config.visuals.custom_fov = get_float("visuals.custom_fov", config.visuals.custom_fov);
     config.visuals.override_zoom_fov = get_bool("visuals.override_zoom_fov", config.visuals.override_zoom_fov);
@@ -1293,6 +1381,9 @@ void config_store::export_config(Config& config) const
     config.misc.exploits.equip_region_unlock = get_bool(
         "misc.exploits.equip_region_unlock",
         config.misc.exploits.equip_region_unlock);
+    config.misc.exploits.anti_cheat_compat = get_bool(
+        "misc.exploits.anti_cheat_compat",
+        config.misc.exploits.anti_cheat_compat);
     config.misc.exploits.ping_reducer = get_bool("misc.exploits.ping_reducer", config.misc.exploits.ping_reducer);
     config.misc.exploits.ping_target = std::clamp(
         get_int("misc.exploits.ping_target", config.misc.exploits.ping_target),
@@ -1361,6 +1452,34 @@ void config_store::export_config(Config& config) const
         get_int("misc.automation.auto_vote_map_option", config.misc.automation.auto_vote_map_option),
         0,
         2);
+    config.misc.automation.auto_vote = static_cast<std::uint32_t>(
+        get_int("misc.automation.auto_vote", static_cast<int>(config.misc.automation.auto_vote))) & 0xfu;
+    config.misc.automation.auto_vote_delay = get_bool("misc.automation.auto_vote_delay", config.misc.automation.auto_vote_delay);
+    config.misc.automation.auto_vote_delay_min = std::clamp(
+        get_float("misc.automation.auto_vote_delay_min", config.misc.automation.auto_vote_delay_min), 0.0f, 60.0f);
+    config.misc.automation.auto_vote_delay_max = std::clamp(
+        get_float("misc.automation.auto_vote_delay_max", config.misc.automation.auto_vote_delay_max), 0.0f, 60.0f);
+    config.misc.automation.killstreak = get_bool("misc.automation.killstreak", config.misc.automation.killstreak);
+    config.misc.cheat_detection.methods = static_cast<std::uint32_t>(
+        get_int("misc.cheat_detection.methods", static_cast<int>(config.misc.cheat_detection.methods))) & 0x3fu;
+    config.misc.cheat_detection.detections_required = std::clamp(
+        get_int("misc.cheat_detection.detections_required", config.misc.cheat_detection.detections_required), 1, 20);
+    config.misc.cheat_detection.min_flick = std::clamp(
+        get_float("misc.cheat_detection.min_flick", config.misc.cheat_detection.min_flick), 1.0f, 180.0f);
+    config.misc.cheat_detection.max_noise = std::clamp(
+        get_float("misc.cheat_detection.max_noise", config.misc.cheat_detection.max_noise), 0.0f, 45.0f);
+    config.misc.cheat_detection.min_choking_ticks = std::clamp(
+        get_int("misc.cheat_detection.min_choking_ticks", config.misc.cheat_detection.min_choking_ticks), 2, 128);
+    config.misc.cheat_detection.lagcomp_min_delta = std::clamp(
+        get_int("misc.cheat_detection.lagcomp_min_delta", config.misc.cheat_detection.lagcomp_min_delta), 2, 64);
+    config.misc.cheat_detection.lagcomp_window = std::clamp(
+        get_float("misc.cheat_detection.lagcomp_window", config.misc.cheat_detection.lagcomp_window), 0.1f, 30.0f);
+    config.misc.cheat_detection.lagcomp_burst_count = std::clamp(
+        get_int("misc.cheat_detection.lagcomp_burst_count", config.misc.cheat_detection.lagcomp_burst_count), 1, 16);
+    config.misc.cheat_detection.crit_window = std::clamp(
+        get_int("misc.cheat_detection.crit_window", config.misc.cheat_detection.crit_window), 2, 200);
+    config.misc.cheat_detection.crit_threshold = std::clamp(
+        get_float("misc.cheat_detection.crit_threshold", config.misc.cheat_detection.crit_threshold), 1.0f, 100.0f);
     config.misc.automation.noisemaker_spam = get_bool("misc.automation.noisemaker_spam", config.misc.automation.noisemaker_spam);
     config.misc.automation.voice_command_spam = static_cast<Misc::Automation::voice_command_spam_mode>(std::clamp(
         get_int("misc.automation.voice_command_spam", static_cast<int>(config.misc.automation.voice_command_spam)),
@@ -1451,6 +1570,43 @@ void config_store::export_config(Config& config) const
         get_int("misc.automation.autotaunt_weapon_slot", config.misc.automation.autotaunt_weapon_slot),
         0,
         5);
+    config.misc.automation.autoparty = get_bool("misc.automation.autoparty", config.misc.automation.autoparty);
+    config.misc.automation.autoparty_max_party_size = std::clamp(
+        get_int("misc.automation.autoparty_max_party_size", config.misc.automation.autoparty_max_party_size),
+        1,
+        6);
+    config.misc.automation.autoparty_party_hosts = get_string(
+        "misc.automation.autoparty_party_hosts",
+        config.misc.automation.autoparty_party_hosts);
+    config.misc.automation.autoparty_kick_rage = get_bool(
+        "misc.automation.autoparty_kick_rage",
+        config.misc.automation.autoparty_kick_rage);
+    config.misc.automation.autoparty_auto_leave = get_bool(
+        "misc.automation.autoparty_auto_leave",
+        config.misc.automation.autoparty_auto_leave);
+    config.misc.automation.autoparty_auto_lock = get_bool(
+        "misc.automation.autoparty_auto_lock",
+        config.misc.automation.autoparty_auto_lock);
+    config.misc.automation.autoparty_auto_unlock = get_bool(
+        "misc.automation.autoparty_auto_unlock",
+        config.misc.automation.autoparty_auto_unlock);
+    config.misc.automation.autoparty_log = get_bool(
+        "misc.automation.autoparty_log",
+        config.misc.automation.autoparty_log);
+    config.misc.automation.autoparty_message_kicks = get_bool(
+        "misc.automation.autoparty_message_kicks",
+        config.misc.automation.autoparty_message_kicks);
+    config.misc.automation.autoparty_ipc_mode = get_bool(
+        "misc.automation.autoparty_ipc_mode",
+        config.misc.automation.autoparty_ipc_mode);
+    config.misc.automation.autoparty_ipc_count = std::clamp(
+        get_int("misc.automation.autoparty_ipc_count", config.misc.automation.autoparty_ipc_count),
+        0,
+        8);
+    config.misc.automation.autoparty_run_frequency = std::clamp(
+        get_int("misc.automation.autoparty_run_frequency", config.misc.automation.autoparty_run_frequency),
+        5,
+        300);
     config.misc.automation.chatspam = static_cast<Misc::Automation::chatspam_source>(std::clamp(
         get_int("misc.automation.chatspam", static_cast<int>(config.misc.automation.chatspam)),
         0,
@@ -1501,6 +1657,13 @@ void config_store::export_config(Config& config) const
         get_int("misc.automation.mvm_buybot_class", static_cast<int>(config.misc.automation.mvm_buybot_class)),
         1,
         9));
+    config.misc.automation.mvm_chat_commands = static_cast<Misc::Automation::mvm_chat_command_mode>(std::clamp(
+        get_int("misc.automation.mvm_chat_commands", static_cast<int>(config.misc.automation.mvm_chat_commands)),
+        0,
+        3));
+    config.misc.automation.mvm_chat_commands_role = get_int(
+        "misc.automation.mvm_chat_commands_role",
+        config.misc.automation.mvm_chat_commands_role);
     config.misc.automation.medic_autoheal = get_bool("misc.automation.medic_autoheal", config.misc.automation.medic_autoheal);
     config.misc.automation.medic_autovacc = get_bool("misc.automation.medic_autovacc", config.misc.automation.medic_autovacc);
     config.misc.automation.medic_autouber = get_bool("misc.automation.medic_autouber", config.misc.automation.medic_autouber);
@@ -1579,6 +1742,12 @@ void config_store::export_config(Config& config) const
         get_int("misc.automation.stalker_interval", config.misc.automation.stalker_interval),
         5,
         300);
+    config.misc.automation.stalker_overlay_x = get_float(
+        "misc.automation.stalker_overlay_x",
+        config.misc.automation.stalker_overlay_x);
+    config.misc.automation.stalker_overlay_y = get_float(
+        "misc.automation.stalker_overlay_y",
+        config.misc.automation.stalker_overlay_y);
     config.misc.automation.navbot_enabled = get_bool("misc.automation.navbot_enabled", config.misc.automation.navbot_enabled);
     config.misc.automation.navbot_behavior = static_cast<Misc::Automation::navbot_mode>(std::clamp(
         get_int("misc.automation.navbot_behavior", static_cast<int>(config.misc.automation.navbot_behavior)),

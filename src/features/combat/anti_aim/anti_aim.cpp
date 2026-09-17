@@ -56,7 +56,7 @@ using yaw_mode = Misc::Exploits::anti_aim_yaw_mode;
     return 0.0f;
   }
 
-  return std::remainder(angle, 360.0f);
+  return azimuth_to_signed(angle);
 }
 
 [[nodiscard]] auto clamp_angles(Vec3 angles) -> Vec3
@@ -122,17 +122,6 @@ void store_attack_button_state(user_cmd* cmd)
   g_state.previous_command_number = cmd->command_number;
 }
 
-[[nodiscard]] auto calculate_angles_to_position(const Vec3& start, const Vec3& target) -> Vec3
-{
-  const Vec3 diff = target - start;
-  const float hypotenuse = std::sqrt((diff.x * diff.x) + (diff.y * diff.y));
-  return {
-    -std::atan2(diff.z, hypotenuse) * radpi,
-    std::atan2(diff.y, diff.x) * radpi,
-    0.0f
-  };
-}
-
 [[nodiscard]] auto closest_target_yaw(Player* localplayer, const Vec3& fallback_angles) -> float
 {
   if (localplayer == nullptr) {
@@ -154,7 +143,7 @@ void store_attack_button_state(user_cmd* cmd)
       continue;
     }
 
-    const Vec3 angles_to_player = calculate_angles_to_position(local_origin, player->get_origin());
+    const Vec3 angles_to_player = angles_to_position(local_origin, player->get_origin());
     const float fov = std::fabs(normalize_angle(angles_to_player.y - fallback_angles.y));
     if (fov < best_fov) {
       best_fov = fov;
@@ -186,10 +175,8 @@ void store_attack_button_state(user_cmd* cmd)
   return ((static_cast<std::uint32_t>(command_number) + salt) & 1U) != 0U ? 1.0f : -1.0f;
 }
 
-[[nodiscard]] auto yaw_offset(Player* localplayer, user_cmd* cmd, bool fake) -> float
+[[nodiscard]] auto yaw_offset(user_cmd* cmd, bool fake) -> float
 {
-  (void)localplayer;
-
   const yaw_mode mode = fake
     ? config.misc.exploits.anti_aim_fake_yaw
     : config.misc.exploits.anti_aim_real_yaw;
@@ -224,13 +211,13 @@ void store_attack_button_state(user_cmd* cmd)
 
 [[nodiscard]] auto build_yaw(Player* localplayer, user_cmd* cmd, bool fake, const Vec3& source_angles) -> float
 {
-  float yaw = base_yaw(localplayer, cmd, fake, source_angles) + yaw_offset(localplayer, cmd, fake);
+  float yaw = base_yaw(localplayer, cmd, fake, source_angles) + yaw_offset(cmd, fake);
 
   if (!fake
       && config.misc.exploits.anti_aim_anti_overlap
       && yaw_mode_enabled(config.misc.exploits.anti_aim_real_yaw, config.misc.exploits.anti_aim_real_yaw_offset)
       && yaw_mode_enabled(config.misc.exploits.anti_aim_fake_yaw, config.misc.exploits.anti_aim_fake_yaw_offset)) {
-    const float fake_yaw = base_yaw(localplayer, cmd, true, source_angles) + yaw_offset(localplayer, cmd, true);
+    const float fake_yaw = base_yaw(localplayer, cmd, true, source_angles) + yaw_offset(cmd, true);
     const float yaw_delta = normalize_angle(yaw - fake_yaw);
     const float abs_delta = std::fabs(yaw_delta);
     if (abs_delta < overlap_epsilon) {
@@ -285,21 +272,11 @@ void fix_movement(user_cmd* cmd, const Vec3& source_angles, float source_forward
     return;
   }
 
-  float yaw_delta = cmd->view_angles.y - source_angles.y;
-  float source_yaw_correction = source_angles.y < 0.0f ? 360.0f + source_angles.y : source_angles.y;
-  float target_yaw_correction = cmd->view_angles.y < 0.0f ? 360.0f + cmd->view_angles.y : cmd->view_angles.y;
-
-  if (target_yaw_correction < source_yaw_correction) {
-    yaw_delta = std::fabs(target_yaw_correction - source_yaw_correction);
-  } else {
-    yaw_delta = 360.0f - std::fabs(source_yaw_correction - target_yaw_correction);
-  }
-  yaw_delta = 360.0f - yaw_delta;
-
-  cmd->forwardmove = std::cos(yaw_delta * pideg) * source_forward_move
-    + std::cos((yaw_delta + 90.0f) * pideg) * source_side_move;
-  cmd->sidemove = std::sin(yaw_delta * pideg) * source_forward_move
-    + std::sin((yaw_delta + 90.0f) * pideg) * source_side_move;
+  const float yaw_delta = (cmd->view_angles.y - source_angles.y) * pideg;
+  cmd->forwardmove = std::cos(yaw_delta) * source_forward_move
+    - std::sin(yaw_delta) * source_side_move;
+  cmd->sidemove = std::sin(yaw_delta) * source_forward_move
+    + std::cos(yaw_delta) * source_side_move;
 }
 
 [[nodiscard]] auto should_run(user_cmd* cmd) -> bool
@@ -349,9 +326,8 @@ void on_create_move(user_cmd* cmd)
   g_state.active = false;
 
   if (!should_run(cmd)) {
-
     g_state.visual_angles = false;
-    if (!g_state.visual_angles && cmd != nullptr) {
+    if (cmd != nullptr) {
       g_state.real_angles = cmd->view_angles;
       g_state.fake_angles = cmd->view_angles;
     }

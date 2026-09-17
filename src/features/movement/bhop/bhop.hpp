@@ -8,4 +8,5 @@ void movement_post_prediction(user_cmd* user_cmd);
 bool moonwalk_create_move(user_cmd* user_cmd);
 bool moonwalk_applied_to_command(int command_number);
 bool auto_edgebug_create_move(user_cmd* user_cmd);
+void reset_movement_session_state();
 #endif

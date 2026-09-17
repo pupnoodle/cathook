@@ -32,6 +32,7 @@ V  o o  V  file: src/core/ipc/ipc_client.cpp
 #include <shared_mutex>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <unistd.h>
@@ -66,6 +67,19 @@ std::chrono::steady_clock::time_point game_telemetry_ready_since{};
 std::mutex ipc_mutex{};
 std::thread ipc_worker{};
 std::atomic_bool ipc_worker_running = false;
+
+struct ipc_worker_guard
+{
+  ~ipc_worker_guard()
+  {
+    ipc_worker_running.store(false, std::memory_order_release);
+    if (ipc_worker.joinable() && ipc_worker.get_id() != std::this_thread::get_id()) {
+      ipc_worker.join();
+    }
+  }
+};
+inline ipc_worker_guard ipc_worker_guard_instance{};
+std::atomic_bool ipc_worker_sweep_active = false;
 std::shared_mutex local_ipc_friends_mutex{};
 constexpr std::size_t max_local_ipc_friends = static_cast<std::size_t>(max_peers);
 std::array<std::uint32_t, max_local_ipc_friends> local_ipc_friends{};
@@ -866,6 +880,7 @@ void ipc_worker_main()
 {
   while (ipc_worker_running.load())
   {
+    ipc_worker_sweep_active.store(true, std::memory_order_release);
     {
       std::lock_guard lock{ipc_mutex};
       if (ipc_enabled.load(std::memory_order_acquire))
@@ -874,9 +889,11 @@ void ipc_worker_main()
         service_ipc_locked(false, true);
       }
     }
+    ipc_worker_sweep_active.store(false, std::memory_order_release);
 
     std::this_thread::sleep_for(std::chrono::seconds(1));
   }
+  ipc_worker_sweep_active.store(false, std::memory_order_release);
 }
 
 void start_ipc_worker()
@@ -941,13 +958,32 @@ void tick()
 
   set_enabled(config.ipc.enabled);
   set_auto_ignore_enabled(config.ipc.auto_ignore_local_bots);
-  std::lock_guard lock{ipc_mutex};
+
+  if (ipc_worker_sweep_active.load(std::memory_order_acquire))
+  {
+    return;
+  }
+
+  std::unique_lock lock{ipc_mutex, std::try_to_lock};
+  if (!lock.owns_lock())
+  {
+    return;
+  }
+
   if (ipc_state == nullptr && !config.ipc.auto_connect)
   {
     return;
   }
 
-  service_ipc_locked(true, true);
+  static std::chrono::steady_clock::time_point last_full_telemetry{};
+  const auto now = std::chrono::steady_clock::now();
+  const bool full_telemetry = last_full_telemetry.time_since_epoch().count() == 0
+      || now - last_full_telemetry >= std::chrono::seconds(1);
+  if (full_telemetry)
+  {
+    last_full_telemetry = now;
+  }
+  service_ipc_locked(full_telemetry, true);
   process_pending_commands();
 }
 
@@ -1033,7 +1069,11 @@ void on_game_event(GameEvent* event)
     return;
   }
 
-  std::lock_guard ipc_lock{ipc_mutex};
+  std::unique_lock ipc_lock{ipc_mutex, std::try_to_lock};
+  if (!ipc_lock.owns_lock())
+  {
+    return;
+  }
   if (ipc_state == nullptr || !valid_local_peer_id())
   {
     return;
@@ -1217,6 +1257,54 @@ bool is_first_local_ipc_peer_on_current_server()
   }
 
   return true;
+}
+
+std::vector<std::uint32_t> ipc_peer_friend_ids_by_injection_time(int max_count)
+{
+  std::vector<std::uint32_t> ids;
+  if (max_count <= 0)
+  {
+    return ids;
+  }
+
+  std::vector<std::pair<std::time_t, std::uint32_t>> peers;
+  {
+    std::lock_guard ipc_lock{ipc_mutex};
+    if (ipc_state == nullptr || !valid_local_peer_id())
+    {
+      return ids;
+    }
+
+    try_scoped_lock lock{ipc_state};
+    if (!lock.locked())
+    {
+      return ids;
+    }
+
+    const auto now = now_seconds();
+    for (auto index = 0u; index < max_peers; ++index)
+    {
+      const auto& peer = ipc_state->peer_data[index];
+      const auto& data = ipc_state->peer_user_data[index];
+      if (peer.free || !peer_alive(peer, now) || !data.connected || data.friendid == 0)
+      {
+        continue;
+      }
+      peers.emplace_back(data.ts_injected, data.friendid);
+    }
+  }
+
+  std::sort(peers.begin(), peers.end(),
+            [](const auto& a, const auto& b) { return a.first > b.first; });
+  for (const auto& peer : peers)
+  {
+    if (static_cast<int>(ids.size()) >= max_count)
+    {
+      break;
+    }
+    ids.push_back(peer.second);
+  }
+  return ids;
 }
 
 bool is_known_local_ipc_friend(std::uint32_t friend_id)

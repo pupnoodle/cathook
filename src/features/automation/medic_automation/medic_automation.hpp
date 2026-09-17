@@ -22,7 +22,7 @@ namespace medic_automation
 class medic_controller
 {
 public:
-  void on_pre_navbot_create_move(user_cmd* user_cmd);
+  void on_pre_navbot_create_move();
   void on_post_navbot_create_move(user_cmd* user_cmd);
   void on_game_event(GameEvent* event);
 

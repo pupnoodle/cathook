@@ -9,6 +9,9 @@ V  o o  V  file: src/features/automation/nographics/nographics.cpp
   || (___\====
 */
 #include "features/automation/nographics/nographics.hpp"
+#include "core/shared/modules.hpp"
+#include "core/memory/maps.hpp"
+#include "core/memory/resolve.hpp"
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -51,7 +54,6 @@ constexpr int base_file_system_open_index = 2;
 constexpr int base_file_system_precache_index = 9;
 constexpr int base_file_system_read_file_index = 14;
 constexpr std::uintptr_t base_file_system_vptr_offset = sizeof(void*);
-constexpr const char* client_module_name = "tf/bin/linux64/client.so";
 constexpr int fs_async_err_fileopen = -1;
 constexpr int client_hud_update_index = 11;
 
@@ -116,18 +118,16 @@ constexpr bool textmode_build = false;
 
 bool module_is_loaded(const char* module_name)
 {
-  auto* bounds = sigscan_get_module_bounds(SIGSCAN_PID_SELF, module_name);
-  if (bounds == nullptr)
+  return cathook::core::memory::is_module_loaded(module_name);
+}
+
+bool command_line_has_flag(const char* flag)
+{
+  if (flag == nullptr)
   {
     return false;
   }
 
-  sigscan_free_module_bounds(bounds);
-  return true;
-}
-
-bool command_line_has_noshaderapi()
-{
   std::ifstream cmdline{ "/proc/self/cmdline", std::ios::binary };
   if (!cmdline)
   {
@@ -139,7 +139,7 @@ bool command_line_has_noshaderapi()
   {
     if (value == '\0')
     {
-      if (argument == "-noshaderapi")
+      if (argument == flag)
       {
         return true;
       }
@@ -149,7 +149,12 @@ bool command_line_has_noshaderapi()
     argument.push_back(value);
   }
 
-  return argument == "-noshaderapi";
+  return argument == flag;
+}
+
+bool command_line_has_noshaderapi()
+{
+  return command_line_has_flag("-noshaderapi");
 }
 
 bool empty_shader_api_is_active()
@@ -198,14 +203,27 @@ bool is_startup_patch_module(const char* library_path)
          name == "filesystem_steam.so";
 }
 
-byte_patch particle_create_patch{};
-byte_patch play_sequence_patch{};
-byte_patch particle_precache_patch{};
-byte_patch particle_effect_create_patch{};
-byte_patch view_render_patch{};
-byte_patch v_render_view_patch{};
-byte_patch material_system_swap_buffers_patch{};
-byte_patch video_mode_setup_startup_graphic_patch{};
+struct render_patch
+{
+  byte_patch patch{};
+  const char* module;
+  const char* signature;
+  int offset;
+  std::initializer_list<std::uint8_t> bytes;
+  const char* name;
+  bool textmode_only;
+};
+
+render_patch render_patches[] = {
+  { {}, cathook::core::modules::tf_client, sigs::particle_property_create, 0, { 0x31, 0xC0, 0xC3 }, "particle_property_create", false },
+  { {}, cathook::core::modules::tf_client, sigs::play_sequence, 0, { 0xC3 }, "play_sequence", false },
+  { {}, cathook::core::modules::tf_client, sigs::particle_system_precache, 0, { 0x31, 0xC0, 0xC3 }, "particle_system_precache", false },
+  { {}, cathook::core::modules::tf_client, sigs::particle_effect_create_event, 0, { 0x31, 0xC0, 0xC3 }, "particle_effect_create_event", false },
+  { {}, cathook::core::modules::tf_client, sigs::view_render_render, 0, { 0x31, 0xC0, 0x40, 0xC3 }, "view_render_render", true },
+  { {}, "engine.so", sigs::video_mode_setup_startup_graphic, 0, { 0xC3 }, "video_mode_setup_startup_graphic", true },
+  { {}, "engine.so", sigs::v_render_view, 0, { 0xC3 }, "v_render_view", true },
+  { {}, "materialsystem.so", sigs::material_system_swap_buffers, 0, { 0x31, 0xC0, 0x40, 0xC3 }, "material_system_swap_buffers", true },
+};
 
 char normalize_path_char(const char value)
 {
@@ -278,19 +296,6 @@ bool path_contains(const std::string_view path, const std::string_view needle)
   return false;
 }
 
-bool path_contains_any(const std::string_view path, std::initializer_list<std::string_view> needles)
-{
-  for (const std::string_view needle : needles)
-  {
-    if (path_contains(path, needle))
-    {
-      return true;
-    }
-  }
-
-  return false;
-}
-
 std::string_view file_extension(const std::string_view filename)
 {
   const auto slash = filename.find_last_of("/\\");
@@ -309,10 +314,8 @@ bool is_soundscape_script(const std::string_view filename)
          (path_starts_with(filename, "scripts/soundscapes_") && path_ends_with(filename, ".txt"));
 }
 
-bool is_required_model_asset(const std::string_view filename, const std::string_view extension)
+bool is_required_model_asset(const std::string_view extension)
 {
-
-  (void)filename;
   return path_equals(extension, ".mdl") ||
          path_equals(extension, ".phy") ||
          path_equals(extension, ".ani") ||
@@ -416,7 +419,7 @@ bool should_block_file(const char* raw_filename)
   const std::string_view extension = file_extension(filename);
 
   if (path_equals(extension, ".cat") || path_equals(extension, ".cfg") ||
-      path_equals(extension, ".bsp") || path_equals(extension, ".nav") || is_required_model_asset(filename, extension))
+      path_equals(extension, ".bsp") || path_equals(extension, ".nav") || is_required_model_asset(extension))
   {
     return false;
   }
@@ -491,21 +494,15 @@ bool should_block_file(const char* raw_filename)
   return false;
 }
 
-template <typename function_type>
-bool hook_vtable(void** vtable, int index, void* hook, function_type* original)
+bool hook_vtable(void** vtable, int index, void* hook, void** original)
 {
-  if (hook == nullptr || original == nullptr)
-  {
-    return false;
-  }
-
   void* const entry = read_vtable_entry(vtable, index, "nographics vtable hook");
   if (entry == nullptr)
   {
     return false;
   }
 
-  *original = reinterpret_cast<function_type>(entry);
+  *original = entry;
   if (!write_to_table(vtable, index, hook))
   {
     *original = nullptr;
@@ -667,6 +664,27 @@ void add_files_to_cache_hook(void* this_ptr, file_cache_handle_t cache_id, const
   (void)path_id;
 }
 
+struct file_system_hook
+{
+  void*** vtable;
+  int index;
+  void* hook;
+  void** original;
+  const char* name;
+};
+
+const file_system_hook file_system_hooks[] = {
+  { &file_system_vtable, file_system_find_first_index, reinterpret_cast<void*>(find_first_hook), reinterpret_cast<void**>(&find_first_original), "IFileSystem::FindFirst" },
+  { &file_system_vtable, file_system_find_next_index, reinterpret_cast<void*>(find_next_hook), reinterpret_cast<void**>(&find_next_original), "IFileSystem::FindNext" },
+  { &file_system_vtable, file_system_async_read_multiple_index, reinterpret_cast<void*>(async_read_multiple_hook), reinterpret_cast<void**>(&async_read_multiple_original), "IFileSystem::AsyncReadMultiple" },
+  { &file_system_vtable, file_system_open_ex_index, reinterpret_cast<void*>(open_ex_hook), reinterpret_cast<void**>(&open_ex_original), "IFileSystem::OpenEx" },
+  { &file_system_vtable, file_system_read_file_ex_index, reinterpret_cast<void*>(read_file_ex_hook), reinterpret_cast<void**>(&read_file_ex_original), "IFileSystem::ReadFileEx" },
+  { &file_system_vtable, file_system_add_files_to_cache_index, reinterpret_cast<void*>(add_files_to_cache_hook), reinterpret_cast<void**>(&add_files_to_cache_original), "IFileSystem::AddFilesToCache" },
+  { &base_file_system_vtable, base_file_system_open_index, reinterpret_cast<void*>(open_hook), reinterpret_cast<void**>(&open_original), "CBaseFileSystem::Open" },
+  { &base_file_system_vtable, base_file_system_precache_index, reinterpret_cast<void*>(precache_hook), reinterpret_cast<void**>(&precache_original), "CBaseFileSystem::Precache" },
+  { &base_file_system_vtable, base_file_system_read_file_index, reinterpret_cast<void*>(read_file_hook), reinterpret_cast<void**>(&read_file_original), "CBaseFileSystem::ReadFile" },
+};
+
 std::uint8_t* scan_module_patch(const char* module_name, const char* signature, int offset)
 {
   auto* match = reinterpret_cast<std::uint8_t*>(sigscan_module(module_name, signature));
@@ -678,62 +696,15 @@ std::uint8_t* scan_module_patch(const char* module_name, const char* signature, 
   return match + offset;
 }
 
-void* resolve_rip_target(std::uint8_t* instruction, int displacement_offset, int instruction_size)
-{
-  const auto displacement = *reinterpret_cast<std::int32_t*>(instruction + displacement_offset);
-  return instruction + instruction_size + displacement;
-}
 
-bool initialize_core_render_patch(byte_patch& patch,
-                                  const char* module_name,
-                                  const char* signature,
-                                  int offset,
-                                  std::initializer_list<std::uint8_t> patch_bytes,
-                                  const char* patch_name)
-{
-  if (patch.valid())
-  {
-    return true;
-  }
-
-  auto* patch_site = scan_module_patch(module_name, signature, offset);
-  if (patch_site == nullptr)
-  {
-    print("[nographics] core patch scan failed name=%s module=%s\n", patch_name, module_name);
-    return false;
-  }
-
-  patch = byte_patch(patch_site, patch_bytes);
-  return true;
-}
-
-bool apply_render_patch_if_valid(byte_patch& patch, const char* patch_name)
-{
-  if (!patch.valid())
-  {
-    return true;
-  }
-
-  if (!patch.apply())
-  {
-    print("[nographics] render patch apply failed name=%s\n", patch_name);
-    return false;
-  }
-
-  return true;
-}
 
 bool restore_render_patch_objects()
 {
   bool ok = true;
-  ok = particle_create_patch.restore() && ok;
-  ok = play_sequence_patch.restore() && ok;
-  ok = particle_precache_patch.restore() && ok;
-  ok = particle_effect_create_patch.restore() && ok;
-  ok = view_render_patch.restore() && ok;
-  ok = v_render_view_patch.restore() && ok;
-  ok = material_system_swap_buffers_patch.restore() && ok;
-  ok = video_mode_setup_startup_graphic_patch.restore() && ok;
+  for (auto& desc : render_patches)
+  {
+    ok = desc.patch.restore() && ok;
+  }
   return ok;
 }
 
@@ -744,38 +715,32 @@ bool initialize_render_patches()
     return render_patches_ready;
   }
 
-  if (!module_is_loaded(client_module_name))
+  if (!module_is_loaded(cathook::core::modules::tf_client))
   {
     return false;
   }
 
   render_patches_initialized = true;
+  render_patches_ready = true;
 
-  const bool particle_create_ready =
-    initialize_core_render_patch(particle_create_patch, client_module_name, sigs::particle_property_create, 0, { 0x31, 0xC0, 0xC3 }, "particle_property_create");
-  const bool play_sequence_ready =
-    initialize_core_render_patch(play_sequence_patch, client_module_name, sigs::play_sequence, 0, { 0xC3 }, "play_sequence");
-  const bool particle_precache_ready =
-    initialize_core_render_patch(particle_precache_patch, client_module_name, sigs::particle_system_precache, 0, { 0x31, 0xC0, 0xC3 }, "particle_system_precache");
-  const bool particle_effect_create_ready =
-    initialize_core_render_patch(particle_effect_create_patch, client_module_name, sigs::particle_effect_create_event, 0, { 0x31, 0xC0, 0xC3 }, "particle_effect_create_event");
-  const bool particles_ready = particle_create_ready && play_sequence_ready && particle_precache_ready && particle_effect_create_ready;
-  const bool client_ready = !textmode_build ||
-    initialize_core_render_patch(view_render_patch, client_module_name, sigs::view_render_render, 0, { 0x31, 0xC0, 0x40, 0xC3 }, "view_render_render");
-
-  bool textmode_ready = true;
-  if constexpr (textmode_build)
+  for (auto& desc : render_patches)
   {
-    const bool startup_graphic_ready =
-      initialize_core_render_patch(video_mode_setup_startup_graphic_patch, "engine.so", sigs::video_mode_setup_startup_graphic, 0, { 0xC3 }, "video_mode_setup_startup_graphic");
-    const bool v_render_view_ready =
-      initialize_core_render_patch(v_render_view_patch, "engine.so", sigs::v_render_view, 0, { 0xC3 }, "v_render_view");
-    const bool material_swap_buffers_ready =
-      initialize_core_render_patch(material_system_swap_buffers_patch, "materialsystem.so", sigs::material_system_swap_buffers, 0, { 0x31, 0xC0, 0x40, 0xC3 }, "material_system_swap_buffers");
-    textmode_ready = startup_graphic_ready && v_render_view_ready && material_swap_buffers_ready;
+    if ((desc.textmode_only && !textmode_build) || desc.patch.valid())
+    {
+      continue;
+    }
+
+    auto* patch_site = scan_module_patch(desc.module, desc.signature, desc.offset);
+    if (patch_site == nullptr)
+    {
+      print("[nographics] core patch scan failed name=%s module=%s\n", desc.name, desc.module);
+      render_patches_ready = false;
+      continue;
+    }
+
+    desc.patch = byte_patch(patch_site, desc.bytes);
   }
 
-  render_patches_ready = particles_ready && client_ready && textmode_ready;
   if (!render_patches_ready)
   {
     print("[nographics] no core render patches initialized\n");
@@ -787,27 +752,23 @@ bool initialize_render_patches()
 
 void apply_cathook2017_render_patches()
 {
-
   initialize_render_patches();
   bool ok = true;
   bool any_patch = false;
-  const auto apply_patch = [&](byte_patch& patch, const char* patch_name)
-  {
-    any_patch = any_patch || patch.valid();
-    return apply_render_patch_if_valid(patch, patch_name);
-  };
 
-  ok = apply_patch(particle_create_patch, "particle_property_create") && ok;
-  ok = apply_patch(play_sequence_patch, "play_sequence") && ok;
-  ok = apply_patch(particle_precache_patch, "particle_system_precache") && ok;
-  ok = apply_patch(particle_effect_create_patch, "particle_effect_create_event") && ok;
-
-  if constexpr (textmode_build)
+  for (auto& desc : render_patches)
   {
-    ok = apply_patch(view_render_patch, "view_render_render") && ok;
-    ok = apply_patch(video_mode_setup_startup_graphic_patch, "video_mode_setup_startup_graphic") && ok;
-    ok = apply_patch(v_render_view_patch, "v_render_view") && ok;
-    ok = apply_patch(material_system_swap_buffers_patch, "material_system_swap_buffers") && ok;
+    if (!desc.patch.valid())
+    {
+      continue;
+    }
+
+    any_patch = true;
+    if (!desc.patch.apply())
+    {
+      print("[nographics] render patch apply failed name=%s\n", desc.name);
+      ok = false;
+    }
   }
 
   if (!ok)
@@ -852,15 +813,10 @@ void enable_file_system_hooks()
   base_file_system_vtable = *reinterpret_cast<void***>(base_subobject);
 
   bool ok = true;
-  ok &= hook_vtable(file_system_vtable, file_system_find_first_index, reinterpret_cast<void*>(find_first_hook), &find_first_original);
-  ok &= hook_vtable(file_system_vtable, file_system_find_next_index, reinterpret_cast<void*>(find_next_hook), &find_next_original);
-  ok &= hook_vtable(file_system_vtable, file_system_async_read_multiple_index, reinterpret_cast<void*>(async_read_multiple_hook), &async_read_multiple_original);
-  ok &= hook_vtable(file_system_vtable, file_system_open_ex_index, reinterpret_cast<void*>(open_ex_hook), &open_ex_original);
-  ok &= hook_vtable(file_system_vtable, file_system_read_file_ex_index, reinterpret_cast<void*>(read_file_ex_hook), &read_file_ex_original);
-  ok &= hook_vtable(file_system_vtable, file_system_add_files_to_cache_index, reinterpret_cast<void*>(add_files_to_cache_hook), &add_files_to_cache_original);
-  ok &= hook_vtable(base_file_system_vtable, base_file_system_open_index, reinterpret_cast<void*>(open_hook), &open_original);
-  ok &= hook_vtable(base_file_system_vtable, base_file_system_precache_index, reinterpret_cast<void*>(precache_hook), &precache_original);
-  ok &= hook_vtable(base_file_system_vtable, base_file_system_read_file_index, reinterpret_cast<void*>(read_file_hook), &read_file_original);
+  for (const auto& desc : file_system_hooks)
+  {
+    ok &= hook_vtable(*desc.vtable, desc.index, desc.hook, desc.original);
+  }
 
   if (!ok)
   {
@@ -880,32 +836,31 @@ bool disable_file_system_hooks()
     return true;
   }
 
-  const auto restore = [](void** vtable, int index, void* original, const char* name)
+  bool ok = true;
+  for (const auto& desc : file_system_hooks)
   {
+    void* const original = *desc.original;
     if (original == nullptr)
     {
-      return true;
+      continue;
     }
 
-    if (write_to_table(vtable, index, original))
+    if (read_vtable_entry(*desc.vtable, desc.index, desc.name) != desc.hook)
     {
-      return true;
+      print("[nographics] %s was re-hooked after us; leaving it alone\n", desc.name);
+      *desc.original = nullptr;
+      continue;
     }
 
-    print("[nographics] failed to restore %s\n", name);
-    return false;
-  };
+    if (!write_to_table(*desc.vtable, desc.index, original))
+    {
+      print("[nographics] failed to restore %s\n", desc.name);
+      ok = false;
+      continue;
+    }
 
-  bool ok = true;
-  ok = restore(file_system_vtable, file_system_find_first_index, reinterpret_cast<void*>(find_first_original), "IFileSystem::FindFirst") && ok;
-  ok = restore(file_system_vtable, file_system_find_next_index, reinterpret_cast<void*>(find_next_original), "IFileSystem::FindNext") && ok;
-  ok = restore(file_system_vtable, file_system_async_read_multiple_index, reinterpret_cast<void*>(async_read_multiple_original), "IFileSystem::AsyncReadMultiple") && ok;
-  ok = restore(file_system_vtable, file_system_open_ex_index, reinterpret_cast<void*>(open_ex_original), "IFileSystem::OpenEx") && ok;
-  ok = restore(file_system_vtable, file_system_read_file_ex_index, reinterpret_cast<void*>(read_file_ex_original), "IFileSystem::ReadFileEx") && ok;
-  ok = restore(file_system_vtable, file_system_add_files_to_cache_index, reinterpret_cast<void*>(add_files_to_cache_original), "IFileSystem::AddFilesToCache") && ok;
-  ok = restore(base_file_system_vtable, base_file_system_open_index, reinterpret_cast<void*>(open_original), "CBaseFileSystem::Open") && ok;
-  ok = restore(base_file_system_vtable, base_file_system_precache_index, reinterpret_cast<void*>(precache_original), "CBaseFileSystem::Precache") && ok;
-  ok = restore(base_file_system_vtable, base_file_system_read_file_index, reinterpret_cast<void*>(read_file_original), "CBaseFileSystem::ReadFile") && ok;
+    *desc.original = nullptr;
+  }
 
   if (!ok)
   {
@@ -930,15 +885,6 @@ bool disable_file_system_hooks()
     }
   }
 
-  find_first_original = nullptr;
-  find_next_original = nullptr;
-  async_read_multiple_original = nullptr;
-  open_ex_original = nullptr;
-  read_file_ex_original = nullptr;
-  add_files_to_cache_original = nullptr;
-  open_original = nullptr;
-  precache_original = nullptr;
-  read_file_original = nullptr;
   file_system_vtable = nullptr;
   base_file_system_vtable = nullptr;
   return true;
@@ -1073,15 +1019,15 @@ void resolve_game_file_system_interface()
     game_file_system = static_cast<file_system*>(get_interface("./bin/linux64/filesystem_steam.so", "VFileSystem022"));
   }
 
-  if (game_file_system != nullptr || !module_is_loaded(client_module_name))
+  if (game_file_system != nullptr || !module_is_loaded(cathook::core::modules::tf_client))
   {
     return;
   }
 
-  auto* match = reinterpret_cast<std::uint8_t*>(sigscan_module(client_module_name, sigs::client_file_system));
+  auto* match = reinterpret_cast<std::uint8_t*>(sigscan_module(cathook::core::modules::tf_client, sigs::client_file_system));
   if (match != nullptr)
   {
-    game_file_system = *reinterpret_cast<file_system**>(resolve_rip_target(match + 15, 3, 7));
+    game_file_system = *static_cast<file_system**>(cathook::core::memory::resolve_rip_relative(match + 15, 3, 7));
   }
 }
 
@@ -1114,7 +1060,7 @@ void initialize()
     return;
   }
 
-  if (!initialized && module_is_loaded(client_module_name))
+  if (!initialized && module_is_loaded(cathook::core::modules::tf_client))
   {
     print("[nographics] VFileSystem022 is missing\n");
     initialized = true;
@@ -1229,6 +1175,12 @@ bool should_skip_rendering_hooks()
   return textmode_build || is_noshaderapi();
 }
 
+bool command_line_has_vulkan()
+{
+  static const bool from_command_line = command_line_has_flag("-vulkan");
+  return from_command_line;
+}
+
 bool is_noshaderapi()
 {
   static const bool from_command_line = command_line_has_noshaderapi();
@@ -1277,6 +1229,9 @@ const char* redirect_shaderapi_path(const char* library_path)
 }
 #if defined(__linux__)
 
+struct SDL_Window;
+extern SDL_Window* sdl_window;
+
 extern "C" __attribute__((visibility("default"))) SDL_Window* SDL_CreateWindow(
   const char* title,
   int x,
@@ -1306,6 +1261,11 @@ extern "C" __attribute__((visibility("default"))) SDL_Window* SDL_CreateWindow(
     return sdl_create_window_original(title, -32000, -32000, 1, 1, fixed_flags);
   }
 
-  return sdl_create_window_original(title, x, y, w, h, fixed_flags);
+  SDL_Window* const window = sdl_create_window_original(title, x, y, w, h, fixed_flags);
+  if (window != nullptr && (fixed_flags & sdl_window_vulkan) != 0)
+  {
+    sdl_window = window;
+  }
+  return window;
 }
 #endif

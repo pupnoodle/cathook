@@ -20,8 +20,6 @@ CPPFLAGS += -DGIT_COMMITTER_DATE=\"$(shell git log -1 --format=%cd --date=short 
 CXXFLAGS ?= -std=c++23 -O3 -g --no-gnu-unique -pthread -fPIC
 DEPFLAGS = -MMD -MP
 CATHOOK_DEBUG_SYMBOLS ?= 0
-CATHOOK_WITH_PROFILE_STALKER ?= 0
-CPPFLAGS += -DCATHOOK_WITH_PROFILE_STALKER=$(CATHOOK_WITH_PROFILE_STALKER)
 
 ifeq ($(CATHOOK_DEBUG_SYMBOLS),1)
 CXXFLAGS += -g3 -ggdb3 -fno-omit-frame-pointer -fno-optimize-sibling-calls
@@ -146,6 +144,6 @@ $(OBJ_DIR)/%.cpp.o: %.cpp $(BUILD_MAKEFILE)
 
 $(OBJ_DIR)/%.c.o: %.c $(BUILD_MAKEFILE)
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(DEPFLAGS) -c -o $@ $<
+	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC $(DEPFLAGS) -c -o $@ $<
 
 -include $(DEPS)

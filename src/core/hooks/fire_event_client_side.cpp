@@ -8,17 +8,23 @@ V  o o  V  file: src/core/hooks/fire_event_client_side.cpp
   |     \     )
   || (___\====
 */
+#include <cstring>
 #include "games/tf2/sdk/interfaces/game_event_manager.hpp"
 #include "games/tf2/sdk/entities/player.hpp"
 #include "games/tf2/sdk/interfaces/global_vars.hpp"
 #include "core/identify/identify.hpp"
 #include "core/ipc/ipc_client.hpp"
 #include "core/math/math.hpp"
+#include "features/automation/cheat_detection/cheat_detection.hpp"
+#include "features/automation/killstreak/killstreak.hpp"
 #include "features/automation/medic_automation/medic_automation.hpp"
 #include "features/automation/misc/misc.hpp"
 #include "features/automation/navbot/navbot_controller.hpp"
 #include "features/combat/aimbot/aimbot.hpp"
 #include "features/combat/aimbot/resolver.hpp"
+#include "features/combat/simulation/movesim.hpp"
+#include "features/movement/bhop/bhop.hpp"
+#include "features/movement/engine_prediction/engine_prediction.hpp"
 #include "features/visuals/hitmarker.hpp"
 #include "core/detach.hpp"
 
@@ -40,8 +46,8 @@ bool (*fire_event_client_side_original)(void*, GameEvent*) = NULL;
 
 bool fire_event_client_side_hook(void* me, GameEvent* event) {
   CATHOOK_HOOK_GUARD();
-  if (event == nullptr) {
-    return fire_event_client_side_original(me, event);
+  if (event == nullptr || fire_event_client_side_original == nullptr) {
+    return fire_event_client_side_original != nullptr ? fire_event_client_side_original(me, event) : false;
   }
 
   if (cathook::core::is_detach_pending()) {
@@ -55,33 +61,41 @@ bool fire_event_client_side_hook(void* me, GameEvent* event) {
   navbot::controller().on_game_event(event);
   medic_automation::controller().on_game_event(event);
   automation::controller().on_game_event(event);
+  killstreak::on_game_event(event);
+  cheat_detection::on_game_event(event);
 
-  const char* raw_event_name = event->get_name();
-  if (raw_event_name == nullptr) {
+  const char* event_name = event->get_name();
+  if (event_name == nullptr) {
     return fire_event_client_side_original(me, event);
   }
 
-  std::string event_name = std::string(raw_event_name);
-
-  if (event_name == "client_beginconnect" || event_name == "client_connect" ||
-      event_name == "client_disconnect" || event_name == "game_newmap") {
+  if (std::strcmp(event_name, "client_beginconnect") == 0 || std::strcmp(event_name, "client_connect") == 0 ||
+      std::strcmp(event_name, "client_disconnect") == 0 || std::strcmp(event_name, "game_newmap") == 0) {
     pickup_item_cache_clear();
+    movesim::clear_all();
+    reset_engine_prediction();
+    reset_movement_session_state();
+    resolver::clear();
   } else if (global_vars != nullptr) {
     pickup_item_cache_prune(global_vars->curtime);
   }
 
-  if (event_name == "weapon_fire" || event_name == "player_shoot") {
+  if (entity_list == nullptr) {
+    return fire_event_client_side_original(me, event);
+  }
+
+  if (std::strcmp(event_name, "weapon_fire") == 0 || std::strcmp(event_name, "player_shoot") == 0) {
     Player* shooter = entity_list->get_player_from_id(event->get_int("userid"));
     backtrack::report_shot(shooter);
     resolver::on_local_weapon_fire(shooter);
     aimbot::on_weapon_fire(shooter);
   }
 
-  if (event_name == "item_pickup") {
+  if (std::strcmp(event_name, "item_pickup") == 0) {
     Player* obtainer = entity_list->get_player_from_id(event->get_int("userid"));
     if (obtainer != nullptr && !obtainer->is_dormant()) {
       const char* item_name = event->get_string("item");
-      if (strstr(item_name, "medkit") || strstr(item_name, "ammopack")) {
+      if (item_name != nullptr && (strstr(item_name, "medkit") || strstr(item_name, "ammopack"))) {
 	float previous = FLT_MAX;
 	Entity* obtained_entity = nullptr;
 	if (strstr(item_name, "medkit")) {
@@ -108,7 +122,7 @@ bool fire_event_client_side_hook(void* me, GameEvent* event) {
     }
   }
 
-  if (event_name == "player_hurt") {
+  if (std::strcmp(event_name, "player_hurt") == 0) {
     Player* victim = entity_list->get_player_from_id(event->get_int("userid"));
     Player* attacker = entity_list->get_player_from_id(event->get_int("attacker"));
     resolver::note_player_hurt(attacker, victim);
@@ -116,7 +130,7 @@ bool fire_event_client_side_hook(void* me, GameEvent* event) {
     hitmarker::on_player_hurt(attacker, victim, event->get_int("damageamount"), event->get_bool("crit"), event->get_int("custom") == 1);
   }
 
-  if (event_name == "player_death") {
+  if (std::strcmp(event_name, "player_death") == 0) {
 	if (event->get_int("death_flags") & TF_DEATH_FEIGN_DEATH) {
 
 	} else {

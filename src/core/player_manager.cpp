@@ -12,6 +12,7 @@ V  o o  V  file: src/core/player_manager.cpp
 #include "core/identify/identify.hpp"
 #include "core/ipc/ipc_client.hpp"
 #include "core/logger.hpp"
+#include "core/player_resource.hpp"
 #include "games/tf2/sdk/entities/player.hpp"
 #include "games/tf2/sdk/interfaces/engine.hpp"
 #include "games/tf2/sdk/interfaces/entity_list.hpp"
@@ -230,36 +231,10 @@ void set_runtime_state(std::uint32_t account_id, player_state state, std::string
 
 [[nodiscard]] Entity* get_player_resource_entity()
 {
-  if (entity_list == nullptr)
-  {
-    return nullptr;
-  }
-
-  const int max_entities = entity_list->get_max_entities();
-  for (int index = 1; index < max_entities; ++index)
-  {
-    auto* entity = entity_list->entity_from_index(index);
-    if (entity != nullptr && entity->get_class_id() == class_id::PLAYER_RESOURCE)
-    {
-      return entity;
-    }
-  }
-
-  return nullptr;
+  return cathook::core::player_resource::get_player_resource_entity();
 }
 
-template <typename value_type>
-[[nodiscard]] value_type read_player_resource_value(Entity* player_resource, int array_offset, int player_index)
-{
-  if (player_resource == nullptr || player_index <= 0)
-  {
-    return {};
-  }
-
-  const auto base = reinterpret_cast<std::uintptr_t>(player_resource);
-  const auto entry_offset = static_cast<std::uintptr_t>(array_offset) + (static_cast<std::uintptr_t>(player_index) * sizeof(value_type));
-  return *reinterpret_cast<value_type*>(base + entry_offset);
-}
+using cathook::core::player_resource::read_value;
 
 }
 
@@ -300,8 +275,8 @@ void tick()
     return;
   }
 
-  static const int connected_offset = tf2_netvars::find_offset("DT_TFPlayerResource", { "baseclass", "m_bConnected" });
-  static const int ping_offset = tf2_netvars::find_offset("DT_TFPlayerResource", { "baseclass", "m_iPing" });
+  static tf2_netvars::lazy_offset connected_offset{"DT_TFPlayerResource", { "baseclass", "m_bConnected" }};
+  static tf2_netvars::lazy_offset ping_offset{"DT_TFPlayerResource", { "baseclass", "m_iPing" }};
 
   if (connected_offset <= 0)
   {
@@ -314,7 +289,7 @@ void tick()
   const int max_clients = global_vars->max_clients;
   for (int index = 1; index <= max_clients; ++index)
   {
-    const bool is_connected = read_player_resource_value<bool>(player_resource, connected_offset, index);
+    const bool is_connected = cathook::core::player_resource::read_value<bool>(player_resource, connected_offset, index);
     if (!is_connected)
     {
       continue;
@@ -326,11 +301,7 @@ void tick()
       continue;
     }
 
-    const char* name_ptr = nullptr;
-    if (ping_offset > 816)
-    {
-      name_ptr = reinterpret_cast<const char* const*>(reinterpret_cast<uintptr_t>(player_resource) + ping_offset - 816)[index];
-    }
+    const char* name_ptr = cathook::core::player_resource::name_pointer(player_resource, ping_offset, index);
     const std::string_view name = (name_ptr != nullptr && name_ptr[0] != '\0') ? name_ptr : info.name;
 
     const auto account_id = static_cast<std::uint32_t>(info.friends_id);
@@ -403,34 +374,46 @@ bool save()
   std::error_code error{};
   std::filesystem::create_directories(config_directory(), error);
 
-  std::ofstream output{player_list_path(), std::ios::trunc};
-  if (!output.is_open())
+  const auto target_path = player_list_path();
+  const auto temp_path = target_path.parent_path() / (target_path.filename().string() + ".tmp");
   {
-    return false;
-  }
-
-  std::vector<std::pair<std::uint32_t, stored_player>> ordered_entries{};
-  ordered_entries.reserve(persistent_players.size());
-  for (const auto& entry : persistent_players)
-  {
-    if (!entry.second.roles.empty())
+    std::ofstream output{temp_path, std::ios::trunc};
+    if (!output.is_open())
     {
-      ordered_entries.emplace_back(entry.first, entry.second);
+      return false;
+    }
+
+    std::vector<std::pair<std::uint32_t, stored_player>> ordered_entries{};
+    ordered_entries.reserve(persistent_players.size());
+    for (const auto& entry : persistent_players)
+    {
+      if (!entry.second.roles.empty())
+      {
+        ordered_entries.emplace_back(entry.first, entry.second);
+      }
+    }
+
+    std::ranges::sort(ordered_entries, [](const auto& left, const auto& right)
+    {
+      return left.first < right.first;
+    });
+
+    output << "# account_id\troles\tname\n";
+    for (const auto& [account_id, player] : ordered_entries)
+    {
+      output << account_id << '\t' << serialize_roles(player.roles) << '\t' << player.name << '\n';
+    }
+
+    if (!output.good())
+    {
+      output.close();
+      std::filesystem::remove(temp_path, error);
+      return false;
     }
   }
 
-  std::ranges::sort(ordered_entries, [](const auto& left, const auto& right)
-  {
-    return left.first < right.first;
-  });
-
-  output << "# account_id\troles\tname\n";
-  for (const auto& [account_id, player] : ordered_entries)
-  {
-    output << account_id << '\t' << serialize_roles(player.roles) << '\t' << player.name << '\n';
-  }
-
-  return output.good();
+  std::filesystem::rename(temp_path, target_path, error);
+  return !error;
 }
 
 bool set_state(std::uint32_t account_id, player_state state, std::string_view name, bool save_changes)

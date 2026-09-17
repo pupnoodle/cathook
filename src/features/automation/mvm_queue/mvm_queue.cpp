@@ -9,6 +9,8 @@ V  o o  V  file: src/features/automation/mvm_queue/mvm_queue.cpp
   || (___\====
 */
 #include "features/automation/mvm_queue/mvm_queue.hpp"
+#include "core/shared/modules.hpp"
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -31,7 +33,6 @@ using mvm_completed_mask_fn = bool (*)(unsigned int, unsigned int*, unsigned int
 using get_party_client_fn = void* (*)();
 using group_criteria_getter_fn = void* (*)(void*);
 
-constexpr const char* tf_client_module_name = "tf/bin/linux64/client.so";
 constexpr int mannup_match_group = 1;
 constexpr int bootcamp_match_group = 0;
 constexpr int party_criteria_wrapper_offset = 432;
@@ -106,12 +107,12 @@ bool resolve_api()
 
   g_api.attempted = true;
   g_api.reserve = reinterpret_cast<repeated_field_reserve_fn>(
-    sigscan_module(tf_client_module_name, sigs::protobuf_repeated_field_reserve));
+    sigscan_module(cathook::core::modules::tf_client, sigs::protobuf_repeated_field_reserve));
   g_api.new_element = reinterpret_cast<string_new_element_fn>(
-    sigscan_module(tf_client_module_name, sigs::protobuf_string_new_element));
+    sigscan_module(cathook::core::modules::tf_client, sigs::protobuf_string_new_element));
   g_api.completed_mask =
-    reinterpret_cast<mvm_completed_mask_fn>(sigscan_module(tf_client_module_name, sigs::mvm_completed_tour_mask));
-  const auto get_party_client_match = sigscan_module(tf_client_module_name, sigs::get_party_client);
+    reinterpret_cast<mvm_completed_mask_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::mvm_completed_tour_mask));
+  const auto get_party_client_match = sigscan_module(cathook::core::modules::tf_client, sigs::get_party_client);
   g_api.get_party_client = get_party_client_match != nullptr
     ? reinterpret_cast<get_party_client_fn>(
         reinterpret_cast<std::uintptr_t>(get_party_client_match) + sigs::get_party_client_offset)
@@ -155,12 +156,14 @@ void refresh_schema_cache()
     return;
   }
 
+  constexpr int max_reasonable_entries = 4096;
+
   std::vector<tour_entry> tours{};
-  const int tour_count_value = *reinterpret_cast<const std::int32_t*>(
-    schema + static_cast<std::uintptr_t>(schema_tour_count_offset));
+  const int tour_count_value = std::clamp(*reinterpret_cast<const std::int32_t*>(
+    schema + static_cast<std::uintptr_t>(schema_tour_count_offset)), 0, max_reasonable_entries);
   const auto tour_data = *reinterpret_cast<const std::uintptr_t*>(
     schema + static_cast<std::uintptr_t>(schema_tour_data_offset));
-  tours.reserve(tour_count_value > 0 ? static_cast<std::size_t>(tour_count_value) : 0u);
+  tours.reserve(static_cast<std::size_t>(tour_count_value));
   for (int index = 0; index < tour_count_value; ++index)
   {
     const auto tour = tour_data + static_cast<std::uintptr_t>(index) * 88u;
@@ -173,12 +176,11 @@ void refresh_schema_cache()
   }
 
   std::vector<bootcamp_entry> bootcamp_missions{};
-  const int mission_count_value = *reinterpret_cast<const std::int32_t*>(
-    schema + static_cast<std::uintptr_t>(schema_mission_count_offset));
+  const int mission_count_value = std::clamp(*reinterpret_cast<const std::int32_t*>(
+    schema + static_cast<std::uintptr_t>(schema_mission_count_offset)), 0, max_reasonable_entries);
   const auto mission_data = *reinterpret_cast<const std::uintptr_t*>(
     schema + static_cast<std::uintptr_t>(schema_mission_data_offset));
-  bootcamp_missions.reserve(bootcamp_missions.size() +
-    (mission_count_value > 0 ? static_cast<std::size_t>(mission_count_value) : 0u));
+  bootcamp_missions.reserve(static_cast<std::size_t>(mission_count_value));
   for (int index = 0; index < mission_count_value; ++index)
   {
     const auto mission = mission_data + static_cast<std::uintptr_t>(index) * 48u;
@@ -345,8 +347,10 @@ void apply_mannup_list(std::uint8_t* proto)
   const auto tour = tour_data + static_cast<std::uintptr_t>(tour_index) * 88u;
   const auto pairs = *reinterpret_cast<const std::uintptr_t*>(
     tour + static_cast<std::uintptr_t>(tour_mission_pairs_offset));
-  const auto pair_count = *reinterpret_cast<const std::int32_t*>(
-    tour + static_cast<std::uintptr_t>(tour_mission_pair_count_offset));
+  const auto pair_count = std::clamp(*reinterpret_cast<const std::int32_t*>(
+    tour + static_cast<std::uintptr_t>(tour_mission_pair_count_offset)), 0, 4096);
+  const int mission_count = std::clamp(*reinterpret_cast<const std::int32_t*>(
+    schema + static_cast<std::uintptr_t>(schema_mission_count_offset)), 0, 4096);
 
   std::uint32_t completed_mask = 0;
   const bool filter_completed = config.misc.automation.mvm_uncompleted_only;
@@ -360,9 +364,7 @@ void apply_mannup_list(std::uint8_t* proto)
     const auto pair = pairs + static_cast<std::uintptr_t>(index) * 8u;
     const auto mission_schema_index = static_cast<const std::int32_t>(*reinterpret_cast<const std::int32_t*>(pair));
     const auto badge_slot = static_cast<const std::int32_t>(*reinterpret_cast<const std::int32_t*>(pair + 4u));
-    if (mission_schema_index < 0 ||
-        mission_schema_index >= *reinterpret_cast<const std::int32_t*>(
-          schema + static_cast<std::uintptr_t>(schema_mission_count_offset)))
+    if (mission_schema_index < 0 || mission_schema_index >= mission_count)
     {
       continue;
     }

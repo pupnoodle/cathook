@@ -3,6 +3,7 @@
 #endif
 
 #include "core/identify/identify_client.hpp"
+
 #include "core/print.hpp"
 #include <arpa/inet.h>
 #include <cerrno>
@@ -21,6 +22,13 @@
 
 namespace cathook::core::identify
 {
+
+namespace
+{
+
+constexpr std::chrono::seconds send_deadline{2};
+
+}
 
 identify_client::~identify_client()
 {
@@ -348,8 +356,20 @@ void identify_client::send_line(std::string line)
 
   line += '\n';
   size_t offset = 0;
+  const auto deadline = std::chrono::steady_clock::now() + send_deadline;
   while (offset < line.size())
   {
+    if (std::chrono::steady_clock::now() >= deadline)
+    {
+      if (m_socket.load(std::memory_order_acquire) == s)
+      {
+        m_socket.store(-1, std::memory_order_release);
+        ::shutdown(s, SHUT_RDWR);
+        ::close(s);
+      }
+      return;
+    }
+
     ssize_t n = ::send(s, line.data() + offset, line.size() - offset, MSG_NOSIGNAL | MSG_DONTWAIT);
     if (n > 0)
     {

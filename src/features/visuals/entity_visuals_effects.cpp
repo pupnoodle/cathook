@@ -303,7 +303,7 @@ void draw_chams(void* instance, const DrawModelState& state, const ModelRenderIn
 }
 
 void store_glow(Entity* entity, const glow_settings& settings, const float distance,
-  const DrawModelState* state = nullptr, const ModelRenderInfo* info = nullptr, matrix_3x4* bones = nullptr)
+  const DrawModelState* state, const ModelRenderInfo* info, matrix_3x4* bones)
 {
   if (entity == nullptr || state == nullptr || info == nullptr) return;
   RGBA_float color = settings.color;
@@ -481,11 +481,14 @@ void draw_backtrack_effects(void* instance, const DrawModelState& state, const M
 
 }
 
+thread_local bool model_effects_this_frame = false;
+
 void on_render_start()
 {
   glow_batches.clear();
+  model_effects_this_frame = !nographics::is_enabled() && visual_groups::groups_need_model_effects();
   if (nographics::is_enabled()) return;
-  if (visual_groups::groups_need_model_effects()) ensure_resources();
+  if (model_effects_this_frame) ensure_resources();
 }
 
 void on_post_screen_space_effects()
@@ -534,7 +537,7 @@ bool is_rendering_effect()
 void on_draw_model_execute(void* instance, const DrawModelState& state, const ModelRenderInfo& info, matrix_3x4* bones)
 {
   if (draw_model_execute_original == nullptr) return;
-  if (nographics::is_enabled()) {
+  if (nographics::is_enabled() || !model_effects_this_frame) {
     call_original(instance, state, info, bones);
     return;
   }

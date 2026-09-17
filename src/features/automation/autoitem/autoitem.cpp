@@ -8,6 +8,8 @@ V  o o  V  file: src/features/automation/autoitem/autoitem.cpp
   || (___\====
 */
 #include "features/automation/autoitem/autoitem.hpp"
+#include "core/memory/code_scan.hpp"
+#include "core/memory/resolve.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -66,12 +68,81 @@ constexpr std::uint16_t gc_custom_craft_recipe = 0xFFFEu;
 constexpr std::uint64_t unequipped_item_id = static_cast<std::uint64_t>(-1);
 constexpr int max_item_def_id = 65535;
 
-constexpr std::uintptr_t inventory_item_array_offset = 0x60;
-constexpr std::uintptr_t inventory_item_count_offset = 0x70;
-constexpr std::uintptr_t inventory_item_stride = 0x150;
-constexpr std::uintptr_t inventory_item_id_high_offset = 0x58;
-constexpr std::uintptr_t inventory_item_id_low_offset = 0x5C;
-constexpr std::uintptr_t inventory_item_def_offset = 0x44;
+struct inventory_cache_layout
+{
+  int array_offset = 0;
+  int count_offset = 0;
+  int stride = 0;
+  int id_high_offset = 0;
+  int id_low_offset = 0;
+  int def_index_offset = 0;
+
+  bool valid() const
+  {
+    return array_offset > 0 && count_offset > 0 && stride > 0 && stride <= 0x1000 &&
+           id_high_offset > 0 && id_low_offset > 0 && def_index_offset > 0;
+  }
+};
+
+inventory_cache_layout extract_inventory_layout()
+{
+  namespace mem = cathook::core::memory;
+  inventory_cache_layout layout{};
+
+  const auto* by_id = static_cast<const std::uint8_t*>(
+    sigscan_module("client.so", sigs::inventory_find_item_by_id));
+  if (by_id != nullptr) {
+    const std::uint8_t* const limit = by_id + 0x80;
+    int id_loads = 0;
+    for (const std::uint8_t* p = by_id; p < limit; ++p) {
+      if (*p == 0x05) {
+        std::memcpy(&layout.stride, p + 1, 4);
+        continue;
+      }
+      mem::mem_insn insn{};
+      if (!mem::decode_mem_insn(p, limit, insn)) {
+        continue;
+      }
+      if (insn.opcode == 0x81 && insn.base == -2 && insn.reg == 0) {
+        std::memcpy(&layout.stride, p + insn.size, 4);
+      } else if (insn.opcode == 0x8B && insn.base >= 0) {
+        if (insn.base == 0) {
+          if (id_loads == 0) layout.id_high_offset = insn.disp;
+          else if (id_loads == 1) layout.id_low_offset = insn.disp;
+          ++id_loads;
+        } else if (insn.rex_w && layout.array_offset == 0) {
+          layout.array_offset = insn.disp;
+        } else if (!insn.rex_w && layout.count_offset == 0) {
+          layout.count_offset = insn.disp;
+        }
+      }
+    }
+  }
+
+  const auto* by_def = static_cast<const std::uint8_t*>(
+    sigscan_module("client.so", sigs::inventory_find_item_by_def));
+  if (by_def != nullptr) {
+    const std::uint8_t* const limit = by_def + 0x100;
+    for (const std::uint8_t* p = by_def; p < limit; ++p) {
+      mem::mem_insn insn{};
+      if (!mem::decode_mem_insn(p, limit, insn)) {
+        continue;
+      }
+      if (insn.opcode == 0x0F && insn.opcode2 == 0xB7 && insn.base >= 0) {
+        layout.def_index_offset = insn.disp;
+        break;
+      }
+    }
+  }
+
+  return layout;
+}
+
+const inventory_cache_layout& inventory_layout()
+{
+  static const inventory_cache_layout layout = extract_inventory_layout();
+  return layout;
+}
 
 constexpr int inventory_manager_get_local_inventory_index = 24;
 constexpr int inventory_manager_update_inventory_equipped_state_index = 33;
@@ -319,11 +390,7 @@ value_type read_unaligned(const void* address)
   return value;
 }
 
-std::uint8_t* decode_rip_relative(std::uint8_t* instruction, const int displacement_offset, const int instruction_size)
-{
-  const auto displacement = read_unaligned<std::int32_t>(instruction + displacement_offset);
-  return instruction + instruction_size + displacement;
-}
+
 
 std::optional<int> parse_item_def(std::string_view value)
 {
@@ -551,13 +618,14 @@ void* get_local_inventory()
 
 std::uint32_t read_item_def_id(std::uint8_t* item)
 {
-  return read_unaligned<std::uint16_t>(item + inventory_item_def_offset);
+  return read_unaligned<std::uint16_t>(item + inventory_layout().def_index_offset);
 }
 
 std::uint64_t read_item_id(std::uint8_t* item)
 {
-  const auto high = read_unaligned<std::uint32_t>(item + inventory_item_id_high_offset);
-  const auto low = read_unaligned<std::uint32_t>(item + inventory_item_id_low_offset);
+  const auto& layout = inventory_layout();
+  const auto high = read_unaligned<std::uint32_t>(item + layout.id_high_offset);
+  const auto low = read_unaligned<std::uint32_t>(item + layout.id_low_offset);
   return (static_cast<std::uint64_t>(high) << 32u) | static_cast<std::uint64_t>(low);
 }
 
@@ -573,8 +641,14 @@ void rebuild_inventory_index()
     return;
   }
 
-  auto* item_array = read_unaligned<std::uint8_t*>(inventory + inventory_item_array_offset);
-  const int item_count = read_unaligned<int>(inventory + inventory_item_count_offset);
+  const auto& layout = inventory_layout();
+  if (!layout.valid())
+  {
+    return;
+  }
+
+  auto* item_array = read_unaligned<std::uint8_t*>(inventory + layout.array_offset);
+  const int item_count = read_unaligned<int>(inventory + layout.count_offset);
   if (item_array == nullptr || item_count <= 0 || item_count > 20000)
   {
     return;
@@ -583,7 +657,7 @@ void rebuild_inventory_index()
   g_item_ids_by_def.reserve(static_cast<std::size_t>(item_count));
   for (int index = 0; index < item_count; ++index)
   {
-    auto* item = item_array + (static_cast<std::uintptr_t>(index) * inventory_item_stride);
+    auto* item = item_array + (static_cast<std::uintptr_t>(index) * static_cast<std::uintptr_t>(layout.stride));
     const int item_def = static_cast<int>(read_item_def_id(item));
     const auto item_id = read_item_id(item);
     if (item_def <= 0 || item_id == 0)
@@ -1117,7 +1191,7 @@ void initialize()
     auto* initializer = reinterpret_cast<std::uint8_t*>(sigscan_module("client.so", sigs::tf_inventory_manager_initializer));
     if (initializer != nullptr)
     {
-      g_inventory_api.inventory_manager = decode_rip_relative(initializer + 1, 3, 7);
+      g_inventory_api.inventory_manager = cathook::core::memory::resolve_rip_relative(initializer + 1, 3, 7);
     }
   }
 
@@ -1244,6 +1318,36 @@ bool rent_item(const int item_def_id)
   }
   queue_pending_pickup_ack();
   return true;
+}
+
+bool equip_item(const int class_id, const int slot, const int item_def_id)
+{
+  if (class_id <= 0 || item_def_id <= 0)
+  {
+    return false;
+  }
+
+  rebuild_inventory_index();
+  if (auto item_id = first_owned_item_id(item_def_id))
+  {
+    return request_equip(class_id, slot, *item_id);
+  }
+
+  rent_item(item_def_id);
+  rebuild_inventory_index();
+  if (auto item_id = first_owned_item_id(item_def_id))
+  {
+    return request_equip(class_id, slot, *item_id);
+  }
+  return false;
+}
+
+void mvm_rent()
+{
+  rent_item(Medic_s_TheVaccinator);
+  rent_item(Sniper_m_TheHitmansHeatmaker);
+  equip_item(static_cast<int>(tf_class::MEDIC), secondary_slot, Medic_s_TheVaccinator);
+  equip_item(static_cast<int>(tf_class::SNIPER), primary_slot, Sniper_m_TheHitmansHeatmaker);
 }
 
 bool craft_items(const std::vector<int>& item_def_ids)

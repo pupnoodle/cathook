@@ -11,6 +11,7 @@ V  o o  V  file: src/features/menu/player_window.hpp
 #ifndef PLAYER_WINDOW_HPP
 #define PLAYER_WINDOW_HPP
 #include "core/player_manager.hpp"
+#include "core/player_resource.hpp"
 #include "core/ipc/ipc_client.hpp"
 #include "games/tf2/sdk/entities/entity.hpp"
 #include "games/tf2/sdk/entities/player.hpp"
@@ -53,35 +54,13 @@ namespace
 
 inline Entity* get_player_resource_entity()
 {
-  if (entity_list == nullptr)
-  {
-    return nullptr;
-  }
-
-  const int max_entities = entity_list->get_max_entities();
-  for (int index = 1; index < max_entities; ++index)
-  {
-    auto* entity = entity_list->entity_from_index(index);
-    if (entity != nullptr && entity->get_class_id() == class_id::PLAYER_RESOURCE)
-    {
-      return entity;
-    }
-  }
-
-  return nullptr;
+  return cathook::core::player_resource::get_player_resource_entity();
 }
 
 template <typename value_type>
 inline value_type read_player_resource_value(Entity* player_resource, int array_offset, int player_index)
 {
-  if (player_resource == nullptr || player_index <= 0)
-  {
-    return {};
-  }
-
-  const auto base = reinterpret_cast<std::uintptr_t>(player_resource);
-  const auto entry_offset = static_cast<std::uintptr_t>(array_offset) + (static_cast<std::uintptr_t>(player_index) * sizeof(value_type));
-  return *reinterpret_cast<value_type*>(base + entry_offset);
+  return cathook::core::player_resource::read_value<value_type>(player_resource, array_offset, player_index);
 }
 
 }
@@ -100,10 +79,10 @@ inline std::vector<player_row> collect_player_rows() {
     return rows;
   }
 
-  static const int connected_offset = tf2_netvars::find_offset("DT_TFPlayerResource", { "baseclass", "m_bConnected" });
-  static const int team_offset = tf2_netvars::find_offset("DT_TFPlayerResource", { "baseclass", "m_iTeam" });
-  static const int alive_offset = tf2_netvars::find_offset("DT_TFPlayerResource", { "baseclass", "m_bAlive" });
-  static const int ping_offset = tf2_netvars::find_offset("DT_TFPlayerResource", { "baseclass", "m_iPing" });
+  static tf2_netvars::lazy_offset connected_offset{"DT_TFPlayerResource", { "baseclass", "m_bConnected" }};
+  static tf2_netvars::lazy_offset team_offset{"DT_TFPlayerResource", { "baseclass", "m_iTeam" }};
+  static tf2_netvars::lazy_offset alive_offset{"DT_TFPlayerResource", { "baseclass", "m_bAlive" }};
+  static tf2_netvars::lazy_offset ping_offset{"DT_TFPlayerResource", { "baseclass", "m_iPing" }};
 
   if (connected_offset <= 0 || team_offset <= 0 || alive_offset <= 0) {
     return rows;
@@ -123,10 +102,7 @@ inline std::vector<player_row> collect_player_rows() {
       continue;
     }
 
-    const char* name_ptr = nullptr;
-    if (ping_offset > 816) {
-      name_ptr = reinterpret_cast<const char* const*>(reinterpret_cast<uintptr_t>(player_resource) + ping_offset - 816)[index];
-    }
+    const char* name_ptr = cathook::core::player_resource::name_pointer(player_resource, ping_offset, index);
 
     player_row row{};
     row.entity_index = index;

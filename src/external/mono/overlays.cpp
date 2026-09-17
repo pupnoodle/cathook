@@ -76,26 +76,6 @@ void corner_text(const std::vector<overlay_text_line> &lines, const ImVec2 origi
 	}
 }
 
-void center_notice(const std::string_view title, const std::string_view message, const color title_color, const color message_color, ImFont *const requested_title_font, ImFont *const requested_message_font)
-{
-	ImFont *const title_font{ requested_title_font ? requested_title_font : ImGui::GetFont() };
-	ImFont *const message_font{ requested_message_font ? requested_message_font : title_font };
-	if (!title_font || !message_font) {
-		return;
-	}
-
-	const ImGuiViewport *const viewport{ ImGui::GetMainViewport() };
-	const float title_size_px{ ImGui::GetFontSize() };
-	const float message_size_px{ ImGui::GetFontSize() };
-	const ImVec2 title_size{ title_font->CalcTextSizeA(title_size_px, FLT_MAX, 0.0f, title.data(), title.data() + title.size()) };
-	const ImVec2 message_size{ message_font->CalcTextSizeA(message_size_px, FLT_MAX, 0.0f, message.data(), message.data() + message.size()) };
-	const float center_x{ viewport->Pos.x + (viewport->Size.x * 0.5f) };
-	const float top_y{ viewport->Pos.y + (viewport->Size.y * 0.18f) };
-	ImDrawList *const draw_list{ ImGui::GetWindowDrawList() };
-	draw_list->AddText(title_font, title_size_px, { center_x - title_size.x * 0.5f, top_y }, to_u32(title_color), title.data(), title.data() + title.size());
-	draw_list->AddText(message_font, message_size_px, { center_x - message_size.x * 0.5f, top_y + title_size.y + 4.0f }, to_u32(message_color), message.data(), message.data() + message.size());
-}
-
 ImVec2 indicator_panel(
 	const char *const id,
 	const std::string_view title,

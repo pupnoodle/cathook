@@ -69,6 +69,7 @@ inline void reset_player(Player* player)
   g_poses[static_cast<std::size_t>(index)].valid = false;
   g_poses[static_cast<std::size_t>(index)].dormant = true;
   g_last_driven_simtime[static_cast<std::size_t>(index)] = 0.0f;
+  movesim::clear_records(index);
   backtrack::mark_stale(player);
 }
 
@@ -125,17 +126,6 @@ inline bool copy_pose_bones(Player* player, matrix_3x4* bones, int max_bones, in
 
 namespace detail {
 
-[[nodiscard]] inline float tick_interval()
-{
-  return global_vars != nullptr && global_vars->interval_per_tick > 0.0f
-    ? global_vars->interval_per_tick
-    : static_cast<float>(TICK_INTERVAL);
-}
-
-[[nodiscard]] inline int time_to_ticks(float seconds)
-{
-  return static_cast<int>(0.5f + (seconds / std::max(tick_interval(), 0.0001f)));
-}
 
 [[nodiscard]] inline bool enemy_of_local(Player* player, Player* localplayer)
 {
@@ -161,10 +151,12 @@ inline void feed_movesim(Player* player)
 
   const Vec3 velocity = player->get_velocity();
   const float horizontal_speed = std::sqrt((velocity.x * velocity.x) + (velocity.y * velocity.y));
+  if (horizontal_speed <= 0.0001f) {
+    movesim::clear_records(index);
+    return;
+  }
   movesim::move_record record{};
-  record.direction = horizontal_speed > 0.0001f
-    ? Vec3{velocity.x / horizontal_speed, velocity.y / horizontal_speed, 0.0f}
-    : Vec3{};
+  record.direction = Vec3{velocity.x, velocity.y, 0.0f};
   record.sim_time = player->get_simulation_time();
   record.velocity = velocity;
   record.origin = player->get_origin();
@@ -209,7 +201,7 @@ inline void drive_player(Player* player)
   const bool teleported =
     (teleport_delta.x * teleport_delta.x) + (teleport_delta.y * teleport_delta.y) +
     (teleport_delta.z * teleport_delta.z) > (64.0f * 64.0f);
-  const bool rewound = sim_time < last_driven - detail::tick_interval();
+  const bool rewound = sim_time < last_driven - tick_interval();
   if (teleported || rewound || last_driven <= 0.0f) {
     last_driven = 0.0f;
     aimbot_anim_detail::reset(player);
@@ -260,6 +252,9 @@ inline void drive_player(Player* player)
 inline void update_all()
 {
   if (g_driving || !settings.enabled || !settings.drive_remote_anims) {
+    return;
+  }
+  if (!config.aimbot.master && !config.backtrack.enabled) {
     return;
   }
 

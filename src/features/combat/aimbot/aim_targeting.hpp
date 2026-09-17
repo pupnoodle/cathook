@@ -143,23 +143,19 @@ inline aimbot_candidate find_best_candidate(Player* localplayer,
   user_cmd* user_cmd,
   const Vec3& original_view_angles) {
   aimbot_candidate best_candidate{};
-  aimbot_candidate best_ready_hitscan_candidate{};
   aim_state::scan = {};
 
   if (localplayer == nullptr || weapon == nullptr || aimbot_is_projectile_weapon(weapon)) {
     return best_candidate;
   }
 
-  const bool hitscan_ready_selection = !aimbot_is_melee_weapon(weapon);
   Player* navbot_melee_target = aimbot_is_melee_weapon(weapon)
     ? navbot::controller().melee_target()
     : nullptr;
   const std::size_t max_target_count = static_cast<std::size_t>(std::clamp(config.aimbot.max_targets, 1, 6));
   std::array<target_hint, 6> target_hints{};
   std::size_t target_hint_count = 0;
-  const Vec3 shoot_pos = hitscan_ready_selection
-    ? hitscan_aim_eye_position(localplayer)
-    : localplayer->get_shoot_pos();
+  const Vec3 shoot_pos = localplayer->get_shoot_pos();
 
   for (const entity_cache_player_entry& entry : entity_cache_players()) {
     Player* player = entry.player;
@@ -201,16 +197,8 @@ inline aimbot_candidate find_best_candidate(Player* localplayer,
     const bool forced_navbot_target = player == navbot_melee_target;
     if (!forced_navbot_target && !target_hint_selected(player, target_hints, target_hint_count)) continue;
 
-    aimbot_candidate candidate = aimbot_is_melee_weapon(weapon)
-      ? melee_aim_find_candidate(localplayer, weapon, player, user_cmd, original_view_angles)
-      : hitscan_aim_find_candidate(localplayer, weapon, player, original_view_angles);
-    if (!aimbot_is_melee_weapon(weapon)) {
-      const aimbot_candidate backtrack_candidate = backtrack::find_hitscan_candidate(
-        localplayer, weapon, player, original_view_angles, aimbot_player_is_preferred(player));
-      if (aimbot_candidate_better(backtrack_candidate, candidate)) {
-        candidate = backtrack_candidate;
-      }
-    }
+    aimbot_candidate candidate = melee_aim_find_candidate(
+      localplayer, weapon, player, user_cmd, original_view_angles);
 
     if (candidate.entity == nullptr) {
       const aimbot_reject_debug reject = candidate.reject_debug.reason != aimbot_reject_reason::none
@@ -234,57 +222,12 @@ inline aimbot_candidate find_best_candidate(Player* localplayer,
     if (forced_navbot_target || aimbot_candidate_better(candidate, best_candidate)) {
       best_candidate = candidate;
     }
-
-    if (hitscan_ready_selection &&
-        aim_spread::hitscan_candidate_ready_for_selection(localplayer, weapon, user_cmd, candidate) &&
-        hitscan_ready_candidate_better(candidate, best_ready_hitscan_candidate)) {
-      best_ready_hitscan_candidate = candidate;
-    }
   }
 
   const aimbot_candidate non_player_candidate = find_best_non_player_candidate(
     localplayer, weapon, original_view_angles);
   if (navbot_melee_target == nullptr && aimbot_candidate_better(non_player_candidate, best_candidate)) {
     best_candidate = non_player_candidate;
-  }
-
-  if (best_ready_hitscan_candidate.entity != nullptr &&
-      best_candidate.player != nullptr &&
-      (!aim_spread::hitscan_candidate_ready_for_selection(localplayer, weapon, user_cmd, best_candidate) ||
-        hitscan_fast_head_backtrack_better(best_ready_hitscan_candidate, best_candidate))) {
-    best_candidate = best_ready_hitscan_candidate;
-  }
-
-  return best_candidate;
-}
-
-inline aimbot_candidate find_best_scope_candidate(Player* localplayer,
-  Weapon* weapon,
-  const Vec3& original_view_angles) {
-  aimbot_candidate best_candidate{};
-  if (localplayer == nullptr || weapon == nullptr ||
-      localplayer->get_tf_class() != tf_class::SNIPER || !weapon->is_sniper_rifle()) {
-    return best_candidate;
-  }
-
-  for (const entity_cache_player_entry& entry : entity_cache_players()) {
-    Player* player = entry.player;
-    ++aim_state::scan.candidates_total;
-    if (const auto skip_reason = aimbot_player_skip_reason_for(localplayer, entry, weapon);
-        skip_reason != aimbot_player_skip_reason::none) {
-      aim_state::record_player_skip(skip_reason, player);
-      continue;
-    }
-
-    aimbot_candidate candidate = hitscan_aim_find_occluded_candidate(
-      localplayer, weapon, player, original_view_angles);
-    if (candidate.player == nullptr || !aimbot_fov_within_limit(
-        candidate.fov, candidate.preferred ? 1.35f : 1.0f)) {
-      continue;
-    }
-    if (aimbot_candidate_better(candidate, best_candidate)) {
-      best_candidate = candidate;
-    }
   }
 
   return best_candidate;

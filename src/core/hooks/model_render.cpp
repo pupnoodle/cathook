@@ -15,17 +15,20 @@ void model_render_draw_model_execute_hook(void* me, const DrawModelState& state,
   Entity* entity = entity_list != nullptr && info.entity_index > 0
     ? entity_list->entity_from_index(static_cast<unsigned int>(info.entity_index))
     : nullptr;
-  const char* network_name = entity != nullptr ? entity->get_network_name() : nullptr;
-  const char* model_name = info.model != nullptr ? info.model->name : nullptr;
-  const bool ragdoll = network_name != nullptr &&
-    (std::strstr(network_name, "Ragdoll") != nullptr || std::strstr(network_name, "ragdoll") != nullptr);
-  const bool gib = (network_name != nullptr &&
-    (std::strstr(network_name, "Gib") != nullptr || std::strstr(network_name, "gib") != nullptr)) ||
-    (model_name != nullptr && (std::strstr(model_name, "/gibs/") != nullptr || std::strstr(model_name, "gib") != nullptr));
   const bool nographics_drop = nographics::is_enabled();
-  if (((config.visuals.removals.ragdolls || nographics_drop) && ragdoll) ||
-      ((config.visuals.removals.gibs || nographics_drop) && gib)) {
-    return;
+  const bool drop_ragdolls = config.visuals.removals.ragdolls || nographics_drop;
+  const bool drop_gibs = config.visuals.removals.gibs || nographics_drop;
+  if (drop_ragdolls || drop_gibs) {
+    const char* network_name = entity != nullptr ? entity->get_network_name() : nullptr;
+    const char* model_name = info.model != nullptr ? info.model->name : nullptr;
+    const bool ragdoll = network_name != nullptr &&
+      (std::strstr(network_name, "Ragdoll") != nullptr || std::strstr(network_name, "ragdoll") != nullptr);
+    const bool gib = (network_name != nullptr &&
+      (std::strstr(network_name, "Gib") != nullptr || std::strstr(network_name, "gib") != nullptr)) ||
+      (model_name != nullptr && (std::strstr(model_name, "/gibs/") != nullptr || std::strstr(model_name, "gib") != nullptr));
+    if ((drop_ragdolls && ragdoll) || (drop_gibs && gib)) {
+      return;
+    }
   }
 
   entity_visuals::on_draw_model_execute(me, state, info, bones);

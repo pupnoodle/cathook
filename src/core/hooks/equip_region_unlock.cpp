@@ -10,17 +10,11 @@ V  o o  V  file: src/core/hooks/equip_region_unlock.cpp
 */
 #include "equip_region_unlock.hpp"
 #include <cstddef>
+#include "core/memory/code_scan.hpp"
 #include "features/menu/config.hpp"
 
 namespace
 {
-
-struct item_definition_masks
-{
-  std::byte pad[0xB0];
-  std::uint64_t equip_region_mask = 0;
-  std::uint64_t equip_region_conflict_mask = 0;
-};
 
 auto should_unlock_equip_regions(std::uintptr_t lookup_map) -> bool
 {
@@ -50,8 +44,14 @@ std::uintptr_t item_definition_lookup_hook(std::uintptr_t lookup_map, unsigned i
     return item_definition;
   }
 
-  auto* definition = reinterpret_cast<item_definition_masks*>(item_definition);
-  definition->equip_region_mask = 0;
-  definition->equip_region_conflict_mask = 0;
+  static const int masks_offset =
+    cathook::core::memory::keyed_movq_store_offset("client.so", "equip_regions");
+  if (masks_offset <= 0) {
+    return item_definition;
+  }
+
+  auto* const masks = reinterpret_cast<std::uint32_t*>(item_definition + masks_offset);
+  masks[0] = 0;
+  masks[1] = 0;
   return item_definition;
 }

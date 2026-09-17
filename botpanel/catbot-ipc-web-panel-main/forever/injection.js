@@ -42,11 +42,26 @@ class InjectManager {
         });
     }
     inject(pid, callback) {
+        const max_queue = 32;
+        if (this.injectQueue.queue.length >= max_queue) {
+            const dropped = this.injectQueue.queue.splice(0, this.injectQueue.queue.length - max_queue + 1);
+            dropped.forEach((cb) => cb(new Error('injection queue overflow; request dropped')));
+        }
         this.injectQueue.push(this.injectInternal.bind(this, pid, callback));
     }
     injected(pid) {
-        var maps = fs.readFileSync(`/proc/${pid}/maps`).toString();
-        return (maps.indexOf('cathook') > 0);
+        try {
+            var maps = fs.readFileSync(`/proc/${pid}/maps`).toString();
+            return maps.split('\n').some((line) => {
+                const name = line.trim().split(/\s+/).pop();
+                if (!name)
+                    return false;
+                const base = name.substring(name.lastIndexOf('/') + 1);
+                return base.indexOf('cathook') === 0;
+            });
+        } catch (error) {
+            return false;
+        }
     }
 }
 

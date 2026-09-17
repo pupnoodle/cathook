@@ -29,11 +29,6 @@ struct vector4d {
   float w = 0.0f;
 };
 
-class IEntityEnumerator {
-public:
-  virtual bool enum_entity(IHandleEntity* handle_entity) = 0;
-};
-
 enum trace_type_t {
   TRACE_EVERYTHING = 0,
   TRACE_WORLD_ONLY,
@@ -247,7 +242,7 @@ inline enum trace_type_t world_trace_get_type(struct trace_filter*) {
 static void* trace_filter_world_vtable[2] = { (void*)world_trace_should_hit_entity, (void*)world_trace_get_type };
 
 inline enum trace_type_t world_and_props_trace_get_type(struct trace_filter*) {
-  return TRACE_EVERYTHING;
+  return TRACE_EVERYTHING_FILTER_PROPS;
 }
 
 static void* trace_filter_world_and_props_vtable[2] = {
@@ -437,42 +432,6 @@ public:
       (void (*)(void*, struct ray_t*, unsigned int, struct trace_filter*, struct trace_t*))vtable[4];
 
     trace_ray_fn(this, ray, f_mask, p_trace_filter, p_trace);
-  }
-
-  int get_point_contents(const Vec3& point, IHandleEntity** entity = nullptr) {
-    void** vtable = *(void***)this;
-    auto fn = reinterpret_cast<int (*)(void*, const Vec3&, IHandleEntity**)>(vtable[0]);
-    return fn(this, point, entity);
-  }
-
-  void enumerate_entities(const Vec3& mins, const Vec3& maxs, IEntityEnumerator* enumerator) {
-    void** vtable = *(void***)this;
-    auto fn = reinterpret_cast<void (*)(void*, const Vec3&, const Vec3&, IEntityEnumerator*)>(vtable[10]);
-    fn(this, mins, maxs, enumerator);
-  }
-
-  ICollideable* get_collideable(IHandleEntity* entity) {
-    void** vtable = *(void***)this;
-    auto fn = reinterpret_cast<ICollideable* (*)(void*, IHandleEntity*)>(vtable[11]);
-    return fn(this, entity);
-  }
-
-  void get_brushes_in_aabb(const Vec3& mins, const Vec3& maxs, CUtlVector<int>* output, int contents_mask = MASK_ALL) {
-    void** vtable = *(void***)this;
-    auto fn = reinterpret_cast<void (*)(void*, const Vec3&, const Vec3&, CUtlVector<int>*, int)>(vtable[13]);
-    fn(this, mins, maxs, output, contents_mask);
-  }
-
-  CPhysCollide* get_collidable_from_displacements_in_aabb(const Vec3& mins, const Vec3& maxs) {
-    void** vtable = *(void***)this;
-    auto fn = reinterpret_cast<CPhysCollide* (*)(void*, const Vec3&, const Vec3&)>(vtable[14]);
-    return fn(this, mins, maxs);
-  }
-
-  bool get_brush_info(int brush, CUtlVector<vector4d>* planes_out, int* contents_out) {
-    void** vtable = *(void***)this;
-    auto fn = reinterpret_cast<bool (*)(void*, int, CUtlVector<vector4d>*, int*)>(vtable[15]);
-    return fn(this, brush, planes_out, contents_out);
   }
 
   void trace_hull(Vec3* start, Vec3* end, Vec3* hull_min, Vec3* hull_max, unsigned int mask, struct trace_t* trace) {

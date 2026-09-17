@@ -15,4 +15,6 @@ struct user_cmd;
 
 void start_engine_prediction(user_cmd* user_cmd);
 void end_engine_prediction();
+void reset_engine_prediction();
+[[nodiscard]] bool engine_prediction_needed();
 #endif

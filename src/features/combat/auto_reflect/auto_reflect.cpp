@@ -32,16 +32,6 @@ constexpr int max_tracked_entities = 4096;
 constexpr float min_projectile_speed_per_second = 50.0f;
 constexpr int prediction_ticks = 2;
 
-float vec_length(const Vec3& value)
-{
-  return std::sqrt(value.x * value.x + value.y * value.y + value.z * value.z);
-}
-
-float vec_dot(const Vec3& first, const Vec3& second)
-{
-  return first.x * second.x + first.y * second.y + first.z * second.z;
-}
-
 struct projectile_motion
 {
   int tick_count = 0;
@@ -54,15 +44,10 @@ std::array<projectile_motion, max_tracked_entities> g_motions{};
 
 int deflected_offset()
 {
-  static const int offset = [] {
-    int rocket_offset = tf2_netvars::find_offset("DT_TFProjectile_Rocket", { "m_iDeflected" });
-    if (rocket_offset <= 0)
-    {
-      rocket_offset = tf2_netvars::find_offset("DT_TFGrenadePipebombProjectile", { "m_iDeflected" });
-    }
-    return rocket_offset;
-  }();
-  return offset;
+  static tf2_netvars::lazy_offset rocket_offset{"DT_TFProjectile_Rocket", { "m_iDeflected" }};
+  static tf2_netvars::lazy_offset pipebomb_offset{"DT_TFProjectile_Pipebomb", { "m_iDeflected" }};
+  const int offset = rocket_offset;
+  return offset > 0 ? offset : static_cast<int>(pipebomb_offset);
 }
 
 bool is_deflected(Entity* projectile)
@@ -109,8 +94,7 @@ Vec3 estimated_velocity(Entity* projectile)
   if (motion.valid && tick_count > motion.tick_count)
   {
     const int elapsed_ticks = tick_count - motion.tick_count;
-    const float elapsed_seconds = static_cast<float>(elapsed_ticks) *
-      (global_vars != nullptr ? std::max(global_vars->interval_per_tick, 0.001f) : 0.0f);
+    const float elapsed_seconds = static_cast<float>(elapsed_ticks) * tick_interval();
     if (elapsed_seconds > 0.0f && std::isfinite(elapsed_seconds))
     {
       velocity = (origin - motion.origin) * (1.0f / elapsed_seconds);
@@ -140,8 +124,7 @@ bool type_enabled(Entity* projectile, enum class_id projectile_class)
 
     case class_id::PILL_OR_STICKY:
     {
-      static const int pipe_type_offset =
-        tf2_netvars::find_offset("DT_TFGrenadePipebombProjectile", { "m_iPipeType" });
+      static tf2_netvars::lazy_offset pipe_type_offset{"DT_TFProjectile_Pipebomb", { "m_iType" }};
       if (pipe_type_offset <= 0)
       {
         return config.auto_reflect.pipes;
@@ -210,8 +193,7 @@ void on_create_move(user_cmd* cmd)
 
   const Vec3 eye_position = localplayer->get_shoot_pos();
   const float range = std::clamp(config.auto_reflect.range, 40.0f, 400.0f);
-  const float tick_interval = std::max(global_vars->interval_per_tick, 0.001f);
-  const float lead_time = static_cast<float>(prediction_ticks) * tick_interval;
+  const float lead_time = static_cast<float>(prediction_ticks) * tick_interval();
 
   Vec3 view_forward{};
   angle_vectors(cmd->view_angles, &view_forward, nullptr, nullptr);
@@ -235,7 +217,7 @@ void on_create_move(user_cmd* cmd)
     }
 
     const Vec3 velocity = estimated_velocity(projectile);
-    if (vec_length(velocity) < min_projectile_speed_per_second)
+    if (length(velocity) < min_projectile_speed_per_second)
     {
       return false;
     }
@@ -247,12 +229,12 @@ void on_create_move(user_cmd* cmd)
       return false;
     }
 
-    const float speed = vec_length(velocity);
+    const float speed = length(velocity);
     const Vec3 direction = velocity * (1.0f / speed);
     const Vec3 to_eye = eye_position - origin;
-    const float to_eye_length = vec_length(to_eye);
+    const float to_eye_length = length(to_eye);
     if (to_eye_length <= 0.001f ||
-        vec_dot(to_eye, direction) / to_eye_length <= 0.05f)
+        dot(to_eye, direction) / to_eye_length <= 0.05f)
     {
       return false;
     }
@@ -260,9 +242,9 @@ void on_create_move(user_cmd* cmd)
     if (config.auto_reflect.fov_limit > 0.0f)
     {
       const Vec3 to_predicted = predicted - eye_position;
-      const float predicted_distance = vec_length(to_predicted);
+      const float predicted_distance = length(to_predicted);
       if (predicted_distance > 0.001f &&
-          vec_dot(view_forward, to_predicted * (1.0f / predicted_distance)) <
+          dot(view_forward, to_predicted * (1.0f / predicted_distance)) <
             std::cos(config.auto_reflect.fov_limit * pideg))
       {
         return false;

@@ -28,13 +28,6 @@ inline struct settings {
 
 namespace melee_aim_detail {
 
-inline float movement_interval() {
-  if (global_vars != nullptr && std::isfinite(global_vars->interval_per_tick) &&
-      global_vars->interval_per_tick > 0.0001f) {
-    return global_vars->interval_per_tick;
-  }
-  return static_cast<float>(TICK_INTERVAL);
-}
 
 inline bool is_knife(Weapon* weapon) {
   if (weapon == nullptr) {
@@ -80,10 +73,6 @@ inline float normalize_angle(float yaw) {
   return std::remainder(yaw, 360.0f);
 }
 
-inline float vector_yaw(const Vec3& direction) {
-  return std::atan2(direction.y, direction.x) * 57.29577951308232f;
-}
-
 inline float attribute_value(float fallback, const char* name, Entity* entity) {
   return attribute_manager != nullptr
     ? attribute_manager->attrib_hook_value(fallback, name, entity)
@@ -94,11 +83,16 @@ inline float game_convar_float(const char* name, float fallback) {
   if (name == nullptr || convar_system == nullptr) {
     return fallback;
   }
-  Convar* var = convar_system->find_var(name);
-  if (var == nullptr) {
+  static thread_local const char* cached_name = nullptr;
+  static thread_local Convar* cached_var = nullptr;
+  if (cached_name != name) {
+    cached_name = name;
+    cached_var = convar_system->find_var(name);
+  }
+  if (cached_var == nullptr) {
     return fallback;
   }
-  const float value = var->get_float();
+  const float value = cached_var->get_float();
   return std::isfinite(value) ? value : fallback;
 }
 
@@ -125,7 +119,7 @@ inline int real_smack_ticks(Weapon* weapon) {
     return 0;
   }
   return std::clamp(
-    static_cast<int>(std::ceil(weapon->get_smack_delay() / movement_interval())), 0, 32);
+    static_cast<int>(std::ceil(weapon->get_smack_delay() / tick_interval())), 0, 32);
 }
 
 inline int simulated_ticks_setting() {
@@ -566,7 +560,7 @@ inline bool record_origin_at(const target_frame& frame, Player* target, int tick
   }
   const Vec3 velocity = target->get_velocity();
   *out = target->get_origin() +
-    velocity * (static_cast<float>(tick) * movement_interval());
+    velocity * (static_cast<float>(tick) * tick_interval());
   return aimbot_vec3_is_finite(*out);
 }
 
