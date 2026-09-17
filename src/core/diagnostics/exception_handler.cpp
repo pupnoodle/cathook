@@ -13,6 +13,7 @@ V  o o  V  file: src/core/diagnostics/exception_handler.cpp
 #include <cerrno>
 #include <csignal>
 #include <cstdint>
+#include <execinfo.h>
 #include <fcntl.h>
 #include <string>
 #include <system_error>
@@ -221,6 +222,16 @@ void signal_handler(const int signal_number, siginfo_t* const info, void* const 
             write_register(fd, "ebp", static_cast<std::uint64_t>(registers[REG_EBP]));
         }
 #endif
+
+        {
+            std::array<void*, 64> frames{};
+            const int frame_count{ ::backtrace(frames.data(), static_cast<int>(frames.size())) };
+            if (frame_count > 0)
+            {
+                write_literal(fd, "backtrace:\n");
+                ::backtrace_symbols_fd(frames.data(), frame_count, fd);
+            }
+        }
 
         write_literal(fd, "\n=======================================\n");
         static_cast<void>(::fsync(fd));

@@ -74,6 +74,7 @@ logger::logger(std::filesystem::path file_path)
     std::error_code error{};
     std::filesystem::create_directories(file_path.parent_path(), error);
     m_stream.open(file_path, std::ios::out | std::ios::app);
+    m_stream << std::unitbuf;
 }
 
 void logger::write(const std::string_view message)

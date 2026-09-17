@@ -260,11 +260,9 @@ inline bool raw_key_down(const int key)
   }
   const int button = -key;
   if (button <= 0 || button > SDL_BUTTON_X2) return false;
-  if (mouse_seen()[static_cast<size_t>(button)]) {
-    return mouse_down()[static_cast<size_t>(button)];
-  }
   const Uint32 mouse = SDL_GetMouseState(nullptr, nullptr);
-  return (mouse & SDL_BUTTON(button)) != 0;
+  if ((mouse & SDL_BUTTON(button)) != 0) return true;
+  return mouse_seen()[static_cast<size_t>(button)] && mouse_down()[static_cast<size_t>(button)];
 }
 
 inline void reset_input_state(const bool synchronize = false)
@@ -447,15 +445,21 @@ inline bind_value read_value(void* target, const value_type type)
   return false;
 }
 
+inline std::string_view target_key_leaf(const std::string_view key)
+{
+  const std::size_t last = key.rfind('/');
+  if (last == std::string_view::npos) return key;
+  const std::size_t previous = key.rfind('/', last - 1);
+  return previous == std::string_view::npos ? key : key.substr(previous + 1);
+}
+
 inline void relink_saved_overrides(const target_entry& target)
 {
-  const std::size_t separator = target.target_key.rfind('/');
-  const std::string suffix = separator == std::string::npos ? target.target_key : target.target_key.substr(separator);
   for (bind_entry& bind : entries()) {
     if (bind.overrides.contains(target.target_key)) continue;
     for (auto iterator = bind.overrides.begin(); iterator != bind.overrides.end(); ++iterator) {
       const bool saved_is_dynamic = iterator->first.find("/group_") != std::string::npos || iterator->first.find("/layer_") != std::string::npos;
-      if (iterator->first == target.target_key || (!saved_is_dynamic && iterator->first.size() >= suffix.size() && iterator->first.ends_with(suffix))) {
+      if (iterator->first == target.target_key || (!saved_is_dynamic && target_key_leaf(iterator->first) == target_key_leaf(target.target_key))) {
         bind.overrides[target.target_key] = iterator->second;
         bind.overrides.erase(iterator);
         break;

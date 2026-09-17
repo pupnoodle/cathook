@@ -209,7 +209,7 @@ struct render_patch
   const char* module;
   const char* signature;
   int offset;
-  std::initializer_list<std::uint8_t> bytes;
+  std::vector<std::uint8_t> bytes;
   const char* name;
   bool textmode_only;
 };

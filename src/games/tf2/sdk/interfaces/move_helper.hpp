@@ -29,18 +29,7 @@ public:
         return 0;
       }
       const auto* fn = static_cast<const std::uint8_t*>(vtable[12]);
-      const auto* end = fn + 0x40;
-      for (const std::uint8_t* p = fn; p < end;
-           p += cathook::core::memory::insn_length(p, end)) {
-        cathook::core::memory::mem_insn insn{};
-        if (!cathook::core::memory::decode_mem_insn(p, end, insn)) {
-          continue;
-        }
-        if (insn.opcode == 0x89 && insn.reg == 6 && insn.base == 7) {
-          return insn.disp;
-        }
-      }
-      return 0;
+      return cathook::core::memory::member_store_of_arg(fn, fn + 0x80, 6);
     }();
     if (host_offset <= 0) {
       return nullptr;

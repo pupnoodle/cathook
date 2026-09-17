@@ -572,29 +572,29 @@ void fast_stop(user_cmd* user_cmd, Player* localplayer)
   g_fast_stop_command = user_cmd->command_number;
 }
 
-void fast_accelerate(user_cmd* user_cmd, Player* localplayer)
+bool fast_accelerate(user_cmd* user_cmd, Player* localplayer)
 {
   if (user_cmd == nullptr || localplayer == nullptr || !localplayer->is_on_ground() ||
       (localplayer->get_flags() & FL_INWATER) != 0 ||
       (user_cmd->buttons & (IN_ATTACK | IN_ATTACK2 | IN_ATTACK3)) != 0 ||
       client_state == nullptr || client_state->chokedcommands != 0) {
-    return;
+    return false;
   }
 
   if (!config.misc.movement.fast_accelerate || localplayer->is_ducking() ||
       (user_cmd->buttons & IN_DUCK) != 0) {
-    return;
+    return false;
   }
 
   const float speed = vector_length_2d(localplayer->get_velocity());
   const float max_speed = std::min(localplayer->get_max_speed() * 0.9f, 520.0f) - 10.0f;
   if (speed >= max_speed || (user_cmd->forwardmove == 0.0f && user_cmd->sidemove == 0.0f)) {
-    return;
+    return false;
   }
 
   const float move_length = std::hypot(user_cmd->forwardmove, user_cmd->sidemove);
   if (move_length <= 1.0f) {
-    return;
+    return false;
   }
 
   const float reverse_yaw = std::atan2(-user_cmd->sidemove, -user_cmd->forwardmove) * radpi;
@@ -602,6 +602,7 @@ void fast_accelerate(user_cmd* user_cmd, Player* localplayer)
   user_cmd->sidemove = 0.0f;
   user_cmd->view_angles.y = normalize_2d_yaw(user_cmd->view_angles.y - reverse_yaw);
   user_cmd->view_angles.z = 270.0f;
+  return true;
 }
 
 bool moonwalk(user_cmd* user_cmd, Player* localplayer)
@@ -685,20 +686,21 @@ void bhop(user_cmd* user_cmd)
   auto_strafe(user_cmd, localplayer);
 }
 
-void movement_post_prediction(user_cmd* user_cmd)
+bool movement_post_prediction(user_cmd* user_cmd)
 {
   if (user_cmd == nullptr || entity_list == nullptr) {
-    return;
+    return false;
   }
 
   auto* localplayer = entity_list->get_localplayer();
   if (localplayer == nullptr || !localplayer->is_alive()) {
-    return;
+    return false;
   }
 
   if (g_fast_stop_command != user_cmd->command_number) {
-    fast_accelerate(user_cmd, localplayer);
+    return fast_accelerate(user_cmd, localplayer);
   }
+  return false;
 }
 
 bool auto_edgebug_create_move(user_cmd* user_cmd)

@@ -282,7 +282,7 @@ Vec3 candidate_command_angles(Player* localplayer, const aimbot_candidate& candi
   if (hitscan) {
     return hitscan_aim_command_angles(localplayer, candidate.aim_angles);
   }
-  return candidate.aim_angles - localplayer->get_punch_angles();
+  return aimbot_clamp_angles(candidate.aim_angles - localplayer->get_punch_angles());
 }
 
 void populate_debug(aimbot_run_context& ctx) {
@@ -718,8 +718,10 @@ void update_local_client_side_animation() {
   }
 
   using update_client_side_animation_fn = void (*)(void*);
+  aimbot_anim_detail::manual_update_active = true;
   reinterpret_cast<update_client_side_animation_fn>(
     vtable[update_client_side_animation_index])(localplayer);
+  aimbot_anim_detail::manual_update_active = false;
 }
 
 void clear_network_pose(Player* player) {

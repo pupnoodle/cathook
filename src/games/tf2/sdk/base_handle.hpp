@@ -15,7 +15,7 @@ V  o o  V  file: src/games/tf2/sdk/base_handle.hpp
 #include <cstdint>
 
 constexpr std::uint32_t invalid_ehandle_index = 0xffffffffu;
-constexpr int num_serial_num_shift_bits = 13;
+constexpr int num_serial_num_shift_bits = 16;
 constexpr std::uint32_t ent_entry_mask = (1u << num_serial_num_shift_bits) - 1u;
 
 class CBaseHandle {

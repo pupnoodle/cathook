@@ -222,7 +222,7 @@ static move_features_result run_move_features(user_cmd* user_cmd) {
 
   end_engine_prediction();
 
-  movement_post_prediction(user_cmd);
+  const bool fast_accelerate_psilent = !menu_movement_blocked && movement_post_prediction(user_cmd);
   const bool auto_edgebug_psilent = !menu_movement_blocked && auto_edgebug_create_move(user_cmd);
   const bool moonwalk_psilent = !menu_movement_blocked && moonwalk_create_move(user_cmd);
 
@@ -235,7 +235,7 @@ static move_features_result run_move_features(user_cmd* user_cmd) {
   }
 
   result.use_psilent = (aimbot_result.psilent_command && !crit_result.attack_suppressed) ||
-    moonwalk_psilent || auto_edgebug_psilent;
+    fast_accelerate_psilent || moonwalk_psilent || auto_edgebug_psilent;
   return result;
 }
 

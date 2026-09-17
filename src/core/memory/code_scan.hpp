@@ -55,6 +55,7 @@ struct mem_insn
   int mod = -1;
   int reg = -1;
   int base = -1;
+  int rm = -1;
   std::int32_t disp = 0;
   std::size_t size = 0;
   std::uintptr_t rip_target = 0;
@@ -120,6 +121,7 @@ inline bool decode_mem_insn(const std::uint8_t* p, const std::uint8_t* end, mem_
   out.disp = 0;
   if (mod == 3) {
     out.base = -2;
+    out.rm = base + (out.rex_b ? 8 : 0);
     out.size = static_cast<std::size_t>(q - p);
     return true;
   }
@@ -231,13 +233,14 @@ inline std::size_t insn_length(const std::uint8_t* p, const std::uint8_t* end)
       imm = op2 == 0x3A ? 1 : 0;
     } else if (op2 >= 0x80 && op2 <= 0x8F) {
       imm = 4;
-    } else if ((op2 >= 0x70 && op2 <= 0x7F) ||
-               op2 == 0xC2) {
+    } else if ((op2 >= 0x70 && op2 <= 0x73) || op2 == 0xC2) {
       modrm = true;
       imm = 1;
     } else {
       modrm = (op2 >= 0x10 && op2 <= 0x2F) || (op2 >= 0x40 && op2 <= 0x4F) ||
-              (op2 >= 0x50 && op2 <= 0x6F) || (op2 >= 0x90 && op2 <= 0x9F) ||
+              (op2 >= 0x50 && op2 <= 0x6F) ||
+              ((op2 >= 0x74 && op2 <= 0x7F) && op2 != 0x77) ||
+              (op2 >= 0x90 && op2 <= 0x9F) ||
               (op2 >= 0xA3 && op2 <= 0xA5) || op2 == 0xAB || op2 == 0xAD ||
               op2 == 0xAE || (op2 >= 0xB0 && op2 <= 0xBF) ||
               (op2 >= 0xC0 && op2 <= 0xC1) || (op2 >= 0xC4 && op2 <= 0xC7) ||
@@ -380,24 +383,83 @@ inline bool is_scan_terminator(const std::uint8_t* p, const std::uint8_t* end)
   return false;
 }
 
-inline int first_store_disp(const std::uint8_t* p, const std::uint8_t* limit,
-                            const std::uint8_t* end)
+inline bool is_flow_exit(const std::uint8_t* p, const std::uint8_t* end)
 {
-  while (p < limit && p < end) {
-    if (is_scan_terminator(p, end)) {
-      return 0;
+  const std::uint8_t* q = p;
+  while (q < end && (*q == 0x66 || *q == 0x67 || *q == 0xF0 || *q == 0xF2 ||
+                     *q == 0xF3 || (*q >= 0x40 && *q <= 0x4F))) {
+    ++q;
+  }
+  if (q >= end) {
+    return true;
+  }
+  const std::uint8_t b = *q;
+  if (b == 0xC3 || b == 0xC2 || b == 0xE9 || b == 0xEB) {
+    return true;
+  }
+  if (b == 0xFF && q + 1 < end && ((q[1] >> 3) & 7) == 4) {
+    return true;
+  }
+  return false;
+}
+
+inline int member_access_disp(const std::uint8_t* p, const std::uint8_t* end,
+                              std::uint8_t opcode, std::int32_t min_disp,
+                              std::int32_t max_disp, int mod_mask = 0x6)
+{
+  for (const std::uint8_t* q = p; q < end;) {
+    if (is_flow_exit(q, end)) {
+      break;
     }
     mem_insn insn{};
-    if (decode_mem_insn(p, end, insn) && insn.base >= 0 && insn.reg == 0) {
-      if (insn.opcode == 0x88 || insn.opcode == 0x89 || insn.opcode == 0xC6 ||
-          insn.opcode == 0xC7 ||
-          (insn.opcode == 0x0F &&
-           ((insn.opcode2 >= 0x90 && insn.opcode2 <= 0x9F) ||
-            insn.opcode2 == 0xD6 || insn.opcode2 == 0x7F))) {
-        return insn.disp;
-      }
+    if (decode_mem_insn(q, end, insn) && insn.opcode == opcode &&
+        insn.base >= 0 && insn.base != 4 && insn.base != 5 &&
+        (mod_mask & (1 << insn.mod)) != 0 &&
+        insn.disp >= min_disp && insn.disp < max_disp) {
+      return insn.disp;
     }
-    p += insn_length(p, end);
+    const std::size_t len = insn_length(q, end);
+    q += len != 0 ? len : 1;
+  }
+  return 0;
+}
+
+inline std::size_t mov_imm(const std::uint8_t* p, const std::uint8_t* end,
+                           std::uint64_t& imm)
+{
+  const std::uint8_t* q = p;
+  bool rex_w = false;
+  while (q < end) {
+    const std::uint8_t b = *q;
+    if (b == 0x66 || b == 0xF2 || b == 0xF3) {
+      ++q;
+      continue;
+    }
+    if (b >= 0x40 && b <= 0x4F) {
+      rex_w = rex_w || (b & 8) != 0;
+      ++q;
+      continue;
+    }
+    break;
+  }
+  if (q >= end) {
+    return 0;
+  }
+  const std::uint8_t op = *q++;
+  if (op >= 0xB8 && op <= 0xBF) {
+    const std::size_t n = rex_w ? 8 : 4;
+    if (q + n > end) {
+      return 0;
+    }
+    std::memcpy(&imm, q, n);
+    return static_cast<std::size_t>(q - p) + n;
+  }
+  if (op == 0xC7 && q + 5 <= end && (*q >> 6) == 3 && ((*q >> 3) & 7) == 0) {
+    ++q;
+    std::uint32_t v = 0;
+    std::memcpy(&v, q, 4);
+    imm = v;
+    return static_cast<std::size_t>(q - p) + 4;
   }
   return 0;
 }
@@ -423,6 +485,93 @@ inline const std::uint8_t* first_call(const std::uint8_t* p, const std::uint8_t*
     p += insn_length(p, end);
   }
   return nullptr;
+}
+
+inline int member_store_after_alloc(const std::uint8_t* fn, const std::uint8_t* end,
+                                    std::uint32_t alloc_size)
+{
+  for (const std::uint8_t* p = fn; p < end;) {
+    if (is_flow_exit(p, end)) {
+      break;
+    }
+    std::uint64_t imm = 0;
+    const std::size_t n = mov_imm(p, end, imm);
+    if (n != 0 && imm == alloc_size) {
+      const std::uint8_t* const call_limit =
+        p + n + 0x80 < end ? p + n + 0x80 : end;
+      if (const std::uint8_t* const call = first_call(p + n, call_limit, end)) {
+        const std::uint8_t* const limit = call + 0x200 < end ? call + 0x200 : end;
+        const int disp = member_access_disp(call + 5, limit, 0x89, 0x40, 0x1000);
+        if (disp > 0) {
+          return disp;
+        }
+      }
+    }
+    const std::size_t len = insn_length(p, end);
+    p += len != 0 ? len : 1;
+  }
+  return 0;
+}
+
+inline int member_store_of_arg(const std::uint8_t* fn, const std::uint8_t* end,
+                               int arg_reg)
+{
+  if (arg_reg < 0 || arg_reg >= 16) {
+    return 0;
+  }
+  std::uint32_t tracked = 1u << arg_reg;
+  for (const std::uint8_t* q = fn; q < end;) {
+    if (is_flow_exit(q, end)) {
+      break;
+    }
+    mem_insn insn{};
+    if (decode_mem_insn(q, end, insn)) {
+      const bool reg_src =
+        insn.reg >= 0 && insn.reg < 16 && ((tracked >> insn.reg) & 1) != 0;
+      const bool rm_src =
+        insn.rm >= 0 && insn.rm < 16 && ((tracked >> insn.rm) & 1) != 0;
+      if (insn.opcode == 0x89) {
+        if (insn.mod == 3) {
+          if (reg_src) {
+            tracked |= 1u << insn.rm;
+          }
+        } else if (reg_src && insn.base >= 0 && insn.base != 4 &&
+                   insn.base != 5 && insn.disp > 0) {
+          return insn.disp;
+        }
+      } else if (insn.mod == 3 && rm_src &&
+                 (insn.opcode == 0x8B || insn.opcode == 0x63 ||
+                  (insn.opcode == 0x0F &&
+                   (insn.opcode2 == 0xB6 || insn.opcode2 == 0xB7)))) {
+        tracked |= 1u << insn.reg;
+      }
+    }
+    const std::size_t len = insn_length(q, end);
+    q += len != 0 ? len : 1;
+  }
+  return 0;
+}
+
+inline int first_store_disp(const std::uint8_t* p, const std::uint8_t* limit,
+                            const std::uint8_t* end)
+{
+  while (p < limit && p < end) {
+    if (is_scan_terminator(p, end)) {
+      return 0;
+    }
+    mem_insn insn{};
+    if (decode_mem_insn(p, end, insn) && insn.base >= 0 && insn.reg == 0) {
+      if (insn.opcode == 0x88 || insn.opcode == 0x89 || insn.opcode == 0xC6 ||
+          insn.opcode == 0xC7 ||
+          (insn.opcode == 0x0F &&
+           ((insn.opcode2 >= 0x90 && insn.opcode2 <= 0x9F) ||
+            insn.opcode2 == 0xD6 || insn.opcode2 == 0x7F))) {
+        return insn.disp;
+      }
+    }
+    p += insn_length(p, end);
+  }
+  return 0;
 }
 
 inline int keyed_store_offset(std::string_view module_name, std::string_view key)

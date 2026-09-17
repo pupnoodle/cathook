@@ -118,6 +118,7 @@ V  o o  V  file: src/cathook.cpp
 #include "core/hooks/override_view.cpp"
 #include "core/hooks/draw_view_model.cpp"
 #include "core/hooks/in_cond.cpp"
+#include "core/hooks/update_client_side_animation.cpp"
 #include "core/hooks/host_is_secure_server_allowed.cpp"
 #include "core/hooks/load_white_list.cpp"
 #include "core/hooks/fire_event_client_side.cpp"
@@ -213,17 +214,8 @@ void client_panel_image_paint_hook(void* panel)
     if (fn == nullptr) {
       return 0;
     }
-    const auto* end = fn + 0x100;
-    for (const std::uint8_t* p = fn; p < end; p += cathook::core::memory::insn_length(p, end)) {
-      cathook::core::memory::mem_insn insn{};
-      if (!cathook::core::memory::decode_mem_insn(p, end, insn)) {
-        continue;
-      }
-      if (insn.opcode == 0x8B && insn.mod == 2 && insn.base >= 0 && insn.disp > 0) {
-        return insn.disp;
-      }
-    }
-    return 0;
+    return cathook::core::memory::member_access_disp(fn, fn + 0x100, 0x8B, 1,
+      INT32_MAX, 0x4);
   }();
   if (image_offset <= 0) {
     client_panel_image_paint_original(panel);
@@ -449,6 +441,9 @@ void register_hook_entries()
 
   hooks::add(hooks::sig("InCond", "client.so", sigs::in_cond,
     (void**)&in_cond_original, (void*)in_cond_hook, true));
+  hooks::add(hooks::sig("C_TFPlayer::UpdateClientSideAnimation", "client.so",
+    sigs::tfplayer_update_client_side_animation,
+    (void**)&update_client_side_animation_original, (void*)update_client_side_animation_hook, true));
 #if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
   hooks::add(hooks::resolved("LoadWhiteList", "engine.so", sigs::load_white_list,
     (void**)&load_white_list_original));
@@ -601,7 +596,7 @@ std::mutex attach_worker_mutex{};
 constexpr auto attach_wait_step = std::chrono::milliseconds(100);
 constexpr long attach_ready_delay_default_seconds = 0;
 constexpr long attach_ready_delay_max_seconds = 300;
-constexpr auto attach_module_wait_timeout = std::chrono::seconds(30);
+constexpr auto attach_module_wait_timeout = std::chrono::seconds(300);
 
 constexpr std::string_view steamclient_module = "steamclient.so";
 

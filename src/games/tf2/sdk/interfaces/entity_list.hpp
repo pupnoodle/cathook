@@ -44,8 +44,9 @@ public:
       return nullptr;
     }
 
-    using entity_from_handle_fn = Entity* (*)(void*, std::uint32_t);
-    return reinterpret_cast<entity_from_handle_fn>(vtable[4])(this, raw_handle);
+    using entity_from_handle_fn = Entity* (*)(void*, const void*);
+    const std::uint64_t handle_arg = raw_handle;
+    return reinterpret_cast<entity_from_handle_fn>(vtable[4])(this, &handle_arg);
   }
 
   Entity* entity_from_handle(const CBaseHandle& handle) {

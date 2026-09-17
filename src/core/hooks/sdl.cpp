@@ -698,7 +698,6 @@ void swap_window_hook(SDL_Window* window) {
             glEnable(GL_FRAMEBUFFER_SRGB);
           }
         }
-        mono_frame_ready = false;
       }
     }
 

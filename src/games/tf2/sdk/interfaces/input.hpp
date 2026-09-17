@@ -62,7 +62,7 @@ public:
       if (vtable == nullptr) {
         return std::ptrdiff_t{0};
       }
-      return decode_verified_offset(vtable, decode_commands_offset(vtable));
+      return decode_verified_offset(vtable);
     }();
     if (off <= 0) {
       return nullptr;
@@ -99,7 +99,7 @@ public:
   void to_thirdperson(void) {
     void** vtable = *(void***)this;
 
-    void (*to_thirdperson_fn)(void*) = (void (*)(void*))vtable[31];
+    void (*to_thirdperson_fn)(void*) = (void (*)(void*))vtable[32];
 
     to_thirdperson_fn(this);
   }
@@ -107,7 +107,7 @@ public:
   bool is_thirdperson(void) {
     void** vtable = *(void***)this;
 
-    bool (*is_thirdperson_fn)(void*) = (bool (*)(void*))vtable[30];
+    bool (*is_thirdperson_fn)(void*) = (bool (*)(void*))vtable[31];
 
     return is_thirdperson_fn(this);
   }
@@ -115,58 +115,26 @@ public:
   void to_firstperson(void) {
     void** vtable = *(void***)this;
 
-    void (*to_firstperson_fn)(void*) = (void (*)(void*))vtable[32];
+    void (*to_firstperson_fn)(void*) = (void (*)(void*))vtable[33];
 
     to_firstperson_fn(this);
   }
 
 private:
-  static std::ptrdiff_t decode_commands_offset(void** vtable) {
-    const auto* p = static_cast<const std::uint8_t*>(vtable[7]);
-    const auto* const end = p + 0x100;
-    while (p < end && *p != 0xC3 && *p != 0xC2) {
-      cathook::core::memory::mem_insn insn{};
-      if (cathook::core::memory::decode_mem_insn(p, end, insn) &&
-          insn.opcode == 0x8B && insn.mod == 2 && insn.base == 7 &&
-          insn.disp > 0x40 && insn.disp < 0x1000) {
-        return insn.disp;
-      }
-      p += cathook::core::memory::insn_length(p, end);
-    }
-    return 0;
-  }
-
-  static std::ptrdiff_t decode_verified_offset(void** vtable, std::ptrdiff_t commands) {
-    if (commands <= 0) {
+  static std::ptrdiff_t decode_member_offset_for_alloc(void** vtable, std::uint32_t alloc_size) {
+    const auto* fn = static_cast<const std::uint8_t*>(vtable != nullptr ? vtable[0] : nullptr);
+    if (fn == nullptr) {
       return 0;
     }
-    const auto* p = static_cast<const std::uint8_t*>(vtable[0]);
-    const auto* const end = p + 0x200;
-    while (p < end && *p != 0xC3 && *p != 0xC2) {
-      cathook::core::memory::mem_insn insn{};
-      if (cathook::core::memory::decode_mem_insn(p, end, insn) &&
-          insn.opcode == 0x8B && insn.mod == 2 && insn.base >= 0 &&
-          insn.disp > 0x40 && insn.disp < 0x1000 &&
-          insn.disp != static_cast<std::int32_t>(commands)) {
-        const auto* q = p + cathook::core::memory::insn_length(p, end);
-        for (int n = 0; n < 8 && q < end; ++n) {
-          if (cathook::core::memory::is_scan_terminator(q, end)) {
-            break;
-          }
-          cathook::core::memory::mem_insn st{};
-          if (cathook::core::memory::decode_mem_insn(q, end, st) &&
-              st.opcode == 0xC7 && st.reg == 0 && st.base == insn.base &&
-              st.disp == static_cast<std::int32_t>(commands) &&
-              q + st.size + 4 <= end &&
-              *reinterpret_cast<const std::int32_t*>(q + st.size) == 0) {
-            return insn.disp;
-          }
-          q += cathook::core::memory::insn_length(q, end);
-        }
-      }
-      p += cathook::core::memory::insn_length(p, end);
-    }
-    return 0;
+    return cathook::core::memory::member_store_after_alloc(fn, fn + 0x800, alloc_size);
+  }
+
+  static std::ptrdiff_t decode_commands_offset(void** vtable) {
+    return decode_member_offset_for_alloc(vtable, command_buffer_size * sizeof(user_cmd) + 8);
+  }
+
+  static std::ptrdiff_t decode_verified_offset(void** vtable) {
+    return decode_member_offset_for_alloc(vtable, command_buffer_size * sizeof(verified_user_cmd) + 8);
   }
 };
 

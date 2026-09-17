@@ -42,14 +42,12 @@ struct ray_t
   struct Vec3_aligned delta;
   struct Vec3_aligned start_offset;
   struct Vec3_aligned extents;
-  const void* world_axis_transform = nullptr;
   bool is_ray;
   bool is_swept;
 };
 
-static_assert(offsetof(ray_t, world_axis_transform) == 0x40);
-static_assert(offsetof(ray_t, is_ray) == 0x48);
-static_assert(offsetof(ray_t, is_swept) == 0x49);
+static_assert(offsetof(ray_t, is_ray) == 0x40);
+static_assert(offsetof(ray_t, is_swept) == 0x41);
 static_assert(sizeof(ray_t) == 0x50);
 
 struct trace_filter {
@@ -341,7 +339,6 @@ public:
       .delta = { delta.x, delta.y, delta.z },
       .start_offset = { 0.0f, 0.0f, 0.0f },
       .extents = { 0.0f, 0.0f, 0.0f },
-      .world_axis_transform = nullptr,
       .is_ray = true,
       .is_swept = is_swept
     };
@@ -356,7 +353,6 @@ public:
     ray.delta = Vec3_aligned_subtract(end, start);
     ray.start_offset = {0.0f, 0.0f, 0.0f, 0.0f};
     ray.extents = {0.0f, 0.0f, 0.0f, 0.0f};
-    ray.world_axis_transform = nullptr;
     ray.is_swept = (ray.delta.x * ray.delta.x + ray.delta.y * ray.delta.y + ray.delta.z * ray.delta.z) != 0;
     ray.extents = Vec3_aligned_subtract(maxs, mins);
     ray.extents.x *= 0.5f;

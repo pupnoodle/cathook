@@ -27,6 +27,8 @@ constexpr const char* client_mode_shared =
 
 constexpr const char* in_cond =
   "55 83 FE ? 48 89 E5 41 54 41 89 F4";
+constexpr const char* tfplayer_update_client_side_animation =
+  "55 48 89 E5 41 54 49 89 FC 53 E8 ? ? ? ? 48 85 C0 0F 84 ? ? ? ? 48 89 C3 48 8B 00 48 89 DF FF 90 ? ? ? ? 84 C0 0F 84 ? ? ? ? 49 39 DC";
 constexpr const char* load_white_list =
   "55 48 89 E5 41 55 41 54 49 89 FC 48 83 EC ? 48 8B 07 FF 50";
 constexpr const char* cl_move =

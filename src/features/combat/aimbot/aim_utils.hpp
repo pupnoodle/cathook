@@ -334,6 +334,7 @@ inline Player* slot_player[anim_slot_count]{};
 inline unsigned int slot_handle[anim_slot_count]{};
 inline const model_t* slot_model[anim_slot_count]{};
 inline float slot_simtime[anim_slot_count]{};
+inline bool manual_update_active = false;
 
 inline void reset(Player* target) {
   const int index = target != nullptr ? target->get_index() : -1;
@@ -377,7 +378,9 @@ inline bool aimbot_update_client_side_animation(Player* target) {
   global_vars->curtime = sim_time;
   global_vars->frametime = interval;
   *anim_time = sim_time - interval;
+  aimbot_anim_detail::manual_update_active = true;
   reinterpret_cast<update_client_side_animation_fn>(vtable[update_client_side_animation_index])(target);
+  aimbot_anim_detail::manual_update_active = false;
   *anim_time = saved_anim_time;
   global_vars->frametime = saved_frametime;
   global_vars->curtime = saved_curtime;
@@ -386,6 +389,23 @@ inline bool aimbot_update_client_side_animation(Player* target) {
   aimbot_anim_detail::slot_model[index] = target->get_model();
   aimbot_anim_detail::slot_simtime[index] = sim_time;
   return true;
+}
+
+inline bool aimbot_suppress_engine_anim_update(Player* target) {
+  if (target == nullptr || entity_list == nullptr || target->is_dormant() || !target->is_alive()) {
+    return false;
+  }
+  if (target == entity_list->get_localplayer()) {
+    return false;
+  }
+  const int index = target->get_index();
+  if (index <= 0 || index >= aimbot_anim_detail::anim_slot_count ||
+      aimbot_anim_detail::slot_player[index] != target) {
+    return false;
+  }
+  const float sim_time = target->get_simulation_time();
+  return std::isfinite(sim_time) && sim_time > 0.0f &&
+    std::fabs(sim_time - aimbot_anim_detail::slot_simtime[index]) <= tick_interval() * 2.0f;
 }
 
 class aimbot_bone_access_guard {
@@ -3014,7 +3034,7 @@ inline Vec3 aimbot_apply_mode_angles(const Vec3& source_view_angles,
       last_input_angles,
       has_last_input_angles);
   default:
-    return target_view_angles;
+    return aimbot_clamp_angles(target_view_angles);
   }
 }
 

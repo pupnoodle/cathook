@@ -120,14 +120,15 @@ inline int find_offset_in_table(recv_table* table, const std::vector<const char*
   return 0;
 }
 
-inline int find_offset(const char* table_name, std::initializer_list<const char*> props)
+inline int find_offset(const char* table_name, const char* const* props, std::size_t prop_count)
 {
-  if (client == nullptr || table_name == nullptr || props.size() == 0) {
+  if (client == nullptr || table_name == nullptr || prop_count == 0) {
     return 0;
   }
 
   std::string cache_key{ table_name };
-  for (const char* prop_name : props) {
+  for (std::size_t index = 0; index < prop_count; ++index) {
+    const char* prop_name = props[index];
     cache_key += "->";
     cache_key += prop_name != nullptr ? prop_name : "";
   }
@@ -138,7 +139,7 @@ inline int find_offset(const char* table_name, std::initializer_list<const char*
     return found->second;
   }
 
-  const std::vector<const char*> path{ props.begin(), props.end() };
+  const std::vector<const char*> path{ props, props + prop_count };
   auto* classes = reinterpret_cast<client_class*>(client->get_all_classes());
   for (auto* current = classes; current != nullptr; current = current->next) {
     if (current->recv_table_ptr == nullptr || current->recv_table_ptr->net_table_name == nullptr) {
@@ -156,6 +157,11 @@ inline int find_offset(const char* table_name, std::initializer_list<const char*
   }
 
   return 0;
+}
+
+inline int find_offset(const char* table_name, std::initializer_list<const char*> props)
+{
+  return find_offset(table_name, props.begin(), props.size());
 }
 
 inline recv_prop* find_prop_in_table(recv_table* table, const std::vector<const char*>& path, std::size_t depth,
@@ -278,10 +284,10 @@ inline void* game_rules_object()
 struct lazy_offset
 {
   const char* table;
-  std::initializer_list<const char*> path;
+  std::vector<const char*> path;
   std::atomic<int> value{0};
 
-  constexpr lazy_offset(const char* table_name, std::initializer_list<const char*> prop_path)
+  lazy_offset(const char* table_name, std::initializer_list<const char*> prop_path)
       : table(table_name), path(prop_path)
   {
   }
@@ -293,7 +299,7 @@ struct lazy_offset
   {
     int current = value.load(std::memory_order_acquire);
     if (current <= 0) {
-      current = find_offset(table, path);
+      current = find_offset(table, path.data(), path.size());
       if (current > 0) value.store(current, std::memory_order_release);
     }
     return current;

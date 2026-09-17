@@ -48,7 +48,7 @@ inline Vec3 hitscan_aim_bullet_angles(Player* localplayer, const Vec3& view_angl
 }
 
 inline Vec3 hitscan_aim_command_angles(Player* localplayer, const Vec3& bullet_angles) {
-  return localplayer != nullptr ? bullet_angles - localplayer->get_punch_angles() : bullet_angles;
+  return aimbot_clamp_angles(localplayer != nullptr ? bullet_angles - localplayer->get_punch_angles() : bullet_angles);
 }
 
 

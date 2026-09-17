@@ -69,13 +69,19 @@ inline void* resolve_jmp_slot(const void* instruction)
   if (instruction == nullptr) {
     return nullptr;
   }
-  const auto* bytes = static_cast<const std::uint8_t*>(instruction);
+  auto* bytes = static_cast<const std::uint8_t*>(instruction);
   const int protection = protection_at(instruction);
-  if (protection < 0 || (protection & (PROT_READ | PROT_EXEC)) != (PROT_READ | PROT_EXEC) ||
-      bytes[0] != 0xFF || bytes[1] != 0x25) {
+  if (protection < 0 || (protection & (PROT_READ | PROT_EXEC)) != (PROT_READ | PROT_EXEC)) {
     return nullptr;
   }
-  return resolve_rip_relative(instruction, 2, 6);
+  if (bytes[0] == 0xF3 && bytes[1] == 0x0F && bytes[2] == 0x1E &&
+      (bytes[3] == 0xFA || bytes[3] == 0xFB)) {
+    bytes += 4;
+  }
+  if (bytes[0] != 0xFF || bytes[1] != 0x25) {
+    return nullptr;
+  }
+  return resolve_rip_relative(bytes, 2, 6);
 }
 
 }
