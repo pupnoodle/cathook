@@ -977,7 +977,7 @@ backtrack_timing current_timing()
 
 bool command_tick_for_current_pose(float simulation_time, int* tick_count)
 {
-  const backtrack_timing timing = build_timing(false);
+  const backtrack_timing timing = build_timing();
   if (!timing.valid || !std::isfinite(simulation_time) || simulation_time <= 0.0f) {
     return false;
   }

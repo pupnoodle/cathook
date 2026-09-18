@@ -409,10 +409,41 @@ inline bool hitscan_aim_hull_usable(const Vec3& mins, const Vec3& maxs) {
     maxs.z > mins.z + 8.0f;
 }
 
+inline float (*hitscan_aim_get_bullet_spread)(void*) = nullptr;
+inline bool hitscan_aim_bullet_spread_ready = false;
+inline bool hitscan_aim_bullet_spread_signature_found = false;
+
+inline bool hitscan_aim_init_bullet_spread() {
+  if (hitscan_aim_bullet_spread_ready) {
+    return hitscan_aim_get_bullet_spread != nullptr;
+  }
+
+  hitscan_aim_bullet_spread_ready = true;
+  hitscan_aim_get_bullet_spread = reinterpret_cast<float (*)(void*)>(
+    sigscan_module("client.so", sigs::tf_weapon_base_gun_get_bullet_spread));
+  hitscan_aim_bullet_spread_signature_found = hitscan_aim_get_bullet_spread != nullptr;
+  return hitscan_aim_get_bullet_spread != nullptr;
+}
+
+inline float hitscan_aim_weapon_spread(Weapon* weapon) {
+  if (weapon == nullptr || aimbot_is_projectile_weapon(weapon) || aimbot_is_melee_weapon(weapon)) {
+    return 0.0f;
+  }
+
+  if (hitscan_aim_init_bullet_spread()) {
+    const float spread = hitscan_aim_get_bullet_spread(weapon);
+    if (std::isfinite(spread)) {
+      return spread > 0.0f ? spread : 0.0f;
+    }
+  }
+
+  return weapon->get_hitscan_spread();
+}
+
 inline bool hitscan_aim_want_peek(Weapon* weapon) {
   return config.aimbot.peek_ticks > 0 &&
     weapon != nullptr &&
-    weapon->get_hitscan_spread() > 0.0f;
+    hitscan_aim_weapon_spread(weapon) > 0.0f;
 }
 
 inline bool hitscan_aim_peek_origin(Player* localplayer, const Vec3& shoot_pos, Vec3* peek_out) {
@@ -1006,11 +1037,16 @@ inline bool hitscan_aim_scan_live_pose(const hitscan_scan_context& ctx,
   found_out->hull_valid = ctx.hull_valid;
   found_out->inset = best.inset;
 
-  int command_tick = 0;
-  if (backtrack::command_tick_for_current_pose(found_out->sim_time, &command_tick)) {
+  found_out->pose_target_tick = time_to_ticks(found_out->sim_time);
+  const backtrack_timing live_timing = backtrack::current_timing();
+  if (std::isfinite(found_out->sim_time) && found_out->sim_time > 0.0f) {
+    const float fake_interp = live_timing.valid ? live_timing.fake_interp : backtrack::interpolation_time();
+    found_out->command_tick = time_to_ticks(found_out->sim_time + fake_interp);
+  }
+  if (backtrack::command_tick_for_current_pose(found_out->sim_time, &found_out->command_tick)) {
     found_out->pose_timing_valid = true;
-    found_out->pose_target_tick = time_to_ticks(found_out->sim_time);
-    found_out->command_tick = command_tick;
+  } else {
+    found_out->timing_error = FLT_MAX;
   }
 
   return true;
@@ -1061,14 +1097,22 @@ inline bool hitscan_aim_find_solution(Player* localplayer,
   aimbot_reject_debug reject_accum{};
   hitscan_found records{};
   const bool have_records = hitscan_aim_scan_records(ctx, timing, &records, &reject_accum);
+  hitscan_found live{};
+  const bool have_live = hitscan_aim_scan_live_pose(ctx, &live, &reject_accum);
+  if (have_live && live.pose_timing_valid && timing.valid) {
+    live.timing_error = std::fabs(
+      timing.correct - ticks_to_time(timing.server_tick - time_to_ticks(live.sim_time)));
+  }
+  const bool live_fireable = have_live && live.point.fireable && live.pose_timing_valid;
+  if (have_records && records.point.fireable && live_fireable) {
+    *found_out = hitscan_aim_found_better(live, records) ? live : records;
+    return true;
+  }
   if (have_records && records.point.fireable) {
     *found_out = records;
     return true;
   }
-
-  hitscan_found live{};
-  const bool have_live = hitscan_aim_scan_live_pose(ctx, &live, &reject_accum);
-  if (have_live && live.point.fireable && (live.command_tick > 0 || !have_records)) {
+  if (live_fireable) {
     *found_out = live;
     return true;
   }

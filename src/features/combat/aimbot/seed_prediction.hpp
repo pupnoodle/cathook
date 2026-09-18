@@ -64,10 +64,8 @@ inline std::deque<double> deltas{};
     return false;
   }
   static Convar* cvar = nullptr;
-  static bool looked_up = false;
-  if (!looked_up) {
+  if (cvar == nullptr) {
     cvar = convar_system->find_var("sv_usercmd_custom_random_seed");
-    looked_up = true;
   }
   return cvar != nullptr && cvar->get_int() != 0;
 }
@@ -136,6 +134,16 @@ inline void reset() {
 [[nodiscard]] inline int hitscan_seed(user_cmd* cmd) {
   if (custom_random_seed()) {
     return time_seed();
+  }
+  if (cmd == nullptr) {
+    return 0;
+  }
+  const int predicted = crit_hack::predict_cmd_num(cmd);
+  if (predicted > 0 && predicted != cmd->command_number) {
+    return static_cast<int>(MD5_PseudoRandom(static_cast<unsigned int>(predicted)) & 255);
+  }
+  if (cmd->random_seed != 0) {
+    return cmd->random_seed & 255;
   }
   return cmd_seed(cmd) & 255;
 }

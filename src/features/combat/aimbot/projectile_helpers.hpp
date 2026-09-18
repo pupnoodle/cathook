@@ -418,6 +418,7 @@ inline bool fill_from_projectile_type(Player* local, Weapon* weapon, int type, p
     out.offset = {16.0f, 8.0f, -6.0f};
     out.hull = {5.0f, 5.0f, 5.0f};
     out.initial_up_velocity = 200.0f;
+    out.spin_drag_key = true;
     return true;
   case 4:
   case 16:
@@ -428,6 +429,8 @@ inline bool fill_from_projectile_type(Player* local, Weapon* weapon, int type, p
     out.offset = {16.0f, 8.0f, -6.0f};
     out.hull = {5.0f, 5.0f, 5.0f};
     out.initial_up_velocity = 200.0f;
+    out.spin_drag_key = true;
+    out.arm_time = game_convar_float("tf_grenadelauncher_livetime", 0.8f);
     return true;
   case 17:
     out.speed = 1454.0f;
@@ -437,6 +440,7 @@ inline bool fill_from_projectile_type(Player* local, Weapon* weapon, int type, p
     out.offset = {16.0f, 8.0f, -6.0f};
     out.hull = {6.0f, 6.0f, 6.0f};
     out.initial_up_velocity = 200.0f;
+    out.spin_drag_key = true;
     return true;
   case 5:
     out.speed = 1000.0f;
@@ -467,6 +471,7 @@ inline bool fill_from_projectile_type(Player* local, Weapon* weapon, int type, p
     out.hull = {3.0f, 3.0f, 3.0f};
     out.initial_up_velocity = 200.0f;
     out.launch = launch_type::hand;
+    out.spin_drag_key = true;
     return true;
   case 29:
     out.speed = 2000.0f;
@@ -476,6 +481,7 @@ inline bool fill_from_projectile_type(Player* local, Weapon* weapon, int type, p
     out.offset = {16.0f, 8.0f, -6.0f};
     out.hull = {3.0f, 3.0f, 3.0f};
     out.initial_up_velocity = 200.0f;
+    out.spin_drag_key = true;
     return true;
   case 8:
   case 19:
@@ -551,6 +557,7 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
   const float weapon_z = ducking ? 8.0f : -3.0f;
   out.weapon_id_value = id;
   out.def_id = weapon->get_def_id();
+  out.collision_mask = projectile_collision_mask;
   out.trace_launch = true;
 
   if (weapon->get_def_id() == Pyro_m_DragonsFury || id == TF_WEAPON_FLAME_BALL) {
@@ -648,6 +655,7 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     out.offset = {16.0f, 8.0f, -6.0f};
     out.hull = {5.0f, 5.0f, 5.0f};
     out.initial_up_velocity = 200.0f;
+    out.spin_drag_key = true;
     out.air_splash = true;
     out.arm_time = attribute(game_convar_float("tf_grenadelauncher_livetime", 0.8f),
                              "sticky_arm_time", weapon->to_entity());
@@ -663,6 +671,7 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     out.offset = {16.0f, 8.0f, -6.0f};
     out.hull = {6.0f, 6.0f, 6.0f};
     out.initial_up_velocity = 200.0f;
+    out.spin_drag_key = true;
     return true;
 
   case TF_WEAPON_FLAREGUN: {
@@ -758,6 +767,7 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     out.initial_up_velocity = 200.0f;
     out.release_delay = 0.1f;
     out.launch = launch_type::hand;
+    out.spin_drag_key = true;
     return true;
 
   case TF_WEAPON_JAR_GAS:
@@ -771,6 +781,7 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     out.offset = {16.0f, 8.0f, -6.0f};
     out.hull = {3.0f, 3.0f, 3.0f};
     out.initial_up_velocity = 200.0f;
+    out.spin_drag_key = true;
     return true;
 
   case TF_WEAPON_CLEAVER:
@@ -783,6 +794,7 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     out.release_delay = 0.1f;
     out.hull = {1.0f, 1.0f, 10.0f};
     out.launch = launch_type::hand;
+    out.spin_drag_key = true;
     return true;
 
   case TF_WEAPON_BAT_WOOD:
@@ -798,6 +810,7 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     out.launch = launch_type::bat;
     out.secondary_attack = true;
     out.trace_launch = false;
+    out.spin_drag_key = true;
     return true;
 
   case TF_WEAPON_THROWABLE:
@@ -810,6 +823,7 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     out.initial_up_velocity = 200.0f;
     out.release_delay = 0.1f;
     out.launch = launch_type::hand;
+    out.spin_drag_key = true;
     return true;
 
   case TF_WEAPON_GRAPPLINGHOOK: {

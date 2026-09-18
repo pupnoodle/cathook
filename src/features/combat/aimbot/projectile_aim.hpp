@@ -293,8 +293,7 @@ inline bool trace_path_clear(Player* local, const projectile_info& info, Entity*
                             path[static_cast<std::size_t>(replay)], retest_trace)) {
       return false;
     }
-    if (retest_trace.start_solid || retest_trace.all_solid || retest_trace.fraction < 1.0f ||
-        retest_trace.entity != nullptr) {
+    if (retest_trace.start_solid || retest_trace.all_solid || retest_trace.fraction < 1.0f) {
       return false;
     }
   }
@@ -307,7 +306,8 @@ inline bool validate_shot(Player* local, const projectile_info& info, const shot
     return false;
   }
 
-  const bool direct = test.kind == 0;
+  int kind = test.kind;
+  const bool direct = kind == 0;
   Entity* ignored_target = direct ? nullptr : test.target;
 
   projsim::params params{};
@@ -368,7 +368,7 @@ inline bool validate_shot(Player* local, const projectile_info& info, const shot
 
     const bool solid_hit = segment.start_solid || segment.all_solid || segment.fraction < 1.0f;
     bool candidate_hit = false;
-    switch (test.kind) {
+    switch (kind) {
     case 0:
     case 1:
       candidate_hit = solid_hit;
@@ -383,24 +383,31 @@ inline bool validate_shot(Player* local, const projectile_info& info, const shot
 
     const Vec3 endpos = solid_hit ? segment.endpos : current;
     const float hull_distance = aabb_distance(endpos, test.state.mins, test.state.maxs);
-    const float splash_radius = std::sqrt(std::max(test.radius_sqr, 0.0f));
-    const float aim_slop = std::max(24.0f, splash_radius * 0.45f);
+    const float splash_radius =
+      test.kind != 0 && test.radius_sqr > 0.0f && std::isfinite(test.radius_sqr) &&
+      test.radius_sqr < 1.0e10f
+        ? std::sqrt(test.radius_sqr)
+        : info.splash_radius;
     bool valid = false;
-    switch (test.kind) {
+    switch (kind) {
     case 0: {
       Entity* hit_entity = static_cast<Entity*>(segment.entity);
       const bool target_hit = hit_entity == test.target ||
         (hit_entity != nullptr && test.target != nullptr &&
          hit_entity->get_ref_handle() == test.target->get_ref_handle());
-      valid = target_hit && (test.sim_ticks - tick) < tolerance_ticks;
+      valid = target_hit && (test.sim_ticks - tick) <= tolerance_ticks;
       if (!valid) {
+        if (target_hit && info.arm_time > 0.0f && info.splash_radius > 0.0f) {
+          kind = 1;
+          ignored_target = test.target;
+          continue;
+        }
         return false;
       }
       break;
     }
     case 1:
       valid = hull_distance <= splash_radius &&
-        length_squared(endpos - test.aim_point) <= aim_slop * aim_slop &&
         splashbot_instance.exposure_clear(endpos, segment.plane.normal, test.normal_offset,
                                           test.target, test.state.eye);
       break;
@@ -411,9 +418,14 @@ inline bool validate_shot(Player* local, const projectile_info& info, const shot
     if (!valid) {
       return false;
     }
-    if (test.interval_retest && test.trace_interval > 1 &&
-        !trace_path_clear(local, info, ignored_target, simulation.path, tick, retest_skip)) {
-      return false;
+    if (test.interval_retest && test.trace_interval > 1) {
+      const float interval = static_cast<float>(test.trace_interval);
+      const int pop = static_cast<int>(
+        std::ceil(interval - std::clamp(segment.fraction, 0.0f, 1.0f) * interval));
+      const int skip = std::max(pop, 0) + retest_skip;
+      if (!trace_path_clear(local, info, ignored_target, simulation.path, tick, skip)) {
+        return false;
+      }
     }
     return true;
   }
@@ -432,13 +444,20 @@ inline point_solution solve_point(Player* local, const projectile_info& info, co
     return result;
   }
 
-  const bool needs_two_pass = two_pass && info.launch != launch_type::bat &&
-    length_squared(info.offset) > 0.0001f;
-  if (!needs_two_pass) {
+  const float offset_speed = std::max(std::hypot(info.speed, info.initial_up_velocity), 1.0f);
+  time = std::max(time - length(info.offset) / offset_speed, 0.0f);
+
+  const auto accept_first_pass = [&]() {
     result.calculated = calc_state::good;
     result.pitch = pitch_command;
     result.yaw = yaw_command;
     result.time = time;
+  };
+
+  const bool needs_two_pass = two_pass && info.launch != launch_type::bat &&
+    length_squared(info.offset) > 0.0001f;
+  if (!needs_two_pass) {
+    accept_first_pass();
     return result;
   }
 
@@ -447,7 +466,7 @@ inline point_solution solve_point(Player* local, const projectile_info& info, co
   Vec3 launch_angles{};
   if (!launch_position(local, info, {pitch_command, yaw_command, 0.0f}, ignore_friendlies,
                        launch, &launch_angles)) {
-    result.calculated = calc_state::bad;
+    accept_first_pass();
     return result;
   }
 
@@ -455,7 +474,7 @@ inline point_solution solve_point(Player* local, const projectile_info& info, co
   float muzzle_yaw = 0.0f;
   float muzzle_time = 0.0f;
   if (!solve_ballistic(info, launch, point, drag, lob, muzzle_pitch, muzzle_yaw, muzzle_time)) {
-    result.calculated = calc_state::bad;
+    accept_first_pass();
     return result;
   }
 
@@ -675,11 +694,11 @@ inline seed_outcome evaluate_seed(Player* local, Weapon* weapon, const projectil
     info.gravity_mod > 0.0f;
   const bool underpredict = cfg.lob_underpredict && radius > 0.0f;
   const bool account_drag = projsim::drag_for_weapon(weapon_id_value).coefficient > 0.0f &&
-    projsim::ensure_env();
+    projsim::physics_drag_ready();
   const auto shot_drag = [&](float velocity) {
     return account_drag ? effective_drag(info, velocity, lob_enabled) : 0.0f;
   };
-  const float drag_base = shot_drag(speed);
+  const float drag_base = shot_drag(std::hypot(info.speed, info.initial_up_velocity));
   const int splash_policy = std::clamp(config.aimbot.projectile_splash_policy, 0, 2);
   const bool splash_allowed = radius > 0.0f && splash_policy != 0 && info.direct_hit;
   const bool splash_only = !info.direct_hit;
@@ -761,8 +780,7 @@ inline seed_outcome evaluate_seed(Player* local, Weapon* weapon, const projectil
       continue;
     }
 
-    const bool moving_target = length_squared(seed.velocity) > 100.0f;
-    const bool armed = arm_ticks <= 0 || tick >= arm_ticks || !moving_target;
+    const bool armed = arm_ticks <= 0 || tick >= arm_ticks;
 
     bool directs_alive = false;
     if (!splash_only) {
@@ -780,12 +798,21 @@ inline seed_outcome evaluate_seed(Player* local, Weapon* weapon, const projectil
           point = pull_point_toward_eye(point, eye, origin + mins, origin + maxs);
         }
         point_solution solution =
-          solve_point(local, info, eye, point, lob_enabled, true, drag_base);
+          solve_point(local, info, eye, point, lob_enabled, false, drag_base);
         if (solution.calculated == calc_state::bad) {
           slot.active = false;
           continue;
         }
         const int tolerance = underpredict && lob_enabled ? INT_MAX : -1;
+        if (!solution_within_timing(solution, tick, tolerance)) {
+          directs_alive = true;
+          continue;
+        }
+        solution = solve_point(local, info, eye, point, lob_enabled, true, drag_base);
+        if (solution.calculated == calc_state::bad) {
+          slot.active = false;
+          continue;
+        }
         if (solution_within_timing(solution, tick, tolerance)) {
           direct_history.push_back({tick, origin, point, slot.head, solution});
           slot.active = false;
@@ -797,20 +824,24 @@ inline seed_outcome evaluate_seed(Player* local, Weapon* weapon, const projectil
 
     bool splashes_alive = false;
     if ((splash_allowed || splash_only) && !splash_exhausted) {
-      const Vec3 schedule_point = origin + seed.aim_offset;
-      const point_solution schedule =
-        solve_point(local, info, eye, schedule_point, lob_enabled, true, drag_base);
-      if (schedule.calculated == calc_state::bad && !directs_alive) {
-        splash_exhausted = true;
+      if (arm_ticks > 0 && tick < arm_ticks) {
+        splashes_alive = true;
       } else {
-        const float time_to = schedule.time - ticks_to_time(tick);
-        if (time_to > radius_time) {
-          splashes_alive = true;
-        } else if (time_to < -radius_time) {
+        const Vec3 schedule_point = origin + seed.aim_offset;
+        const point_solution schedule =
+          solve_point(local, info, eye, schedule_point, lob_enabled, false, drag_base);
+        if (schedule.calculated == calc_state::bad && !directs_alive) {
           splash_exhausted = true;
         } else {
-          splash_history.push_back({tick, origin, std::fabs(time_to)});
-          splashes_alive = true;
+          const float time_to = schedule.time - ticks_to_time(tick);
+          if (time_to > radius_time) {
+            splashes_alive = true;
+          } else if (time_to < -radius_time) {
+            splash_exhausted = true;
+          } else {
+            splash_history.push_back({tick, origin, std::fabs(time_to)});
+            splashes_alive = true;
+          }
         }
       }
     }
@@ -931,7 +962,7 @@ inline seed_outcome evaluate_seed(Player* local, Weapon* weapon, const projectil
       for (int index = 0; index < limit; ++index) {
         const splash_candidate& candidate = candidates[index];
         const point_solution solution =
-          solve_point(local, info, eye, candidate.point, lob_enabled, true, drag_base);
+          solve_point(local, info, eye, candidate.point, lob_enabled, false, drag_base);
         if (solution.calculated != calc_state::good) {
           continue;
         }

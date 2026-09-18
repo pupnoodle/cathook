@@ -160,6 +160,16 @@ inline bool ensure_env() {
   return state.object != nullptr;
 }
 
+inline bool physics_drag_ready() {
+  if (!ensure_env()) {
+    return false;
+  }
+  env_state& state = shared_env();
+  float probe = 1.0f;
+  state.object->SetDragCoefficient(&probe, &probe);
+  return std::fabs(state.object->m_dragCoefficient - 1.0f) < 0.01f;
+}
+
 struct simulation {
   params p{};
   Vec3 position{};
@@ -180,7 +190,8 @@ struct simulation {
     last_trace = {};
 
     const drag_profile drag = drag_for_weapon(p.weapon_id);
-    physics_mode = drag.coefficient > 0.0f && length_squared(drag.linear) > 0.0f && ensure_env();
+    physics_mode = drag.coefficient > 0.0f && length_squared(drag.linear) > 0.0f &&
+      physics_drag_ready();
 
     if (physics_mode) {
       env_state& state = shared_env();
@@ -208,7 +219,10 @@ struct simulation {
       state.env->SetGravity({0.0f, 0.0f, -p.gravity});
       state.env->ResetSimulationClock();
 
-      Vec3 angular = p.spin ? drag.spin : Vec3{};
+      Vec3 angular = drag.spin;
+      if (p.weapon_id == TF_WEAPON_GRENADELAUNCHER && !p.spin) {
+        angular = {};
+      }
       state.object->SetPosition(p.origin, p.angles, true);
       state.object->SetVelocity(&velocity, &angular);
       state.object->Wake();

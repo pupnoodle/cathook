@@ -2,6 +2,8 @@
 #define AIM_AUTO_SHOOT_HPP
 #include "aim_state.hpp"
 #include "aim_utils.hpp"
+#include "aim_spread.hpp"
+#include "games/tf2/sdk/interfaces/entity_list.hpp"
 
 namespace aim_auto_shoot {
 
@@ -47,8 +49,11 @@ inline result apply(user_cmd* user_cmd,
     return r;
   }
 
+  Player* localplayer = entity_list != nullptr ? entity_list->get_localplayer() : nullptr;
+  const bool precision_rune = localplayer != nullptr && localplayer->in_cond(TF_COND_RUNE_PRECISION);
   if (hitscan_solution && aimbot_modifier_enabled(Aim::hitscan_mod_tapfire) &&
-      weapon->get_hitscan_spread() > 0.0f &&
+      !precision_rune &&
+      aim_spread::weapon_hitscan_spread(weapon) > 0.0f &&
       candidate.distance > config.aimbot.tapfire_distance &&
       global_vars != nullptr) {
     const float time_since_last_shot = global_vars->curtime - weapon->get_last_attack();

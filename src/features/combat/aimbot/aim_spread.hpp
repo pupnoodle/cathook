@@ -6,8 +6,6 @@
 #include <climits>
 #include <cstdint>
 #include <vector>
-#include "core/shared/sigs.hpp"
-#include "libsigscan/libsigscan.h"
 #include "aim_utils.hpp"
 #include "hitscan_aim.hpp"
 #include "games/tf2/sdk/interfaces/convar_system.hpp"
@@ -15,39 +13,10 @@
 
 namespace aim_spread {
 
-using bullet_spread_fn = float (*)(void*);
-
-inline bullet_spread_fn get_bullet_spread = nullptr;
-inline bool bullet_spread_initialized = false;
-inline bool bullet_spread_signature_found = false;
-
 using valve_random_stream = valve_random;
 
-inline bool init_bullet_spread() {
-  if (bullet_spread_initialized) {
-    return get_bullet_spread != nullptr;
-  }
-
-  bullet_spread_initialized = true;
-  get_bullet_spread = reinterpret_cast<bullet_spread_fn>(
-    sigscan_module("client.so", sigs::tf_weapon_base_gun_get_bullet_spread));
-  bullet_spread_signature_found = get_bullet_spread != nullptr;
-  return get_bullet_spread != nullptr;
-}
-
 inline float weapon_hitscan_spread(Weapon* weapon) {
-  if (weapon == nullptr || aimbot_is_projectile_weapon(weapon) || aimbot_is_melee_weapon(weapon)) {
-    return 0.0f;
-  }
-
-  if (init_bullet_spread()) {
-    const float spread = get_bullet_spread(weapon);
-    if (std::isfinite(spread)) {
-      return spread > 0.0f ? std::clamp(spread, 0.0f, 1.0f) : 0.0f;
-    }
-  }
-
-  return weapon->get_hitscan_spread();
+  return hitscan_aim_weapon_spread(weapon);
 }
 
 inline bool fixed_weapon_spreads_enabled() {
@@ -59,8 +28,43 @@ inline bool fixed_weapon_spreads_enabled() {
   return fixed_weapon_spreads != nullptr && fixed_weapon_spreads->get_int() != 0;
 }
 
+inline int hitscan_weapon_data_bullets(Weapon* weapon) {
+  if (weapon == nullptr) {
+    return 1;
+  }
+
+  const uintptr_t data = weapon->get_weapon_data();
+  if (data == 0) {
+    return 1;
+  }
+
+  const int bullets = *reinterpret_cast<const int*>(data + Weapon::weapon_data_bullets_per_shot_offset);
+  return bullets > 0 ? bullets : 1;
+}
+
+inline int hitscan_weapon_damage_type(Weapon* weapon) {
+  if (weapon == nullptr) {
+    return 0;
+  }
+
+  void** vtable = *reinterpret_cast<void***>(weapon);
+  constexpr std::size_t get_damage_type_index = 452;
+  if (vtable == nullptr || vtable[get_damage_type_index] == nullptr) {
+    return 0;
+  }
+
+  using get_damage_type_fn = int (*)(void*);
+  return reinterpret_cast<get_damage_type_fn>(vtable[get_damage_type_index])(weapon);
+}
+
 inline bool fixed_weapon_spread_active(Weapon* weapon, int pellet_count) {
-  if (pellet_count <= 1) {
+  (void)pellet_count;
+  if (weapon == nullptr || hitscan_weapon_data_bullets(weapon) <= 1) {
+    return false;
+  }
+
+  constexpr int dmg_buckshot = 1 << 29;
+  if ((hitscan_weapon_damage_type(weapon) & dmg_buckshot) == 0) {
     return false;
   }
 
@@ -69,7 +73,6 @@ inline bool fixed_weapon_spread_active(Weapon* weapon, int pellet_count) {
   }
 
   return attribute_manager != nullptr &&
-    weapon != nullptr &&
     attribute_manager->attrib_hook_value(0, "fixed_shot_pattern", weapon->to_entity()) != 0;
 }
 
@@ -155,8 +158,11 @@ inline bool hitscan_spread_offset(user_cmd* user_cmd,
   }
 
   *offset_out = {};
-  if (user_cmd == nullptr || (user_cmd->command_number <= 0 && user_cmd->random_seed == 0) || spread <= 0.0f) {
+  if (spread <= 0.0f) {
     return true;
+  }
+  if (user_cmd == nullptr) {
+    return false;
   }
 
   if (fixed_spread) {
@@ -231,8 +237,11 @@ inline hitscan_fire_solution prepare_hitscan_fire_solution(Player* localplayer,
   const Vec3& command_view_angles) {
   hitscan_fire_solution solution{};
   solution.command_angles = command_view_angles;
-  solution.spread_signature = bullet_spread_signature_found;
+  solution.spread_signature = hitscan_aim_bullet_spread_signature_found;
   if (localplayer == nullptr || weapon == nullptr || user_cmd == nullptr || candidate.entity == nullptr) {
+    return solution;
+  }
+  if (candidate.player != nullptr && !candidate.backtrack && !candidate.pose_timing_valid) {
     return solution;
   }
 
@@ -247,7 +256,7 @@ inline hitscan_fire_solution prepare_hitscan_fire_solution(Player* localplayer,
     (use_fixed_spread && pellet_count <= 14);
   solution.spread = spread;
   solution.pellet_count = pellet_count;
-  solution.spread_signature = bullet_spread_signature_found;
+  solution.spread_signature = hitscan_aim_bullet_spread_signature_found;
   solution.spread_fixed = use_fixed_spread;
 
   if (want_spread && !seed_ready && !deterministic_first) {
@@ -369,9 +378,6 @@ inline bool hitscan_candidate_ready_for_selection(Player* localplayer, Weapon* w
   const Vec3 command_angles = candidate.player != nullptr
     ? candidate.command_angles
     : hitscan_aim_command_angles(localplayer, candidate.aim_angles);
-  if (weapon_hitscan_spread(weapon) <= 0.00001f) {
-    return true;
-  }
   return prepare_hitscan_fire_solution(localplayer, weapon, user_cmd, candidate, command_angles).ready;
 }
 
