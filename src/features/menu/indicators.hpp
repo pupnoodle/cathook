@@ -91,7 +91,7 @@ inline auto build_sections() -> std::vector<section_spec>
       sections.push_back({ .kind = section_kind::spectators, .position = { config.visuals.spectator_list.x, config.visuals.spectator_list.y } });
     }
   }
-  if (has_indicator(Visuals::Indicators::keybinds)) {
+  if (config.misc.menu.bind_window || menu_focused || has_indicator(Visuals::Indicators::keybinds)) {
     if (!collect_keybind_rows().empty()) {
       sections.push_back({ .kind = section_kind::keybinds, .position = { config.visuals.indicators.keybinds_x, config.visuals.indicators.keybinds_y } });
     }
@@ -617,7 +617,7 @@ static void draw_game_indicators()
         }
       };
       const ImVec2 position = mono::indicator_panel(
-        section_id(section.kind), "keybinds", panel.rows, section.position, cat_menu::font_regular(), menu_focused,
+        section_id(section.kind), config.misc.menu.bind_window_title ? "keybinds" : "", panel.rows, section.position, cat_menu::font_regular(), menu_focused,
         menu_focused ? std::move(on_row) : mono::indicator_row_callback{});
       if (refs.x != nullptr && refs.y != nullptr) { *refs.x = position.x; *refs.y = position.y; }
       continue;

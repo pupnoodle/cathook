@@ -14,7 +14,6 @@ V  o o  V  file: src/features/automation/nographics/nographics.hpp
 namespace nographics
 {
 
-inline int hud_throttle_frames = 4;
 inline bool aggressive_material_block = true;
 inline bool textmode_allow_engine_sleep = false;
 

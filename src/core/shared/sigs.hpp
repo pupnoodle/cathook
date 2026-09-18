@@ -99,6 +99,12 @@ constexpr const char* base_animating_bone_handle =
 
 constexpr const char* ik_context_clear_targets =
   "8B 8F ? ? ? ? 48 8D 97 ? ? ? ? 31 C0 85 C9 7E ? 0F 1F 44 00 00 C7 02 F1 D8 FF FF 83 C0 01 48 81 C2 60 01 00 00 39 87 ? ? ? ? 7F ? C3 90";
+constexpr const char* base_animating_add_eflags =
+  "09 B7 ? ? ? ? C3";
+constexpr const char* base_animating_studio_hdr =
+  "4C 8B BB ? ? ? ? 4D 85 FF";
+constexpr const char* base_animating_bone_array =
+  "48 8B B3 ? ? ? ? 48 8D 14 52";
 
 constexpr const char* inspect_target_check =
   "55 48 89 E5 41 55 41 54 53 48 81 EC ? ? ? ? 48 85 F6 74 ? 48 8D 05 ? ? ? ?";

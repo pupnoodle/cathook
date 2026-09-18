@@ -692,7 +692,7 @@ bool add_record_hitbox(backtrack_record* record,
 
   if (!bones_captured) {
     if (!aimbot_setup_bones_at_time(player, bone_to_world, setup_time, pose_frame,
-        player->get_origin(), true, false, &bone_count)) {
+        aimbot_target_setup_origin(player), true, false, &bone_count)) {
       return false;
     }
   }

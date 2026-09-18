@@ -65,12 +65,12 @@ bool select_single(const char *label, int *value, const std::vector<std::pair<st
 bool select_multi(const char *label, const std::vector<std::pair<std::string, bool *>> &items);
 bool slider_int(const char *label, int *value, int minimum, int maximum, const char *format = "%d");
 bool slider_float(const char *label, float *value, float minimum, float maximum, const char *format = "%.3f");
-bool color_picker(const char *label, rgba8 *value);
+bool color_picker(const char *label, rgba8 *value, bool *rainbow = nullptr);
 bool input_string(const char *label, std::string *value, ImGuiInputTextFlags flags = 0);
 bool input_string_with_hint(const char *label, std::string *value, const char *hint, ImGuiInputTextFlags flags = 0);
 bool input_string_multiline(const char *label, std::string *value, ImVec2 size, ImGuiInputTextFlags flags = 0);
 bool input_key(const char *label, int *value);
-void begin_panel(const char *label, ImVec2 size = {});
+void begin_panel(const char *label, ImVec2 size = {}, ImGuiWindowFlags window_flags = 0);
 void end_panel();
 void group_separator();
 void control_spacing();

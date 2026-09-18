@@ -455,6 +455,7 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
       entity_cache_publish_snapshot(std::move(snapshot));
 
       animation::update_all();
+      movesim::store();
 
       for (const entity_cache_player_entry& entry : entity_cache_current_snapshot().players) {
         if (entry.player == nullptr || entry.dormant || !entry.alive) {

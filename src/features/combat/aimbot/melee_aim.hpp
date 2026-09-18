@@ -152,31 +152,30 @@ struct swing_geometry {
 
 inline swing_geometry swing_geometry_for(Player* local, Weapon* weapon, Entity* target,
                                          bool friendly_target) {
+  (void)target;
   swing_geometry geometry{};
   if (weapon == nullptr) {
     return geometry;
   }
-  float range = game_convar_float("tf_meleeattackrange", 48.0f);
-  float hull = 18.0f;
-  range = attribute_value(range, "melee_range_multiplier", weapon->to_entity());
-  hull = attribute_value(hull, "melee_bounds_multiplier", weapon->to_entity());
-  if (local != nullptr) {
-    const float model_scale = local->get_model_scale();
-    if (model_scale > 1.0f) {
-      range *= model_scale;
-      hull *= model_scale;
-    }
-  }
   if (friendly_target && weapon->get_weapon_id() == TF_WEAPON_WRENCH) {
-    range = 70.0f;
-    hull = 18.0f;
-  }
-  if (!std::isfinite(range) || range <= 0.0f ||
-      !std::isfinite(hull) || hull <= 0.0f) {
+    geometry.range = 70.0f;
+    geometry.hull = 18.0f;
     return geometry;
   }
-  geometry.range = range;
-  geometry.hull = hull;
+
+  const aimbot_melee_swing_geometry source = aimbot_get_melee_swing_geometry(local, weapon);
+  if (source.range <= 0.0f) {
+    return geometry;
+  }
+  geometry.range = source.range;
+  geometry.hull = std::max({
+    std::fabs(source.hull_mins.x),
+    std::fabs(source.hull_mins.y),
+    std::fabs(source.hull_mins.z),
+    std::fabs(source.hull_maxs.x),
+    std::fabs(source.hull_maxs.y),
+    std::fabs(source.hull_maxs.z)
+  });
   return geometry;
 }
 
@@ -341,24 +340,24 @@ inline Vec3 backstab_approach_position(Player* localplayer, Player* target) {
 
 struct origin_guard {
   Player* target = nullptr;
-  Vec3 origin{};
+  Vec3 network_origin{};
   Vec3 abs_origin{};
   bool active = false;
 
   origin_guard(Player* value, const Vec3& predicted_origin)
     : target(value),
-      origin(value != nullptr ? value->get_origin() : Vec3{}),
+      network_origin(value != nullptr ? value->get_network_origin() : Vec3{}),
       abs_origin(value != nullptr ? value->get_abs_origin() : Vec3{}),
       active(value != nullptr) {
     if (active) {
-      target->set_origin(predicted_origin);
+      target->set_network_origin(predicted_origin);
       target->set_abs_origin(predicted_origin);
     }
   }
 
   ~origin_guard() {
     if (active) {
-      target->set_origin(origin);
+      target->set_network_origin(network_origin);
       target->set_abs_origin(abs_origin);
     }
   }

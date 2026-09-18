@@ -123,6 +123,7 @@ V  o o  V  file: src/cathook.cpp
 #include "core/hooks/load_white_list.cpp"
 #include "core/hooks/fire_event_client_side.cpp"
 #include "core/hooks/frame_stage_notify.cpp"
+#include "core/hooks/recv_proxy_simulation_time.cpp"
 #include "core/hooks/dispatch_user_message.cpp"
 #include "core/hooks/intro_menu_on_tick.cpp"
 #include "core/hooks/class_menu_show_panel.cpp"
@@ -155,6 +156,7 @@ V  o o  V  file: src/cathook.cpp
 #include "features/visuals/skybox_changer.cpp"
 #include "features/visuals/skin_changer.cpp"
 #include "features/visuals/world_visuals.cpp"
+#include "features/combat/simulation/projsim.hpp"
 #include "core/hooks/hook_registry.hpp"
 
 void** client_mode_vtable;
@@ -850,6 +852,7 @@ void clear_runtime_pointer_state()
   render_view = nullptr;
   engine_trace = nullptr;
   static_prop_mgr = nullptr;
+  spatial_partition = nullptr;
   physics = nullptr;
   physics_collision = nullptr;
   client_state = nullptr;
@@ -897,6 +900,7 @@ bool unload_module_runtime() {
 
   print("Unhooking functions\n");
   bool hooks_restored = nographics::shutdown();
+  simulation_time_proxy::restore();
   hooks_restored = backtrack::restore_net_channel_hook() && hooks_restored;
   hooks_restored = hooks::restore_all() && hooks_restored;
 
@@ -940,6 +944,7 @@ bool unload_module_runtime() {
   navbot::controller().shutdown();
   automation::shutdown();
   tickbase::reset();
+  projsim::shutdown();
 
   if (!release_graphics_resources) {
     print("Skipping graphics resource release during detach\n");
@@ -1243,6 +1248,11 @@ bool initialize_game_runtime() {
   static_prop_mgr = (IStaticPropMgrClient*)get_interface("./bin/linux64/engine.so", "StaticPropMgrClient004");
   if (static_prop_mgr == nullptr) {
     print("StaticPropMgrClient004 interface is missing; face splash will skip static props\n");
+  }
+
+  spatial_partition = (ISpatialPartition*)get_interface("./bin/linux64/engine.so", "SpatialPartition001");
+  if (spatial_partition == nullptr) {
+    print("SpatialPartition001 interface is missing; face splash will skip dynamic entities\n");
   }
 
   if (!cathook::core::wait_for_module("vphysics.so")) {
@@ -1604,6 +1614,9 @@ bool initialize_game_runtime() {
   }
 
   error_assert(!hooks::install_all(), "Failed to install hooks");
+  if (!simulation_time_proxy::install()) {
+    print("simulation time recv proxy not installed; movesim delta tracking will use stock decode\n");
+  }
 
   entity_visuals::draw_model_execute_original = model_render_draw_model_execute_original;
 

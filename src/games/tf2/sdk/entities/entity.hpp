@@ -12,9 +12,13 @@ V  o o  V  file: src/games/tf2/sdk/entities/entity.hpp
 #define ENTITY_HPP
 #include <string>
 #include <string.h>
+#include <cstring>
 #include <cstdint>
+#include <sys/mman.h>
+#include "core/memory/resolve.hpp"
 #include "core/types.hpp"
 #include "games/tf2/sdk/base_handle.hpp"
+#include "games/tf2/sdk/datamap.hpp"
 #include "games/tf2/sdk/interfaces/entity_list.hpp"
 #include "games/tf2/sdk/interfaces/model_info.hpp"
 #include "games/tf2/sdk/netvars.hpp"
@@ -150,6 +154,22 @@ public:
     return entity_list->entity_from_handle(this->get_owner_entity_handle());
   }
 
+  Vec3 get_network_origin(void) {
+    static tf2_netvars::lazy_offset offset{"DT_BaseEntity", {"m_vecOrigin"}};
+    return offset > 0
+      ? *reinterpret_cast<Vec3*>(reinterpret_cast<std::uintptr_t>(this) +
+                                 static_cast<std::uintptr_t>(offset))
+      : get_abs_origin();
+  }
+
+  void set_network_origin(const Vec3& origin) {
+    static tf2_netvars::lazy_offset offset{"DT_BaseEntity", {"m_vecOrigin"}};
+    if (offset > 0) {
+      *reinterpret_cast<Vec3*>(reinterpret_cast<std::uintptr_t>(this) +
+                               static_cast<std::uintptr_t>(offset)) = origin;
+    }
+  }
+
   Vec3 get_origin(void) {
     return get_abs_origin();
   }
@@ -199,7 +219,15 @@ public:
   }
 
   Vec3 get_abs_origin(void) {
+    if (this == nullptr) {
+      return {};
+    }
+
     void** vtable = *(void***)this;
+    if (vtable == nullptr || vtable[11] == nullptr) {
+      return {};
+    }
+
     const Vec3& (*get_abs_origin_fn)(void*) = (const Vec3& (*)(void*))vtable[11];
     return get_abs_origin_fn(this);
   }
@@ -259,6 +287,8 @@ public:
     void* networkable = get_networkable();
     if (!networkable) return nullptr;
     void** vtable = *(void***)networkable;
+    if (vtable == nullptr || vtable[0] == nullptr) return nullptr;
+
     void* (*get_client_unknown_fn)(void*) = (void* (*)(void*))vtable[0];
     return get_client_unknown_fn(networkable);
   }
@@ -267,6 +297,8 @@ public:
     void* unknown = get_client_unknown();
     if (!unknown) return nullptr;
     void** vtable = *(void***)unknown;
+    if (vtable == nullptr || vtable[4] == nullptr) return nullptr;
+
     void* (*get_collideable_fn)(void*) = (void* (*)(void*))vtable[4];
     return get_collideable_fn(unknown);
   }
@@ -275,6 +307,8 @@ public:
     void* collideable = get_collideable();
     if (!collideable) return Vec3{0, 0, 0};
     void** vtable = *(void***)collideable;
+    if (vtable == nullptr || vtable[3] == nullptr) return Vec3{0, 0, 0};
+
     Vec3& (*get_obb_mins_fn)(void*) = (Vec3& (*)(void*))vtable[3];
     return get_obb_mins_fn(collideable);
   }
@@ -283,6 +317,8 @@ public:
     void* collideable = get_collideable();
     if (!collideable) return Vec3{0, 0, 0};
     void** vtable = *(void***)collideable;
+    if (vtable == nullptr || vtable[4] == nullptr) return Vec3{0, 0, 0};
+
     Vec3& (*get_obb_maxs_fn)(void*) = (Vec3& (*)(void*))vtable[4];
     return get_obb_maxs_fn(collideable);
   }
@@ -291,6 +327,21 @@ public:
     void* collideable = get_collideable();
     if (!collideable) return get_abs_origin();
     void** vtable = *(void***)collideable;
+    if (vtable == nullptr || vtable[0] == nullptr || vtable[10] == nullptr) {
+      return get_abs_origin();
+    }
+
+    void* (*get_entity_handle_fn)(void*) = (void* (*)(void*))vtable[0];
+    void* outer = get_entity_handle_fn(collideable);
+    if (outer == nullptr) {
+      return get_abs_origin();
+    }
+
+    void** outer_vtable = *reinterpret_cast<void***>(outer);
+    if (outer_vtable == nullptr || outer_vtable[11] == nullptr) {
+      return get_abs_origin();
+    }
+
     const Vec3& (*get_collision_origin_fn)(void*) = (const Vec3& (*)(void*))vtable[10];
     return get_collision_origin_fn(collideable);
   }
@@ -532,6 +583,115 @@ public:
     bool (*is_base_combat_weapon_fn)(void*) = (bool (*)(void*))vtable[138];
 
     return is_base_combat_weapon_fn(this);
+  }
+
+  datamap_t* get_pred_desc_map() {
+    void** vtable = *reinterpret_cast<void***>(this);
+    if (vtable == nullptr) {
+      return nullptr;
+    }
+
+    const auto readable = [](const void* address, std::size_t bytes) -> bool {
+      if (address == nullptr) {
+        return false;
+      }
+      const int protection = cathook::core::memory::protection_at(address);
+      if (protection < 0 || (protection & PROT_READ) == 0) {
+        return false;
+      }
+      if (bytes <= 1) {
+        return true;
+      }
+      const auto* start = static_cast<const std::uint8_t*>(address);
+      return cathook::core::memory::protection_at(start + bytes - 1) >= 0;
+    };
+
+    const auto looks_like_datamap = [&](const datamap_t* map) -> bool {
+      if (!readable(map, sizeof(datamap_t))) {
+        return false;
+      }
+      if (map->dataNumFields <= 0 || map->dataNumFields > 1024) {
+        return false;
+      }
+      if (map->packed_size < 0 || map->packed_size > 1 << 20) {
+        return false;
+      }
+      if (!readable(map->dataClassName, 8)) {
+        return false;
+      }
+      const char* name = map->dataClassName;
+      std::size_t length = 0;
+      while (length < 64 && name[length] != '\0') {
+        ++length;
+      }
+      if (length < 3 || length >= 64) {
+        return false;
+      }
+      return std::strstr(name, "Player") != nullptr || std::strstr(name, "Entity") != nullptr ||
+        std::strstr(name, "Animating") != nullptr;
+    };
+
+    const auto decode_map = [&](void* function) -> datamap_t* {
+      if (!readable(function, 16)) {
+        return nullptr;
+      }
+      auto* code = static_cast<std::uint8_t*>(function);
+      if (code[0] == 0xF3 && code[1] == 0x0F && code[2] == 0x1E && code[3] == 0xFA) {
+        code += 4;
+      }
+      if (code[0] == 0x55) {
+        code += (code[1] == 0x48 && code[2] == 0x89 && code[3] == 0xE5) ? 4 : 1;
+      }
+      if (code[0] == 0x48 && code[1] == 0x8D && code[2] == 0x05) {
+        void* address = cathook::core::memory::resolve_rip_relative(code, 3, 7);
+        auto* map = static_cast<datamap_t*>(address);
+        return looks_like_datamap(map) ? map : nullptr;
+      }
+      if (code[0] == 0x48 && code[1] == 0x8B && code[2] == 0x05) {
+        void** slot = static_cast<void**>(cathook::core::memory::resolve_rip_relative(code, 3, 7));
+        if (!readable(slot, sizeof(void*))) {
+          return nullptr;
+        }
+        auto* map = static_cast<datamap_t*>(*slot);
+        return looks_like_datamap(map) ? map : nullptr;
+      }
+      return nullptr;
+    };
+
+    static int cached_index = -1;
+    if (cached_index >= 0 && vtable[cached_index] != nullptr) {
+      if (datamap_t* map = decode_map(vtable[cached_index])) {
+        return map;
+      }
+    }
+
+    int best_index = -1;
+    datamap_t* best_map = nullptr;
+    int best_score = -1;
+    for (int index = 12; index <= 22; ++index) {
+      if (vtable[index] == nullptr) {
+        continue;
+      }
+      datamap_t* map = decode_map(vtable[index]);
+      if (map == nullptr || map->dataClassName == nullptr) {
+        continue;
+      }
+      int score = index;
+      if (std::strstr(map->dataClassName, "Player") != nullptr) {
+        score += 100;
+      } else if (std::strstr(map->dataClassName, "Animating") != nullptr) {
+        score += 10;
+      }
+      if (score >= best_score) {
+        best_score = score;
+        best_index = index;
+        best_map = map;
+      }
+    }
+    if (best_map != nullptr) {
+      cached_index = best_index;
+    }
+    return best_map;
   }
 
 };

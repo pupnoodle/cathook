@@ -12,6 +12,7 @@ V  o o  V  file: src/games/tf2/sdk/interfaces/global_vars.hpp
 #ifndef GLOBAL_VARS_HPP
 #define GLOBAL_VARS_HPP
 
+#include <cstddef>
 #include <cmath>
 
 class GlobalVars {
@@ -32,6 +33,11 @@ public:
   int nTimestampNetworkingBase;
   int nTimestampRandomizeWindow;
 };
+
+static_assert(offsetof(GlobalVars, tickcount) == 0x18);
+static_assert(offsetof(GlobalVars, interval_per_tick) == 0x1c);
+static_assert(offsetof(GlobalVars, nTimestampNetworkingBase) == 0x3c);
+static_assert(offsetof(GlobalVars, nTimestampRandomizeWindow) == 0x40);
 
 inline static GlobalVars* global_vars;
 

@@ -27,9 +27,23 @@ constexpr int max_hitbox_slots = 32;
 
 
 inline Vec3 hitscan_aim_eye_position(Player* localplayer) {
-  return localplayer != nullptr
-    ? localplayer->get_origin() + localplayer->get_view_offset()
-    : Vec3{};
+  if (localplayer == nullptr) {
+    return {};
+  }
+
+  const Vec3 fallback = localplayer->get_origin() + localplayer->get_view_offset();
+  const Vec3 shoot_pos = localplayer->get_shoot_pos();
+  if (!aimbot_vec3_is_finite(shoot_pos)) {
+    return fallback;
+  }
+  if (!aimbot_vec3_is_finite(fallback)) {
+    return shoot_pos;
+  }
+  if (nographics::is_enabled() &&
+      aimbot_distance_squared(shoot_pos, fallback) > (24.0f * 24.0f)) {
+    return fallback;
+  }
+  return shoot_pos;
 }
 
 inline bool hitscan_aim_same_entity(Entity* left, Entity* right) {
@@ -349,15 +363,18 @@ struct hitscan_scan_context {
   Player* target = nullptr;
   Weapon* weapon = nullptr;
   Vec3 view_angles{};
+  Vec3 last_input_angles{};
   Vec3 shoot_pos{};
   uint32_t hitbox_mask = 0;
   int priority_hitbox = -1;
   bool head_locked = false;
   bool body_forced = false;
+  bool has_last_input_angles = false;
 };
 
 struct hitscan_point {
   bool valid = false;
+  bool fireable = false;
   int bone = 0;
   int hitbox = -1;
   int studio_hitbox = -1;
@@ -377,6 +394,41 @@ struct hitscan_hitbox_slot {
   Vec3 maxs{};
   const matrix_3x4* bone_to_world = nullptr;
 };
+
+inline bool hitscan_aim_point_fireable(const hitscan_scan_context& ctx,
+  const hitscan_hitbox_slot& slot,
+  const hitscan_point& point) {
+  if (!aimbot_mode_uses_visible_steering()) {
+    return true;
+  }
+  if (slot.bone_to_world == nullptr || ctx.weapon == nullptr) {
+    return false;
+  }
+
+  const Vec3 applied = aimbot_apply_mode_angles(
+    ctx.view_angles,
+    hitscan_aim_command_angles(ctx.localplayer, point.angles),
+    ctx.last_input_angles,
+    ctx.has_last_input_angles);
+  Vec3 forward{};
+  angle_vectors(hitscan_aim_bullet_angles(ctx.localplayer, applied), &forward);
+  if (!aimbot_vec3_is_finite(forward)) {
+    return false;
+  }
+
+  const float weapon_range = ctx.weapon->get_hitscan_range();
+  const float trace_length = weapon_range > 0.0f ? weapon_range : 8192.0f;
+  const Vec3 end_pos = ctx.shoot_pos + (forward * trace_length);
+  const Vec3 local_start = aimbot_inverse_transform_point(ctx.shoot_pos, *slot.bone_to_world);
+  const Vec3 local_end = aimbot_inverse_transform_point(end_pos, *slot.bone_to_world);
+  float fraction = 0.0f;
+  if (!aimbot_segment_aabb_enter_fraction(local_start, local_end, slot.mins, slot.maxs, &fraction)) {
+    return false;
+  }
+
+  const Vec3 impact = ctx.shoot_pos + (end_pos - ctx.shoot_pos) * fraction;
+  return hitscan_aim_trace_line(ctx.localplayer, ctx.shoot_pos, impact, ctx.target, true).clear;
+}
 
 inline hitscan_point hitscan_aim_evaluate_point(const hitscan_scan_context& ctx,
   const hitscan_hitbox_slot& slot,
@@ -434,6 +486,7 @@ inline hitscan_point hitscan_aim_evaluate_point(const hitscan_scan_context& ctx,
   point.position = position;
   point.angles = aim_angles;
   point.fov = fov;
+  point.fireable = hitscan_aim_point_fireable(ctx, slot, point);
   return point;
 }
 
@@ -450,7 +503,16 @@ inline bool hitscan_aim_scan_slots(const hitscan_scan_context& ctx,
   }
 
   hitscan_point best{};
+  hitscan_point best_fireable{};
   const hitscan_hitbox_slot* best_slot = nullptr;
+  const hitscan_hitbox_slot* best_fireable_slot = nullptr;
+  const auto better = [](const hitscan_point& candidate, const hitscan_point& best_point,
+    const hitscan_hitbox_slot* selected) {
+    return selected == nullptr ||
+      candidate.priority < best_point.priority ||
+      (candidate.priority == best_point.priority && candidate.fov < best_point.fov);
+  };
+
   for (int index = 0; index < slot_count; ++index) {
     const hitscan_hitbox_slot& slot = slots[static_cast<std::size_t>(index)];
     if (slot.bone_to_world == nullptr) {
@@ -494,7 +556,7 @@ inline bool hitscan_aim_scan_slots(const hitscan_scan_context& ctx,
         continue;
       }
 
-      if (first_valid) {
+      if (point.fireable && first_valid) {
         *point_out = point;
         if (slot_out != nullptr) {
           *slot_out = &slot;
@@ -502,18 +564,31 @@ inline bool hitscan_aim_scan_slots(const hitscan_scan_context& ctx,
         return true;
       }
 
-      if (best_slot == nullptr || point.priority < best.priority ||
-          (point.priority == best.priority && point.fov < best.fov)) {
+      if (point.fireable && better(point, best_fireable, best_fireable_slot)) {
+        best_fireable = point;
+        best_fireable_slot = &slot;
+      }
+      if (better(point, best, best_slot)) {
         best = point;
         best_slot = &slot;
       }
     }
 
-    if (best_slot != nullptr && best.priority == 0) {
+    if (best_fireable_slot != nullptr && best_fireable.priority == 0) {
+      break;
+    }
+    if (!aimbot_mode_uses_visible_steering() && best_slot != nullptr && best.priority == 0) {
       break;
     }
   }
 
+  if (best_fireable_slot != nullptr) {
+    *point_out = best_fireable;
+    if (slot_out != nullptr) {
+      *slot_out = best_fireable_slot;
+    }
+    return true;
+  }
   if (best_slot == nullptr) {
     return false;
   }
@@ -604,6 +679,25 @@ inline bool hitscan_aim_scan_records(const hitscan_scan_context& ctx,
     return false;
   }
 
+  hitscan_found visible{};
+  const auto fill = [&](hitscan_found* out, const backtrack_record& record, const hitscan_point& point,
+    const hitscan_hitbox_slot* slot, int command_tick) {
+    out->valid = true;
+    out->point = point;
+    out->record = &record;
+    out->command_tick = command_tick;
+    out->sim_time = record.sim_time;
+    out->distance = distance_3d(ctx.localplayer->get_origin(), record.origin);
+    out->on_shot = record.on_shot;
+    out->timing_error = backtrack::record_timing_score(timing, record);
+    out->capture_gap = backtrack::record_capture_gap(record);
+    out->hull_world_mins = record.origin + record.mins;
+    out->hull_world_maxs = record.origin + record.maxs;
+    out->hitbox_local_mins = slot != nullptr ? slot->mins : Vec3{};
+    out->hitbox_local_maxs = slot != nullptr ? slot->maxs : Vec3{};
+    out->hitbox_bone = slot != nullptr ? *slot->bone_to_world : matrix_3x4{};
+  };
+
   for (int pass = 0; pass < 2; ++pass) {
     int scanned = 0;
     for (int index = 0; index < view.count && scanned < hitscan::max_records_scanned; ++index) {
@@ -630,24 +724,20 @@ inline bool hitscan_aim_scan_records(const hitscan_scan_context& ctx,
         continue;
       }
 
-      found_out->valid = true;
-      found_out->point = point;
-      found_out->record = record;
-      found_out->command_tick = command_tick;
-      found_out->sim_time = record->sim_time;
-      found_out->distance = distance_3d(ctx.localplayer->get_origin(), record->origin);
-      found_out->on_shot = record->on_shot;
-      found_out->timing_error = backtrack::record_timing_score(timing, *record);
-      found_out->capture_gap = backtrack::record_capture_gap(*record);
-      found_out->hull_world_mins = record->origin + record->mins;
-      found_out->hull_world_maxs = record->origin + record->maxs;
-      found_out->hitbox_local_mins = slot != nullptr ? slot->mins : Vec3{};
-      found_out->hitbox_local_maxs = slot != nullptr ? slot->maxs : Vec3{};
-      found_out->hitbox_bone = slot != nullptr ? *slot->bone_to_world : matrix_3x4{};
-      return true;
+      if (point.fireable) {
+        fill(found_out, *record, point, slot, command_tick);
+        return true;
+      }
+      if (!visible.valid) {
+        fill(&visible, *record, point, slot, command_tick);
+      }
     }
   }
 
+  if (visible.valid) {
+    *found_out = visible;
+    return true;
+  }
   return false;
 }
 
@@ -782,6 +872,8 @@ inline bool hitscan_aim_find_solution(Player* localplayer,
   ctx.target = target;
   ctx.weapon = weapon;
   ctx.view_angles = view_angles;
+  ctx.last_input_angles = aimbot::current_state().last_input_angles;
+  ctx.has_last_input_angles = aimbot::current_state().last_input_angles_valid;
   ctx.shoot_pos = hitscan_aim_eye_position(localplayer);
   if (!aimbot_vec3_is_finite(ctx.shoot_pos)) {
     return false;
@@ -803,10 +895,18 @@ inline bool hitscan_aim_find_solution(Player* localplayer,
 
   const backtrack_timing timing = backtrack::current_timing();
   aimbot_reject_debug reject_accum{};
-  if (hitscan_aim_scan_records(ctx, timing, found_out, &reject_accum)) {
+  hitscan_found records{};
+  const bool have_records = hitscan_aim_scan_records(ctx, timing, &records, &reject_accum);
+  if (have_records && records.point.fireable) {
+    *found_out = records;
     return true;
   }
-  if (hitscan_aim_scan_live_pose(ctx, found_out, &reject_accum)) {
+  if (hitscan_aim_scan_live_pose(ctx, found_out, &reject_accum) &&
+      (found_out->point.fireable || !have_records)) {
+    return true;
+  }
+  if (have_records) {
+    *found_out = records;
     return true;
   }
 

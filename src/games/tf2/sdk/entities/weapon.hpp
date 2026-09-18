@@ -1474,6 +1474,18 @@ public:
     return std::max(1, static_cast<int>(attribute_manager->attrib_hook_value(static_cast<float>(bullets), "mult_bullets_per_shot", to_entity())));
   }
 
+  int get_swing_range() {
+    void** vtable = *reinterpret_cast<void***>(this);
+    constexpr std::size_t get_swing_range_index = 528;
+    if (vtable == nullptr || vtable[get_swing_range_index] == nullptr) {
+      return 0;
+    }
+
+    using get_swing_range_fn = int (*)(void*);
+    const int range = reinterpret_cast<get_swing_range_fn>(vtable[get_swing_range_index])(this);
+    return range > 0 && range <= 256 ? range : 0;
+  }
+
   float get_hitscan_range() {
     const uintptr_t weapon_data = get_weapon_data();
     if (weapon_data == 0 || is_melee()) {

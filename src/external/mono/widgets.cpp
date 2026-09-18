@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
 
 namespace mono
@@ -251,7 +252,7 @@ bool slider_float(const char *const label, float *const value, const float minim
 	return changed;
 }
 
-bool color_picker(const char *const label, rgba8 *const value)
+bool color_picker(const char *const label, rgba8 *const value, bool *const rainbow)
 {
 	if (!label || !value) return false;
 	std::array color{
@@ -260,12 +261,31 @@ bool color_picker(const char *const label, rgba8 *const value)
 		value->b / 255.0f,
 		value->a / 255.0f
 	};
+	ImVec4 preview{ color[0], color[1], color[2], color[3] };
+	if (rainbow && *rainbow) {
+		const float hue{ std::fmod(static_cast<float>(ImGui::GetTime()) * 0.15f, 1.0f) };
+		ImGui::ColorConvertHSVtoRGB(hue, 0.95f, 0.95f, preview.x, preview.y, preview.z);
+	}
 	ImGui::PushID(label);
 	ImGui::TextUnformatted(label);
 	ImGui::SameLine();
 	ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowWidth() - 34.0f));
-	const bool changed{ ImGui::ColorEdit4("##value", color.data(), ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaPreviewHalf) };
+	if (ImGui::ColorButton("##preview", preview, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaPreviewHalf)) {
+		ImGui::OpenPopup("##picker");
+	}
 	remember_item_interaction();
+	bool changed{};
+	if (ImGui::BeginPopup("##picker")) {
+		ImGui::SetNextItemWidth(ImGui::GetFrameHeight() * 12.0f);
+		changed = ImGui::ColorPicker4(
+			"##picker",
+			color.data(),
+			ImGuiColorEditFlags_NoLabel | ImGuiColorEditFlags_AlphaPreviewHalf | ImGuiColorEditFlags_AlphaBar);
+		if (rainbow) {
+			changed = toggle("Rainbow", rainbow) || changed;
+		}
+		ImGui::EndPopup();
+	}
 	if (changed) {
 		value->r = static_cast<uint8_t>(std::clamp(color[0], 0.0f, 1.0f) * 255.0f);
 		value->g = static_cast<uint8_t>(std::clamp(color[1], 0.0f, 1.0f) * 255.0f);
@@ -335,13 +355,13 @@ bool input_key(const char *const label, int *const value)
 	return changed;
 }
 
-void begin_panel(const char *const label, const ImVec2 size)
+void begin_panel(const char *const label, const ImVec2 size, const ImGuiWindowFlags window_flags)
 {
 	if (!label) {
 		return;
 	}
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 8.0f, 8.0f });
-	ImGui::BeginChild(label, size, ImGuiChildFlags_Border);
+	ImGui::BeginChild(label, size, ImGuiChildFlags_Border, window_flags);
 	ImGui::TextUnformatted(label);
 	ImGui::Separator();
 }

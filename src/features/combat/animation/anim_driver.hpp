@@ -140,32 +140,10 @@ namespace detail {
 
 inline void feed_movesim(Player* player)
 {
-  if (!settings.feed_movesim || player == nullptr || global_vars == nullptr) {
+  if (!settings.feed_movesim) {
     return;
   }
-
-  const int index = index_of(player);
-  if (index <= 0) {
-    return;
-  }
-
-  const Vec3 velocity = player->get_velocity();
-  const float horizontal_speed = std::sqrt((velocity.x * velocity.x) + (velocity.y * velocity.y));
-  if (horizontal_speed <= 0.0001f) {
-    movesim::clear_records(index);
-    return;
-  }
-  movesim::move_record record{};
-  record.direction = Vec3{velocity.x, velocity.y, 0.0f};
-  record.sim_time = player->get_simulation_time();
-  record.velocity = velocity;
-  record.origin = player->get_origin();
-  record.mode = player->get_water_level() > 1
-    ? movesim::surface_mode::swim
-    : ((player->get_flags() & FL_ONGROUND) != 0
-      ? movesim::surface_mode::ground
-      : movesim::surface_mode::air);
-  movesim::push_record(index, record);
+  movesim::store_player(player);
 }
 
 inline void drive_player(Player* player)
@@ -180,7 +158,7 @@ inline void drive_player(Player* player)
   }
 
   const float sim_time = player->get_simulation_time();
-  const Vec3 origin = player->get_origin();
+  const Vec3 origin = aimbot_target_setup_origin(player);
   if (!std::isfinite(sim_time) || sim_time <= 0.0f || !aimbot_vec3_is_finite(origin)) {
     return;
   }
@@ -241,7 +219,6 @@ inline void drive_player(Player* player)
   }
 
   player->set_eye_angles(original_eye_angles);
-  aimbot_invalidate_bone_cache(player);
 
   last_driven = sim_time;
   g_last_driven_origin[slot] = origin;

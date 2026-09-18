@@ -2,7 +2,6 @@
 #include "window_chrome.hpp"
 
 #include <algorithm>
-#include <cmath>
 
 namespace mono
 {
@@ -59,48 +58,6 @@ void drag_from_header(const menu_config &config, menu_state &state, const ImVec2
 	}
 }
 
-bool menu_body_hovered_for_wheel()
-{
-	ImGuiWindow *const body{ GImGui->CurrentWindow };
-	for (ImGuiWindow *window{ GImGui->HoveredWindow }; window != nullptr; window = window->ParentWindow) {
-		if (window == GImGui->WheelingWindow) {
-			return false;
-		}
-		if (window == body) {
-			return true;
-		}
-	}
-	return false;
-}
-
-void smooth_menu_scroll(menu_state &state)
-{
-	const float current{ ImGui::GetScrollY() };
-	const float maximum{ std::max(ImGui::GetScrollMaxY(), 0.0f) };
-	const ImGuiIO &io{ ImGui::GetIO() };
-
-	if (!state.scroll_initialized) {
-		state.scroll_position = current;
-		state.scroll_target = current;
-		state.scroll_initialized = true;
-	}
-
-	if (io.MouseWheel != 0.0f && menu_body_hovered_for_wheel()) {
-		state.scroll_target -= io.MouseWheel * ImGui::GetFontSize() * 7.0f;
-	} else if (io.MouseWheel == 0.0f && std::abs(current - state.scroll_position) > 0.001f) {
-		state.scroll_position = current;
-		state.scroll_target = current;
-	}
-
-	state.scroll_target = std::clamp(state.scroll_target, 0.0f, maximum);
-	const float delta_time{ std::clamp(io.DeltaTime, 0.0f, 0.1f) };
-	const float amount{ 1.0f - std::exp(-30.0f * delta_time) };
-	state.scroll_position = std::lerp(state.scroll_position, state.scroll_target, amount);
-	if (std::abs(state.scroll_target - state.scroll_position) < 0.1f) {
-		state.scroll_position = state.scroll_target;
-	}
-	ImGui::SetScrollY(state.scroll_position);
-}
 }
 
 bool begin_menu(const menu_config &config, menu_state &state, const std::function<void()> &render_navbar,
@@ -182,9 +139,11 @@ bool begin_menu(const menu_config &config, menu_state &state, const std::functio
 	ImGui::BeginChild(
 		"menu_body",
 		{ 0.0f, 0.0f },
-		ImGuiChildFlags_Border | ImGuiChildFlags_AlwaysUseWindowPadding,
-		ImGuiWindowFlags_NoScrollWithMouse);
-	smooth_menu_scroll(state);
+		ImGuiChildFlags_Border | ImGuiChildFlags_AlwaysUseWindowPadding);
+	if (state.reset_scroll) {
+		ImGui::SetScrollY(0.0f);
+		state.reset_scroll = false;
+	}
 	return true;
 }
 

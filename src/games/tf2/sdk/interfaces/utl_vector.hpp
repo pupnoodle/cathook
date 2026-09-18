@@ -13,9 +13,7 @@ public:
   CUtlVector() = default;
 
   CUtlVector(T* external_memory, int external_count) {
-    memory.memory = external_memory;
-    memory.allocation_count = external_count;
-    memory.grow_size = -1;
+    Reset(external_memory, external_count);
   }
 
   int Count() const {
@@ -43,7 +41,7 @@ public:
     memory.allocation_count = external_count;
     memory.grow_size = -1;
     size = 0;
-    elements = nullptr;
+    elements = external_memory;
   }
 
   CUtlMemory memory{};

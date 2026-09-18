@@ -603,7 +603,6 @@ public:
 
 class IPhysics {
 public:
-  virtual ~IPhysics() = default;
   virtual bool Connect(void* factory) = 0;
   virtual void Disconnect() = 0;
   virtual void* QueryInterface(const char* interfaceName) = 0;

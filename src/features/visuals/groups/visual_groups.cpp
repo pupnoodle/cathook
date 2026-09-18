@@ -15,6 +15,7 @@
 #include "features/combat/anti_aim/anti_aim.hpp"
 #include "features/combat/aimbot/aimbot.hpp"
 #include "features/automation/nographics/nographics.hpp"
+#include "games/tf2/sdk/base_handle.hpp"
 #include "games/tf2/sdk/entities/building.hpp"
 #include "games/tf2/sdk/entities/player.hpp"
 #include "games/tf2/sdk/interfaces/engine.hpp"
@@ -46,8 +47,8 @@ struct visual_group_snapshot
   bool need_backtrack_visualizer = false;
   bool need_pickup_timers = false;
   bool need_head_emojis = false;
-  std::unordered_map<Entity*, std::size_t> entity_groups{};
-  std::unordered_map<Entity*, std::size_t> model_groups{};
+  std::unordered_map<std::uint32_t, std::size_t> entity_groups{};
+  std::unordered_map<std::uint32_t, std::size_t> model_groups{};
 };
 
 }
@@ -59,6 +60,25 @@ std::atomic<std::shared_ptr<const visual_groups::visual_group_snapshot>> g_group
 thread_local bool g_fake_angle_model = false;
 thread_local bool g_viewmodel_model = false;
 std::uint32_t next_group_id = 1;
+
+[[nodiscard]] std::uint32_t snapshot_handle_for_entity(Entity* entity)
+{
+  if (entity == nullptr) {
+    return invalid_ehandle_index;
+  }
+
+  const auto handle = static_cast<std::uint32_t>(entity->get_ref_handle());
+  return handle == 0 ? invalid_ehandle_index : handle;
+}
+
+[[nodiscard]] Entity* entity_from_snapshot_handle(std::uint32_t handle)
+{
+  if (entity_list == nullptr || handle == 0 || handle == invalid_ehandle_index) {
+    return nullptr;
+  }
+
+  return entity_list->entity_from_handle(static_cast<int>(handle));
+}
 
 [[nodiscard]] bool text_contains(std::string_view text, std::string_view needle)
 {
@@ -956,16 +976,21 @@ void store(Player* localplayer)
       return;
     }
 
+    const std::uint32_t handle = snapshot_handle_for_entity(entity);
+    if (handle == invalid_ehandle_index) {
+      return;
+    }
+
     if (next_snapshot->need_screen_overlay) {
       const std::size_t entity_group = find_group_index(entity, localplayer, false, *next_snapshot);
       if (entity_group != visual_group_not_found) {
-        next_snapshot->entity_groups.emplace(entity, entity_group);
+        next_snapshot->entity_groups.emplace(handle, entity_group);
       }
     }
     if (next_snapshot->need_model_effects) {
       const std::size_t model_group = find_group_index(entity, localplayer, true, *next_snapshot);
       if (model_group != visual_group_not_found) {
-        next_snapshot->model_groups.emplace(entity, model_group);
+        next_snapshot->model_groups.emplace(handle, model_group);
       }
     }
   };
@@ -1021,8 +1046,13 @@ visual_group_match group_for_entity(Entity* entity, bool models)
     return {};
   }
 
-  const std::unordered_map<Entity*, std::size_t>& groups = models ? snapshot->model_groups : snapshot->entity_groups;
-  const auto found = groups.find(entity);
+  const std::uint32_t handle = snapshot_handle_for_entity(entity);
+  if (handle == invalid_ehandle_index) {
+    return {};
+  }
+
+  const std::unordered_map<std::uint32_t, std::size_t>& groups = models ? snapshot->model_groups : snapshot->entity_groups;
+  const auto found = groups.find(handle);
   if (found == groups.end() || found->second >= snapshot->groups.size()) {
     return {};
   }
@@ -1045,7 +1075,8 @@ void visit_screen_entities(const std::function<void(Entity*, const visual_group_
     return;
   }
 
-  for (const auto& [entity, group_index] : snapshot->entity_groups) {
+  for (const auto& [handle, group_index] : snapshot->entity_groups) {
+    Entity* entity = entity_from_snapshot_handle(handle);
     if (entity == nullptr || group_index >= snapshot->groups.size()) {
       continue;
     }

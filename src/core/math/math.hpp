@@ -170,7 +170,8 @@ inline static float remap_clamped(float value, float in_min, float in_max, float
   return out_min + (out_max - out_min) * fraction;
 }
 
-inline static void angle_vectors(Vec3 angles, Vec3* forward, Vec3* right, Vec3* up) {
+inline static void angle_vectors(Vec3 angles, Vec3* forward, Vec3* right = nullptr,
+                                 Vec3* up = nullptr) {
   double sp, sy, sr, cp, cy, cr;
   sincos(angles.x * pideg, &sp, &cp);
   sincos(angles.y * pideg, &sy, &cy);

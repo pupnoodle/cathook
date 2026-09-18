@@ -20,6 +20,7 @@
 #include "games/tf2/sdk/interfaces/move_helper.hpp"
 #include "games/tf2/sdk/interfaces/prediction.hpp"
 #include "games/tf2/sdk/netvars.hpp"
+#include "games/tf2/sdk/prediction_copy.hpp"
 
 namespace movesim {
 
@@ -63,6 +64,9 @@ struct snapshot_state {
   std::uint32_t player_cond = 0;
   std::uint32_t condition_bits = 0;
   Player* move_helper_host = nullptr;
+  bool pred_copy_valid = false;
+  std::vector<pred_copy::field> pred_fields{};
+  std::vector<std::uint8_t> pred_data{};
 };
 
 struct storage {
@@ -104,6 +108,8 @@ inline void push_record(int entindex, const move_record& record);
 inline void clear_records(int entindex);
 inline void clear_all();
 inline const std::vector<move_record>& history(int entindex);
+inline void store_player(Player* player);
+inline void store();
 inline bool initialize(Player* player, storage& state, const init_options& options);
 inline bool run_tick(storage& state);
 inline void restore(storage& state);
@@ -408,7 +414,7 @@ inline void setup_move_data(storage& state) {
 inline void capture_snapshot(storage& state) {
   Player* player = state.player;
   snapshot_state& snap = state.snapshot;
-  snap.origin = player->get_origin();
+  snap.origin = player->get_network_origin();
   snap.abs_origin = player->get_abs_origin();
   snap.velocity = player->get_velocity();
   snap.base_velocity = player->get_base_velocity();
@@ -432,6 +438,8 @@ inline void capture_snapshot(storage& state) {
   snap.player_cond = detail::read_shared_u32(snap.shared, detail::player_cond_offset());
   snap.condition_bits = detail::read_shared_u32(snap.shared, detail::condition_list_bits_offset());
   snap.move_helper_host = move_helper != nullptr ? move_helper->get_host() : nullptr;
+  snap.pred_copy_valid = pred_copy::capture(player, player->get_pred_desc_map(), snap.pred_fields,
+                                            snap.pred_data);
   if (global_vars != nullptr) {
     snap.curtime = global_vars->curtime;
     snap.frametime = global_vars->frametime;
@@ -515,7 +523,7 @@ inline void synthesize_record(Player* player, storage& state) {
   record.sim_time = player->get_simulation_time();
   record.mode = surface_mode_of(player);
   record.velocity = player->get_velocity();
-  record.origin = player->get_origin();
+  record.origin = player->get_network_origin();
   push_record(player->get_index(), record);
 }
 
@@ -545,6 +553,47 @@ inline void clear_all() {
 
 inline const std::vector<move_record>& history(int entindex) {
   return detail::record_view(entindex);
+}
+
+inline void store_player(Player* player) {
+  if (player == nullptr) {
+    return;
+  }
+  const int index = player->get_index();
+  if (index <= 0) {
+    return;
+  }
+  const bool local =
+    engine != nullptr && player->get_index() == engine->get_localplayer_index();
+  if (local) {
+    return;
+  }
+  if (!player->is_alive() || player->is_dormant()) {
+    clear_records(index);
+    return;
+  }
+  const Vec3 velocity = player->get_velocity();
+  if (detail::length_2d(velocity) <= 0.0001f) {
+    clear_records(index);
+    return;
+  }
+  move_record record{};
+  record.direction = Vec3{velocity.x, velocity.y, 0.0f};
+  record.sim_time = player->get_simulation_time();
+  record.mode = detail::surface_mode_of(player);
+  record.velocity = velocity;
+  record.origin = player->get_network_origin();
+  push_record(index, record);
+}
+
+inline void store() {
+  if (entity_list == nullptr || engine == nullptr) {
+    return;
+  }
+  const int max_clients = global_vars != nullptr ? global_vars->max_clients : 64;
+  for (int index = 1; index <= max_clients; ++index) {
+    store_player(detail::player_from_index(index));
+  }
 }
 
 inline bool average_yaw(int entindex, float sample_window_seconds, float* out_yaw_per_tick) {
@@ -748,6 +797,10 @@ inline bool initialize(Player* player, storage& state, const init_options& optio
   player->set_in_duck_jump(false);
 
   detail::setup_move_data(state);
+  if (game_movement->check_stuck(player, &state.move_data) != 0) {
+    state.failed = true;
+    return false;
+  }
 
   state.sim_time = player->get_simulation_time();
   state.predicted_delta = detail::predicted_delta_from_history(player->get_index());
@@ -795,7 +848,11 @@ inline bool run_tick(storage& state) {
   MoveData& move_data = state.move_data;
   const float interval = tick_interval();
 
-  if (prediction != nullptr) {
+    if (move_helper != nullptr) {
+      move_helper->set_host(player);
+    }
+    player->set_current_cmd(&state.dummy_cmd);
+    if (prediction != nullptr) {
     prediction->in_prediction = true;
     prediction->first_time_predicted = false;
   }
@@ -909,28 +966,30 @@ inline void restore(storage& state) {
   }
   Player* player = state.player;
   const snapshot_state& snap = state.snapshot;
-  player->set_origin(snap.origin);
+  if (!snap.pred_copy_valid || !pred_copy::restore(player, snap.pred_fields, snap.pred_data)) {
+    player->set_velocity(snap.velocity);
+    player->set_base_velocity(snap.base_velocity);
+    player->set_view_offset(snap.view_offset);
+    player->set_flags(snap.flags);
+    player->set_ground_entity_handle(snap.ground_entity_handle);
+    player->set_buttons(snap.buttons);
+    player->set_last_buttons(snap.last_buttons);
+    player->set_tickbase(snap.tickbase);
+    player->set_ducked(snap.ducked);
+    player->set_ducking_state(snap.ducking);
+    player->set_in_duck_jump(snap.in_duck_jump);
+    player->set_duck_time(snap.duck_time);
+    player->set_duck_jump_time(snap.duck_jump_time);
+    player->set_fall_velocity(snap.fall_velocity);
+    player->set_move_type(snap.move_type);
+    player->set_water_level(snap.water_level);
+    detail::set_charge_meter_value(player, snap.charge_meter);
+    detail::write_shared_u32(snap.shared, detail::player_cond_offset(), snap.player_cond);
+    detail::write_shared_u32(snap.shared, detail::condition_list_bits_offset(), snap.condition_bits);
+  }
+  player->set_network_origin(snap.origin);
   player->set_abs_origin(snap.abs_origin);
-  player->set_velocity(snap.velocity);
-  player->set_base_velocity(snap.base_velocity);
-  player->set_view_offset(snap.view_offset);
-  player->set_flags(snap.flags);
-  player->set_ground_entity_handle(snap.ground_entity_handle);
-  player->set_buttons(snap.buttons);
-  player->set_last_buttons(snap.last_buttons);
-  player->set_tickbase(snap.tickbase);
   player->set_current_cmd(snap.current_cmd);
-  player->set_ducked(snap.ducked);
-  player->set_ducking_state(snap.ducking);
-  player->set_in_duck_jump(snap.in_duck_jump);
-  player->set_duck_time(snap.duck_time);
-  player->set_duck_jump_time(snap.duck_jump_time);
-  player->set_fall_velocity(snap.fall_velocity);
-  player->set_move_type(snap.move_type);
-  player->set_water_level(snap.water_level);
-  detail::set_charge_meter_value(player, snap.charge_meter);
-  detail::write_shared_u32(snap.shared, detail::player_cond_offset(), snap.player_cond);
-  detail::write_shared_u32(snap.shared, detail::condition_list_bits_offset(), snap.condition_bits);
   if (global_vars != nullptr) {
     global_vars->curtime = snap.curtime;
     global_vars->frametime = snap.frametime;

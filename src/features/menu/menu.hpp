@@ -40,6 +40,8 @@ V  o o  V  file: src/features/menu/menu.hpp
 #include <cfloat>
 #include <cstring>
 #include <filesystem>
+#include <functional>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <string>
@@ -133,12 +135,19 @@ inline void preload_menu_font_ascii(ImFont* font, float size) {
   }
 }
 
+enum combat_subtab_id
+{
+  combat_subtab_aimbot,
+  combat_subtab_weapons,
+  combat_subtab_overlay
+};
+
 enum visuals_subtab_id
 {
-  visuals_subtab_entity_profiles,
-  visuals_subtab_indicators,
-  visuals_subtab_radar,
-  visuals_subtab_other
+  visuals_subtab_profiles,
+  visuals_subtab_world,
+  visuals_subtab_hud,
+  visuals_subtab_models
 };
 
 inline bool combo(const char* label, int* value, const char* const items[], int item_count);
@@ -320,7 +329,8 @@ enum automation_subtab_id
   automation_subtab_general,
   automation_subtab_queue,
   // automation_subtab_inventory_changer, // Temporarily disabled.
-  automation_subtab_items_chat,
+  automation_subtab_chat,
+  automation_subtab_items,
   automation_subtab_navbot,
   automation_subtab_medic,
   automation_subtab_ipc
@@ -535,9 +545,29 @@ inline bool list_row(const char* label, bool selected, const ImVec2& size = ImVe
   return mono::list_item(label, selected, size);
 }
 
-inline bool begin_panel(const char* name, const ImVec2& size) {
+inline bool icon_button(const char* icon, const ImVec2& size = ImVec2(22.0f, 22.0f)) {
+  ImFont* icons = font_icons();
+  if (icons != nullptr) ImGui::PushFont(icons);
+  ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 1.0f, 1.0f, 0.10f));
+  ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1.0f, 1.0f, 1.0f, 0.18f));
+  ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2.0f, 2.0f));
+  const bool pressed = ImGui::Button(icon, size);
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor(3);
+  if (icons != nullptr) ImGui::PopFont();
+  return pressed;
+}
+
+inline std::string truncate_ui_text(std::string text, const float max_width) {
+  if (ImGui::CalcTextSize(text.c_str()).x <= max_width) return text;
+  while (!text.empty() && ImGui::CalcTextSize((text + "...").c_str()).x > max_width) text.pop_back();
+  return text.empty() ? "..." : text + "...";
+}
+
+inline bool begin_panel(const char* name, const ImVec2& size, ImGuiWindowFlags window_flags = 0) {
   current_panel_layout_stack().push_back({ .header_height = ImGui::GetTextLineHeight() + scaled(8.0f) });
-  mono::begin_panel(name, size);
+  mono::begin_panel(name, size, window_flags);
   return !ImGui::GetCurrentWindow()->SkipItems;
 }
 
@@ -593,7 +623,8 @@ inline void flow_panel(const char* name, int column_index, float height, draw_fn
     state.origin.y + state.column_offsets[static_cast<size_t>(column_index)]);
 
   ImGui::SetCursorPos(position);
-  const bool panel_visible = begin_panel(name, ImVec2(state.column_width, panel_height));
+  const bool panel_visible = begin_panel(name, ImVec2(state.column_width, panel_height),
+    ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
   cat_bind::push_panel_label(name != nullptr ? name : "");
   if (panel_visible || cat_bind::registering_targets()) {
     draw_fn();
@@ -681,6 +712,19 @@ inline bool combo(const char* label, int* value, const char* const items[], cons
   const bool mono_changed = mono::select_single(label, value, mono_items);
   cat_bind::bindable_combo_int(label, value, mono_changed, items, item_count, mono::last_item_interaction().hovered);
   return mono_changed;
+}
+
+inline bool bools_combo(const char* label, std::initializer_list<std::pair<const char*, bool*>> items) {
+  if (label == nullptr || items.size() == 0) return false;
+  std::vector<std::pair<std::string, bool*>> mono_items;
+  mono_items.reserve(items.size());
+  for (const auto& item : items) {
+    if (item.first == nullptr || item.second == nullptr) continue;
+    cat_bind::bindable_checkbox(item.first, item.second, false, false);
+    if (!cat_bind::registering_targets()) mono_items.emplace_back(item.first, item.second);
+  }
+  if (cat_bind::registering_targets() || mono_items.empty()) return false;
+  return mono::select_multi(label, mono_items);
 }
 
 inline bool multi_select_combo(const char* label, uint32_t* value_mask, const char* const items[], const uint32_t item_bits[], const int item_count) {
@@ -788,29 +832,26 @@ inline bool color_picker(const char* label, RGBA_float* color) {
 
   if (cat_bind::registering_targets()) {
     cat_bind::bindable_color(label, color, false, false);
-    checkbox("Rainbow", &color->rainbow);
     return false;
   }
 
   ImGui::PushID(color);
-  const auto display_color = color->to_RGBA();
   mono::rgba8 value{
-    static_cast<uint8_t>(display_color.r),
-    static_cast<uint8_t>(display_color.g),
-    static_cast<uint8_t>(display_color.b),
-    static_cast<uint8_t>(display_color.a)
+    static_cast<uint8_t>(std::clamp(color->r * 255.0f, 0.0f, 255.0f)),
+    static_cast<uint8_t>(std::clamp(color->g * 255.0f, 0.0f, 255.0f)),
+    static_cast<uint8_t>(std::clamp(color->b * 255.0f, 0.0f, 255.0f)),
+    static_cast<uint8_t>(std::clamp(color->a * 255.0f, 0.0f, 255.0f))
   };
-  const bool mono_changed = mono::color_picker(label, &value);
-  if (mono_changed) {
+  const bool changed = mono::color_picker(label, &value, &color->rainbow);
+  if (changed) {
     color->r = value.r / 255.0f;
     color->g = value.g / 255.0f;
     color->b = value.b / 255.0f;
     color->a = value.a / 255.0f;
   }
-  cat_bind::bindable_color(label, color, mono_changed, mono::last_item_interaction().hovered);
-  const bool rainbow_changed = cat_menu::checkbox("Rainbow", &color->rainbow);
+  cat_bind::bindable_color(label, color, changed, mono::last_item_interaction().hovered);
   ImGui::PopID();
-  return mono_changed || rainbow_changed;
+  return changed;
 }
 
 }
@@ -940,22 +981,26 @@ static void draw_aimbot_content() {
   };
 
   cat_menu::begin_flow_layout("aimbot_layout", 2);
-  cat_menu::flow_panel("Aimbot", 0, 226.0f, [&]() {
+  cat_menu::flow_panel("Aimbot", 0, 186.0f, [&]() {
     cat_menu::checkbox("Enable", &config.aimbot.master);
-    cat_menu::checkbox("Auto shoot", &config.aimbot.auto_shoot);
-    cat_menu::checkbox("Shoot through glass", &config.aimbot.shoot_through_glass);
-    cat_menu::checkbox("Spread compensation", &config.aimbot.spread_compensation);
-    cat_menu::checkbox("Auto resolver", &config.aimbot.resolver);
+    cat_menu::bools_combo("Options", {
+      { "Auto shoot", &config.aimbot.auto_shoot },
+      { "Shoot through glass", &config.aimbot.shoot_through_glass },
+      { "Spread compensation", &config.aimbot.spread_compensation },
+      { "Auto resolver", &config.aimbot.resolver }
+    });
     cat_menu::combo("Aim mode", (int*)&config.aimbot.aim_mode, aim_mode_items, IM_ARRAYSIZE(aim_mode_items));
     cat_menu::slider_float("Aim FOV", &config.aimbot.fov, 0.0f, 180.0f, "%.0f deg");
     cat_menu::slider_float("Assist strength", &config.aimbot.assist_strength, 0.0f, 100.0f, "%.0f%%");
     cat_menu::slider_int("Resolver yaws", &config.aimbot.resolver_max_yaws, 4, 24);
   });
-  cat_menu::flow_panel("Crit Hack", 0, 116.0f, [&]() {
+  cat_menu::flow_panel("Crit Hack", 0, 88.0f, [&]() {
     cat_menu::checkbox("Enable Crit Hack", &config.crithack.enabled);
-    cat_menu::checkbox("Force crits", &config.crithack.force_crits);
-    cat_menu::checkbox("Always melee crit", &config.crithack.always_melee);
-    cat_menu::checkbox("Avoid random crits", &config.crithack.avoid_random);
+    cat_menu::bools_combo("Options", {
+      { "Force crits", &config.crithack.force_crits },
+      { "Always melee crit", &config.crithack.always_melee },
+      { "Avoid random crits", &config.crithack.avoid_random }
+    });
   });
   cat_menu::flow_panel("Target selection", 1, 254.0f, [&]() {
     cat_menu::combo("Target", (int*)&config.aimbot.target_type, target_items, IM_ARRAYSIZE(target_items));
@@ -968,49 +1013,7 @@ static void draw_aimbot_content() {
     cat_menu::slider_int("Unsimulated ticks", &config.aimbot.ignore_unsimulated_ticks, 0, 21);
     cat_menu::slider_int("Max targets", &config.aimbot.max_targets, 1, 6);
   });
-  cat_menu::flow_panel("Heavy", 1, 92.0f, [&]() {
-    cat_menu::checkbox("Heavy auto rev", &config.aimbot.auto_rev);
-    cat_menu::checkbox("Heavy auto unrev", &config.aimbot.auto_unrev);
-    cat_menu::slider_float("Heavy rev threshold", &config.aimbot.auto_rev_threshold, 200.0f, 1200.0f, "%.0f HU");
-  });
-  cat_menu::flow_panel("Auto detonate", 1, 156.0f, [&]() {
-    cat_menu::checkbox("Sticky detonation", &config.auto_detonate.stickies);
-    cat_menu::checkbox("Flare airburst", &config.auto_detonate.flares);
-    cat_menu::checkbox("Target buildings", &config.auto_detonate.buildings);
-    cat_menu::checkbox("Ignore cloaked", &config.auto_detonate.ignore_cloaked);
-    cat_menu::checkbox("Don't blow me up", &config.auto_detonate.dont_blow_me_up);
-    cat_menu::slider_float("Sticky radius", &config.auto_detonate.sticky_radius, 40.0f, 400.0f, "%.0f HU");
-    cat_menu::slider_float("Flare radius", &config.auto_detonate.flare_radius, 40.0f, 400.0f, "%.0f HU");
-  });
-  cat_menu::flow_panel("Auto reflect", 1, 200.0f, [&]() {
-    cat_menu::checkbox("Enable", &config.auto_reflect.enabled);
-    cat_menu::checkbox("Rockets", &config.auto_reflect.rockets);
-    cat_menu::checkbox("Sentry rockets", &config.auto_reflect.sentry_rockets);
-    cat_menu::checkbox("Pipes", &config.auto_reflect.pipes);
-    cat_menu::checkbox("Stickies", &config.auto_reflect.stickies);
-    cat_menu::checkbox("Flares", &config.auto_reflect.flares);
-    cat_menu::checkbox("Arrows", &config.auto_reflect.arrows);
-    cat_menu::checkbox("Burning teammates", &config.auto_reflect.burning_teammates);
-    cat_menu::slider_float("Range", &config.auto_reflect.range, 40.0f, 400.0f, "%.0f HU");
-    cat_menu::slider_float("FOV limit", &config.auto_reflect.fov_limit, 0.0f, 180.0f, "%.0f deg");
-  });
-  cat_menu::flow_panel("Sniper", 1, 116.0f, [&]() {
-    cat_menu::checkbox("Automatic scope", &config.aimbot.sniper_auto_scope);
-    cat_menu::checkbox("Automatic unscope", &config.aimbot.sniper_auto_unscope);
-    cat_menu::slider_float("Scope distance", &config.aimbot.sniper_scope_distance, 250.0f, 4000.0f, "%.0f HU");
-    cat_menu::slider_float("Scope cancel delay", &config.aimbot.sniper_scope_cancel_time, 1.0f, 5.0f, "%.1f s");
-  });
-  cat_menu::flow_panel("Melee", 1, 140.0f, [&]() {
-    cat_menu::checkbox("Auto backstab", &config.aimbot.melee_auto_backstab);
-    cat_menu::checkbox("Ignore razorback", &config.aimbot.melee_ignore_razorback);
-    cat_menu::checkbox("Swing prediction", &config.aimbot.melee_swing_prediction);
-    cat_menu::checkbox("Predict lag", &config.aimbot.melee_swing_predict_lag);
-    cat_menu::slider_int("Swing ticks", &config.aimbot.melee_swing_ticks, 0, 14);
-    static const char* swing_validate_items[] = { "Both", "Swing", "Simulated" };
-    cat_menu::combo("Swing validation", &config.aimbot.melee_swing_validate_mode,
-      swing_validate_items, IM_ARRAYSIZE(swing_validate_items));
-  });
-  cat_menu::flow_panel("Hitscan", 1, 164.0f, [&]() {
+  cat_menu::flow_panel("Hitscan", 0, 164.0f, [&]() {
     cat_menu::multi_select_combo("Modifiers", &config.aimbot.hitscan_modifiers, hitscan_modifier_items, hitscan_modifier_bits, IM_ARRAYSIZE(hitscan_modifier_items));
     cat_menu::slider_float("Tapfire distance", &config.aimbot.tapfire_distance, 250.0f, 2000.0f, "%.0f HU");
     cat_menu::slider_float("Multipoint scale", &config.aimbot.multipoint_scale, 0.0f, 100.0f, "%.0f%%");
@@ -1051,14 +1054,74 @@ static void draw_aimbot_draw_content() {
   cat_menu::end_flow_layout();
 }
 
+static void draw_combat_weapons_content() {
+  cat_menu::begin_flow_layout("combat_weapons_layout", 2);
+  cat_menu::flow_panel("Sniper", 0, 100.0f, [&]() {
+    cat_menu::bools_combo("Scope", {
+      { "Automatic scope", &config.aimbot.sniper_auto_scope },
+      { "Automatic unscope", &config.aimbot.sniper_auto_unscope }
+    });
+    cat_menu::slider_float("Scope distance", &config.aimbot.sniper_scope_distance, 250.0f, 4000.0f, "%.0f HU");
+    cat_menu::slider_float("Scope cancel delay", &config.aimbot.sniper_scope_cancel_time, 1.0f, 5.0f, "%.1f s");
+  });
+  cat_menu::flow_panel("Melee", 0, 116.0f, [&]() {
+    cat_menu::bools_combo("Options", {
+      { "Auto backstab", &config.aimbot.melee_auto_backstab },
+      { "Ignore razorback", &config.aimbot.melee_ignore_razorback },
+      { "Swing prediction", &config.aimbot.melee_swing_prediction },
+      { "Predict lag", &config.aimbot.melee_swing_predict_lag }
+    });
+    cat_menu::slider_int("Swing ticks", &config.aimbot.melee_swing_ticks, 0, 14);
+    static const char* swing_validate_items[] = { "Both", "Swing", "Simulated" };
+    cat_menu::combo("Swing validation", &config.aimbot.melee_swing_validate_mode,
+      swing_validate_items, IM_ARRAYSIZE(swing_validate_items));
+  });
+  cat_menu::flow_panel("Heavy", 1, 80.0f, [&]() {
+    cat_menu::bools_combo("Rev", {
+      { "Heavy auto rev", &config.aimbot.auto_rev },
+      { "Heavy auto unrev", &config.aimbot.auto_unrev }
+    });
+    cat_menu::slider_float("Heavy rev threshold", &config.aimbot.auto_rev_threshold, 200.0f, 1200.0f, "%.0f HU");
+  });
+  cat_menu::flow_panel("Auto detonate", 1, 116.0f, [&]() {
+    cat_menu::bools_combo("Detonate", {
+      { "Sticky detonation", &config.auto_detonate.stickies },
+      { "Flare airburst", &config.auto_detonate.flares },
+      { "Target buildings", &config.auto_detonate.buildings },
+      { "Ignore cloaked", &config.auto_detonate.ignore_cloaked },
+      { "Don't blow me up", &config.auto_detonate.dont_blow_me_up }
+    });
+    cat_menu::slider_float("Sticky radius", &config.auto_detonate.sticky_radius, 40.0f, 400.0f, "%.0f HU");
+    cat_menu::slider_float("Flare radius", &config.auto_detonate.flare_radius, 40.0f, 400.0f, "%.0f HU");
+  });
+  cat_menu::flow_panel("Auto reflect", 1, 116.0f, [&]() {
+    cat_menu::checkbox("Enable", &config.auto_reflect.enabled);
+    cat_menu::bools_combo("Projectiles", {
+      { "Rockets", &config.auto_reflect.rockets },
+      { "Sentry rockets", &config.auto_reflect.sentry_rockets },
+      { "Pipes", &config.auto_reflect.pipes },
+      { "Stickies", &config.auto_reflect.stickies },
+      { "Flares", &config.auto_reflect.flares },
+      { "Arrows", &config.auto_reflect.arrows },
+      { "Burning teammates", &config.auto_reflect.burning_teammates }
+    });
+    cat_menu::slider_float("Range", &config.auto_reflect.range, 40.0f, 400.0f, "%.0f HU");
+    cat_menu::slider_float("FOV limit", &config.auto_reflect.fov_limit, 0.0f, 180.0f, "%.0f deg");
+  });
+  cat_menu::end_flow_layout();
+}
+
 static void draw_medic_content();
 
 static void draw_combat_tab(const int combat_subtab) {
   switch (combat_subtab) {
-    case 0:
+    case cat_menu::combat_subtab_aimbot:
       draw_aimbot_content();
       break;
-    case 1:
+    case cat_menu::combat_subtab_weapons:
+      draw_combat_weapons_content();
+      break;
+    case cat_menu::combat_subtab_overlay:
       draw_aimbot_draw_content();
       break;
   }
@@ -1227,8 +1290,9 @@ static void draw_visual_groups_content_tfwin() {
     }
   };
 
-  ImGui::BeginChild("visual_group_manager_tfwin", { profile_width, 0.0f }, ImGuiChildFlags_Border);
-  ImGui::TextUnformatted("profiles");
+  ImGui::BeginChild("visual_group_manager_tfwin", { profile_width, 0.0f }, ImGuiChildFlags_Border,
+    ImGuiWindowFlags_NoScrollWithMouse);
+  ImGui::TextUnformatted("Profiles");
   mono::group_separator();
   cat_menu::input_text("New profile", &new_group_name);
   const float content_width = ImMax(1.0f, ImGui::GetContentRegionAvail().x);
@@ -1360,7 +1424,7 @@ static void draw_visual_groups_content_tfwin() {
     ImGuiChildFlags_Border | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysAutoResize;
 
   if (ImGui::BeginChild("visual_profile_panel", { 0.0f, 0.0f }, inspector_panel_flags)) {
-    draw_panel_header("profile inspector");
+    draw_panel_header("Profile");
     cat_menu::input_text("Name", &group.name);
     cat_menu::color_picker("Profile color", &group.color);
     cat_menu::checkbox("Tags use profile color", &group.tags_override_color);
@@ -1368,13 +1432,13 @@ static void draw_visual_groups_content_tfwin() {
   end_panel();
 
   if (ImGui::BeginChild("visual_targets_panel", { 0.0f, 0.0f }, inspector_panel_flags)) {
-    draw_panel_header("targets");
+    draw_panel_header("Targets");
     cat_menu::multi_select_combo("Entity target types", &group.targets, target_items, target_bits, IM_ARRAYSIZE(target_items));
   }
   end_panel();
 
   if (ImGui::BeginChild("visual_conditions_panel", { 0.0f, 0.0f }, inspector_panel_flags)) {
-    draw_panel_header("conditions");
+    draw_panel_header("Conditions");
     cat_menu::multi_select_combo("Conditions", &group.conditions, condition_items, condition_bits, IM_ARRAYSIZE(condition_items));
     draw_visual_group_roles(group.roles);
     cat_menu::multi_select_combo("Player filters", &group.players, player_items, player_bits, IM_ARRAYSIZE(player_items));
@@ -1384,7 +1448,7 @@ static void draw_visual_groups_content_tfwin() {
   end_panel();
 
   if (ImGui::BeginChild("visual_esp_panel", { 0.0f, 0.0f }, inspector_panel_flags)) {
-    draw_panel_header("esp effects");
+    draw_panel_header("ESP");
     cat_menu::multi_select_combo("Draw", &group.esp.draw_mask, esp_items, esp_bits, IM_ARRAYSIZE(esp_items));
     cat_menu::mask_checkbox("Emoji head", &group.esp.draw_mask, group_esp_settings::head_emoji);
     cat_menu::mask_checkbox("Mafia level", &group.esp.draw_mask, group_esp_settings::mafia_level);
@@ -1407,13 +1471,13 @@ static void draw_visual_groups_content_tfwin() {
 
   materials.prepare();
   if (ImGui::BeginChild("visual_chams_visible_panel", { 0.0f, 0.0f }, inspector_panel_flags)) {
-    draw_panel_header("visible chams");
+    draw_panel_header("Visible chams");
     cat_menu::render_material_layers("Visible layers", group.chams.visible);
   }
   end_panel();
 
   if (ImGui::BeginChild("visual_glow_panel", { 0.0f, 0.0f }, inspector_panel_flags)) {
-    draw_panel_header("glow");
+    draw_panel_header("Glow");
     cat_menu::color_picker("Color", &group.glow.color);
     cat_menu::slider_float("Stencil scale", &group.glow.stencil, 0.0f, 10.0f, "%.1f");
     group.glow.stencil = std::clamp(std::round(group.glow.stencil * 10.0f) / 10.0f, 0.0f, 10.0f);
@@ -1426,13 +1490,13 @@ static void draw_visual_groups_content_tfwin() {
   end_panel();
 
   if (ImGui::BeginChild("visual_chams_occluded_panel", { 0.0f, 0.0f }, inspector_panel_flags)) {
-    draw_panel_header("behind walls chams");
+    draw_panel_header("Behind walls");
     cat_menu::render_material_layers("Behind walls layers", group.chams.occluded);
   }
   end_panel();
 
   if (ImGui::BeginChild("visual_backtrack_panel", { 0.0f, 0.0f }, inspector_panel_flags)) {
-    draw_panel_header("backtrack visuals");
+    draw_panel_header("Backtrack");
     auto& backtrack = group.backtrack_visuals;
     cat_menu::checkbox("Backtrack", &backtrack.enabled);
     static const char* backtrack_record_items[] = { "Last", "First", "All" };
@@ -1455,7 +1519,7 @@ static void draw_visual_groups_content_tfwin() {
   end_panel();
 
   if (ImGui::BeginChild("visual_advanced_panel", { 0.0f, 0.0f }, inspector_panel_flags)) {
-    draw_panel_header("advanced");
+    draw_panel_header("Advanced");
     cat_menu::checkbox("Offscreen arrows", &group.offscreen_arrows);
     cat_menu::slider_int("Arrow offset", &group.offscreen_arrows_offset, 0, 500);
     cat_menu::slider_float("Arrow max distance", &group.offscreen_arrows_max_distance, 0.0f, 8192.0f, "%.0f HU");
@@ -1501,21 +1565,25 @@ static void draw_visuals_world_content() {
   cat_menu::flow_panel("World", 0, 324.0f, [&]() {
     cat_menu::combo("Skybox", &config.visuals.skybox_changer_index,
                     skybox_changer::option_names(), skybox_changer::option_count());
-    cat_menu::checkbox("Thirdperson", &config.visuals.thirdperson.enabled);
-    cat_menu::checkbox("Thirdperson crosshair", &config.visuals.thirdperson.crosshair);
-    cat_menu::checkbox("Thirdperson collision", &config.visuals.thirdperson.collision);
+    cat_menu::bools_combo("Thirdperson", {
+      { "Thirdperson", &config.visuals.thirdperson.enabled },
+      { "Thirdperson crosshair", &config.visuals.thirdperson.crosshair },
+      { "Thirdperson collision", &config.visuals.thirdperson.collision },
+      { "Thirdperson scales", &config.visuals.thirdperson.scale }
+    });
     cat_menu::slider_float("Thirdperson distance", &config.visuals.thirdperson.distance, 0.0f, 400.0f, "%.0f HU");
     cat_menu::slider_float("Thirdperson right", &config.visuals.thirdperson.right, -100.0f, 100.0f, "%.0f HU");
     cat_menu::slider_float("Thirdperson up", &config.visuals.thirdperson.up, -100.0f, 100.0f, "%.0f HU");
-    cat_menu::checkbox("Thirdperson scales", &config.visuals.thirdperson.scale);
     cat_menu::checkbox("Override FOV", &config.visuals.override_fov);
     cat_menu::slider_float("Custom FOV", &config.visuals.custom_fov, 30.1f, 150.0f, "%.0f deg");
     cat_menu::checkbox("Override zoom FOV", &config.visuals.override_zoom_fov);
     cat_menu::slider_float("Zoom FOV", &config.visuals.custom_zoom_fov, 1.0f, 150.0f, "%.0f deg");
     cat_menu::checkbox("Override viewmodel FOV", &config.visuals.override_viewmodel_fov);
     cat_menu::slider_float("Viewmodel FOV", &config.visuals.custom_viewmodel_fov, 30.1f, 150.0f, "%.0f deg");
-    cat_menu::checkbox("ESP lerp", &config.visuals.esp_lerp);
-    cat_menu::checkbox("Dormant ESP", &config.visuals.dormant_esp);
+    cat_menu::bools_combo("ESP", {
+      { "ESP lerp", &config.visuals.esp_lerp },
+      { "Dormant ESP", &config.visuals.dormant_esp }
+    });
   });
   cat_menu::flow_panel("Color modulation", 1, 270.0f, [&]() {
     cat_menu::multi_select_combo("Modulations", &config.visuals.world.modulation_mask,
@@ -1533,10 +1601,33 @@ static void draw_visuals_world_content() {
                  IM_ARRAYSIZE(projectile_trail_items));
     string_combo("Medigun beam", config.visuals.effects.medigun_beam, beam_items, IM_ARRAYSIZE(beam_items));
     string_combo("Medigun charge", config.visuals.effects.medigun_charge, charge_items, IM_ARRAYSIZE(charge_items));
-    cat_menu::checkbox("Remove screen overlays", &config.visuals.effects.remove_screen_overlays);
-    cat_menu::checkbox("Remove screen effects", &config.visuals.effects.remove_screen_effects);
+    cat_menu::bools_combo("Remove", {
+      { "Remove screen overlays", &config.visuals.effects.remove_screen_overlays },
+      { "Remove screen effects", &config.visuals.effects.remove_screen_effects }
+    });
   });
-  cat_menu::flow_panel("Skin changer", 1, 390.0f, [&]() {
+  cat_menu::flow_panel("Removals", 1, 88.0f, [&]() {
+    cat_menu::bools_combo("Removals", {
+      { "Remove interpolation", &config.visuals.removals.interpolation },
+      { "Remove lerp", &config.visuals.removals.lerp },
+      { "Remove scope", &config.visuals.removals.scope },
+      { "Remove zoom", &config.visuals.removals.zoom },
+      { "Flat scoped sensitivity", &config.visuals.flat_zoom_sensitivity },
+      { "Remove disguises", &config.visuals.removals.disguises },
+      { "Remove taunts", &config.visuals.removals.taunts },
+      { "Remove post-processing", &config.visuals.removals.post_processing },
+      { "Remove view punch", &config.visuals.removals.view_punch },
+      { "Remove angle forcing", &config.visuals.removals.angle_forcing },
+      { "Remove ragdolls", &config.visuals.removals.ragdolls },
+      { "Remove gibs", &config.visuals.removals.gibs }
+    });
+  });
+  cat_menu::end_flow_layout();
+}
+
+static void draw_visuals_models_content() {
+  cat_menu::begin_flow_layout("visuals_models_layout", 2);
+  cat_menu::flow_panel("Skin changer", 0, 390.0f, [&]() {
     cat_menu::checkbox("Enable skin changer", &config.visuals.skin_changer.enabled);
     cat_menu::checkbox("Reskin to stock variants", &config.visuals.skin_changer.reskin);
 
@@ -1597,20 +1688,6 @@ static void draw_visuals_world_content() {
       skin_changer::set(skin_key, override_skin);
     }
   });
-  cat_menu::flow_panel("Removals", 1, 250.0f, [&]() {
-    cat_menu::checkbox("Remove interpolation", &config.visuals.removals.interpolation);
-    cat_menu::checkbox("Remove lerp", &config.visuals.removals.lerp);
-    cat_menu::checkbox("Remove scope", &config.visuals.removals.scope);
-    cat_menu::checkbox("Remove zoom", &config.visuals.removals.zoom);
-    cat_menu::checkbox("Flat scoped sensitivity", &config.visuals.flat_zoom_sensitivity);
-    cat_menu::checkbox("Remove disguises", &config.visuals.removals.disguises);
-    cat_menu::checkbox("Remove taunts", &config.visuals.removals.taunts);
-    cat_menu::checkbox("Remove post-processing", &config.visuals.removals.post_processing);
-    cat_menu::checkbox("Remove view punch", &config.visuals.removals.view_punch);
-    cat_menu::checkbox("Remove angle forcing", &config.visuals.removals.angle_forcing);
-    cat_menu::checkbox("Remove ragdolls", &config.visuals.removals.ragdolls);
-    cat_menu::checkbox("Remove gibs", &config.visuals.removals.gibs);
-  });
   cat_menu::end_flow_layout();
 }
 
@@ -1633,11 +1710,11 @@ static void draw_visuals_ui_content() {
   cat_menu::begin_flow_layout("visuals_ui_layout", 2);
   cat_menu::flow_panel("Indicators", 0, 228.0f, [&]() {
     cat_menu::multi_select_combo("Visible widgets", &config.visuals.indicators.enabled_mask, indicator_items, indicator_bits, IM_ARRAYSIZE(indicator_items));
-    cat_menu::color_picker("Tickbase bar", &config.visuals.indicators.tickbase_bar_color);
-    cat_menu::color_picker("Crit hack bar", &config.visuals.indicators.crit_hack_bar_color);
-    cat_menu::checkbox("Show spectator target", &config.visuals.spectator_list.show_target);
-    cat_menu::checkbox("Show spectator modes", &config.visuals.spectator_list.show_modes);
-    cat_menu::checkbox("Highlight firstperson", &config.visuals.spectator_list.highlight_firstperson);
+    cat_menu::bools_combo("Spectators", {
+      { "Show spectator target", &config.visuals.spectator_list.show_target },
+      { "Show spectator modes", &config.visuals.spectator_list.show_modes },
+      { "Highlight firstperson", &config.visuals.spectator_list.highlight_firstperson }
+    });
     cat_menu::color_picker("Firstperson color", &config.visuals.spectator_list.firstperson_color);
   });
   cat_menu::flow_panel("Feedback", 1, 188.0f, [&]() {
@@ -1654,12 +1731,7 @@ static void draw_visuals_ui_content() {
     cat_menu::checkbox("Change displayed rank", &config.visuals.casual_medal.changer);
     cat_menu::slider_int("Displayed rank", &config.visuals.casual_medal.rank, 1, 1200);
   });
-  cat_menu::end_flow_layout();
-}
-
-static void draw_radar_content() {
-  cat_menu::begin_flow_layout("radar_layout", 2);
-  cat_menu::flow_panel("Radar settings", 0, 356.0f, [&]() {
+  cat_menu::flow_panel("Radar", 1, 356.0f, [&]() {
     cat_menu::checkbox("Enable radar", &config.visuals.radar.enabled);
     cat_menu::slider_float("Radar X", &config.visuals.radar.x, 0.0f, 1920.0f, "%.0f px");
     cat_menu::slider_float("Radar Y", &config.visuals.radar.y, 0.0f, 1080.0f, "%.0f px");
@@ -1678,8 +1750,10 @@ static void draw_radar_content() {
     if (ImGui::IsItemHovered()) {
       ImGui::SetTooltip("Evenly spaced distance rings, 0 to turn them off.\nSpacing is in radar pixels, so the rings stay put while zoom\nchanges what distance they represent.");
     }
-    cat_menu::checkbox("Show teammates", &config.visuals.radar.show_teammates);
-    cat_menu::checkbox("Show enemies", &config.visuals.radar.show_enemies);
+    cat_menu::bools_combo("Players", {
+      { "Show teammates", &config.visuals.radar.show_teammates },
+      { "Show enemies", &config.visuals.radar.show_enemies }
+    });
   });
   cat_menu::end_flow_layout();
 }
@@ -1688,17 +1762,17 @@ static void draw_navbot_content();
 
 static void draw_visuals_tab(const int visuals_subtab) {
   switch (visuals_subtab) {
-    case cat_menu::visuals_subtab_entity_profiles:
+    case cat_menu::visuals_subtab_profiles:
       draw_visual_groups_content();
       break;
-    case cat_menu::visuals_subtab_indicators:
+    case cat_menu::visuals_subtab_world:
+      draw_visuals_world_content();
+      break;
+    case cat_menu::visuals_subtab_hud:
       draw_visuals_ui_content();
       break;
-    case cat_menu::visuals_subtab_radar:
-      draw_radar_content();
-      break;
-    case cat_menu::visuals_subtab_other:
-      draw_visuals_world_content();
+    case cat_menu::visuals_subtab_models:
+      draw_visuals_models_content();
       break;
   }
 }
@@ -1722,21 +1796,27 @@ static void draw_movement_content() {
     cat_menu::combo("Auto strafe", (int*)&config.misc.movement.auto_strafe, auto_strafe_items, IM_ARRAYSIZE(auto_strafe_items));
     cat_menu::slider_float("Strafe turn scale", &config.misc.movement.auto_strafe_turn_scale, 0.0f, 1.0f, "%.2f");
     cat_menu::slider_float("Strafe max delta", &config.misc.movement.auto_strafe_max_delta, 0.0f, 180.0f, "%.0f deg");
-    cat_menu::checkbox("Edge jump", &config.misc.movement.edge_jump);
-    cat_menu::checkbox("Jumpbug", &config.misc.movement.jumpbug);
-    cat_menu::checkbox("Duck jump", &config.misc.movement.duck_jump);
-    cat_menu::checkbox("Break jump", &config.misc.movement.break_jump);
-    cat_menu::checkbox("Auto reverse jump", &config.misc.movement.auto_reverse_jump);
+    cat_menu::bools_combo("Jumps", {
+      { "Edge jump", &config.misc.movement.edge_jump },
+      { "Jumpbug", &config.misc.movement.jumpbug },
+      { "Duck jump", &config.misc.movement.duck_jump },
+      { "Break jump", &config.misc.movement.break_jump },
+      { "Auto reverse jump", &config.misc.movement.auto_reverse_jump }
+    });
   });
   cat_menu::flow_panel("Movement extras", 1, 220.0f, [&]() {
-    cat_menu::checkbox("Fast stop", &config.misc.movement.fast_stop);
-    cat_menu::checkbox("Fast accelerate", &config.misc.movement.fast_accelerate);
+    cat_menu::bools_combo("Assist", {
+      { "Fast stop", &config.misc.movement.fast_stop },
+      { "Fast accelerate", &config.misc.movement.fast_accelerate },
+      { "No push", &config.misc.movement.no_push },
+      { "Taunt slide", &config.misc.movement.taunt_slide }
+    });
     cat_menu::combo("Auto edgebug", (int*)&config.misc.movement.auto_edgebug, auto_edgebug_items, IM_ARRAYSIZE(auto_edgebug_items));
-    cat_menu::checkbox("No push", &config.misc.movement.no_push);
-    cat_menu::checkbox("Taunt slide", &config.misc.movement.taunt_slide);
-    cat_menu::checkbox("Moonwalk", &config.misc.movement.moonwalk);
-    cat_menu::checkbox("Moonwalk forward", &config.misc.movement.moonwalk_forward);
-    cat_menu::checkbox("Moonwalk navbot compat", &config.misc.movement.moonwalk_navbot_compat);
+    cat_menu::bools_combo("Moonwalk", {
+      { "Moonwalk", &config.misc.movement.moonwalk },
+      { "Moonwalk forward", &config.misc.movement.moonwalk_forward },
+      { "Moonwalk navbot compat", &config.misc.movement.moonwalk_navbot_compat }
+    });
   });
   cat_menu::end_flow_layout();
 }
@@ -1794,11 +1874,15 @@ static void draw_navbot_content() {
     };
     cat_menu::combo("Behavior", (int*)&config.misc.automation.navbot_behavior,
       navbot_behavior_items, IM_ARRAYSIZE(navbot_behavior_items));
-    cat_menu::checkbox("Draw path", &config.misc.automation.navbot_draw_path);
-    cat_menu::checkbox("Draw path boxes", &config.misc.automation.navbot_draw_path_boxes);
+    cat_menu::bools_combo("Draw", {
+      { "Draw path", &config.misc.automation.navbot_draw_path },
+      { "Draw path boxes", &config.misc.automation.navbot_draw_path_boxes }
+    });
     cat_menu::color_picker("Path color", &config.misc.automation.navbot_path_color);
-    cat_menu::checkbox("Don't path during warmup", &config.misc.automation.navbot_dont_path_during_warmup);
-    cat_menu::checkbox("Dynamic hazards", &config.misc.automation.navbot_hazards);
+    cat_menu::bools_combo("Options", {
+      { "Don't path during warmup", &config.misc.automation.navbot_dont_path_during_warmup },
+      { "Dynamic hazards", &config.misc.automation.navbot_hazards }
+    });
     static const char* navbot_weapon_selection_items[] = {
       "Off",
       "Auto",
@@ -1846,8 +1930,10 @@ static void draw_navbot_content() {
       followbot_preference_items, IM_ARRAYSIZE(followbot_preference_items));
     cat_menu::combo("Look at path", (int*)&config.misc.automation.followbot_look,
       followbot_look_items, IM_ARRAYSIZE(followbot_look_items));
-    cat_menu::checkbox("Avoid view snap", &config.misc.automation.followbot_look_no_snap);
-    cat_menu::checkbox("Ignore AFK targets", &config.misc.automation.followbot_ignore_afk);
+    cat_menu::bools_combo("Options", {
+      { "Avoid view snap", &config.misc.automation.followbot_look_no_snap },
+      { "Ignore AFK targets", &config.misc.automation.followbot_ignore_afk }
+    });
     cat_menu::slider_int("Min priority", &config.misc.automation.followbot_min_priority, 0, 10);
     cat_menu::slider_int("Max path nodes", &config.misc.automation.followbot_max_nodes, 50, 500);
     cat_menu::slider_float("Activation distance", &config.misc.automation.followbot_activation_distance, 10.0f, 1200.0f, "%.0f HU");
@@ -1872,9 +1958,11 @@ static void draw_medic_content() {
 
   cat_menu::begin_flow_layout("medic_layout", 2);
   cat_menu::flow_panel("Medic", 0, 184.0f, [&]() {
-    cat_menu::checkbox("Autoheal", &config.misc.automation.medic_autoheal);
-    cat_menu::checkbox("Autovacc", &config.misc.automation.medic_autovacc);
-    cat_menu::checkbox("Autouber", &config.misc.automation.medic_autouber);
+    cat_menu::bools_combo("Assist", {
+      { "Autoheal", &config.misc.automation.medic_autoheal },
+      { "Autovacc", &config.misc.automation.medic_autovacc },
+      { "Autouber", &config.misc.automation.medic_autouber }
+    });
     cat_menu::multi_select_combo("Heal targets", &config.misc.automation.medic_heal_targets_mask, heal_target_items, heal_target_bits, IM_ARRAYSIZE(heal_target_items));
   });
   cat_menu::end_flow_layout();
@@ -1941,14 +2029,54 @@ static void draw_chat_content() {
   cat_menu::flow_panel("Chat spam", 0, 166.0f, [&]() {
     cat_menu::combo("Chatspam", (int*)&config.misc.automation.chatspam, chatspam_items, IM_ARRAYSIZE(chatspam_items));
     cat_menu::input_text("Spam file", &config.misc.automation.chatspam_file);
-    cat_menu::checkbox("Random order", &config.misc.automation.chatspam_random);
-    cat_menu::checkbox("Team chat", &config.misc.automation.chatspam_team);
+    cat_menu::bools_combo("Options", {
+      { "Random order", &config.misc.automation.chatspam_random },
+      { "Team chat", &config.misc.automation.chatspam_team }
+    });
     cat_menu::slider_int("Spam delay", &config.misc.automation.chatspam_delay_ms, 250, 60000);
   });
   cat_menu::flow_panel("Killsay", 1, 128.0f, [&]() {
     cat_menu::combo("Killsay", (int*)&config.misc.automation.killsay, killsay_items, IM_ARRAYSIZE(killsay_items));
     cat_menu::input_text("Killsay file", &config.misc.automation.killsay_file);
     cat_menu::slider_int("Killsay delay", &config.misc.automation.killsay_delay_ms, 0, 10000);
+  });
+  const char* voice_command_spam_items[] = {
+    "Off",
+    "Random",
+    "Medic",
+    "Thanks",
+    "Nice Shot",
+    "Cheers",
+    "Jeers",
+    "Go Go Go",
+    "Move Up",
+    "Go Left",
+    "Go Right",
+    "Yes",
+    "No",
+    "Incoming",
+    "Spy",
+    "Sentry Ahead",
+    "Need Teleporter",
+    "Pootis",
+    "Need Sentry",
+    "Activate Charge",
+    "Help",
+    "Battle Cry"
+  };
+  cat_menu::flow_panel("Spam", 0, 200.0f, [&]() {
+    cat_menu::checkbox("Noisemaker spam", &config.misc.automation.noisemaker_spam);
+    cat_menu::combo("Voice command spam", (int*)&config.misc.automation.voice_command_spam, voice_command_spam_items, IM_ARRAYSIZE(voice_command_spam_items));
+    cat_menu::checkbox("Micspam", &config.misc.automation.micspam);
+    cat_menu::slider_int("Micspam on", &config.misc.automation.micspam_interval_on_seconds, 1, 600, "%d s");
+    cat_menu::slider_int("Micspam off", &config.misc.automation.micspam_interval_off_seconds, 1, 600, "%d s");
+    cat_menu::checkbox("Micspam from file", &config.misc.automation.micspam_from_file);
+  });
+  cat_menu::flow_panel("Taunt", 1, 128.0f, [&]() {
+    cat_menu::checkbox("Auto taunt", &config.misc.automation.autotaunt);
+    cat_menu::slider_float("Taunt chance", &config.misc.automation.autotaunt_chance, 0.0f, 100.0f, "%.0f%%");
+    cat_menu::slider_float("Taunt safety distance", &config.misc.automation.autotaunt_safety_distance, 0.0f, 5000.0f, "%.0f HU");
+    cat_menu::slider_int("Taunt weapon slot", &config.misc.automation.autotaunt_weapon_slot, 0, 5);
   });
   cat_menu::end_flow_layout();
 }
@@ -1986,16 +2114,20 @@ static void draw_queue_content() {
       cat_menu::combo("Boost", (int*)&config.misc.automation.boost_queue, boost_queue_mode_items, IM_ARRAYSIZE(boost_queue_mode_items));
       return;
     }
-    cat_menu::checkbox("Auto queue", &config.misc.automation.auto_queue);
-    cat_menu::checkbox("Auto requeue", &config.misc.automation.auto_requeue);
-    cat_menu::checkbox("Requeue on kick", &config.misc.automation.requeue_on_kick);
-    cat_menu::checkbox("Auto casual join", &config.misc.automation.auto_casual_join);
+    cat_menu::bools_combo("Queue", {
+      { "Auto queue", &config.misc.automation.auto_queue },
+      { "Auto requeue", &config.misc.automation.auto_requeue },
+      { "Requeue on kick", &config.misc.automation.requeue_on_kick },
+      { "Auto casual join", &config.misc.automation.auto_casual_join }
+    });
     cat_menu::combo("Queue mode", &config.misc.automation.auto_queue_mode, queue_mode_items, IM_ARRAYSIZE(queue_mode_items));
     cat_menu::slider_int("RQ if players <", &config.misc.automation.rq_if_players_lte, 0, 32);
     cat_menu::slider_int("RQ if players >", &config.misc.automation.rq_if_players_gte, 0, 32);
     cat_menu::slider_int("RQ if IPC bots >", &config.misc.automation.rq_if_ipc_bots_gt, 0, 32);
-    cat_menu::checkbox("RQ if no navmesh", &config.misc.automation.rq_if_no_navmesh);
-    cat_menu::checkbox("RQ ignore friends", &config.misc.automation.rq_ignore_friends);
+    cat_menu::bools_combo("Requeue", {
+      { "RQ if no navmesh", &config.misc.automation.rq_if_no_navmesh },
+      { "RQ ignore friends", &config.misc.automation.rq_ignore_friends }
+    });
     cat_menu::combo("Requeue action", (int*)&config.misc.automation.requeue_action, requeue_action_items, IM_ARRAYSIZE(requeue_action_items));
   });
   cat_menu::flow_panel("Region selector", 0, 390.0f, [&]() {
@@ -2005,112 +2137,28 @@ static void draw_queue_content() {
     cat_menu::checkbox("Enable", &config.misc.automation.autoparty);
     cat_menu::slider_int("Max party size", &config.misc.automation.autoparty_max_party_size, 1, 6);
     cat_menu::input_text("Hosts (Steam32 IDs)", &config.misc.automation.autoparty_party_hosts);
-    cat_menu::checkbox("Kick cheaters", &config.misc.automation.autoparty_kick_rage);
-    cat_menu::checkbox("Auto leave on offline member", &config.misc.automation.autoparty_auto_leave);
-    cat_menu::checkbox("Auto lock", &config.misc.automation.autoparty_auto_lock);
-    cat_menu::checkbox("Auto unlock", &config.misc.automation.autoparty_auto_unlock);
-    cat_menu::checkbox("Log", &config.misc.automation.autoparty_log);
-    cat_menu::checkbox("Message kicks to party", &config.misc.automation.autoparty_message_kicks);
-    cat_menu::checkbox("IPC mode", &config.misc.automation.autoparty_ipc_mode);
+    cat_menu::bools_combo("Options", {
+      { "Kick cheaters", &config.misc.automation.autoparty_kick_rage },
+      { "Auto leave on offline member", &config.misc.automation.autoparty_auto_leave },
+      { "Auto lock", &config.misc.automation.autoparty_auto_lock },
+      { "Auto unlock", &config.misc.automation.autoparty_auto_unlock },
+      { "Log", &config.misc.automation.autoparty_log },
+      { "Message kicks to party", &config.misc.automation.autoparty_message_kicks },
+      { "IPC mode", &config.misc.automation.autoparty_ipc_mode }
+    });
     cat_menu::slider_int("IPC host count", &config.misc.automation.autoparty_ipc_count, 0, 8);
     cat_menu::slider_int("Run every", &config.misc.automation.autoparty_run_frequency, 5, 300, "%d s");
   });
-  cat_menu::end_flow_layout();
-}
-
-static void draw_automation_utilities_content() {
   const char* class_items[] = { "Undefined", "Scout", "Sniper", "Soldier", "Demoman", "Medic", "Heavy", "Pyro", "Spy", "Engineer" };
-  const char* voice_command_spam_items[] = {
-    "Off",
-    "Random",
-    "Medic",
-    "Thanks",
-    "Nice Shot",
-    "Cheers",
-    "Jeers",
-    "Go Go Go",
-    "Move Up",
-    "Go Left",
-    "Go Right",
-    "Yes",
-    "No",
-    "Incoming",
-    "Spy",
-    "Sentry Ahead",
-    "Need Teleporter",
-    "Pootis",
-    "Need Sentry",
-    "Activate Charge",
-    "Help",
-    "Battle Cry"
-  };
-
-  cat_menu::begin_flow_layout("automation_utilities_layout", 2);
-  cat_menu::flow_panel("Class", 0, 104.0f, [&]() {
-    cat_menu::checkbox("Auto class select", &config.misc.automation.auto_class_select);
-    cat_menu::combo("Preferred class", (int*)&config.misc.automation.class_selected, class_items, IM_ARRAYSIZE(class_items));
-    cat_menu::checkbox("Don't join class during warmup", &config.misc.automation.auto_class_dont_join_during_warmup);
-  });
-  cat_menu::flow_panel("General", 0, 190.0f, [&]() {
-    cat_menu::checkbox("Anti AFK", &config.misc.automation.anti_afk);
-    cat_menu::checkbox("Anti autobalance", &config.misc.automation.anti_autobalance);
-    cat_menu::checkbox("Anti MOTD", &config.misc.automation.anti_motd);
-    cat_menu::checkbox("Don't close MOTD during warmup", &config.misc.automation.anti_motd_dont_close_during_warmup);
-    cat_menu::checkbox("Auto report", &config.misc.automation.auto_report);
-    cat_menu::checkbox("Auto vote map", &config.misc.automation.auto_vote_map);
-    cat_menu::slider_int("Vote option", &config.misc.automation.auto_vote_map_option, 0, 2);
-    static const char* auto_vote_items[] = {"Defend", "Assist", "Kick", "Kick all"};
-    static const uint32_t auto_vote_bits[] = {
-      Misc::Automation::auto_vote_defend, Misc::Automation::auto_vote_assist,
-      Misc::Automation::auto_vote_kick, Misc::Automation::auto_vote_kick_all};
-    cat_menu::multi_select_combo("Auto vote", &config.misc.automation.auto_vote,
-                                 auto_vote_items, auto_vote_bits, IM_ARRAYSIZE(auto_vote_items));
-    cat_menu::checkbox("Auto vote delay", &config.misc.automation.auto_vote_delay);
-    cat_menu::slider_float("Vote delay min", &config.misc.automation.auto_vote_delay_min, 0.0f, 30.0f, "%.1f s");
-    cat_menu::slider_float("Vote delay max", &config.misc.automation.auto_vote_delay_max, 0.0f, 30.0f, "%.1f s");
-    cat_menu::checkbox("Killstreak", &config.misc.automation.killstreak);
-    cat_menu::checkbox("Custom announcer", &config.misc.automation.custom_announcer);
-  });
-  static const char* cheat_detection_items[] = {
-    "Invalid pitch", "Packet choking", "Aim flick", "Duck speed", "Lag-comp abuse", "Crit manipulation"};
-  static const uint32_t cheat_detection_bits[] = {
-    Misc::CheatDetection::method_invalid_pitch, Misc::CheatDetection::method_packet_choking,
-    Misc::CheatDetection::method_aim_flick, Misc::CheatDetection::method_duck_speed,
-    Misc::CheatDetection::method_lagcomp_abuse, Misc::CheatDetection::method_crit_manipulation};
-  cat_menu::flow_panel("Cheat detection", 1, 190.0f, [&]() {
-    cat_menu::multi_select_combo("Methods", &config.misc.cheat_detection.methods,
-                                 cheat_detection_items, cheat_detection_bits, IM_ARRAYSIZE(cheat_detection_items));
-    cat_menu::slider_int("Detections to mark", &config.misc.cheat_detection.detections_required, 1, 20);
-    cat_menu::slider_float("Min flick", &config.misc.cheat_detection.min_flick, 1.0f, 180.0f, "%.0f deg");
-    cat_menu::slider_float("Max noise", &config.misc.cheat_detection.max_noise, 0.0f, 45.0f, "%.1f deg");
-    cat_menu::slider_int("Min choking ticks", &config.misc.cheat_detection.min_choking_ticks, 2, 128);
-    cat_menu::slider_int("Lag-comp min delta", &config.misc.cheat_detection.lagcomp_min_delta, 2, 64);
-    cat_menu::slider_float("Lag-comp window", &config.misc.cheat_detection.lagcomp_window, 0.1f, 10.0f, "%.1f s");
-    cat_menu::slider_int("Lag-comp bursts", &config.misc.cheat_detection.lagcomp_burst_count, 1, 16);
-    cat_menu::slider_int("Crit window", &config.misc.cheat_detection.crit_window, 2, 200);
-    cat_menu::slider_float("Crit threshold", &config.misc.cheat_detection.crit_threshold, 1.0f, 100.0f, "%.0f%%");
-  });
-  cat_menu::flow_panel("Spam", 1, 200.0f, [&]() {
-    cat_menu::checkbox("Noisemaker spam", &config.misc.automation.noisemaker_spam);
-    cat_menu::combo("Voice command spam", (int*)&config.misc.automation.voice_command_spam, voice_command_spam_items, IM_ARRAYSIZE(voice_command_spam_items));
-    cat_menu::checkbox("Micspam", &config.misc.automation.micspam);
-    cat_menu::slider_int("Micspam on", &config.misc.automation.micspam_interval_on_seconds, 1, 600, "%d s");
-    cat_menu::slider_int("Micspam off", &config.misc.automation.micspam_interval_off_seconds, 1, 600, "%d s");
-    cat_menu::checkbox("Micspam from file", &config.misc.automation.micspam_from_file);
-  });
-  cat_menu::flow_panel("Taunt", 1, 128.0f, [&]() {
-    cat_menu::checkbox("Auto taunt", &config.misc.automation.autotaunt);
-    cat_menu::slider_float("Taunt chance", &config.misc.automation.autotaunt_chance, 0.0f, 100.0f, "%.0f%%");
-    cat_menu::slider_float("Taunt safety distance", &config.misc.automation.autotaunt_safety_distance, 0.0f, 5000.0f, "%.0f HU");
-    cat_menu::slider_int("Taunt weapon slot", &config.misc.automation.autotaunt_weapon_slot, 0, 5);
-  });
   cat_menu::flow_panel("MvM", 1, 268.0f, [&]() {
-    cat_menu::checkbox("Instant respawn", &config.misc.automation.mvm_instant_respawn);
-    cat_menu::checkbox("Instant revive", &config.misc.automation.mvm_instant_revive);
-    cat_menu::checkbox("Allow inspect", &config.misc.automation.allow_mvm_inspect);
-    cat_menu::checkbox("Auto ready up", &config.misc.automation.auto_mvm_ready_up);
-    cat_menu::checkbox("Auto abandon Mann Up", &config.misc.automation.auto_mvm_abandon_mannup);
-    cat_menu::checkbox("Buybot", &config.misc.automation.mvm_buybot);
+    cat_menu::bools_combo("MvM", {
+      { "Instant respawn", &config.misc.automation.mvm_instant_respawn },
+      { "Instant revive", &config.misc.automation.mvm_instant_revive },
+      { "Allow inspect", &config.misc.automation.allow_mvm_inspect },
+      { "Auto ready up", &config.misc.automation.auto_mvm_ready_up },
+      { "Auto abandon Mann Up", &config.misc.automation.auto_mvm_abandon_mannup },
+      { "Buybot", &config.misc.automation.mvm_buybot }
+    });
     cat_menu::slider_int("Buybot max cash", &config.misc.automation.mvm_buybot_max_cash, 0, 50000);
     cat_menu::checkbox("Buybot auto class", &config.misc.automation.mvm_buybot_auto_class);
     cat_menu::combo("Buybot class", (int*)&config.misc.automation.mvm_buybot_class,
@@ -2133,6 +2181,61 @@ static void draw_automation_utilities_content() {
         config.misc.automation.mvm_chat_commands_role = chat_role_ids[chat_role_index];
       }
     }
+  });
+  cat_menu::end_flow_layout();
+}
+
+static void draw_automation_utilities_content() {
+  const char* class_items[] = { "Undefined", "Scout", "Sniper", "Soldier", "Demoman", "Medic", "Heavy", "Pyro", "Spy", "Engineer" };
+
+  cat_menu::begin_flow_layout("automation_utilities_layout", 2);
+  cat_menu::flow_panel("Class", 0, 104.0f, [&]() {
+    cat_menu::checkbox("Auto class select", &config.misc.automation.auto_class_select);
+    cat_menu::combo("Preferred class", (int*)&config.misc.automation.class_selected, class_items, IM_ARRAYSIZE(class_items));
+    cat_menu::checkbox("Don't join class during warmup", &config.misc.automation.auto_class_dont_join_during_warmup);
+  });
+  cat_menu::flow_panel("General", 0, 190.0f, [&]() {
+    cat_menu::bools_combo("General", {
+      { "Anti AFK", &config.misc.automation.anti_afk },
+      { "Anti autobalance", &config.misc.automation.anti_autobalance },
+      { "Anti MOTD", &config.misc.automation.anti_motd },
+      { "Don't close MOTD during warmup", &config.misc.automation.anti_motd_dont_close_during_warmup },
+      { "Auto report", &config.misc.automation.auto_report },
+      { "Auto vote map", &config.misc.automation.auto_vote_map }
+    });
+    cat_menu::slider_int("Vote option", &config.misc.automation.auto_vote_map_option, 0, 2);
+    static const char* auto_vote_items[] = {"Defend", "Assist", "Kick", "Kick all"};
+    static const uint32_t auto_vote_bits[] = {
+      Misc::Automation::auto_vote_defend, Misc::Automation::auto_vote_assist,
+      Misc::Automation::auto_vote_kick, Misc::Automation::auto_vote_kick_all};
+    cat_menu::multi_select_combo("Auto vote", &config.misc.automation.auto_vote,
+                                 auto_vote_items, auto_vote_bits, IM_ARRAYSIZE(auto_vote_items));
+    cat_menu::checkbox("Auto vote delay", &config.misc.automation.auto_vote_delay);
+    cat_menu::slider_float("Vote delay min", &config.misc.automation.auto_vote_delay_min, 0.0f, 30.0f, "%.1f s");
+    cat_menu::slider_float("Vote delay max", &config.misc.automation.auto_vote_delay_max, 0.0f, 30.0f, "%.1f s");
+    cat_menu::bools_combo("Extras", {
+      { "Killstreak", &config.misc.automation.killstreak },
+      { "Custom announcer", &config.misc.automation.custom_announcer }
+    });
+  });
+  static const char* cheat_detection_items[] = {
+    "Invalid pitch", "Packet choking", "Aim flick", "Duck speed", "Lag-comp abuse", "Crit manipulation"};
+  static const uint32_t cheat_detection_bits[] = {
+    Misc::CheatDetection::method_invalid_pitch, Misc::CheatDetection::method_packet_choking,
+    Misc::CheatDetection::method_aim_flick, Misc::CheatDetection::method_duck_speed,
+    Misc::CheatDetection::method_lagcomp_abuse, Misc::CheatDetection::method_crit_manipulation};
+  cat_menu::flow_panel("Cheat detection", 1, 190.0f, [&]() {
+    cat_menu::multi_select_combo("Methods", &config.misc.cheat_detection.methods,
+                                 cheat_detection_items, cheat_detection_bits, IM_ARRAYSIZE(cheat_detection_items));
+    cat_menu::slider_int("Detections to mark", &config.misc.cheat_detection.detections_required, 1, 20);
+    cat_menu::slider_float("Min flick", &config.misc.cheat_detection.min_flick, 1.0f, 180.0f, "%.0f deg");
+    cat_menu::slider_float("Max noise", &config.misc.cheat_detection.max_noise, 0.0f, 45.0f, "%.1f deg");
+    cat_menu::slider_int("Min choking ticks", &config.misc.cheat_detection.min_choking_ticks, 2, 128);
+    cat_menu::slider_int("Lag-comp min rewind", &config.misc.cheat_detection.lagcomp_min_delta, 2, 64);
+    cat_menu::slider_float("Lag-comp window", &config.misc.cheat_detection.lagcomp_window, 0.1f, 30.0f, "%.1f s");
+    cat_menu::slider_int("Lag-comp bursts", &config.misc.cheat_detection.lagcomp_burst_count, 1, 16);
+    cat_menu::slider_int("Crit window", &config.misc.cheat_detection.crit_window, 2, 200);
+    cat_menu::slider_float("Crit threshold", &config.misc.cheat_detection.crit_threshold, 1.0f, 100.0f, "%.0f%%");
   });
   cat_menu::flow_panel("Profile presence", 0, 280.0f, [&]() {
     cat_menu::checkbox("Enable", &config.misc.automation.stalker_enabled);
@@ -2239,9 +2342,11 @@ static void draw_ipc_content() {
 
   cat_menu::begin_flow_layout("ipc_layout", 2);
   cat_menu::flow_panel("Connection", 0, 156.0f, [&]() {
-    cat_menu::checkbox("Enable IPC", &config.ipc.enabled);
-    cat_menu::checkbox("Auto connect", &config.ipc.auto_connect);
-    cat_menu::checkbox("Auto ignore local bots", &config.ipc.auto_ignore_local_bots);
+    cat_menu::bools_combo("Connection", {
+      { "Enable IPC", &config.ipc.enabled },
+      { "Auto connect", &config.ipc.auto_connect },
+      { "Auto ignore local bots", &config.ipc.auto_ignore_local_bots }
+    });
 #if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
 
     config.ipc.enabled = true;
@@ -2302,7 +2407,8 @@ static void draw_automation_tab(const int automation_subtab) {
   switch (automation_subtab) {
     case cat_menu::automation_subtab_general: draw_automation_utilities_content(); break;
     case cat_menu::automation_subtab_queue: draw_queue_content(); break;
-    case cat_menu::automation_subtab_items_chat: draw_autoitem_content(); draw_chat_content(); break;
+    case cat_menu::automation_subtab_chat: draw_chat_content(); break;
+    case cat_menu::automation_subtab_items: draw_autoitem_content(); break;
     case cat_menu::automation_subtab_navbot: draw_navbot_content(); break;
     case cat_menu::automation_subtab_medic: draw_medic_content(); break;
     case cat_menu::automation_subtab_ipc: draw_ipc_content(); break;
@@ -2355,22 +2461,26 @@ static void draw_exploits_content() {
     ImGui::BeginDisabled(!config.backtrack.fake_interp);
     cat_menu::slider_float("Interpolation", &config.backtrack.interp_ms, 0.0f, 1000.0f, "%.0f ms");
     ImGui::EndDisabled();
-    cat_menu::checkbox("Prefer on shot", &config.backtrack.prefer_on_shot);
-    cat_menu::checkbox("Backtrack to crosshair", &config.backtrack.to_crosshair);
+    cat_menu::bools_combo("Aim", {
+      { "Prefer on shot", &config.backtrack.prefer_on_shot },
+      { "Backtrack to crosshair", &config.backtrack.to_crosshair }
+    });
     cat_menu::slider_int("Tick offset", &config.backtrack.offset_ticks, -4, 4, "%d ticks");
     cat_menu::checkbox("Visualizer", &config.backtrack.visualizer);
     cat_menu::combo("Visualizer style", (int*)&config.backtrack.visualizer_mode, backtrack_visualizer_items, IM_ARRAYSIZE(backtrack_visualizer_items));
     cat_menu::slider_int("Ticks", &config.backtrack.visualizer_ticks, 1, 80);
   });
 
-  cat_menu::flow_panel("Bypasses", 1, 224.0f, [&]() {
-    cat_menu::checkbox("Bypass sv_pure", &config.misc.exploits.bypasspure);
-    cat_menu::checkbox("Pure bypass", &config.misc.exploits.pure_bypass);
-    cat_menu::checkbox("Cheats bypass", &config.misc.exploits.cheats_bypass);
-    cat_menu::checkbox("VAC bypass", &config.misc.exploits.vac_bypass);
-    cat_menu::checkbox("Network fix", &config.misc.exploits.network_fix);
-    cat_menu::checkbox("No engine sleep", &config.misc.exploits.no_engine_sleep);
-    cat_menu::checkbox("Null graphics", &config.misc.exploits.null_graphics);
+  cat_menu::flow_panel("Bypasses", 1, 88.0f, [&]() {
+    cat_menu::bools_combo("Bypasses", {
+      { "Bypass sv_pure", &config.misc.exploits.bypasspure },
+      { "Pure bypass", &config.misc.exploits.pure_bypass },
+      { "Cheats bypass", &config.misc.exploits.cheats_bypass },
+      { "VAC bypass", &config.misc.exploits.vac_bypass },
+      { "Network fix", &config.misc.exploits.network_fix },
+      { "No engine sleep", &config.misc.exploits.no_engine_sleep },
+      { "Null graphics", &config.misc.exploits.null_graphics }
+    });
   });
   cat_menu::flow_panel("Tickbase", 1, 224.0f, [&]() {
     cat_menu::checkbox("Tickbase", &config.misc.exploits.tickbase);
@@ -2384,9 +2494,11 @@ static void draw_exploits_content() {
     cat_menu::checkbox("Antiwarp", &config.misc.exploits.antiwarp);
   });
   cat_menu::flow_panel("Engine", 0, 118.0f, [&]() {
-    cat_menu::checkbox("Equip region unlock", &config.misc.exploits.equip_region_unlock);
-    cat_menu::checkbox("Anti-cheat compat", &config.misc.exploits.anti_cheat_compat);
-    cat_menu::checkbox("Ping reducer", &config.misc.exploits.ping_reducer);
+    cat_menu::bools_combo("Engine", {
+      { "Equip region unlock", &config.misc.exploits.equip_region_unlock },
+      { "Anti-cheat compat", &config.misc.exploits.anti_cheat_compat },
+      { "Ping reducer", &config.misc.exploits.ping_reducer }
+    });
     cat_menu::slider_int("Ping target", &config.misc.exploits.ping_target, 1, 100);
   });
   cat_menu::flow_panel("Anti-aim", 1, 286.0f, [&]() {
@@ -2575,156 +2687,357 @@ static void draw_system_tab(const int system_subtab) {
 #include "player_window.hpp"
 
 static void draw_binds_content() {
-  static uint32_t selected_id{};
-
   std::lock_guard lock{cat_bind::bind_mutex()};
-  if (cat_bind::find_entry(selected_id) == nullptr && !cat_bind::entries().empty()) {
-    selected_id = cat_bind::entries().front().id;
-  }
 
-  const float left_width = std::max(220.0f, ImGui::GetContentRegionAvail().x * 0.36f);
-  mono::begin_transparent_child("bind_tree_column", { left_width, 0.0f });
-  if (ImGui::BeginChild("bind_tree", { 0.0f, 0.0f }, ImGuiChildFlags_Border)) {
-    ImGui::TextUnformatted("binds");
-    mono::group_separator();
-    if (mono::button("add root bind", { -1.0f, 0.0f })) {
-      selected_id = cat_bind::add_and_capture_key();
-    }
-    for (const cat_bind::bind_entry& bind : cat_bind::entries()) {
-      std::string label = bind.name;
-      label += "  [";
-      label += bind.condition == cat_bind::bind_condition::key ? get_button_name(bind.key) : cat_bind::condition_label(bind.condition);
-      label += "]";
-      ImGui::PushID(static_cast<int>(bind.id));
-      ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (bind.parent_id ? 18.0f : 0.0f));
-      if (cat_menu::list_row(label.c_str(), selected_id == bind.id, { 0.0f, 24.0f })) {
-        selected_id = bind.id;
-      }
-      ImGui::PopID();
-    }
-  }
-  ImGui::EndChild();
-  ImGui::EndChild();
-  ImGui::SameLine();
+  static uint32_t selected_id{};
+  static cat_bind::bind_entry draft{};
+  static int picking_parent{};
+  static uint32_t dragging_id{};
+  static uint32_t dragging_parent{};
 
-  if (ImGui::BeginChild("bind_editor", { 0.0f, 0.0f }, ImGuiChildFlags_Border)) {
-    cat_bind::bind_entry* bind = cat_bind::find_entry(selected_id);
-    if (bind == nullptr) {
-      ImGui::TextDisabled("Select or create a bind.");
-    } else if (bind != nullptr) {
-      ImGui::PushID(static_cast<int>(bind->id));
-      ImGui::TextUnformatted("bind editor");
-      mono::group_separator();
-      if (mono::input_string("Name", &bind->name)) cat_bind::mark_dirty();
-      const std::vector<std::pair<std::string, int>> conditions{
-        { "key", 0 }, { "class", 1 }, { "weapon type", 2 }, { "item slot", 3 }, { "misc", 4 }
-      };
-      int condition = static_cast<int>(bind->condition);
-      if (mono::select_single("Condition", &condition, conditions)) {
-        bind->condition = static_cast<cat_bind::bind_condition>(condition);
-        bind->condition_value = 0;
-        cat_bind::mark_dirty();
+  if (cat_bind::find_entry(selected_id) == nullptr) selected_id = 0;
+  if (picking_parent) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+  if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) dragging_id = 0;
+
+  const auto class_items = std::vector<std::pair<std::string, int>>{
+    { "Scout", static_cast<int>(tf_class::SCOUT) },
+    { "Soldier", static_cast<int>(tf_class::SOLDIER) },
+    { "Pyro", static_cast<int>(tf_class::PYRO) },
+    { "Demoman", static_cast<int>(tf_class::DEMOMAN) },
+    { "Heavy", static_cast<int>(tf_class::HEAVYWEAPONS) },
+    { "Engineer", static_cast<int>(tf_class::ENGINEER) },
+    { "Medic", static_cast<int>(tf_class::MEDIC) },
+    { "Sniper", static_cast<int>(tf_class::SNIPER) },
+    { "Spy", static_cast<int>(tf_class::SPY) }
+  };
+  const auto copy_fields = [](cat_bind::bind_entry& dest, const cat_bind::bind_entry& src) {
+    dest.name = src.name;
+    dest.condition = src.condition;
+    dest.key_mode = src.key_mode;
+    dest.key = src.key;
+    dest.condition_value = src.condition_value;
+    dest.inverted = src.inverted;
+    dest.visibility = src.visibility;
+    dest.enabled = src.enabled;
+  };
+  const auto reset_form = [&] {
+    selected_id = 0;
+    draft = {};
+    picking_parent = 0;
+  };
+  const auto apply_condition_change = [](cat_bind::bind_entry& bind) {
+    if (bind.condition == cat_bind::bind_condition::player_class && bind.condition_value == 0) {
+      bind.condition_value = static_cast<int>(tf_class::SCOUT);
+    } else if (bind.condition != cat_bind::bind_condition::player_class && bind.condition != cat_bind::bind_condition::key) {
+      if (bind.condition == cat_bind::bind_condition::item_slot) bind.condition_value = std::clamp(bind.condition_value, 0, 8);
+      else if (bind.condition == cat_bind::bind_condition::weapon_type) bind.condition_value = std::clamp(bind.condition_value, 0, 3);
+      else bind.condition_value = std::clamp(bind.condition_value, 0, 4);
+    }
+  };
+  const auto draw_condition_fields = [&](cat_bind::bind_entry& bind) {
+    bool changed = false;
+    int type = static_cast<int>(bind.condition);
+    if (mono::select_single("Type", &type, { { "Key", 0 }, { "Class", 1 }, { "Weapon type", 2 }, { "Item slot", 3 }, { "Misc", 4 } })) {
+      bind.condition = static_cast<cat_bind::bind_condition>(type);
+      bind.condition_value = bind.condition == cat_bind::bind_condition::player_class ? static_cast<int>(tf_class::SCOUT) : 0;
+      bind.toggle_state = false;
+      bind.was_down = false;
+      bind.press_pending = false;
+      changed = true;
+    }
+    apply_condition_change(bind);
+    switch (bind.condition) {
+    case cat_bind::bind_condition::key:
+    {
+      int mode = static_cast<int>(bind.key_mode);
+      if (mono::select_single("Behavior", &mode, { { "Hold", 0 }, { "Toggle", 1 }, { "Double click", 2 } })) {
+        bind.key_mode = static_cast<cat_bind::bind_key_mode>(mode);
+        bind.toggle_state = false;
+        bind.was_down = false;
+        bind.press_pending = false;
+        changed = true;
       }
-      if (bind->condition == cat_bind::bind_condition::key) {
-        const std::vector<std::pair<std::string, int>> modes{
-          { "hold", 0 }, { "toggle", 1 }, { "double click", 2 }
-        };
-        int mode = static_cast<int>(bind->key_mode);
-        if (mono::select_single("Behavior", &mode, modes)) {
-          bind->key_mode = static_cast<cat_bind::bind_key_mode>(mode);
-          bind->toggle_state = false;
-          bind->was_down = false;
-          bind->press_pending = false;
+      break;
+    }
+    case cat_bind::bind_condition::player_class:
+      changed = mono::select_single("Class", &bind.condition_value, class_items) || changed;
+      break;
+    case cat_bind::bind_condition::weapon_type:
+      changed = mono::select_single("Weapon type", &bind.condition_value, { { "Hitscan", 0 }, { "Projectile", 1 }, { "Melee", 2 }, { "Throwable", 3 } }) || changed;
+      break;
+    case cat_bind::bind_condition::item_slot:
+    {
+      std::vector<std::pair<std::string, int>> slots{};
+      for (int slot{}; slot < 9; ++slot) slots.emplace_back(std::to_string(slot + 1), slot);
+      changed = mono::select_single("Item slot", &bind.condition_value, slots) || changed;
+      break;
+    }
+    case cat_bind::bind_condition::misc:
+      changed = mono::select_single("Misc", &bind.condition_value, { { "Spectated", 0 }, { "Spectated 1st", 1 }, { "Spectated 3rd", 2 }, { "Zoomed", 3 }, { "Aiming", 4 } }) || changed;
+      break;
+    }
+    return changed;
+  };
+
+  cat_menu::begin_flow_layout("bind_settings_layout", 1);
+  cat_menu::flow_panel("Settings", 0, 92.0f, [&] {
+    if (ImGui::BeginTable("bind_window_settings", 3, ImGuiTableFlags_SizingStretchSame)) {
+      ImGui::TableNextColumn();
+      if (mono::toggle("Bind window", &config.misc.menu.bind_window)) {}
+      ImGui::TableNextColumn();
+      if (mono::toggle("Bind window title", &config.misc.menu.bind_window_title)) {}
+      ImGui::TableNextColumn();
+      if (mono::toggle("Menu shows binds", &config.misc.menu.menu_shows_binds)) {}
+      ImGui::EndTable();
+    }
+  });
+  cat_menu::end_flow_layout();
+
+  mono::begin_panel("Binds", { 0.0f, 0.0f });
+  if (ImGui::BeginTable("bind_form", 2, ImGuiTableFlags_SizingStretchSame)) {
+    ImGui::TableNextColumn();
+    if (mono::input_string("Name", &draft.name)) {}
+    {
+      const cat_bind::bind_entry* parent = cat_bind::find_entry(draft.parent_id);
+      std::string parent_label = "Parent: ";
+      parent_label += picking_parent ? "..." : parent != nullptr ? parent->name : "None";
+      if (mono::button(parent_label.c_str(), { -1.0f, 22.0f })) picking_parent = 2;
+    }
+    draw_condition_fields(draft);
+
+    ImGui::TableNextColumn();
+    int invert = draft.inverted ? 1 : 0;
+    if (mono::select_single("While", &invert, { { "Active", 0 }, { "Not active", 1 } })) draft.inverted = invert != 0;
+    int visibility = static_cast<int>(draft.visibility);
+    if (mono::select_single("Visibility", &visibility, { { "Always", 0 }, { "While active", 1 }, { "Hidden", 2 } })) {
+      draft.visibility = static_cast<cat_bind::bind_visibility>(visibility);
+    }
+    if (draft.condition == cat_bind::bind_condition::key) {
+      if (draft.waiting) ImGui::TextDisabled("Press a key or mouse button...");
+      else cat_menu::input_key("Key", &draft.key);
+    }
+
+    const bool modifying = selected_id != 0 && cat_bind::find_entry(selected_id) != nullptr;
+    const bool parent_ok = draft.parent_id == 0 || cat_bind::find_entry(draft.parent_id) != nullptr;
+    const bool can_create = parent_ok && (draft.condition != cat_bind::bind_condition::key || draft.key != SDLK_UNKNOWN);
+    ImGui::BeginDisabled(!can_create);
+    if (cat_menu::icon_button(modifying ? ICON_MD_SETTINGS : ICON_MD_ADD, { 28.0f, 28.0f })) {
+      if (modifying) {
+        if (cat_bind::bind_entry* live = cat_bind::find_entry(selected_id)) {
+          copy_fields(*live, draft);
+          cat_bind::reparent(selected_id, draft.parent_id);
           cat_bind::mark_dirty();
-        }
-        if (bind->waiting) {
-          ImGui::TextDisabled("Press a key or mouse button...");
-        } else {
-          const int previous_key = bind->key;
-          if (cat_menu::input_key("Key", &bind->key) && previous_key != bind->key) {
-            bind->toggle_state = false;
-            bind->was_down = false;
-            bind->press_pending = false;
-            cat_bind::mark_dirty();
-          }
         }
       } else {
-        std::vector<std::pair<std::string, int>> values;
-        if (bind->condition == cat_bind::bind_condition::player_class) {
-          values = { { "scout", static_cast<int>(tf_class::SCOUT) }, { "sniper", static_cast<int>(tf_class::SNIPER) }, { "soldier", static_cast<int>(tf_class::SOLDIER) }, { "demoman", static_cast<int>(tf_class::DEMOMAN) }, { "medic", static_cast<int>(tf_class::MEDIC) }, { "heavy", static_cast<int>(tf_class::HEAVYWEAPONS) }, { "pyro", static_cast<int>(tf_class::PYRO) }, { "spy", static_cast<int>(tf_class::SPY) }, { "engineer", static_cast<int>(tf_class::ENGINEER) } };
-        } else if (bind->condition == cat_bind::bind_condition::weapon_type) {
-          values = { { "hitscan", 0 }, { "projectile", 1 }, { "melee", 2 }, { "throwable", 3 } };
-        } else if (bind->condition == cat_bind::bind_condition::item_slot) {
-          for (int slot{}; slot < 9; ++slot) values.emplace_back(std::to_string(slot + 1), slot);
-        } else {
-          values = { { "spectated", 0 }, { "spectated 1st", 1 }, { "spectated 3rd", 2 }, { "zoomed", 3 }, { "aiming", 4 } };
-        }
-        int value = bind->condition_value;
-        if (mono::select_single("Value", &value, values)) {
-          bind->condition_value = value;
-          cat_bind::mark_dirty();
-        }
+        const uint32_t id = cat_bind::add(draft.name.empty() ? "new bind" : draft.name, draft.parent_id);
+        if (cat_bind::bind_entry* live = cat_bind::find_entry(id)) copy_fields(*live, draft);
       }
-      if (mono::toggle("Enabled", &bind->enabled)) cat_bind::mark_dirty();
-      if (mono::toggle("Invert", &bind->inverted)) cat_bind::mark_dirty();
-      const std::vector<std::pair<std::string, int>> visibility{
-        { "always", 0 }, { "while active", 1 }, { "hidden", 2 }
+      reset_form();
+    }
+    ImGui::SetItemTooltip(modifying ? "Modify bind" : "Create bind");
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (cat_menu::icon_button(ICON_MD_CLEAR, { 28.0f, 28.0f })) reset_form();
+    ImGui::SetItemTooltip("Clear");
+    ImGui::EndTable();
+  }
+
+  ImGui::Dummy(ImVec2(0.0f, 6.0f));
+  ImGui::TextDisabled("Binds");
+  mono::group_separator();
+
+  struct bind_row_hit
+  {
+    uint32_t id{};
+    uint32_t parent{};
+    float min_y{};
+    float max_y{};
+  };
+  std::vector<bind_row_hit> hits{};
+  bool clicked_bind = false;
+  uint32_t delete_id{};
+
+  const std::function<void(uint32_t, int)> draw_tree = [&](const uint32_t parent, const int depth) {
+    for (cat_bind::bind_entry& bind : cat_bind::entries()) {
+      if (bind.parent_id != parent) continue;
+      ImGui::PushID(static_cast<int>(bind.id));
+      const float indent = 8.0f + 28.0f * static_cast<float>(std::min(depth, 3));
+      const float height = 28.0f;
+      const float width = std::max(80.0f, ImGui::GetContentRegionAvail().x - indent);
+      ImGui::SetCursorPosX(ImGui::GetCursorPosX() + indent);
+      const ImVec2 row_min = ImGui::GetCursorScreenPos();
+      ImDrawList* draw_list = ImGui::GetWindowDrawList();
+      const bool selected = selected_id == bind.id;
+      const ImVec4 background = selected ? ImGui::GetStyleColorVec4(ImGuiCol_FrameBgHovered) : ImGui::GetStyleColorVec4(ImGuiCol_FrameBg);
+      draw_list->AddRectFilled(row_min, { row_min.x + width, row_min.y + height }, ImGui::ColorConvertFloat4ToU32(background), 4.0f);
+      if (selected) {
+        draw_list->AddRect(row_min, { row_min.x + width, row_min.y + height }, ImGui::GetColorU32(ImGuiCol_CheckMark), 4.0f);
+      }
+
+      std::string type{};
+      std::string info{};
+      cat_bind::describe_bind(bind, type, info);
+      const float icon_strip = 125.0f;
+      const float text_width = std::max(24.0f, width - icon_strip);
+      const bool enabled_path = cat_bind::will_be_enabled(bind.id);
+      const ImU32 name_color = ImGui::GetColorU32(bind.active ? ImGuiCol_CheckMark : enabled_path ? ImGuiCol_Text : ImGuiCol_TextDisabled);
+      const ImU32 detail_color = ImGui::GetColorU32(enabled_path ? ImGuiCol_Text : ImGuiCol_TextDisabled);
+      draw_list->AddText({ row_min.x + 8.0f, row_min.y + 7.0f }, name_color, cat_menu::truncate_ui_text(bind.name, text_width / 3.0f - 8.0f).c_str());
+      draw_list->AddText({ row_min.x + text_width / 3.0f, row_min.y + 7.0f }, detail_color, type.c_str());
+      draw_list->AddText({ row_min.x + text_width * 2.0f / 3.0f, row_min.y + 7.0f }, detail_color, info.c_str());
+
+      ImGui::InvisibleButton("##row", { width - icon_strip, height });
+      const bool row_clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
+      const bool row_right = ImGui::IsItemClicked(ImGuiMouseButton_Right);
+      const bool row_hovered = ImGui::IsItemHovered();
+      hits.push_back({ bind.id, bind.parent_id, row_min.y, row_min.y + height });
+
+      float icon_x = width - 24.0f;
+      const auto place_icon = [&](const char* icon) {
+        ImGui::SetCursorScreenPos({ row_min.x + icon_x, row_min.y + 3.0f });
+        icon_x -= 25.0f;
+        return cat_menu::icon_button(icon, { 22.0f, 22.0f });
       };
-      int visible = static_cast<int>(bind->visibility);
-      if (mono::select_single("Indicator", &visible, visibility)) {
-        bind->visibility = static_cast<cat_bind::bind_visibility>(visible);
+      ImGui::SetCursorScreenPos({ row_min.x + width - 125.0f, row_min.y });
+      const bool pressed_delete = place_icon(ICON_MD_DELETE);
+      if (place_icon(ICON_MD_EDIT)) {
+        cat_bind::set_editing(cat_bind::editing() == bind.id ? 0 : bind.id);
+      }
+      if (place_icon(bind.inverted ? ICON_MD_CODE_OFF : ICON_MD_CODE)) {
+        bind.inverted = !bind.inverted;
+        if (selected_id == bind.id) draft.inverted = bind.inverted;
         cat_bind::mark_dirty();
       }
-      std::vector<std::pair<std::string, int>> parents{ { "root", 0 } };
-      std::vector<uint32_t> parent_ids{ 0 };
-      for (const cat_bind::bind_entry& candidate : cat_bind::entries()) {
-        if (candidate.id != bind->id) {
-          parents.emplace_back(candidate.name, static_cast<int>(parents.size()));
-          parent_ids.push_back(candidate.id);
+      if (place_icon(bind.visibility == cat_bind::bind_visibility::always ? ICON_MD_VISIBILITY : ICON_MD_VISIBILITY_OFF)) {
+        bind.visibility = static_cast<cat_bind::bind_visibility>((static_cast<int>(bind.visibility) + 1) % 3);
+        if (selected_id == bind.id) draft.visibility = bind.visibility;
+        cat_bind::mark_dirty();
+      }
+      if (place_icon(bind.enabled ? ICON_MD_TOGGLE_ON : ICON_MD_TOGGLE_OFF)) {
+        bind.enabled = !bind.enabled;
+        if (selected_id == bind.id) draft.enabled = bind.enabled;
+        cat_bind::mark_dirty();
+      }
+
+      if (row_clicked) {
+        clicked_bind = true;
+        if (!picking_parent) {
+          selected_id = bind.id;
+          draft = bind;
+        } else {
+          picking_parent = 0;
+          if (selected_id == 0 || !cat_bind::would_cycle_parent(selected_id, bind.id)) draft.parent_id = bind.id;
+          else draft.parent_id = 0;
+        }
+      } else if (row_right) {
+        ImGui::OpenPopup("RightClicked");
+      } else if (dragging_id == 0 && row_hovered && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+        dragging_id = bind.id;
+        dragging_parent = bind.parent_id;
+      }
+
+      if (pressed_delete) {
+        if ((bind.overrides.empty() && !cat_bind::has_children(bind.id)) || ImGui::GetIO().KeyShift) {
+          delete_id = bind.id;
+        } else {
+          ImGui::OpenPopup("DeleteBind");
         }
       }
-      int parent_index{};
-      for (size_t index{}; index < parent_ids.size(); ++index) if (parent_ids[index] == bind->parent_id) parent_index = static_cast<int>(index);
-      if (mono::select_single("Parent", &parent_index, parents)) cat_bind::reparent(bind->id, parent_ids[static_cast<size_t>(parent_index)]);
 
-      ImGui::SeparatorText("Feature overrides");
-      if (bind->overrides.empty()) ImGui::TextDisabled("No feature values assigned. Use edit feature values, then click a setting.");
-      std::string override_to_clear{};
-      for (const auto& [target_key, value] : bind->overrides) {
-        const cat_bind::target_entry* target = cat_bind::find_target(target_key);
-        ImGui::Text("%s", target != nullptr ? target->label.c_str() : target_key.c_str());
-        const std::string value_text = std::visit([](const auto& item) -> std::string {
-          using item_type = std::decay_t<decltype(item)>;
-          if constexpr (std::is_same_v<item_type, std::string>) return item;
-          else if constexpr (std::is_same_v<item_type, RGBA_float>) return "color";
-          else return std::to_string(item);
-        }, value);
+      if (ImGui::BeginPopup("RightClicked")) {
+        static uint32_t rename_id{};
+        static std::string rename{};
+        if (rename_id != bind.id) {
+          rename_id = bind.id;
+          rename = bind.name;
+        }
+        bool changed = false;
+        if (mono::input_string("Name", &rename)) {
+          bind.name = rename;
+          changed = true;
+        }
+        changed = draw_condition_fields(bind) || changed;
+        if (bind.condition == cat_bind::bind_condition::key && cat_menu::input_key("Key", &bind.key)) changed = true;
+        if (changed) {
+          if (selected_id == bind.id) copy_fields(draft, bind);
+          cat_bind::mark_dirty();
+        }
+        ImGui::EndPopup();
+      }
+      if (ImGui::BeginPopupModal("DeleteBind", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Do you really want to delete '%s'%s?", bind.name.c_str(), cat_bind::has_children(bind.id) ? " and all of its children" : "");
+        if (mono::button("Yes", { 80.0f, 22.0f })) {
+          delete_id = bind.id;
+          ImGui::CloseCurrentPopup();
+        }
         ImGui::SameLine();
-        ImGui::TextDisabled("= %s", value_text.c_str());
-        ImGui::SameLine();
-        ImGui::PushID(target_key.c_str());
-        if (ImGui::SmallButton("clear")) override_to_clear = target_key;
-        ImGui::PopID();
+        if (mono::button("No", { 80.0f, 22.0f })) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
       }
 
-      if (!override_to_clear.empty()) cat_bind::clear_override(bind->id, override_to_clear);
-      if (cat_bind::editing() == bind->id) {
-        if (mono::button("done editing")) cat_bind::set_editing(0);
-      } else if (mono::button("edit feature values")) {
-        cat_bind::set_editing(bind->id);
-      }
-      ImGui::SameLine();
-      if (mono::button("add child")) selected_id = cat_bind::add_and_capture_key("new bind", bind->id);
-      ImGui::SameLine();
-      if (mono::button("delete bind", {}, true)) {
-        const uint32_t id = bind->id;
-        cat_bind::remove(id);
-        selected_id = 0;
-      }
+      ImGui::SetCursorScreenPos({ row_min.x, row_min.y + height + 6.0f });
+      ImGui::Dummy(ImVec2(0.0f, 0.0f));
       ImGui::PopID();
+      if (depth < 32) draw_tree(bind.id, depth + 1);
+    }
+  };
+  draw_tree(0, 0);
+
+  std::vector<uint32_t> dangling{};
+  for (const cat_bind::bind_entry& bind : cat_bind::entries()) {
+    if (bind.parent_id != 0 && cat_bind::find_entry(bind.parent_id) == nullptr) dangling.push_back(bind.id);
+  }
+  if (!dangling.empty()) {
+    ImGui::TextDisabled("Dangling");
+    for (const uint32_t id : dangling) {
+      if (cat_bind::bind_entry* bind = cat_bind::find_entry(id)) bind->parent_id = 0;
+    }
+    cat_bind::mark_dirty();
+  }
+
+  if (dragging_id != 0) {
+    const float mouse_y = ImGui::GetIO().MousePos.y;
+    for (const bind_row_hit& hit : hits) {
+      if (hit.parent == dragging_parent && hit.id != dragging_id && mouse_y >= hit.min_y && mouse_y < hit.max_y) {
+        cat_bind::move(dragging_id, hit.id);
+        break;
+      }
     }
   }
-  ImGui::EndChild();
+
+  if (delete_id != 0) {
+    if (selected_id == delete_id) reset_form();
+    if (cat_bind::editing() == delete_id) cat_bind::set_editing(0);
+    cat_bind::remove(delete_id);
+  }
+
+  if (picking_parent == 2) picking_parent = 1;
+  else if (picking_parent && ImGui::IsMouseReleased(ImGuiMouseButton_Left) && !clicked_bind) {
+    picking_parent = 0;
+    draft.parent_id = 0;
+  }
+
+  if (cat_bind::bind_entry* selected = cat_bind::find_entry(selected_id)) {
+    ImGui::Dummy(ImVec2(0.0f, 8.0f));
+    ImGui::TextDisabled("Feature overrides");
+    if (selected->overrides.empty()) {
+      ImGui::TextDisabled("No feature values assigned. Click the edit icon, then click a setting.");
+    }
+    std::string override_to_clear{};
+    for (const auto& [target_key, value] : selected->overrides) {
+      const cat_bind::target_entry* target = cat_bind::find_target(target_key);
+      ImGui::BulletText("%s = %s", target != nullptr ? target->label.c_str() : target_key.c_str(), cat_bind::format_bind_value(value).c_str());
+      ImGui::SameLine();
+      ImGui::PushID(target_key.c_str());
+      if (ImGui::SmallButton("clear")) override_to_clear = target_key;
+      ImGui::PopID();
+    }
+    if (!override_to_clear.empty()) cat_bind::clear_override(selected->id, override_to_clear);
+    if (cat_bind::editing() == selected->id) {
+      if (mono::button("done editing", { 160.0f, 22.0f })) cat_bind::set_editing(0);
+    }
+  }
+  mono::end_panel();
 }
 
 enum cathook_tab_id
@@ -2778,18 +3091,21 @@ static void warmup_bind_targets()
   ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.0f);
   cat_bind::target_registration_scope registration{};
 
-  draw_combat_tab(0);
-  draw_combat_tab(1);
+  draw_combat_tab(cat_menu::combat_subtab_aimbot);
+  draw_combat_tab(cat_menu::combat_subtab_weapons);
+  draw_combat_tab(cat_menu::combat_subtab_overlay);
   draw_automation_tab(cat_menu::automation_subtab_general);
   draw_automation_tab(cat_menu::automation_subtab_queue);
-  draw_automation_tab(cat_menu::automation_subtab_items_chat);
+  draw_automation_tab(cat_menu::automation_subtab_chat);
+  draw_automation_tab(cat_menu::automation_subtab_items);
   draw_automation_tab(cat_menu::automation_subtab_navbot);
   draw_automation_tab(cat_menu::automation_subtab_medic);
   draw_automation_tab(cat_menu::automation_subtab_ipc);
   draw_exploits_content();
-  draw_visuals_tab(cat_menu::visuals_subtab_indicators);
-  draw_visuals_tab(cat_menu::visuals_subtab_radar);
-  draw_visuals_tab(cat_menu::visuals_subtab_other);
+  draw_visuals_tab(cat_menu::visuals_subtab_profiles);
+  draw_visuals_tab(cat_menu::visuals_subtab_world);
+  draw_visuals_tab(cat_menu::visuals_subtab_hud);
+  draw_visuals_tab(cat_menu::visuals_subtab_models);
   draw_movement_content();
 
   int& selected_group = cat_menu::selected_visual_group();
@@ -2798,7 +3114,7 @@ static void warmup_bind_targets()
   for (int index = 0; index < group_count; ++index) {
     selected_group = index;
     ImGui::PushID(index);
-    draw_visuals_tab(cat_menu::visuals_subtab_entity_profiles);
+    draw_visuals_tab(cat_menu::visuals_subtab_profiles);
     ImGui::PopID();
   }
   selected_group = previous_group;
@@ -2836,52 +3152,61 @@ static void draw_menu(void) {
       .preferred_size = cat_menu::k_menu_size,
       .navbar_height = 42.0f,
       .subnavbar_height = 32.0f,
-      .show_subnavbar = tab != cathook_tab_exploits && tab != cathook_tab_binds,
+      .show_subnavbar = tab != cathook_tab_exploits && tab != cathook_tab_binds && tab != cathook_tab_misc,
       .viewport_padding = 8.0f,
       .background_alpha = 0.80f
     },
     menu_state,
     [&] {
       auto select = [&](const cathook_tab_id value, const char* const label, const char* const icon) {
-        if (navbar_entry(label, tab == value, icon)) tab = value;
+        if (navbar_entry(label, tab == value, icon) && tab != value) {
+          tab = value;
+          menu_state.reset_scroll = true;
+        }
       };
 
-      select(cathook_tab_aimbot, "Aimbot", ICON_MD_GPS_FIXED);
+      select(cathook_tab_aimbot, "Combat", ICON_MD_GPS_FIXED);
       select(cathook_tab_automation, "Automation", ICON_MD_AUTORENEW);
       select(cathook_tab_exploits, "Exploits", ICON_MD_BOLT);
       select(cathook_tab_visuals, "Visuals", ICON_MD_VISIBILITY);
-      select(cathook_tab_misc, "Miscellaneous", ICON_MD_TUNE);
+      select(cathook_tab_misc, "Movement", ICON_MD_DIRECTIONS_RUN);
       select(cathook_tab_binds, "Binds", ICON_MD_VPN_KEY);
       select(cathook_tab_settings, "Settings", ICON_MD_SETTINGS);
     },
     [&] {
+      const auto select_section = [&](int& current, const int value, const char* const label) {
+        if (subnavbar_entry(label, current == value) && current != value) {
+          current = value;
+          menu_state.reset_scroll = true;
+        }
+      };
       switch (tab) {
       case cathook_tab_aimbot:
-        if (subnavbar_entry("Main", aimbot_section == 0)) aimbot_section = 0;
-        if (subnavbar_entry("Draw", aimbot_section == 1)) aimbot_section = 1;
+        select_section(aimbot_section, cat_menu::combat_subtab_aimbot, "Aimbot");
+        select_section(aimbot_section, cat_menu::combat_subtab_weapons, "Weapons");
+        select_section(aimbot_section, cat_menu::combat_subtab_overlay, "Overlay");
         break;
       case cathook_tab_automation:
-        if (subnavbar_entry("General", automation_section == cat_menu::automation_subtab_general)) automation_section = cat_menu::automation_subtab_general;
-        if (subnavbar_entry("Queue", automation_section == cat_menu::automation_subtab_queue)) automation_section = cat_menu::automation_subtab_queue;
-        if (subnavbar_entry("Items & chat", automation_section == cat_menu::automation_subtab_items_chat)) automation_section = cat_menu::automation_subtab_items_chat;
-        if (subnavbar_entry("Navbot", automation_section == cat_menu::automation_subtab_navbot)) automation_section = cat_menu::automation_subtab_navbot;
-        if (subnavbar_entry("Medic", automation_section == cat_menu::automation_subtab_medic)) automation_section = cat_menu::automation_subtab_medic;
-        if (subnavbar_entry("IPC", automation_section == cat_menu::automation_subtab_ipc)) automation_section = cat_menu::automation_subtab_ipc;
+        select_section(automation_section, cat_menu::automation_subtab_general, "General");
+        select_section(automation_section, cat_menu::automation_subtab_queue, "Queue");
+        select_section(automation_section, cat_menu::automation_subtab_chat, "Chat");
+        select_section(automation_section, cat_menu::automation_subtab_items, "Items");
+        select_section(automation_section, cat_menu::automation_subtab_navbot, "Navbot");
+        select_section(automation_section, cat_menu::automation_subtab_medic, "Medic");
+        select_section(automation_section, cat_menu::automation_subtab_ipc, "IPC");
         break;
       case cathook_tab_visuals:
-        if (subnavbar_entry("Entity profiles", visuals_section == 0)) visuals_section = 0;
-        if (subnavbar_entry("Indicators", visuals_section == 1)) visuals_section = 1;
-        if (subnavbar_entry("Radar", visuals_section == 2)) visuals_section = 2;
-        if (subnavbar_entry("Other", visuals_section == 3)) visuals_section = 3;
-        break;
-      case cathook_tab_misc:
-        subnavbar_entry("Movement", true);
+        select_section(visuals_section, cat_menu::visuals_subtab_profiles, "Profiles");
+        select_section(visuals_section, cat_menu::visuals_subtab_world, "World");
+        select_section(visuals_section, cat_menu::visuals_subtab_hud, "HUD");
+        select_section(visuals_section, cat_menu::visuals_subtab_models, "Models");
         break;
       case cathook_tab_settings:
-        if (subnavbar_entry("Configurations", settings_section == 0)) settings_section = 0;
-        if (subnavbar_entry("Materials", settings_section == 1)) settings_section = 1;
-        if (subnavbar_entry("Interface", settings_section == 2)) settings_section = 2;
+        select_section(settings_section, 0, "Configurations");
+        select_section(settings_section, 1, "Materials");
+        select_section(settings_section, 2, "Interface");
         break;
+      case cathook_tab_misc:
       case cathook_tab_exploits:
       case cathook_tab_binds:
         break;
@@ -2913,7 +3238,7 @@ static void draw_menu(void) {
       {
         .id = "cathook_player_manager##mono_menu",
         .title = "Player Manager",
-        .preferred_size = { 640.0f, 460.0f },
+        .preferred_size = { 720.0f, 540.0f },
         .show_subnavbar = false,
         .viewport_padding = 8.0f,
         .background_alpha = 0.80f

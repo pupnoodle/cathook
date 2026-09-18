@@ -12,12 +12,15 @@ void model_render_draw_model_execute_hook(void* me, const DrawModelState& state,
 {
   CATHOOK_HOOK_GUARD();
 
+  if (nographics::is_enabled()) {
+    return;
+  }
+
   Entity* entity = entity_list != nullptr && info.entity_index > 0
     ? entity_list->entity_from_index(static_cast<unsigned int>(info.entity_index))
     : nullptr;
-  const bool nographics_drop = nographics::is_enabled();
-  const bool drop_ragdolls = config.visuals.removals.ragdolls || nographics_drop;
-  const bool drop_gibs = config.visuals.removals.gibs || nographics_drop;
+  const bool drop_ragdolls = config.visuals.removals.ragdolls;
+  const bool drop_gibs = config.visuals.removals.gibs;
   if (drop_ragdolls || drop_gibs) {
     const char* network_name = entity != nullptr ? entity->get_network_name() : nullptr;
     const char* model_name = info.model != nullptr ? info.model->name : nullptr;

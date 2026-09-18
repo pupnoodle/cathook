@@ -28,7 +28,6 @@ V  o o  V  file: src/features/automation/nographics/nographics.cpp
 #include "games/tf2/sdk/interfaces/client.hpp"
 #include "games/tf2/sdk/interfaces/file_system.hpp"
 #include "games/tf2/sdk/interfaces/material_system.hpp"
-#include "funchook/funchook.h"
 #include "libsigscan/libsigscan.h"
 #if defined(__linux__)
 #include <dlfcn.h>
@@ -46,6 +45,7 @@ namespace
 
 constexpr int file_system_find_first_index = 27;
 constexpr int file_system_find_next_index = 28;
+constexpr int file_system_find_first_ex_index = 31;
 constexpr int file_system_async_read_multiple_index = 37;
 constexpr int file_system_open_ex_index = 69;
 constexpr int file_system_read_file_ex_index = 71;
@@ -55,10 +55,11 @@ constexpr int base_file_system_precache_index = 9;
 constexpr int base_file_system_read_file_index = 14;
 constexpr std::uintptr_t base_file_system_vptr_offset = sizeof(void*);
 constexpr int fs_async_err_fileopen = -1;
-constexpr int client_hud_update_index = 11;
+constexpr int client_invalidate_mdl_cache_index = 64;
 
 using find_first_fn = const char* (*)(void*, const char*, file_find_handle_t*);
 using find_next_fn = const char* (*)(void*, file_find_handle_t);
+using find_first_ex_fn = const char* (*)(void*, const char*, const char*, file_find_handle_t*);
 using open_ex_fn = file_handle_t (*)(void*, const char*, const char*, unsigned int, const char*, char**);
 using read_file_ex_fn = int (*)(void*, const char*, const char*, void**, bool, bool, int, int, void*);
 using add_files_to_cache_fn = void (*)(void*, file_cache_handle_t, const char**, int, const char*);
@@ -88,6 +89,7 @@ using async_read_multiple_fn = int (*)(void*, const file_async_request*, int, vo
 
 find_first_fn find_first_original = nullptr;
 find_next_fn find_next_original = nullptr;
+find_first_ex_fn find_first_ex_original = nullptr;
 async_read_multiple_fn async_read_multiple_original = nullptr;
 open_ex_fn open_ex_original = nullptr;
 read_file_ex_fn read_file_ex_original = nullptr;
@@ -216,7 +218,7 @@ struct render_patch
 
 render_patch render_patches[] = {
   { {}, cathook::core::modules::tf_client, sigs::particle_property_create, 0, { 0x31, 0xC0, 0xC3 }, "particle_property_create", false },
-  { {}, cathook::core::modules::tf_client, sigs::play_sequence, 0, { 0xC3 }, "play_sequence", false },
+  { {}, cathook::core::modules::tf_client, sigs::play_sequence, 0, { 0xC3 }, "do_animation_events", false },
   { {}, cathook::core::modules::tf_client, sigs::particle_system_precache, 0, { 0x31, 0xC0, 0xC3 }, "particle_system_precache", false },
   { {}, cathook::core::modules::tf_client, sigs::particle_effect_create_event, 0, { 0x31, 0xC0, 0xC3 }, "particle_effect_create_event", false },
   { {}, cathook::core::modules::tf_client, sigs::view_render_render, 0, { 0x31, 0xC0, 0x40, 0xC3 }, "view_render_render", true },
@@ -526,10 +528,12 @@ file_handle_t open_hook(void* this_ptr, const char* filename, const char* option
 bool precache_hook(void* this_ptr, const char* filename, const char* path_id)
 {
   CATHOOK_HOOK_GUARD();
+  if (filename != nullptr && precache_original != nullptr &&
+      is_required_model_asset(file_extension(filename)))
+  {
+    return precache_original(this_ptr, filename, path_id);
+  }
 
-  (void)this_ptr;
-  (void)filename;
-  (void)path_id;
   return true;
 }
 
@@ -542,6 +546,16 @@ bool read_file_hook(void* this_ptr, const char* filename, const char* path, void
   }
 
   return read_file_original(this_ptr, filename, path, buffer, max_bytes, starting_byte, alloc_fn);
+}
+
+const char* skip_blocked_find_results(void* this_ptr, const char* filename, file_find_handle_t* handle)
+{
+  while (filename != nullptr && handle != nullptr && should_block_file(filename))
+  {
+    filename = find_next_original(this_ptr, *handle);
+  }
+
+  return filename;
 }
 
 const char* find_next_hook(void* this_ptr, file_find_handle_t handle)
@@ -560,13 +574,13 @@ const char* find_next_hook(void* this_ptr, file_find_handle_t handle)
 const char* find_first_hook(void* this_ptr, const char* wildcard, file_find_handle_t* handle)
 {
   CATHOOK_HOOK_GUARD();
-  const char* filename = find_first_original(this_ptr, wildcard, handle);
-  while (filename != nullptr && handle != nullptr && should_block_file(filename))
-  {
-    filename = find_next_original(this_ptr, *handle);
-  }
+  return skip_blocked_find_results(this_ptr, find_first_original(this_ptr, wildcard, handle), handle);
+}
 
-  return filename;
+const char* find_first_ex_hook(void* this_ptr, const char* wildcard, const char* path_id, file_find_handle_t* handle)
+{
+  CATHOOK_HOOK_GUARD();
+  return skip_blocked_find_results(this_ptr, find_first_ex_original(this_ptr, wildcard, path_id, handle), handle);
 }
 
 int async_read_multiple_hook(void* this_ptr, const file_async_request* requests, int request_count, void* controls)
@@ -611,7 +625,19 @@ int async_read_multiple_hook(void* this_ptr, const file_async_request* requests,
 
   if (controls != nullptr)
   {
-    return fs_async_err_fileopen;
+    auto* control_slots = static_cast<void**>(controls);
+    int status = fs_async_err_fileopen;
+    for (int index = 0; index < request_count; ++index)
+    {
+      if (should_block_file(requests[index].filename))
+      {
+        continue;
+      }
+
+      status = async_read_multiple_original(this_ptr, &requests[index], 1, &control_slots[index]);
+    }
+
+    return status;
   }
 
   std::vector<file_async_request> allowed_requests{};
@@ -676,6 +702,7 @@ struct file_system_hook
 const file_system_hook file_system_hooks[] = {
   { &file_system_vtable, file_system_find_first_index, reinterpret_cast<void*>(find_first_hook), reinterpret_cast<void**>(&find_first_original), "IFileSystem::FindFirst" },
   { &file_system_vtable, file_system_find_next_index, reinterpret_cast<void*>(find_next_hook), reinterpret_cast<void**>(&find_next_original), "IFileSystem::FindNext" },
+  { &file_system_vtable, file_system_find_first_ex_index, reinterpret_cast<void*>(find_first_ex_hook), reinterpret_cast<void**>(&find_first_ex_original), "IFileSystem::FindFirstEx" },
   { &file_system_vtable, file_system_async_read_multiple_index, reinterpret_cast<void*>(async_read_multiple_hook), reinterpret_cast<void**>(&async_read_multiple_original), "IFileSystem::AsyncReadMultiple" },
   { &file_system_vtable, file_system_open_ex_index, reinterpret_cast<void*>(open_ex_hook), reinterpret_cast<void**>(&open_ex_original), "IFileSystem::OpenEx" },
   { &file_system_vtable, file_system_read_file_ex_index, reinterpret_cast<void*>(read_file_ex_hook), reinterpret_cast<void**>(&read_file_ex_original), "IFileSystem::ReadFileEx" },
@@ -873,7 +900,7 @@ bool disable_file_system_hooks()
   {
     using invalidate_mdl_cache_fn = void (*)(void*);
     void** client_vtable = *reinterpret_cast<void***>(client);
-    void* const entry = read_vtable_entry(client_vtable, 65, "Client::InvalidateMdlCache");
+    void* const entry = read_vtable_entry(client_vtable, client_invalidate_mdl_cache_index, "Client::InvalidateMdlCache");
     if (entry != nullptr)
     {
       invalidate_mdl_cache_fn invalidate_mdl_cache = reinterpret_cast<invalidate_mdl_cache_fn>(entry);
@@ -881,114 +908,13 @@ bool disable_file_system_hooks()
     }
     else
     {
-      print("[nographics] client vtable[65] missing; skipped MDL cache invalidation\n");
+      print("[nographics] client vtable[%d] missing; skipped MDL cache invalidation\n", client_invalidate_mdl_cache_index);
     }
   }
 
   file_system_vtable = nullptr;
   base_file_system_vtable = nullptr;
   return true;
-}
-
-using hud_update_fn = void (*)(void*, bool);
-hud_update_fn hud_update_original = nullptr;
-funchook_t* hud_update_funchook = nullptr;
-std::uint64_t hud_update_frame_counter = 0;
-
-void hud_update_hook(void* this_ptr, bool active)
-{
-  CATHOOK_HOOK_GUARD();
-  if (hud_update_original == nullptr || !is_enabled() || should_skip_rendering_hooks())
-  {
-    if (hud_update_original != nullptr)
-    {
-      hud_update_original(this_ptr, active);
-    }
-    return;
-  }
-
-  std::uint64_t interval = static_cast<std::uint64_t>(hud_throttle_frames);
-  if (interval < 1)
-  {
-    interval = 1;
-  }
-
-  if (++hud_update_frame_counter < interval)
-  {
-    return;
-  }
-
-  hud_update_frame_counter = 0;
-  hud_update_original(this_ptr, active);
-}
-
-bool disable_hud_update_hook()
-{
-  if (hud_update_funchook != nullptr)
-  {
-    const int result = funchook_uninstall(hud_update_funchook, 0);
-    if (result != FUNCHOOK_ERROR_SUCCESS && result != FUNCHOOK_ERROR_NOT_INSTALLED)
-    {
-      print("[nographics] failed to restore HudUpdate hook: %d\n", result);
-      return false;
-    }
-
-    funchook_destroy(hud_update_funchook);
-    hud_update_funchook = nullptr;
-  }
-
-  hud_update_original = nullptr;
-  hud_update_frame_counter = 0;
-  return true;
-}
-
-void enable_hud_update_hook()
-{
-  if (hud_update_funchook != nullptr || client == nullptr)
-  {
-    return;
-  }
-
-  auto** client_vtable_local = *reinterpret_cast<void***>(client);
-  if (client_vtable_local == nullptr)
-  {
-    return;
-  }
-
-  auto* target = read_vtable_entry(client_vtable_local, client_hud_update_index, "Client::HudUpdate");
-  if (target == nullptr)
-  {
-    return;
-  }
-
-  auto* handle = funchook_create();
-  if (handle == nullptr)
-  {
-    return;
-  }
-
-  hud_update_original = reinterpret_cast<hud_update_fn>(target);
-  if (funchook_prepare(handle, reinterpret_cast<void**>(&hud_update_original), reinterpret_cast<void*>(hud_update_hook)) != FUNCHOOK_ERROR_SUCCESS ||
-      funchook_install(handle, 0) != FUNCHOOK_ERROR_SUCCESS)
-  {
-    print("[nographics] HudUpdate throttle install failed: %s\n", funchook_error_message(handle));
-    disable_hud_update_hook();
-    return;
-  }
-
-  hud_update_funchook = handle;
-  print("[nographics] HudUpdate throttle hooked every %d frames\n", hud_throttle_frames);
-}
-
-void update_hud_update_throttle()
-{
-  if (is_enabled() && !should_skip_rendering_hooks())
-  {
-    enable_hud_update_hook();
-    return;
-  }
-
-  disable_hud_update_hook();
 }
 
 void update_material_stub(bool enabled)
@@ -1123,7 +1049,6 @@ void update()
       update_material_stub(false);
       disable_file_system_hooks();
     }
-    disable_hud_update_hook();
     nographics_runtime_enabled = false;
     return;
   }
@@ -1137,7 +1062,6 @@ void update()
   initialize();
   resolve_material_system_interface();
   enable_file_system_hooks();
-  update_hud_update_throttle();
   update_material_stub(textmode_build);
   apply_cathook2017_render_patches();
 
@@ -1150,8 +1074,7 @@ bool shutdown()
   const bool render_patches_restored = restore_render_patches();
   update_material_stub(false);
   const bool file_system_hooks_disabled = disable_file_system_hooks();
-  const bool hud_update_hook_disabled = disable_hud_update_hook();
-  if (!render_patches_restored || !file_system_hooks_disabled || !hud_update_hook_disabled)
+  if (!render_patches_restored || !file_system_hooks_disabled)
   {
     return false;
   }

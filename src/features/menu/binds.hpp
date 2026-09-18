@@ -342,6 +342,69 @@ inline const char* mode_label(const bind_key_mode mode)
   return "hold";
 }
 
+inline void describe_bind(const bind_entry& entry, std::string& type, std::string& info)
+{
+  type.clear();
+  info.clear();
+  switch (entry.condition) {
+  case bind_condition::key:
+    type = entry.key_mode == bind_key_mode::toggle ? "toggle" : entry.key_mode == bind_key_mode::double_click ? "double" : "hold";
+    info = get_button_name(entry.key);
+    break;
+  case bind_condition::player_class:
+  {
+    static constexpr const char* names[] = { "scout", "sniper", "soldier", "demoman", "medic", "heavy", "pyro", "spy", "engineer" };
+    type = "class";
+    info = entry.condition_value >= 1 && entry.condition_value <= static_cast<int>(std::size(names)) ? names[entry.condition_value - 1] : "unknown";
+    break;
+  }
+  case bind_condition::weapon_type:
+  {
+    static constexpr const char* names[] = { "hitscan", "projectile", "melee", "throwable" };
+    type = "weapon";
+    info = entry.condition_value >= 0 && entry.condition_value < static_cast<int>(std::size(names)) ? names[entry.condition_value] : "unknown";
+    break;
+  }
+  case bind_condition::item_slot:
+    type = "slot";
+    info = std::to_string(entry.condition_value + 1);
+    break;
+  case bind_condition::misc:
+    if (entry.condition_value <= 2) {
+      type = "spectated";
+      info = entry.condition_value == 1 ? "1st" : entry.condition_value == 2 ? "3rd" : "any";
+    } else {
+      type = "cond";
+      info = entry.condition_value == 3 ? "zoomed" : entry.condition_value == 4 ? "aiming" : "unknown";
+    }
+    break;
+  }
+  if (entry.inverted && (entry.condition != bind_condition::key || entry.key_mode == bind_key_mode::hold)) {
+    type.insert(0, "not ");
+  }
+}
+
+inline std::string format_bind_value(const bind_value& value)
+{
+  if (const auto* item = std::get_if<bool>(&value)) return *item ? "on" : "off";
+  if (const auto* item = std::get_if<int>(&value)) return std::to_string(*item);
+  if (const auto* item = std::get_if<float>(&value)) return std::to_string(*item);
+  if (std::holds_alternative<RGBA_float>(value)) return "color";
+  if (const auto* item = std::get_if<uint32_t>(&value)) return std::to_string(*item);
+  if (const auto* item = std::get_if<std::string>(&value)) return *item;
+  return {};
+}
+
+inline const bind_value* first_enabled_override(const std::string& target_key)
+{
+  for (const bind_entry& entry : entries()) {
+    if (!entry.enabled) continue;
+    const auto iterator = entry.overrides.find(target_key);
+    if (iterator != entry.overrides.end()) return &iterator->second;
+  }
+  return nullptr;
+}
+
 inline std::string& popup_target_key()
 {
   static std::string value{};
@@ -648,6 +711,51 @@ inline bool reparent(const uint32_t id, const uint32_t parent_id)
   return true;
 }
 
+inline bool has_children(const uint32_t id)
+{
+  return std::ranges::any_of(entries(), [id](const bind_entry& entry) { return entry.parent_id == id; });
+}
+
+inline bool will_be_enabled(const uint32_t id)
+{
+  for (uint32_t cursor = id; cursor;) {
+    const bind_entry* entry = find_entry(cursor);
+    if (entry == nullptr || !entry->enabled) return false;
+    cursor = entry->parent_id;
+  }
+  return true;
+}
+
+inline bool would_cycle_parent(const uint32_t id, const uint32_t parent_id)
+{
+  for (uint32_t cursor = parent_id; cursor;) {
+    if (cursor == id) return true;
+    const bind_entry* parent = find_entry(cursor);
+    cursor = parent != nullptr ? parent->parent_id : 0;
+  }
+  return false;
+}
+
+inline bool move(const uint32_t source_id, const uint32_t destination_id)
+{
+  std::lock_guard lock{ bind_mutex() };
+  if (source_id == 0 || destination_id == 0 || source_id == destination_id) return false;
+  auto& list = entries();
+  const auto source = std::ranges::find(list, source_id, &bind_entry::id);
+  const auto destination = std::ranges::find(list, destination_id, &bind_entry::id);
+  if (source == list.end() || destination == list.end()) return false;
+  bind_entry moved = std::move(*source);
+  list.erase(source);
+  const auto insert_at = std::ranges::find(list, destination_id, &bind_entry::id);
+  if (insert_at == list.end()) {
+    list.push_back(std::move(moved));
+  } else {
+    list.insert(insert_at, std::move(moved));
+  }
+  mark_dirty();
+  return true;
+}
+
 inline bool set_editing(const uint32_t id)
 {
   std::lock_guard lock{ bind_mutex() };
@@ -850,6 +958,20 @@ inline void apply_children(const uint32_t parent_id)
   }
 }
 
+inline void refresh_non_key_active_flags(const uint32_t parent_id)
+{
+  for (bind_entry& entry : entries()) {
+    if (entry.parent_id != parent_id) continue;
+    if (!entry.enabled) {
+      entry.active = false;
+      refresh_non_key_active_flags(entry.id);
+      continue;
+    }
+    if (entry.condition != bind_condition::key) entry.active = condition_active(entry);
+    refresh_non_key_active_flags(entry.id);
+  }
+}
+
 inline void handle_input(SDL_Event* event)
 {
   if (event == nullptr) return;
@@ -945,7 +1067,10 @@ inline void run()
   if (menu_open_state()) {
     restore_active_overrides();
     capture_menu_changes();
-    for (bind_entry& entry : entries()) entry.active = false;
+    for (bind_entry& entry : entries()) {
+      if (entry.condition == bind_condition::key) entry.active = false;
+    }
+    refresh_non_key_active_flags(0);
     return;
   }
 
@@ -1076,15 +1201,29 @@ inline void draw_popup()
         if (ImGui::SliderFloat("When active", &value, target->float_min, target->float_max, target->format.c_str())) { iterator->second = value; mark_dirty(); }
       } else if (target->type == value_type::color) {
         RGBA_float value = std::get<RGBA_float>(iterator->second);
-        const auto display_color = value.resolved();
-        float color[4]{ display_color.r, display_color.g, display_color.b, display_color.a };
-        if (ImGui::ColorEdit4("When active", color, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaPreviewHalf)) {
-          iterator->second = RGBA_float{ color[0], color[1], color[2], color[3], value.rainbow };
-          mark_dirty();
+        float channels[4]{ value.r, value.g, value.b, value.a };
+        const auto preview_color = value.to_RGBA();
+        const ImVec4 preview{
+          preview_color.r / 255.0f,
+          preview_color.g / 255.0f,
+          preview_color.b / 255.0f,
+          preview_color.a / 255.0f
+        };
+        ImGui::TextUnformatted("When active");
+        ImGui::SameLine();
+        if (ImGui::ColorButton("##preview", preview, ImGuiColorEditFlags_AlphaPreviewHalf)) {
+          ImGui::OpenPopup("##bound_color_picker");
         }
-        if (ImGui::Checkbox("Rainbow", &value.rainbow)) {
-          iterator->second = value;
-          mark_dirty();
+        if (ImGui::BeginPopup("##bound_color_picker")) {
+          if (ImGui::ColorPicker4("##picker", channels, ImGuiColorEditFlags_NoLabel | ImGuiColorEditFlags_AlphaPreviewHalf | ImGuiColorEditFlags_AlphaBar)) {
+            iterator->second = RGBA_float{ channels[0], channels[1], channels[2], channels[3], value.rainbow };
+            mark_dirty();
+          }
+          if (ImGui::Checkbox("Rainbow", &value.rainbow)) {
+            iterator->second = RGBA_float{ channels[0], channels[1], channels[2], channels[3], value.rainbow };
+            mark_dirty();
+          }
+          ImGui::EndPopup();
         }
       } else if (target->type == value_type::mask) {
         uint32_t value = std::get<uint32_t>(iterator->second);
@@ -1143,6 +1282,12 @@ inline void bindable_target(value_t* target, const char* label, const bool chang
     set_override(editing_id(), entry->target_key, read_value(*entry));
   }
   if (entry != nullptr && hovered && ImGui::IsMouseReleased(ImGuiMouseButton_Right)) request_popup(entry->target_key, popup_target_type::value_bind);
+  if (entry != nullptr && config.misc.menu.menu_shows_binds && editing_id() == 0) {
+    if (const bind_value* override = first_enabled_override(entry->target_key)) {
+      ImGui::SameLine();
+      ImGui::TextDisabled("%s", format_bind_value(*override).c_str());
+    }
+  }
 }
 
 inline void bindable_checkbox(const char* label, bool* target, const bool changed, const bool hovered = false)
@@ -1203,49 +1348,23 @@ inline std::vector<indicator_row> collect_indicator_rows()
 {
   std::lock_guard lock{ bind_mutex() };
   std::vector<indicator_row> rows{};
-  const auto add_children = [&rows](const auto& self, const uint32_t parent_id) -> void {
+  const bool menu_open = menu_open_state();
+  const auto add_children = [&rows, menu_open](const auto& self, const uint32_t parent_id) -> void {
     for (const bind_entry& entry : entries()) {
-      if (entry.parent_id != parent_id || !entry.enabled) continue;
+      if (entry.parent_id != parent_id) continue;
+      if (!entry.enabled && !menu_open) continue;
 
-      if (entry.visibility == bind_visibility::always || (entry.visibility == bind_visibility::while_active && entry.active)) {
+      const bool visible = menu_open
+        || entry.visibility == bind_visibility::always
+        || (entry.visibility == bind_visibility::while_active && entry.active);
+      if (visible) {
         std::string type{};
         std::string value{};
-        switch (entry.condition) {
-        case bind_condition::key:
-          type = mode_label(entry.key_mode);
-          value = get_button_name(entry.key);
-          break;
-        case bind_condition::player_class:
-        {
-          static constexpr const char* class_names[] = { "scout", "sniper", "soldier", "demoman", "medic", "heavy", "pyro", "spy", "engineer" };
-          type = "class";
-          value = entry.condition_value >= 1 && entry.condition_value <= static_cast<int>(std::size(class_names)) ? class_names[entry.condition_value - 1] : "unknown";
-          break;
-        }
-        case bind_condition::weapon_type:
-        {
-          static constexpr const char* weapon_names[] = { "hitscan", "projectile", "melee", "throwable" };
-          type = "weapon";
-          value = entry.condition_value >= 0 && entry.condition_value < static_cast<int>(std::size(weapon_names)) ? weapon_names[entry.condition_value] : "unknown";
-          break;
-        }
-        case bind_condition::item_slot:
-          type = "slot";
-          value = std::to_string(entry.condition_value + 1);
-          break;
-        case bind_condition::misc:
-        {
-          static constexpr const char* misc_values[] = { "any", "first person", "third person", "zoomed", "aiming" };
-          type = entry.condition_value <= 2 ? "spectated" : "condition";
-          value = entry.condition_value >= 0 && entry.condition_value < static_cast<int>(std::size(misc_values)) ? misc_values[entry.condition_value] : "unknown";
-          break;
-        }
-        }
-        if (entry.inverted) value = "not " + value;
+        describe_bind(entry, type, value);
         rows.push_back({ entry.name, std::move(type), std::move(value), std::to_string(entry.id), popup_target_type::value_bind, entry.active });
       }
 
-      if (entry.active) self(self, entry.id);
+      if (entry.active || menu_open) self(self, entry.id);
     }
   };
   add_children(add_children, 0);

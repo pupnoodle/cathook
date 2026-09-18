@@ -517,8 +517,6 @@ struct Visuals {
     float crit_hack_y = 320.0f;
     float nospread_x = 24.0f;
     float nospread_y = 356.0f;
-    RGBA_float tickbase_bar_color = {.r = 0.39215687f, .g = 0.8627451f, .b = 0.50980395f, .a = 1.0f};
-    RGBA_float crit_hack_bar_color = {.r = 0.39215687f, .g = 0.8627451f, .b = 0.50980395f, .a = 1.0f};
   } indicators;
 
   struct Removals {
@@ -1046,15 +1044,15 @@ struct Misc {
     };
 
     uint32_t methods = 0;
-    int detections_required = 3;
-    float min_flick = 20.0f;
-    float max_noise = 5.0f;
-    int min_choking_ticks = 14;
-    int lagcomp_min_delta = 10;
-    float lagcomp_window = 1.0f;
+    int detections_required = 4;
+    float min_flick = 30.0f;
+    float max_noise = 4.0f;
+    int min_choking_ticks = 16;
+    int lagcomp_min_delta = 4;
+    float lagcomp_window = 8.0f;
     int lagcomp_burst_count = 3;
-    int crit_window = 20;
-    float crit_threshold = 80.0f;
+    int crit_window = 25;
+    float crit_threshold = 85.0f;
   } cheat_detection;
 
   struct Menu {
@@ -1064,6 +1062,9 @@ struct Misc {
     std::string custom_font = "Verdana.ttf";
     int dpi_scale = 2;
     RGBA_float theme_color = {.r = 0.267f, .g = 0.392f, .b = 0.596f, .a = 1.0f};
+    bool bind_window = true;
+    bool bind_window_title = true;
+    bool menu_shows_binds = false;
   } menu;
 };
 

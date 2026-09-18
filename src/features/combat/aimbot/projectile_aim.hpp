@@ -32,8 +32,8 @@ inline struct settings {
   int splash_restrict_direct = 16;
   int splash_restrict_arc = 24;
   int splash_restrict_first = 40;
-  int direct_sphere_points = 14;
-  int arc_sphere_points = 21;
+  int direct_sphere_points = 32;
+  int arc_sphere_points = 48;
   int air_point_count = 3;
   bool air_splash = true;
   bool sticky_arm_time = true;
@@ -222,6 +222,33 @@ struct shot_test {
   bool interval_retest = false;
 };
 
+inline float aabb_distance(const Vec3& point, const Vec3& mins, const Vec3& maxs) {
+  const Vec3 nearest{
+    std::clamp(point.x, mins.x, maxs.x),
+    std::clamp(point.y, mins.y, maxs.y),
+    std::clamp(point.z, mins.z, maxs.z)
+  };
+  return distance_3d(point, nearest);
+}
+
+inline bool trace_path_clear(Player* local, const projectile_info& info, Entity* ignored_target,
+                             const std::vector<Vec3>& path, int tick, int skip_tail) {
+  const int available = static_cast<int>(path.size());
+  const int limit = std::min(tick, available - 1) - std::max(skip_tail, 0);
+  for (int replay = 1; replay < limit; ++replay) {
+    trace_t retest_trace{};
+    if (!trace_hull_segment(local, info, ignored_target, path[static_cast<std::size_t>(replay - 1)],
+                            path[static_cast<std::size_t>(replay)], retest_trace)) {
+      return false;
+    }
+    if (retest_trace.start_solid || retest_trace.all_solid || retest_trace.fraction < 1.0f ||
+        retest_trace.entity != nullptr) {
+      return false;
+    }
+  }
+  return true;
+}
+
 inline bool validate_shot(Player* local, const projectile_info& info, const shot_test& test) {
   if (local == nullptr || engine_trace == nullptr || test.target == nullptr ||
       test.sim_ticks <= 0) {
@@ -234,12 +261,13 @@ inline bool validate_shot(Player* local, const projectile_info& info, const shot
   projsim::params params{};
   params.origin = test.launch;
   params.velocity = test.velocity;
+  params.angles = aimbot_calculate_angles_to_position(test.launch, test.launch + test.velocity);
   params.gravity = 800.0f * info.gravity_mod;
   params.drag = test.drag;
   params.hull = info.hull;
   params.collision_mask = info.collision_mask;
-  engine_trace->init_projectile_trace_filter(&params.filter, local->to_entity(),
-                                             ignored_target, !direct);
+  params.weapon_id = info.weapon_id_value;
+  params.spin = info.spin_drag_key;
 
   projsim::simulation simulation{};
   simulation.reset(params);
@@ -249,7 +277,9 @@ inline bool validate_shot(Player* local, const projectile_info& info, const shot
   const int tolerance_ticks =
     std::max(time_to_ticks(length(test.state.maxs - test.state.mins) /
                            std::max(length(test.velocity), 1.0f)), 1);
+  const int retest_skip = info.gravity_mod > 0.0f ? tolerance_ticks : 0;
 
+  Vec3 traced = simulation.position;
   for (int tick = 1; tick <= test.sim_ticks; ++tick) {
     if (!simulation.step()) {
       return false;
@@ -261,7 +291,13 @@ inline bool validate_shot(Player* local, const projectile_info& info, const shot
       continue;
     }
 
-    const trace_t& segment = simulation.last_trace;
+    trace_t segment{};
+    if (!trace_hull_segment(local, info, ignored_target, traced, current, segment)) {
+      return false;
+    }
+    simulation.last_trace = segment;
+    traced = current;
+
     const bool solid_hit = segment.start_solid || segment.all_solid ||
       segment.fraction < 1.0f || segment.entity != nullptr;
     bool candidate_hit = false;
@@ -279,41 +315,35 @@ inline bool validate_shot(Player* local, const projectile_info& info, const shot
     }
 
     const Vec3 endpos = solid_hit ? segment.endpos : current;
+    const float hull_distance = aabb_distance(endpos, test.state.mins, test.state.maxs);
+    const float splash_radius = std::sqrt(std::max(test.radius_sqr, 0.0f));
+    const float aim_slop = std::max(24.0f, splash_radius * 0.45f);
+    bool valid = false;
     switch (test.kind) {
-    case 0: {
-      const bool valid = segment.entity == test.target &&
-        (test.sim_ticks - tick) < tolerance_ticks;
+    case 0:
+      valid = segment.entity == test.target && (test.sim_ticks - tick) < tolerance_ticks;
       if (!valid) {
         return false;
       }
-      if (test.interval_retest && test.trace_interval > 1) {
-        const std::vector<Vec3>& path = simulation.path;
-        const int available = static_cast<int>(path.size());
-        const int limit = std::min(tick, available - 1);
-        for (int replay = 1; replay <= limit; ++replay) {
-          trace_t retest_trace{};
-          if (!trace_hull_segment(local, info, ignored_target, path[replay - 1],
-                                  path[replay], retest_trace)) {
-            return false;
-          }
-          if (retest_trace.start_solid || retest_trace.all_solid ||
-              retest_trace.fraction < 1.0f || retest_trace.entity != nullptr) {
-            return false;
-          }
-        }
-      }
-      return true;
-    }
-    case 1: {
-      const bool valid = length_squared(endpos - test.aim_point) < test.radius_sqr &&
-        splashbot_instance.exposure_clear(endpos, segment.plane.normal,
-                                          test.normal_offset, test.target,
-                                          test.state.eye);
-      return valid;
-    }
+      break;
+    case 1:
+      valid = hull_distance <= splash_radius &&
+        length_squared(endpos - test.aim_point) <= aim_slop * aim_slop &&
+        splashbot_instance.exposure_clear(endpos, segment.plane.normal, test.normal_offset,
+                                          test.target, test.state.eye);
+      break;
     default:
-      return !solid_hit;
+      valid = !solid_hit && hull_distance <= splash_radius;
+      break;
     }
+    if (!valid) {
+      return false;
+    }
+    if (test.interval_retest && test.trace_interval > 1 &&
+        !trace_path_clear(local, info, ignored_target, simulation.path, tick, retest_skip)) {
+      return false;
+    }
+    return true;
   }
 
   return false;
@@ -720,9 +750,11 @@ inline seed_outcome evaluate_seed(Player* local, Weapon* weapon, const projectil
       const splash_target_state state = make_target_state(seed, entry.origin);
       const int capacity = 256;
       std::array<splash_candidate, capacity> candidates{};
+      const int sphere_samples = std::clamp(
+        info.gravity_mod > 0.0f ? cfg.arc_sphere_points : cfg.direct_sphere_points, 8, 96);
       const int count = splashbot_instance.collect_candidates(
         state, radius, info.hull, cfg.air_splash && info.air_splash,
-        cfg.air_point_count, eye, candidates.data(), capacity);
+        cfg.air_point_count, eye, candidates.data(), capacity, sphere_samples);
       if (count <= 0) {
         first_bucket = false;
         continue;
@@ -777,8 +809,8 @@ inline seed_outcome evaluate_seed(Player* local, Weapon* weapon, const projectil
           continue;
         }
 
-        const float score =
-          candidate.falloff * 1000.0f - solution.time * 0.01f;
+        const float score = candidate.falloff * 1000.0f + candidate.ground * 220.0f -
+          solution.time * 35.0f;
         if (score > best_score) {
           best_score = score;
           best_point = candidate.point;

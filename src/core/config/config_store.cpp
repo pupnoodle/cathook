@@ -493,8 +493,6 @@ void config_store::import_config(const Config& config)
     set_float("visuals.indicators.crit_hack_y", config.visuals.indicators.crit_hack_y);
     set_float("visuals.indicators.nospread_x", config.visuals.indicators.nospread_x);
     set_float("visuals.indicators.nospread_y", config.visuals.indicators.nospread_y);
-    set_color("visuals.indicators.tickbase_bar_color", config.visuals.indicators.tickbase_bar_color);
-    set_color("visuals.indicators.crit_hack_bar_color", config.visuals.indicators.crit_hack_bar_color);
     set_bool("visuals.spectator_list.enabled", spectator_indicator_enabled);
     set_bool("visuals.spectator_list.show_target", config.visuals.spectator_list.show_target);
     set_bool("visuals.spectator_list.show_modes", config.visuals.spectator_list.show_modes);
@@ -620,6 +618,9 @@ void config_store::import_config(const Config& config)
     set_string("misc.menu.custom_font", config.misc.menu.custom_font);
     set_int("misc.menu.dpi_scale", config.misc.menu.dpi_scale);
     set_color("misc.menu.theme_color", config.misc.menu.theme_color);
+    set_bool("misc.menu.bind_window", config.misc.menu.bind_window);
+    set_bool("misc.menu.bind_window_title", config.misc.menu.bind_window_title);
+    set_bool("misc.menu.menu_shows_binds", config.misc.menu.menu_shows_binds);
     set_bool("misc.automation.auto_class_select", config.misc.automation.auto_class_select);
     set_int("misc.automation.class_selected", static_cast<int>(config.misc.automation.class_selected));
     set_bool("misc.automation.auto_class_dont_join_during_warmup", config.misc.automation.auto_class_dont_join_during_warmup);
@@ -1206,12 +1207,6 @@ void config_store::export_config(Config& config) const
     config.visuals.indicators.crit_hack_y = get_float("visuals.indicators.crit_hack_y", config.visuals.indicators.crit_hack_y);
     config.visuals.indicators.nospread_x = get_float("visuals.indicators.nospread_x", config.visuals.indicators.nospread_x);
     config.visuals.indicators.nospread_y = get_float("visuals.indicators.nospread_y", config.visuals.indicators.nospread_y);
-    config.visuals.indicators.tickbase_bar_color = get_color(
-        "visuals.indicators.tickbase_bar_color",
-        config.visuals.indicators.tickbase_bar_color);
-    config.visuals.indicators.crit_hack_bar_color = get_color(
-        "visuals.indicators.crit_hack_bar_color",
-        config.visuals.indicators.crit_hack_bar_color);
     config.visuals.spectator_list.enabled = (config.visuals.indicators.enabled_mask & Visuals::Indicators::spectators) != 0;
     config.visuals.spectator_list.show_target = get_bool("visuals.spectator_list.show_target", config.visuals.spectator_list.show_target);
     config.visuals.spectator_list.show_modes = get_bool("visuals.spectator_list.show_modes", config.visuals.spectator_list.show_modes);
@@ -1433,6 +1428,9 @@ void config_store::export_config(Config& config) const
     config.misc.menu.custom_font = get_string("misc.menu.custom_font", config.misc.menu.custom_font);
     config.misc.menu.dpi_scale = std::clamp(get_int("misc.menu.dpi_scale", config.misc.menu.dpi_scale), 0, 4);
     config.misc.menu.theme_color = get_color("misc.menu.theme_color", config.misc.menu.theme_color);
+    config.misc.menu.bind_window = get_bool("misc.menu.bind_window", config.misc.menu.bind_window);
+    config.misc.menu.bind_window_title = get_bool("misc.menu.bind_window_title", config.misc.menu.bind_window_title);
+    config.misc.menu.menu_shows_binds = get_bool("misc.menu.menu_shows_binds", config.misc.menu.menu_shows_binds);
     config.misc.automation.auto_class_select = get_bool("misc.automation.auto_class_select", config.misc.automation.auto_class_select);
     config.misc.automation.class_selected = static_cast<tf_class>(std::clamp(
         get_int("misc.automation.class_selected", static_cast<int>(config.misc.automation.class_selected)),

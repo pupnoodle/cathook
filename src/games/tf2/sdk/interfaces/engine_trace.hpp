@@ -166,6 +166,9 @@ struct trace_t {
 
 #define	MASK_SHOT					(CONTENTS_SOLID|CONTENTS_MOVEABLE|CONTENTS_MONSTER|CONTENTS_WINDOW|CONTENTS_DEBRIS|CONTENTS_HITBOX)
 
+constexpr unsigned SURF_SKY = 0x0004u;
+constexpr unsigned SURF_NODRAW = 0x0080u;
+
 inline bool should_hit_entity(struct trace_filter* interface, Entity* entity, int contents_mask) {
   if (entity == nullptr) return false;
   if (entity->get_class_id() == class_id::RESPAWN_ROOM_VISUALIZER) return false;
@@ -428,6 +431,36 @@ public:
       (void (*)(void*, struct ray_t*, unsigned int, struct trace_filter*, struct trace_t*))vtable[4];
 
     trace_ray_fn(this, ray, f_mask, p_trace_filter, p_trace);
+  }
+
+  int get_point_contents(const Vec3& abs_position, IHandleEntity** hit_entity = nullptr) {
+    void** vtable = *reinterpret_cast<void***>(this);
+    auto fn = reinterpret_cast<int (*)(void*, const Vec3&, IHandleEntity**)>(vtable[0]);
+    return fn(this, abs_position, hit_entity);
+  }
+
+  void get_brushes_in_aabb(const Vec3& mins, const Vec3& maxs, CUtlVector<int>* output, int contents_mask) {
+    void** vtable = *reinterpret_cast<void***>(this);
+    auto fn = reinterpret_cast<void (*)(void*, const Vec3&, const Vec3&, CUtlVector<int>*, int)>(vtable[13]);
+    fn(this, mins, maxs, output, contents_mask);
+  }
+
+  CPhysCollide* get_collidable_from_displacements_in_aabb(const Vec3& mins, const Vec3& maxs) {
+    void** vtable = *reinterpret_cast<void***>(this);
+    auto fn = reinterpret_cast<CPhysCollide* (*)(void*, const Vec3&, const Vec3&)>(vtable[14]);
+    return fn(this, mins, maxs);
+  }
+
+  bool get_brush_info(int brush, CUtlVector<vector4d>* planes_out, int* contents_out) {
+    void** vtable = *reinterpret_cast<void***>(this);
+    auto fn = reinterpret_cast<bool (*)(void*, int, CUtlVector<vector4d>*, int*)>(vtable[15]);
+    return fn(this, brush, planes_out, contents_out);
+  }
+
+  int spatial_partition_mask() const {
+    void** vtable = *reinterpret_cast<void***>(const_cast<EngineTrace*>(this));
+    auto fn = reinterpret_cast<int (*)(const void*)>(vtable[21]);
+    return fn(this);
   }
 
   void trace_hull(Vec3* start, Vec3* end, Vec3* hull_min, Vec3* hull_max, unsigned int mask, struct trace_t* trace) {

@@ -3267,6 +3267,45 @@ void draw_backtrack_visualizer_imgui()
   }
 }
 
+static float resolve_aimbot_draw_view_fov(Player* localplayer)
+{
+  const auto usable = [](float fov) {
+    return std::isfinite(fov) && fov > 1.0f;
+  };
+
+  float camera_fov = overlay_projection::frame_state.view_fov;
+  if (!usable(camera_fov) && client != nullptr) {
+    camera_fov = client->get_fov();
+  }
+
+  if (localplayer == nullptr) {
+    return usable(camera_fov) ? camera_fov : 75.0f;
+  }
+
+  const int player_fov = localplayer->get_fov();
+  const int default_fov = localplayer->get_default_fov();
+  const float fallback_default = default_fov > 1 ? static_cast<float>(default_fov) : 75.0f;
+  // m_iFOV, not is_scoped(): Remove scope spoofs TF_COND_ZOOMED for the overlay.
+  const bool zoomed = player_fov > 1 && default_fov > 1 && player_fov < default_fov;
+
+  if (config.visuals.removals.zoom) {
+    return config.visuals.override_fov ? config.visuals.custom_fov : fallback_default;
+  }
+  if (zoomed && config.visuals.override_zoom_fov) {
+    return config.visuals.custom_zoom_fov;
+  }
+  if (config.visuals.override_fov && !zoomed) {
+    return config.visuals.custom_fov;
+  }
+  if (usable(camera_fov)) {
+    return camera_fov;
+  }
+  if (player_fov > 1) {
+    return static_cast<float>(player_fov);
+  }
+  return fallback_default;
+}
+
 void draw_aimbot_fov_imgui()
 {
   if (engine == nullptr || entity_list == nullptr || !engine->is_in_game()) {
@@ -3302,19 +3341,7 @@ void draw_aimbot_fov_imgui()
     return;
   }
 
-  auto local_fov = static_cast<float>(localplayer->get_fov());
-  if (!std::isfinite(local_fov) || local_fov <= 1.0f) {
-    local_fov = static_cast<float>(localplayer->get_default_fov());
-  }
-  if (config.visuals.override_fov && !localplayer->is_scoped()) {
-    local_fov = config.visuals.custom_fov;
-  }
-  if (config.visuals.removals.zoom) {
-    local_fov = static_cast<float>(localplayer->get_default_fov());
-  }
-  if (config.visuals.override_fov && config.visuals.removals.zoom) {
-    local_fov = config.visuals.custom_fov;
-  }
+  const float local_fov = resolve_aimbot_draw_view_fov(localplayer);
 
   const auto denominator = std::tan((local_fov / 2.0f) / 180.0f * static_cast<float>(M_PI));
   if (!std::isfinite(denominator) || denominator <= 0.0f) {
@@ -3332,9 +3359,12 @@ void draw_aimbot_fov_imgui()
   static float smoothed_radius = 0.0f;
   static int smoothed_screen_width = 0;
   static int smoothed_screen_height = 0;
+  const bool radius_jumped = smoothed_radius > 0.0f &&
+      (radius > smoothed_radius * 2.0f || smoothed_radius > radius * 2.0f);
   const bool reset_smoothing = smoothed_radius <= 0.0f ||
       smoothed_screen_width != screen_size.x ||
-      smoothed_screen_height != screen_size.y;
+      smoothed_screen_height != screen_size.y ||
+      radius_jumped;
   if (reset_smoothing) {
     smoothed_radius = radius;
     smoothed_screen_width = screen_size.x;

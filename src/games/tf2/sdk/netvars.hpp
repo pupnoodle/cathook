@@ -12,6 +12,7 @@ V  o o  V  file: src/games/tf2/sdk/netvars.hpp
 #ifndef TF2_SDK_NETVARS_HPP
 #define TF2_SDK_NETVARS_HPP
 
+#include <cstddef>
 #include <cstring>
 #include <algorithm>
 #include <initializer_list>
@@ -69,6 +70,9 @@ struct recv_prop
   int element_count = 0;
   const char* parent_array_prop_name = nullptr;
 };
+
+static_assert(offsetof(recv_prop, proxy_fn) == 0x30, "RecvProp::m_ProxyFn");
+static_assert(offsetof(recv_prop, offset) == 0x48, "RecvProp::m_Offset");
 
 struct client_class
 {

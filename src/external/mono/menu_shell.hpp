@@ -26,9 +26,7 @@ struct menu_state final
 	bool position_initialized{};
 	bool dragging{};
 	ImVec2 drag_offset{};
-	float scroll_position{};
-	float scroll_target{};
-	bool scroll_initialized{};
+	bool reset_scroll{};
 };
 
 struct header_status final

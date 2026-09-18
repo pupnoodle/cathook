@@ -8,10 +8,9 @@ namespace
 
 struct glow_entity {
   Entity* entity = nullptr;
+  int entity_index = 0;
   RGBA_float color{};
-  DrawModelState state{};
-  ModelRenderInfo info{};
-  matrix_3x4* bones = nullptr;
+  int backtrack_mode = -1;
 };
 
 struct glow_batch {
@@ -21,6 +20,7 @@ struct glow_batch {
 
 std::vector<glow_batch> glow_batches{};
 thread_local unsigned int rendering_effect_depth = 0;
+thread_local int glow_backtrack_mode = -1;
 
 class rendering_effect_scope final {
 public:
@@ -109,6 +109,68 @@ private:
 void call_original(void* instance, const DrawModelState& state, const ModelRenderInfo& info, matrix_3x4* bones)
 {
   if (draw_model_execute_original != nullptr) draw_model_execute_original(instance, state, info, bones);
+}
+
+class glow_backtrack_scope final {
+public:
+  explicit glow_backtrack_scope(const int mode) { glow_backtrack_mode = mode; }
+  glow_backtrack_scope(const glow_backtrack_scope&) = delete;
+  glow_backtrack_scope& operator=(const glow_backtrack_scope&) = delete;
+  ~glow_backtrack_scope() { glow_backtrack_mode = -1; }
+};
+
+float* player_invisibility(Entity* entity)
+{
+  if (entity == nullptr || entity->get_class_id() != class_id::PLAYER) return nullptr;
+  static tf2_netvars::lazy_offset offset{"DT_TFPlayer", {"m_flInvisChangeCompleteTime"}};
+  if (offset <= 8) return nullptr;
+  return reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(entity) + static_cast<uintptr_t>(offset - 8));
+}
+
+void draw_glow_backtrack(void* instance, const DrawModelState& state, const ModelRenderInfo& info, matrix_3x4* bones,
+  const int record_mode)
+{
+  Entity* entity = info.entity_index > 0 ? entity_list->entity_from_index(static_cast<unsigned int>(info.entity_index)) : nullptr;
+  if (entity == nullptr || entity->get_class_id() != class_id::PLAYER || !backtrack::is_enabled()) {
+    call_original(instance, state, info, bones);
+    return;
+  }
+
+  const backtrack::backtrack_record_view records = backtrack::visual_records(reinterpret_cast<Player*>(entity));
+  if (records.count <= 0) return;
+
+  int first = 0;
+  int last = 1;
+  if (record_mode == 0) {
+    first = records.count - 1;
+    last = records.count;
+  } else if (record_mode == 1) {
+    first = 0;
+    last = 1;
+  } else if (record_mode == 2) {
+    first = 0;
+    last = records.count;
+  }
+
+  for (int index = first; index < last; ++index) {
+    const backtrack::backtrack_record* record = records.records[static_cast<std::size_t>(index)];
+    if (record == nullptr || record->bone_count <= 0) continue;
+    ModelRenderInfo record_info = info;
+    record_info.origin = record->origin;
+    call_original(instance, state, record_info, const_cast<matrix_3x4*>(record->bones.data()));
+  }
+}
+
+void draw_glow_model(const glow_entity& item)
+{
+  if (item.entity == nullptr) return;
+  rendering_effect_scope rendering_scope{};
+  glow_backtrack_scope backtrack_scope{item.backtrack_mode};
+  float* invisibility = player_invisibility(item.entity);
+  const float previous_invisibility = invisibility != nullptr ? *invisibility : 0.0f;
+  if (invisibility != nullptr) *invisibility = 0.0f;
+  item.entity->draw_model(STUDIO_RENDER | STUDIO_NOSHADOWS);
+  if (invisibility != nullptr) *invisibility = previous_invisibility;
 }
 
 [[nodiscard]] bool is_entity_model(Entity* entity, const ModelRenderInfo& info)
@@ -302,10 +364,10 @@ void draw_chams(void* instance, const DrawModelState& state, const ModelRenderIn
   model_render->forced_material_override(original_material, original_override);
 }
 
-void store_glow(Entity* entity, const glow_settings& settings, const float distance,
-  const DrawModelState* state, const ModelRenderInfo* info, matrix_3x4* bones)
+void store_glow(Entity* entity, const glow_settings& settings, const float distance, const int entity_index,
+  const int backtrack_mode = -1)
 {
-  if (entity == nullptr || state == nullptr || info == nullptr) return;
+  if (entity == nullptr || entity_index <= 0) return;
   RGBA_float color = settings.color;
   if (!apply_distance_alpha(distance, settings.start, settings.end, settings.smooth_alpha, color)) return;
   auto iterator = std::ranges::find_if(glow_batches, [&settings](const glow_batch& batch) { return batch.settings == settings; });
@@ -313,20 +375,18 @@ void store_glow(Entity* entity, const glow_settings& settings, const float dista
     glow_batches.push_back({settings, {}});
     iterator = std::prev(glow_batches.end());
   }
-  if (std::ranges::find_if(iterator->entities, [entity, info, bones](const glow_entity& item) {
-    return item.entity == entity && item.info.model == info->model && item.bones == bones;
+  if (std::ranges::find_if(iterator->entities, [entity, entity_index, backtrack_mode](const glow_entity& item) {
+    return item.entity == entity && item.entity_index == entity_index && item.backtrack_mode == backtrack_mode;
   }) == iterator->entities.end()) {
-    glow_entity item{entity, color, *state, *info, bones};
-    iterator->entities.push_back(item);
+    iterator->entities.push_back({entity, entity_index, color, backtrack_mode});
   }
 }
 
 bool glow_entity_valid(const glow_entity& item)
 {
-  if (item.entity == nullptr || entity_list == nullptr || item.info.entity_index <= 0) return false;
-  Entity* current = entity_list->entity_from_index(static_cast<unsigned int>(item.info.entity_index));
+  if (item.entity == nullptr || entity_list == nullptr || item.entity_index <= 0) return false;
+  Entity* current = entity_list->entity_from_index(static_cast<unsigned int>(item.entity_index));
   if (current != item.entity || current->is_dormant() || !current->should_draw()) return false;
-  if (item.info.renderable != current->get_renderable() || item.info.model != current->get_model()) return false;
   if (current->get_class_id() == class_id::PLAYER && !reinterpret_cast<Player*>(current)->is_alive()) return false;
   return true;
 }
@@ -354,6 +414,7 @@ void draw_glow_entities(const glow_batch& batch, const int width, const int heig
   const float original_blend = render_view->get_blend();
   const RGBA_float white{.r = 1.0f, .g = 1.0f, .b = 1.0f, .a = 1.0f};
 
+  context->set_cull_mode(MATERIAL_CULLMODE_CCW);
   context->set_stencil_enable(false);
   context->set_stencil_write_mask(0xFF);
   context->set_stencil_test_mask(0xFF);
@@ -370,8 +431,7 @@ void draw_glow_entities(const glow_batch& batch, const int width, const int heig
   render_view->set_color_modulation(&white);
   render_view->set_blend(0.0f);
   for (const glow_entity* item : valid_entities) {
-    rendering_effect_scope rendering_scope{};
-    call_original(model_render, item->state, item->info, item->bones);
+    draw_glow_model(*item);
   }
 
   context->push_render_target_and_viewport();
@@ -383,8 +443,7 @@ void draw_glow_entities(const glow_batch& batch, const int width, const int heig
   model_render->forced_material_override(mat_glow_color);
   for (const glow_entity* item : valid_entities) {
     materials.set_color(nullptr, item->color);
-    rendering_effect_scope rendering_scope{};
-    call_original(model_render, item->state, item->info, item->bones);
+    draw_glow_model(*item);
   }
   context->pop_render_target_and_viewport();
 
@@ -473,9 +532,9 @@ void draw_backtrack_effects(void* instance, const DrawModelState& state, const M
     if (settings.chams.active()) {
       draw_chams(instance, state, record_info, record_bones, settings.chams, distance, settings.ignore_z);
     }
-    if (settings.glow.active()) {
-      store_glow(player, settings.glow, distance, &state, &record_info, record_bones);
-    }
+  }
+  if (settings.glow.active()) {
+    store_glow(player, settings.glow, distance, info.entity_index, settings.record_mode);
   }
 }
 
@@ -541,7 +600,12 @@ void on_draw_model_execute(void* instance, const DrawModelState& state, const Mo
     call_original(instance, state, info, bones);
     return;
   }
-  if (is_rendering_effect() || model_render == nullptr || !materials.loaded() || entity_list == nullptr ||
+  if (is_rendering_effect()) {
+    if (glow_backtrack_mode >= 0) draw_glow_backtrack(instance, state, info, bones, glow_backtrack_mode);
+    else call_original(instance, state, info, bones);
+    return;
+  }
+  if (model_render == nullptr || !materials.loaded() || entity_list == nullptr ||
       engine == nullptr || engine->is_drawing_loading_image()) {
     call_original(instance, state, info, bones);
     return;
@@ -560,7 +624,7 @@ void on_draw_model_execute(void* instance, const DrawModelState& state, const Mo
   const float distance = distance_for(entity);
   if (match->chams.active()) draw_chams(instance, state, info, bones, match->chams, distance);
   else call_original(instance, state, info, bones);
-  if (match->glow.active() && resources_ready) store_glow(entity, match->glow, distance, &state, &info, bones);
+  if (match->glow.active() && resources_ready) store_glow(entity, match->glow, distance, info.entity_index);
   if (match->backtrack_visuals.active() && entity != nullptr && entity->get_class_id() == class_id::PLAYER) {
     draw_backtrack_effects(instance, state, info, reinterpret_cast<Player*>(entity), match->backtrack_visuals, distance);
   }
