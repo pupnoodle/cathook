@@ -1,0 +1,8 @@
+	.text
+transit:
+
+	lea    transit(%rip), %r11
+	jmp   *hook_caller_addr(%rip)
+hook_caller_addr:
+
+	.byte  0x0f,0x1f,0x40,0x00,0x0f,0x1f,0x40,0x00

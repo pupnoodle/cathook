@@ -1,0 +1,6 @@
+/Debug/
+bin/
+*.d
+*.o
+.settings/*
+build

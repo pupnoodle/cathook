@@ -1,0 +1,15 @@
+*.disasm
+*.dll
+*.lib
+*.o
+*.so
+*~
+/build*
+/CMakeCache.txt
+/CMakeFiles/
+/CTestTestfile.cmake
+/Makefile
+/cmake_install.cmake
+/config.h
+/_deps/*-build/
+/_deps/*-subbuild/
