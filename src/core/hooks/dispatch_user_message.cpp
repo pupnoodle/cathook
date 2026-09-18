@@ -11,6 +11,7 @@ V  o o  V  file: src/core/hooks/dispatch_user_message.cpp
 #include "games/tf2/sdk/bitbuf.hpp"
 #include "features/automation/misc/misc.hpp"
 #include "features/automation/nographics/nographics.hpp"
+#include "features/combat/aimbot/seed_prediction.hpp"
 #include "features/menu/config.hpp"
 #include "games/tf2/sdk/interfaces/engine.hpp"
 #include <cstring>
@@ -20,6 +21,7 @@ bool (*dispatch_user_message_original)(void*, int, bf_read*);
 namespace
 {
 
+constexpr int text_msg_user_message_type = 5;
 constexpr int vgui_menu_user_message_type = 12;
 constexpr int shake_user_message_type = 10;
 constexpr int fade_user_message_type = 11;
@@ -54,6 +56,9 @@ void close_welcome_menu()
 bool dispatch_user_message_hook(void* me, int message_type, bf_read* message_data) {
   CATHOOK_HOOK_GUARD();
   automation::controller().on_dispatch_user_message(message_type, message_data);
+  if (message_type == text_msg_user_message_type && seed_pred::on_text_msg(message_data)) {
+    return true;
+  }
   if (nographics::is_enabled() &&
       (message_type == shake_user_message_type || message_type == fade_user_message_type ||
        message_type == rumble_user_message_type || message_type == spawn_flying_bird_user_message_type ||

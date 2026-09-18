@@ -21,6 +21,7 @@ V  o o  V  file: src/features/combat/aimbot/aim_utils.hpp
 #include "aimbot_debug.hpp"
 #include "aimbot.hpp"
 #include "core/entity_cache.hpp"
+#include "core/dormancy.hpp"
 #include "core/ipc/ipc_client.hpp"
 #include "core/math/math.hpp"
 #include "core/memory/resolve.hpp"
@@ -135,6 +136,8 @@ struct aimbot_candidate {
   float backtrack_capture_gap = 0.0f;
   bool backtrack_on_shot = false;
   int tick_count = 0;
+  float melee_target_yaw = 0.0f;
+  bool melee_target_yaw_valid = false;
   Vec3 command_angles{};
   Vec3 backtrack_mins{};
   Vec3 backtrack_maxs{};
@@ -2751,12 +2754,25 @@ inline bool aimbot_should_extinguish_team(Player* localplayer, Player* player, W
     attribute_manager->attrib_hook_value(0, "jarate_duration", weapon->to_entity()) > 0.0f;
 }
 
+inline bool aimbot_allows_dormant_target(Weapon* weapon) {
+  if (config.aimbot.target_dormant) {
+    return true;
+  }
+  if (weapon != nullptr && aimbot_is_projectile_weapon(weapon) &&
+      (config.aimbot.projectile_modifiers & Aim::projectile_mod_target_dormant) != 0) {
+    return true;
+  }
+  return (config.aimbot.hitscan_modifiers & Aim::hitscan_mod_target_dormant) != 0;
+}
+
 inline aimbot_player_skip_reason aimbot_player_skip_reason_for(
   Player* localplayer, Player* player, Weapon* weapon = nullptr) {
   if (localplayer == nullptr || player == nullptr) return aimbot_player_skip_reason::invalid;
   if (player == localplayer) return aimbot_player_skip_reason::local;
   if (player->is_dormant()) {
-    if (!backtrack::dormant_can_shoot(player)) return aimbot_player_skip_reason::dormant;
+    if (!aimbot_allows_dormant_target(weapon) || !dormancy::usable(player)) {
+      if (!backtrack::dormant_can_shoot(player)) return aimbot_player_skip_reason::dormant;
+    }
   }
   if (!player->is_alive()) return aimbot_player_skip_reason::dead;
   if (aimbot_ignore_enabled(Aim::ignore_invulnerable) && player->is_invulnerable()) return aimbot_player_skip_reason::invulnerable;
@@ -2792,7 +2808,9 @@ inline aimbot_player_skip_reason aimbot_player_skip_reason_for(
   if (player == localplayer) return aimbot_player_skip_reason::local;
   if (entry.dormant) {
     if (player->is_dormant()) {
-      if (!backtrack::dormant_can_shoot(player)) return aimbot_player_skip_reason::dormant;
+      if (!aimbot_allows_dormant_target(weapon) || !dormancy::usable(player)) {
+        if (!backtrack::dormant_can_shoot(player)) return aimbot_player_skip_reason::dormant;
+      }
     } else {
       return aimbot_player_skip_reason::dormant;
     }
@@ -2875,7 +2893,8 @@ inline bool aimbot_should_skip_non_player_target(Player* localplayer, Entity* en
   }
 
   if (entity->is_dormant()) {
-    return true;
+    return !aimbot_allows_dormant_target(localplayer != nullptr ? localplayer->get_weapon() : nullptr) ||
+      !dormancy::usable(entity);
   }
 
   if (entity->is_building()) {
@@ -3152,65 +3171,42 @@ inline bool aimbot_is_projectile_weapon(Weapon* weapon) {
   if (weapon == nullptr) return false;
   if (weapon->is_flamethrower()) return true;
 
-  const int weapon_id = weapon->get_weapon_id();
-  if (weapon_id == TF_WEAPON_THROWABLE || weapon_id == TF_WEAPON_GRENADE_THROWABLE) {
+  switch (weapon->get_weapon_id()) {
+  case TF_WEAPON_CLEAVER:
+  case TF_WEAPON_GRENADE_CLEAVER:
+  case TF_WEAPON_ROCKETLAUNCHER:
+  case TF_WEAPON_ROCKETLAUNCHER_DIRECTHIT:
+  case TF_WEAPON_PARTICLE_CANNON:
+  case TF_WEAPON_RAYGUN:
+  case TF_WEAPON_FLAMETHROWER:
+  case TF_WEAPON_FLAMETHROWER_ROCKET:
+  case TF_WEAPON_FLAME_BALL:
+  case TF_WEAPON_FLAREGUN:
+  case TF_WEAPON_FLAREGUN_REVENGE:
+  case TF_WEAPON_GRENADELAUNCHER:
+  case TF_WEAPON_CANNON:
+  case TF_WEAPON_PIPEBOMBLAUNCHER:
+  case TF_WEAPON_STICKY_BALL_LAUNCHER:
+  case TF_WEAPON_SHOTGUN_BUILDING_RESCUE:
+  case TF_WEAPON_DRG_POMSON:
+  case TF_WEAPON_CROSSBOW:
+  case TF_WEAPON_SYRINGEGUN_MEDIC:
+  case TF_WEAPON_COMPOUND_BOW:
+  case TF_WEAPON_JAR:
+  case TF_WEAPON_JAR_MILK:
+  case TF_WEAPON_JAR_GAS:
+  case TF_WEAPON_GRENADE_JAR_GAS:
+  case TF_WEAPON_GRENADE_GAS:
+  case TF_WEAPON_PASSTIME_GUN:
+  case TF_WEAPON_LUNCHBOX:
+  case TF_WEAPON_GRAPPLINGHOOK:
+  case TF_WEAPON_THROWABLE:
+  case TF_WEAPON_GRENADE_THROWABLE:
+  case TF_WEAPON_BAT_WOOD:
+  case TF_WEAPON_BAT_GIFTWRAP:
     return true;
-  }
-
-  switch (weapon->get_def_id()) {
-  case Soldier_m_RocketLauncher:
-  case Soldier_m_RocketLauncherR:
-  case Soldier_m_TheDirectHit:
-  case Soldier_m_TheBlackBox:
-  case Soldier_m_RocketJumper:
-  case Soldier_m_TheLibertyLauncher:
-  case Soldier_m_TheCowMangler5000:
-  case Soldier_m_TheOriginal:
-  case Soldier_m_FestiveRocketLauncher:
-  case Soldier_m_TheBeggarsBazooka:
-  case Soldier_m_FestiveBlackBox:
-  case Soldier_m_TheAirStrike:
-  case Soldier_s_TheRighteousBison:
-  case Medic_m_CrusadersCrossbow:
-  case Medic_m_FestiveCrusadersCrossbow:
-  case Medic_m_SyringeGun:
-  case Medic_m_SyringeGunR:
-  case Medic_m_TheBlutsauger:
-  case Medic_m_TheOverdose:
-  case Engi_m_TheRescueRanger:
-  case Engi_m_ThePomson6000:
-  case Sniper_m_TheHuntsman:
-  case Sniper_m_FestiveHuntsman:
-  case Sniper_m_TheFortifiedCompound:
-  case Pyro_s_TheFlareGun:
-  case Pyro_s_TheDetonator:
-  case Pyro_s_TheManmelter:
-  case Pyro_s_TheScorchShot:
-  case Pyro_s_FestiveFlareGun:
-  case Pyro_m_DragonsFury:
-  case Pyro_s_GasPasser:
-  case Scout_s_MadMilk:
-  case Scout_s_MutatedMilk:
-  case Scout_s_TheFlyingGuillotine:
-  case Scout_s_TheFlyingGuillotineG:
-  case Sniper_s_Jarate:
-  case Sniper_s_FestiveJarate:
-  case Sniper_s_TheSelfAwareBeautyMark:
-  case Demoman_m_GrenadeLauncher:
-  case Demoman_m_GrenadeLauncherR:
-  case Demoman_m_TheLochnLoad:
-  case Demoman_m_TheLooseCannon:
-  case Demoman_m_FestiveGrenadeLauncher:
-  case Demoman_m_TheIronBomber:
-  case Demoman_s_StickybombLauncher:
-  case Demoman_s_StickybombLauncherR:
-  case Demoman_s_FestiveStickybombLauncher:
-  case Demoman_s_TheScottishResistance:
-  case Demoman_s_TheQuickiebombLauncher:
-      return true;
   default:
-
-      return weapon->get_projectile_type() > 1;
+    return weapon->get_projectile_type() > 1;
   }
 }
 

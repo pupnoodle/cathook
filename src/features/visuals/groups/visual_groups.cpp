@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include "core/math/math.hpp"
 #include "core/entity_cache.hpp"
+#include "core/dormancy.hpp"
 #include "core/player_manager.hpp"
 #include "features/combat/anti_aim/anti_aim.hpp"
 #include "features/combat/aimbot/aimbot.hpp"
@@ -29,7 +30,6 @@ namespace
 {
 
 constexpr std::size_t visual_group_not_found = static_cast<std::size_t>(-1);
-constexpr float dormant_esp_min_distance_hu = 600.0f;
 
 }
 
@@ -759,17 +759,14 @@ std::uint32_t next_group_id = 1;
   }
 
   const bool dormant = entity->is_dormant();
-  if (dormant && !config.visuals.dormant_esp) {
-    return false;
-  }
-  if (!models && dormant && distance_3d(entity->get_collision_origin(), localplayer->get_collision_origin()) < dormant_esp_min_distance_hu) {
+  if (dormant && (!config.visuals.dormant_esp || !dormancy::usable(entity))) {
     return false;
   }
   if ((group.conditions & visual_group::condition_dormant) != 0) {
     if (!dormant) {
       return false;
     }
-  } else if (dormant) {
+  } else if (dormant && !config.visuals.dormant_esp) {
     return false;
   }
 
@@ -972,7 +969,7 @@ void store(Player* localplayer)
     if (entity == nullptr) {
       return;
     }
-    if (entity->is_dormant() && !config.visuals.dormant_esp) {
+    if (entity->is_dormant() && (!config.visuals.dormant_esp || !dormancy::usable(entity))) {
       return;
     }
 
@@ -1246,7 +1243,7 @@ float alpha_for_entity(Entity* entity, float start, float end, bool smooth_alpha
 
   start = std::max(0.0f, start);
   end = std::max(start, end);
-  const Vec3 delta = entity->get_collision_origin() - localplayer->get_collision_origin();
+  const Vec3 delta = dormancy::origin(entity) - localplayer->get_collision_origin();
   const float distance = std::sqrt((delta.x * delta.x) + (delta.y * delta.y) + (delta.z * delta.z));
   if (distance < start) {
     return 0.0f;
@@ -1255,7 +1252,7 @@ float alpha_for_entity(Entity* entity, float start, float end, bool smooth_alpha
     return 0.0f;
   }
   if (!smooth_alpha) {
-    return 1.0f;
+    return dormancy::alpha(entity);
   }
 
   constexpr float max_fade_distance = 256.0f;
@@ -1275,7 +1272,7 @@ float alpha_for_entity(Entity* entity, float start, float end, bool smooth_alpha
     alpha *= smoothstep((distance - start) / fade_distance);
   }
   alpha *= smoothstep((end - distance) / fade_distance);
-  return alpha;
+  return alpha * dormancy::alpha(entity);
 }
 
 const char* label_for_entity(Entity* entity)

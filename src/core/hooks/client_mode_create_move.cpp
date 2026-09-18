@@ -24,6 +24,7 @@ V  o o  V  file: src/core/hooks/client_mode_create_move.cpp
 #include "features/combat/auto_reflect/auto_reflect.hpp"
 #include "features/combat/aimbot/aimbot.cpp"
 #include "features/combat/random_crits/crit_hack.hpp"
+#include "features/combat/aimbot/seed_prediction.hpp"
 #include "features/movement/bhop/bhop.cpp"
 #include "features/movement/engine_prediction/engine_prediction.cpp"
 #include "features/automation/medic_automation/medic_automation.hpp"
@@ -200,6 +201,7 @@ static move_features_result run_move_features(user_cmd* user_cmd) {
   const Vec3 pre_aimbot_view_angles = user_cmd->view_angles;
 
   aimbot_note_render_clock();
+  seed_pred::ask();
   start_engine_prediction(user_cmd);
   const aimbot::aimbot_run_result aimbot_result = suppress_aimbot
     ? aimbot::aimbot_run_result{}

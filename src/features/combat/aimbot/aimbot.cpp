@@ -452,13 +452,14 @@ bool melee_ready(const aimbot_run_context& ctx) {
         ctx.local,
         ctx.weapon,
         ctx.target.player,
-        ctx.target.melee_swing_tick > 0
+        ctx.target.predicted_origin_valid
           ? ctx.target.predicted_origin
           : ctx.target.player->get_origin(),
         ctx.target.melee_swing_tick > 0
           ? ctx.target.melee_swing_start
           : ctx.local->get_shoot_pos(),
-        shot_angles)
+        shot_angles,
+        ctx.target.melee_target_yaw_valid ? &ctx.target.melee_target_yaw : nullptr)
     : aimbot_entity_melee_reachable(ctx.local, ctx.weapon, ctx.target.entity, shot_angles);
 }
 
@@ -584,8 +585,9 @@ void apply_fire_state(aimbot_run_context& ctx) {
   if (firing && ctx.hitscan && ctx.hitscan_fire.ready && ctx.target.player != nullptr) {
     resolver::note_shot(ctx.target.player, ctx.target.hitbox, ctx.target.simulation_time, ctx.target.backtrack);
   }
-  if (firing && ctx.hitscan && ctx.hitscan_fire.ready && ctx.target.player != nullptr &&
-      ctx.target.tick_count > 0) {
+  if (ctx.target.tick_count > 0 && ctx.target.player != nullptr &&
+      ((firing && ctx.hitscan && ctx.hitscan_fire.ready) ||
+       (ctx.melee && (firing || melee_swing_pending)))) {
     ctx.cmd->tick_count = ctx.target.tick_count;
   }
 #if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE

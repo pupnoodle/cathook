@@ -14,6 +14,7 @@
 #include "projectile_helpers.hpp"
 #include "splashbot.hpp"
 #include "core/entity_cache.hpp"
+#include "core/dormancy.hpp"
 #include "games/tf2/sdk/interfaces/client_state.hpp"
 #include "games/tf2/sdk/interfaces/engine_trace.hpp"
 #include "games/tf2/sdk/interfaces/global_vars.hpp"
@@ -231,6 +232,58 @@ inline float aabb_distance(const Vec3& point, const Vec3& mins, const Vec3& maxs
   return distance_3d(point, nearest);
 }
 
+inline Vec3 closest_on_aabb(const Vec3& point, const Vec3& mins, const Vec3& maxs) {
+  return {
+    std::clamp(point.x, mins.x, maxs.x),
+    std::clamp(point.y, mins.y, maxs.y),
+    std::clamp(point.z, mins.z, maxs.z)
+  };
+}
+
+inline bool flame_stream_hits(Player* local, Entity* target, const Vec3& launch, const Vec3& forward,
+                              float speed, float life, float box, const Vec3& mins, const Vec3& maxs,
+                              float elapsed) {
+  if (local == nullptr || speed <= 1.0f) {
+    return false;
+  }
+  const float travel = std::clamp(std::max(elapsed, ticks_to_time(1)), 0.0f, life > 0.0f ? life : 0.285f);
+  const float reach = speed * travel;
+  const Vec3 end = launch + forward * reach;
+  const float t = life > 0.001f ? std::clamp(travel / life, 0.0f, 1.0f) : 1.0f;
+  const float widen = std::lerp(6.0f, std::max(box, 6.0f), t * t * (3.0f - 2.0f * t));
+  Vec3 hit_pos = end;
+  if (engine_trace != nullptr) {
+    Vec3 hull_mins{-widen, -widen, -widen};
+    Vec3 hull_maxs{widen, widen, widen};
+    Vec3 start = launch;
+    Vec3 stop = end;
+    ray_t ray = engine_trace->init_ray(&start, &stop, &hull_mins, &hull_maxs);
+    trace_filter filter{};
+    engine_trace->init_projectile_trace_filter(&filter, local->to_entity(), target, false);
+    trace_t trace{};
+    engine_trace->trace_ray(&ray, MASK_SOLID | CONTENTS_WATER | CONTENTS_HITBOX, &filter, &trace);
+    if (trace.all_solid) {
+      return false;
+    }
+    if (trace.entity == target) {
+      return true;
+    }
+    hit_pos = trace.endpos;
+    if (trace.fraction < 1.0f && trace.entity != target &&
+        aabb_distance(hit_pos, mins, maxs) > widen) {
+      return false;
+    }
+  }
+  const Vec3 center = (mins + maxs) * 0.5f;
+  const Vec3 delta = hit_pos - launch;
+  const float denom = length_squared(delta);
+  float along = 0.0f;
+  if (denom > 0.0001f) {
+    along = std::clamp(dot(center - launch, delta) / denom, 0.0f, 1.0f);
+  }
+  return aabb_distance(launch + delta * along, mins, maxs) <= widen;
+}
+
 inline bool trace_path_clear(Player* local, const projectile_info& info, Entity* ignored_target,
                              const std::vector<Vec3>& path, int tick, int skip_tail) {
   const int available = static_cast<int>(path.size());
@@ -386,7 +439,7 @@ inline point_solution solve_point(Player* local, const projectile_info& info, co
     return result;
   }
 
-  if (info.launch == launch_type::fire_setup && length_squared(info.offset) > 0.0001f) {
+  if (info.launch == launch_type::muzzle && length_squared(info.offset) > 0.0001f) {
     Vec3 forward{};
     angle_vectors(launch_angles, &forward, nullptr, nullptr);
 
@@ -498,12 +551,86 @@ struct seed_outcome {
   aimbot_candidate candidate{};
 };
 
+inline seed_outcome evaluate_flame(Player* local, Weapon* weapon, const projectile_info& info,
+                                  const target_seed& seed, const Vec3& original_view_angles) {
+  (void)weapon;
+  seed_outcome outcome{};
+  if (local == nullptr || seed.entity == nullptr) {
+    return outcome;
+  }
+
+  const Vec3 eye = local->get_shoot_pos();
+  const float speed = std::max(info.speed, 1.0f);
+  const float life = info.life_time > 0.0f ? info.life_time : 0.285f;
+  const int max_tick = std::clamp(time_to_ticks(life), 1, 24);
+  const float box = info.hull.x > 0.1f ? info.hull.x : game_convar_float("tf_flamethrower_boxsize", 12.0f);
+  const Vec3 owner_velocity = local->get_velocity();
+  const Vec3 aim_offsets[2] = {seed.aim_offset, {}};
+
+  for (int tick = 0; tick <= max_tick; ++tick) {
+    const float elapsed = ticks_to_time(tick);
+    const Vec3 origin = seed.origin + seed.velocity * elapsed;
+    const Vec3 mins = origin + seed.bounds_mins;
+    const Vec3 maxs = origin + seed.bounds_maxs;
+    const Vec3 center = (mins + maxs) * 0.5f;
+
+    for (int pass = 0; pass < 2; ++pass) {
+      const Vec3 point = pass == 0 ? origin + aim_offsets[0] : closest_on_aabb(eye, mins, maxs);
+      if (pass == 1 && distance_3d(point, origin + aim_offsets[0]) < 1.0f) {
+        continue;
+      }
+      const Vec3 angles = aimbot_clamp_angles(aimbot_calculate_angles_to_position(eye, point));
+      const float fov = aimbot_calculate_fov(angles, original_view_angles);
+      if (config.aimbot.projectile_mode == 0 && projectile_fov_exceeds_limit(fov)) {
+        continue;
+      }
+
+      Vec3 launch{};
+      Vec3 launch_angles{};
+      if (!launch_position(local, info, angles, true, launch, &launch_angles)) {
+        continue;
+      }
+
+      Vec3 forward{};
+      angle_vectors(launch_angles, &forward, nullptr, nullptr);
+      const float particle_speed = std::max(speed + dot(owner_velocity, forward), 50.0f);
+      if (!flame_stream_hits(local, seed.entity, launch, forward, particle_speed, life, box, mins,
+                             maxs, elapsed)) {
+        continue;
+      }
+
+      if (!outcome.found || fov < outcome.candidate.fov ||
+          (std::fabs(fov - outcome.candidate.fov) < 0.01f && elapsed < outcome.solution_time)) {
+        outcome.found = true;
+        outcome.solution_time = elapsed;
+        outcome.candidate.entity = seed.entity;
+        outcome.candidate.player = seed.player;
+        outcome.candidate.aim_angles = angles;
+        outcome.candidate.command_angles = angles;
+        outcome.candidate.predicted_origin = origin;
+        outcome.candidate.predicted_origin_valid = true;
+        outcome.candidate.fov = fov;
+        outcome.candidate.distance = distance_3d(eye, center);
+        outcome.candidate.preferred = seed.preferred;
+      }
+    }
+    if (outcome.found && tick <= 1) {
+      return outcome;
+    }
+  }
+
+  return outcome;
+}
+
 inline seed_outcome evaluate_seed(Player* local, Weapon* weapon, const projectile_info& info,
                                   const target_seed& seed,
                                   const Vec3& original_view_angles) {
   seed_outcome outcome{};
   if (local == nullptr || weapon == nullptr || seed.entity == nullptr) {
     return outcome;
+  }
+  if (info.weapon_id_value == TF_WEAPON_FLAMETHROWER || weapon->is_flamethrower()) {
+    return evaluate_flame(local, weapon, info, seed, original_view_angles);
   }
 
   const Vec3 eye = local->get_shoot_pos();
@@ -551,7 +678,7 @@ inline seed_outcome evaluate_seed(Player* local, Weapon* weapon, const projectil
   movement_path path{};
   movesim_guard path_guard(path.simulation);
   const bool simulate_movement =
-    seed.player != nullptr &&
+    seed.player != nullptr && !seed.player->is_dormant() &&
     config.aimbot.projectile_prediction_mode == Aim::ProjectilePredictionMode::MOVE_SIM;
   if (simulate_movement) {
     movesim::init_options options{};
@@ -990,7 +1117,7 @@ inline aimbot_candidate find_candidate(Player* local, Weapon* weapon,
     detail::target_seed seed{};
     seed.entity = entry.entity != nullptr ? entry.entity : entry.player->to_entity();
     seed.player = entry.player;
-    seed.origin = entry.player->get_origin();
+    seed.origin = dormancy::origin(entry.player);
     seed.view_offset = entry.player->get_view_offset();
     seed.bounds_mins = entry.player->get_player_mins();
     seed.bounds_maxs = entry.player->get_player_maxs();
@@ -1017,7 +1144,7 @@ inline aimbot_candidate find_candidate(Player* local, Weapon* weapon,
       aim_offset = {0.0f, 0.0f, seed.bounds_maxs.z * 0.93f};
     }
     seed.aim_offset = aim_offset;
-    seed.velocity = entry.player->get_velocity();
+    seed.velocity = dormancy::velocity(entry.player);
     seed.current_fov = aimbot_calculate_fov(
       aimbot_calculate_angles_to_position(shoot_pos, seed.origin + seed.aim_offset),
       original_view_angles);
@@ -1043,7 +1170,7 @@ inline aimbot_candidate find_candidate(Player* local, Weapon* weapon,
         }
         detail::target_seed seed{};
         seed.entity = entity;
-        seed.origin = entity->get_collision_origin();
+        seed.origin = dormancy::origin(entity);
         const Vec3 mins = entity->get_collideable_mins();
         const Vec3 maxs = entity->get_collideable_maxs();
         seed.bounds_mins = mins;
@@ -1070,7 +1197,7 @@ inline aimbot_candidate find_candidate(Player* local, Weapon* weapon,
 
     detail::target_seed seed{};
     seed.entity = entity;
-    seed.origin = entity->get_collision_origin();
+    seed.origin = dormancy::origin(entity);
     const Vec3 mins = entity->get_collideable_mins();
     const Vec3 maxs = entity->get_collideable_maxs();
     seed.bounds_mins = mins;
@@ -1155,7 +1282,7 @@ inline apply_result apply(user_cmd* cmd, Player* local, Weapon* weapon,
   const bool cannon_detonating =
     id == TF_WEAPON_CANNON && weapon->get_detonate_time() > 0.0f;
   const bool beggars = weapon->get_def_id() == Soldier_m_TheBeggarsBazooka;
-  const bool has_ammo = weapon->get_clip1() != 0;
+  const bool has_ammo = detail::has_ammo_for_shot(local, weapon);
   const bool raw_attack = (cmd->buttons & attack_button) != 0;
   bool manual_bow_release = is_bow(weapon) && same_charge_weapon(weapon) &&
     projectile_charge_state.last_aiming && projectile_charge_state.last_attack && !raw_attack;
@@ -1235,7 +1362,8 @@ inline apply_result apply(user_cmd* cmd, Player* local, Weapon* weapon,
   const bool firing = (cmd->buttons & attack_button) != 0;
   const bool shot_command = firing || release_requested || manual_bow_release;
   result.attack_ready = can_attack && shot_command;
-  result.psilent = aim_mode == Aim::AimMode::PSILENT && shot_command && !manual_attack;
+  result.psilent = aim_mode == Aim::AimMode::PSILENT && shot_command && !manual_attack &&
+    !weapon->is_flamethrower();
 
   if (config.aimbot.spread_compensation && shot_command) {
     target_angles = detail::compensate_projectile_spread(local, weapon, cmd, info,
@@ -1243,7 +1371,9 @@ inline apply_result apply(user_cmd* cmd, Player* local, Weapon* weapon,
   }
   cmd->view_angles = aimbot_clamp_angles(target_angles);
 
-  if (aim_mode != Aim::AimMode::PSILENT || manual_attack) {
+  if (aim_mode == Aim::AimMode::PSILENT && !shot_command && !manual_attack) {
+    cmd->view_angles = original_view_angles;
+  } else if (aim_mode != Aim::AimMode::PSILENT || manual_attack) {
     push_view_angles(cmd->view_angles);
   }
 

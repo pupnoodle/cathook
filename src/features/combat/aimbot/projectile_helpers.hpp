@@ -22,6 +22,7 @@
 #include "games/tf2/sdk/interfaces/engine_trace.hpp"
 #include "games/tf2/sdk/interfaces/global_vars.hpp"
 #include "games/tf2/sdk/interfaces/net_channel.hpp"
+#include "features/combat/random_crits/crit_hack.hpp"
 #include "aimbot.hpp"
 #include "aim_utils.hpp"
 
@@ -36,7 +37,7 @@ static constexpr float flare_det_radius = 132.0f;
 static constexpr float max_velocity_reference = 3500.0f;
 
 enum class launch_type {
-  fire_setup,
+  muzzle,
   hand,
   bat,
   grenade
@@ -53,10 +54,12 @@ struct projectile_info {
   float release_delay = 0.0f;
   float normal_offset = 0.0f;
   float arm_time = 0.0f;
+  float forward_redirect = 0.0f;
+  float redirect_cutoff = 0.1f;
   Vec3 offset{};
   Vec3 hull{2.0f, 2.0f, 2.0f};
   unsigned int collision_mask = projectile_collision_mask;
-  launch_type launch = launch_type::fire_setup;
+  launch_type launch = launch_type::muzzle;
   bool trace_launch = false;
   bool direct_hit = true;
   bool secondary_attack = false;
@@ -142,6 +145,9 @@ inline int weapon_id(Weapon* weapon) {
   if (id == TF_WEAPON_GRENADE_THROWABLE) {
     return TF_WEAPON_THROWABLE;
   }
+  if (id == TF_WEAPON_GRENADE_JAR_GAS) {
+    return TF_WEAPON_JAR_GAS;
+  }
   if (id != TF_WEAPON_NONE) {
     return id;
   }
@@ -152,13 +158,14 @@ inline int weapon_id(Weapon* weapon) {
   case Soldier_m_TheBlackBox:
   case Soldier_m_RocketJumper:
   case Soldier_m_TheLibertyLauncher:
-  case Soldier_m_TheCowMangler5000:
   case Soldier_m_TheOriginal:
   case Soldier_m_FestiveRocketLauncher:
   case Soldier_m_TheBeggarsBazooka:
   case Soldier_m_FestiveBlackBox:
   case Soldier_m_TheAirStrike:
     return TF_WEAPON_ROCKETLAUNCHER;
+  case Soldier_m_TheCowMangler5000:
+    return TF_WEAPON_PARTICLE_CANNON;
   case Soldier_m_TheDirectHit:
     return TF_WEAPON_ROCKETLAUNCHER_DIRECTHIT;
   case Soldier_s_TheRighteousBison:
@@ -195,12 +202,13 @@ inline int weapon_id(Weapon* weapon) {
     return TF_WEAPON_COMPOUND_BOW;
   case Pyro_s_TheFlareGun:
   case Pyro_s_TheDetonator:
-  case Pyro_s_TheManmelter:
   case Pyro_s_TheScorchShot:
   case Pyro_s_FestiveFlareGun:
     return TF_WEAPON_FLAREGUN;
+  case Pyro_s_TheManmelter:
+    return TF_WEAPON_FLAREGUN_REVENGE;
   case Pyro_m_DragonsFury:
-    return TF_WEAPON_FLAMETHROWER;
+    return TF_WEAPON_FLAME_BALL;
   case Scout_s_MadMilk:
   case Scout_s_MutatedMilk:
     return TF_WEAPON_JAR_MILK;
@@ -272,6 +280,8 @@ inline float effective_drag(const projectile_info& info, float velocity, bool lo
   case TF_WEAPON_JAR_MILK:
   case TF_WEAPON_THROWABLE:
     return lob ? 0.030f : 0.057f;
+  case TF_WEAPON_JAR_GAS:
+  case TF_WEAPON_GRENADE_JAR_GAS:
   case TF_WEAPON_GRENADE_GAS:
     return lob ? 0.089f : 0.530f;
   default:
@@ -325,8 +335,9 @@ inline projectile_randomness projectile_randomness_for(Weapon* weapon, user_cmd*
     return result;
   }
 
+  const int seed_command = crit_hack::predict_cmd_num(cmd, weapon);
   const int seed =
-    static_cast<int>(MD5_PseudoRandom(static_cast<unsigned int>(cmd->command_number)) & INT_MAX);
+    static_cast<int>(MD5_PseudoRandom(static_cast<unsigned int>(seed_command > 0 ? seed_command : cmd->command_number)) & INT_MAX);
   projectile_random_stream stream{};
   stream.set_seed(
     static_cast<int>(projectile_seed_file_line_hash(seed, "SelectWeightedSequence", 0)));
@@ -358,6 +369,183 @@ inline projectile_randomness projectile_randomness_for(Weapon* weapon, user_cmd*
   return result;
 }
 
+inline bool has_ammo_for_shot(Player* local, Weapon* weapon) {
+  if (weapon == nullptr) {
+    return false;
+  }
+  const int clip = weapon->get_clip1();
+  if (clip > 0) {
+    return true;
+  }
+  if (clip == 0) {
+    return false;
+  }
+  if (local == nullptr) {
+    return true;
+  }
+  const int ammo_type = weapon->get_primary_ammo_type();
+  return ammo_type < 0 || local->get_ammo_count(ammo_type) > 0;
+}
+
+inline bool fill_from_projectile_type(Player* local, Weapon* weapon, int type, projectile_info& out) {
+  if (local == nullptr || weapon == nullptr || type <= 1) {
+    return false;
+  }
+  const float weapon_z = local->is_ducking() ? 8.0f : -3.0f;
+  switch (type) {
+  case 2:
+  case 9:
+  case 27:
+    out.speed = projectile_speed(weapon, 1100.0f);
+    out.splash_radius = rocket_radius_default;
+    out.offset = {23.5f, 12.0f, weapon_z};
+    out.forward_redirect = 2000.0f;
+    out.life_time = 10.0f;
+    out.hull = {0.0f, 0.0f, 0.0f};
+    return true;
+  case 12:
+    out.speed = projectile_speed(weapon, 1100.0f);
+    out.offset = {23.5f, 8.0f, weapon_z};
+    out.forward_redirect = 2000.0f;
+    out.life_time = 10.0f;
+    return true;
+  case 13:
+    out.speed = 1200.0f;
+    out.hull = {1.0f, 1.0f, 1.0f};
+    out.offset = {23.5f, 12.0f, weapon_z};
+    out.forward_redirect = 2000.0f;
+    out.life_time = 10.0f;
+    return true;
+  case 3:
+  case 14:
+    out.speed = std::min(projectile_speed(weapon, 1200.0f), 3500.0f);
+    out.gravity_mod = 1.0f;
+    out.life_time = 2.0f;
+    out.splash_radius = rocket_radius_default;
+    out.offset = {16.0f, 8.0f, -6.0f};
+    out.hull = {5.0f, 5.0f, 5.0f};
+    out.initial_up_velocity = 200.0f;
+    return true;
+  case 4:
+  case 16:
+    out.speed = std::min(projectile_speed(weapon, 900.0f), 3500.0f);
+    out.gravity_mod = 1.0f;
+    out.life_time = 8.0f;
+    out.splash_radius = rocket_radius_default;
+    out.offset = {16.0f, 8.0f, -6.0f};
+    out.hull = {5.0f, 5.0f, 5.0f};
+    out.initial_up_velocity = 200.0f;
+    return true;
+  case 17:
+    out.speed = 1454.0f;
+    out.gravity_mod = 1.0f;
+    out.life_time = 0.95f;
+    out.splash_radius = rocket_radius_default;
+    out.offset = {16.0f, 8.0f, -6.0f};
+    out.hull = {6.0f, 6.0f, 6.0f};
+    out.initial_up_velocity = 200.0f;
+    return true;
+  case 5:
+    out.speed = 1000.0f;
+    out.gravity_mod = 0.3f;
+    out.hull = {1.0f, 1.0f, 1.0f};
+    out.offset = {16.0f, 6.0f, -8.0f};
+    out.forward_redirect = 2000.0f;
+    out.life_time = 3.5f;
+    return true;
+  case 6:
+    out.speed = projectile_speed(weapon, 2000.0f);
+    out.gravity_mod = 0.3f;
+    out.offset = {23.5f, 12.0f, weapon_z};
+    out.forward_redirect = 2000.0f;
+    out.life_time = 10.0f;
+    return true;
+  case 7:
+  case 10:
+  case 22:
+  case 24:
+  case 25:
+    out.speed = 1000.0f;
+    out.gravity_mod = 1.0f;
+    out.life_time = 2.2f;
+    out.splash_radius = 200.0f;
+    out.offset = {16.0f, 8.0f, -6.0f};
+    out.hull = {3.0f, 3.0f, 3.0f};
+    out.initial_up_velocity = 200.0f;
+    out.launch = launch_type::hand;
+    return true;
+  case 29:
+    out.speed = 2000.0f;
+    out.gravity_mod = 1.0f;
+    out.life_time = 2.2f;
+    out.splash_radius = 250.0f;
+    out.offset = {16.0f, 8.0f, -6.0f};
+    out.hull = {3.0f, 3.0f, 3.0f};
+    out.initial_up_velocity = 200.0f;
+    return true;
+  case 8:
+  case 19:
+    out.speed = 1800.0f;
+    out.gravity_mod = 0.5f;
+    out.life_time = 10.0f;
+    out.offset = {23.5f, 8.0f, -3.0f};
+    out.hull = {1.0f, 1.0f, 1.0f};
+    out.forward_redirect = 2000.0f;
+    return true;
+  case 11:
+  case 18:
+  case 23:
+    out.speed = 2400.0f;
+    out.gravity_mod = 0.2f;
+    out.life_time = 10.0f;
+    out.hull = {3.0f, 3.0f, 3.0f};
+    out.offset = {23.5f, 8.0f, -3.0f};
+    out.forward_redirect = 2000.0f;
+    return true;
+  case 15:
+    out.speed = 3000.0f;
+    out.gravity_mod = 1.0f;
+    out.life_time = 2.2f;
+    out.offset = {16.0f, 8.0f, -6.0f};
+    out.initial_up_velocity = 200.0f;
+    out.hull = {1.0f, 1.0f, 10.0f};
+    out.launch = launch_type::hand;
+    return true;
+  case 20:
+  case 28:
+    out.speed = 1000.0f;
+    out.gravity_mod = 1.0f;
+    out.life_time = 5.0f;
+    out.splash_radius = 250.0f;
+    out.offset = {16.0f, 8.0f, -6.0f};
+    out.hull = {3.0f, 3.0f, 3.0f};
+    out.initial_up_velocity = 200.0f;
+    out.launch = launch_type::hand;
+    return true;
+  case 26:
+    out.speed = game_convar_float("tf_grapplinghook_projectile_speed", 2600.0f);
+    out.life_time = out.speed > 1.0f
+      ? game_convar_float("tf_grapplinghook_max_distance", 1450.0f) / out.speed
+      : 0.5f;
+    out.offset = {23.5f, -8.0f, -3.0f};
+    out.hull = {1.2f, 1.2f, 1.2f};
+    out.forward_redirect = 2000.0f;
+    return true;
+  case 30:
+    out.speed = game_convar_float("tf_fireball_speed", 1500.0f);
+    out.life_time = std::min(game_convar_float("tf_fireball_distance", 686.0f) / std::max(out.speed, 1.0f),
+                             game_convar_float("tf_fireball_max_lifetime", 3.5f));
+    out.hull = {1.0f, 1.0f, 1.0f};
+    out.offset = {3.0f, 7.0f, -9.0f};
+    out.no_flip_offset = true;
+    out.forward_redirect = game_convar_float("tf_fireball_distance", 686.0f);
+    out.redirect_cutoff = 1.0f;
+    return true;
+  default:
+    return false;
+  }
+}
+
 inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
   out = {};
   if (local == nullptr || weapon == nullptr) {
@@ -369,29 +557,33 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
   const float weapon_z = ducking ? 8.0f : -3.0f;
   out.weapon_id_value = id;
   out.def_id = weapon->get_def_id();
+  out.trace_launch = true;
 
-  if (weapon->get_def_id() == Pyro_m_DragonsFury) {
+  if (weapon->get_def_id() == Pyro_m_DragonsFury || id == TF_WEAPON_FLAME_BALL) {
     const float fireball_speed = std::max(game_convar_float("tf_fireball_speed", 1500.0f), 1.0f);
-    out.weapon_id_value = TF_WEAPON_FLAMETHROWER;
-    out.def_id = weapon->get_def_id();
+    out.weapon_id_value = TF_WEAPON_FLAME_BALL;
     out.speed = fireball_speed;
     out.life_time = std::min(game_convar_float("tf_fireball_distance", 686.0f) / fireball_speed,
-                             game_convar_float("tf_fireball_lifetime", 3.5f));
+                             game_convar_float("tf_fireball_max_lifetime", 3.5f));
     out.hull = {1.0f, 1.0f, 1.0f};
     out.offset = {3.0f, 7.0f, -9.0f};
     out.no_flip_offset = true;
+    out.forward_redirect = game_convar_float("tf_fireball_distance", 686.0f);
+    out.redirect_cutoff = 1.0f;
     return true;
   }
 
-  if (weapon->is_flamethrower()) {
-    const float box = std::clamp(game_convar_float("tf_flamethrower_boxsize", 14.0f), 2.0f, 32.0f);
-    out.speed = 2000.0f;
+  if (weapon->is_flamethrower() || id == TF_WEAPON_FLAMETHROWER) {
+    const float box = std::clamp(game_convar_float("tf_flamethrower_boxsize", 12.0f), 2.0f, 32.0f);
+    out.weapon_id_value = TF_WEAPON_FLAMETHROWER;
+    out.speed = 1000.0f;
     out.life_time = 0.285f;
-    out.offset = {40.0f, 12.0f, weapon_z};
-    out.hull = {box * 0.5f, box * 0.5f, box * 0.5f};
+    out.offset = {40.0f, 5.0f, 0.0f};
+    out.hull = {box, box, box};
     out.no_flip_offset = true;
     out.owner_velocity_projection = true;
     out.direct_hit = true;
+    out.trace_launch = false;
     return true;
   }
 
@@ -400,6 +592,9 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
   case TF_WEAPON_PARTICLE_CANNON:
   case TF_WEAPON_ROCKETLAUNCHER_DIRECTHIT: {
     out.speed = projectile_speed(weapon, 1100.0f);
+    if (local->in_cond(TF_COND_RUNE_PRECISION)) {
+      out.speed = 3000.0f;
+    }
     out.splash_radius = id == TF_WEAPON_ROCKETLAUNCHER_DIRECTHIT ? rocket_radius_default
       : (weapon->get_def_id() == Soldier_m_TheAirStrike ? 130.0f : rocket_radius_default);
     out.splash_radius = attribute(out.splash_radius, "mult_explosion_radius", weapon->to_entity());
@@ -407,9 +602,15 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
                   attribute(0.0f, "centerfire_projectile", weapon->to_entity()) != 0.0f ? 0.0f
                                                                                         : 12.0f,
                   weapon_z};
-    out.trace_launch = true;
+    if (id == TF_WEAPON_PARTICLE_CANNON) {
+      out.offset.y = 8.0f;
+    }
+    out.forward_redirect = 2000.0f;
     out.normal_offset = 1.0f;
     out.life_time = 10.0f;
+    if (id != TF_WEAPON_PARTICLE_CANNON) {
+      out.hull = {0.0f, 0.0f, 0.0f};
+    }
     return true;
   }
 
@@ -418,13 +619,13 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     out.speed = std::min(projectile_speed(weapon, 1200.0f), 3500.0f);
     out.gravity_mod = 1.0f;
     out.life_time =
-      iron_bomber ? 1.4f : game_convar_float("tf_grenadelauncher_livetime", 0.8f);
+      iron_bomber ? 1.4f : attribute(2.0f, "fuse_mult", weapon->to_entity());
     out.splash_radius = attribute(rocket_radius_default, "mult_explosion_radius",
                                  weapon->to_entity());
     out.offset = {16.0f, 8.0f, -6.0f};
-    out.hull = {2.0f, 2.0f, 2.0f};
+    out.hull = attribute(0.0f, "grenade_no_spin", weapon->to_entity()) == 0.0f
+      ? Vec3{5.0f, 5.0f, 5.0f} : Vec3{4.0f, 4.0f, 4.0f};
     out.initial_up_velocity = 200.0f;
-    out.trace_launch = true;
     out.spin_drag_key =
       attribute(0.0f, "grenade_no_spin", weapon->to_entity()) == 0.0f;
     return true;
@@ -444,9 +645,8 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     out.splash_radius =
       attribute(rocket_radius_default, "mult_explosion_radius", weapon->to_entity());
     out.offset = {16.0f, 8.0f, -6.0f};
-    out.hull = {2.0f, 2.0f, 2.0f};
+    out.hull = {5.0f, 5.0f, 5.0f};
     out.initial_up_velocity = 200.0f;
-    out.trace_launch = true;
     out.air_splash = true;
     out.arm_time = attribute(game_convar_float("tf_grenadelauncher_livetime", 0.8f),
                              "sticky_arm_time", weapon->to_entity());
@@ -460,16 +660,16 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     out.splash_radius =
       attribute(rocket_radius_default, "mult_explosion_radius", weapon->to_entity());
     out.offset = {16.0f, 8.0f, -6.0f};
-    out.hull = {3.0f, 3.0f, 3.0f};
+    out.hull = {6.0f, 6.0f, 6.0f};
     out.initial_up_velocity = 200.0f;
-    out.trace_launch = true;
     return true;
 
   case TF_WEAPON_FLAREGUN: {
-    out.speed = 2000.0f;
+    out.speed = projectile_speed(weapon, 2000.0f);
     out.gravity_mod = 0.3f;
     out.initial_up_velocity = weapon->get_def_id() == Pyro_s_TheScorchShot ? 150.0f : 0.0f;
     out.offset = {23.5f, 12.0f, weapon_z};
+    out.forward_redirect = 2000.0f;
     out.life_time = 10.0f;
     if (weapon->get_def_id() == Pyro_s_TheScorchShot) {
       out.splash_radius = rocket_radius_default;
@@ -485,6 +685,7 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     out.speed = 3000.0f;
     out.gravity_mod = 0.45f;
     out.offset = {23.5f, 12.0f, weapon_z};
+    out.forward_redirect = 2000.0f;
     out.life_time = 10.0f;
     return true;
 
@@ -493,14 +694,16 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     out.speed = 1200.0f;
     out.hull = {1.0f, 1.0f, 1.0f};
     out.offset = {23.5f, 12.0f, weapon_z};
-    out.trace_launch = true;
+    out.forward_redirect = 2000.0f;
     out.normal_offset = id == TF_WEAPON_RAYGUN ? 1.0f : 0.0f;
     out.life_time = 10.0f;
+    if (id == TF_WEAPON_DRG_POMSON) {
+      out.offset.z -= 13.0f;
+    }
     return true;
 
   case TF_WEAPON_FLAMETHROWER_ROCKET:
     out.speed = game_convar_float("tf_fireball_speed", 1500.0f);
-    out.gravity_mod = 0.0f;
     out.hull = {1.0f, 1.0f, 1.0f};
     out.offset = {3.0f, 7.0f, -9.0f};
     out.no_flip_offset = true;
@@ -519,6 +722,7 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     out.life_time = 10.0f;
     out.offset = {23.5f, 8.0f, -3.0f};
     out.hull = {1.0f, 1.0f, 1.0f};
+    out.forward_redirect = 2000.0f;
     return true;
   }
 
@@ -527,8 +731,9 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     out.speed = 2400.0f;
     out.gravity_mod = 0.2f;
     out.life_time = 10.0f;
-    out.hull = {1.0f, 1.0f, 1.0f};
+    out.hull = id == TF_WEAPON_CROSSBOW ? Vec3{3.0f, 3.0f, 3.0f} : Vec3{1.0f, 1.0f, 1.0f};
     out.offset = {23.5f, 8.0f, -3.0f};
+    out.forward_redirect = 2000.0f;
     return true;
 
   case TF_WEAPON_SYRINGEGUN_MEDIC:
@@ -536,6 +741,7 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     out.gravity_mod = 0.3f;
     out.hull = {1.0f, 1.0f, 1.0f};
     out.offset = {16.0f, 6.0f, -8.0f};
+    out.forward_redirect = 2000.0f;
     out.life_time = 3.5f;
     return true;
 
@@ -550,48 +756,46 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     out.initial_up_velocity = 200.0f;
     out.release_delay = 0.1f;
     out.launch = launch_type::hand;
-    out.trace_launch = true;
+    return true;
+
+  case TF_WEAPON_JAR_GAS:
+  case TF_WEAPON_GRENADE_JAR_GAS:
+  case TF_WEAPON_GRENADE_GAS:
+    out.weapon_id_value = TF_WEAPON_JAR_GAS;
+    out.speed = 2000.0f;
+    out.gravity_mod = 1.0f;
+    out.life_time = 2.2f;
+    out.splash_radius = 250.0f;
+    out.offset = {16.0f, 8.0f, -6.0f};
+    out.hull = {3.0f, 3.0f, 3.0f};
+    out.initial_up_velocity = 200.0f;
     return true;
 
   case TF_WEAPON_CLEAVER:
   case TF_WEAPON_GRENADE_CLEAVER:
-    out.speed = 3000.0f * (10.0f / std::sqrt(101.0f));
+    out.speed = 3000.0f;
     out.gravity_mod = 1.0f;
     out.life_time = 2.2f;
     out.offset = {16.0f, 8.0f, -6.0f};
-    out.initial_up_velocity = 3000.0f / std::sqrt(101.0f);
+    out.initial_up_velocity = 200.0f;
     out.release_delay = 0.1f;
     out.hull = {1.0f, 1.0f, 10.0f};
     out.launch = launch_type::hand;
-    out.trace_launch = true;
     return true;
 
   case TF_WEAPON_BAT_WOOD:
   case TF_WEAPON_BAT_GIFTWRAP:
-    out.speed = 3000.0f * (10.0f / std::sqrt(101.0f));
+    out.speed = game_convar_float("tf_scout_stunball_base_speed", 3000.0f * (10.0f / std::sqrt(101.0f)));
     out.gravity_mod = 1.0f;
     out.life_time = 2.2f;
     out.splash_radius = id == TF_WEAPON_BAT_GIFTWRAP ? 50.0f : 0.0f;
     out.offset = {0.0f, 0.0f, 0.0f};
     out.hull = {3.0f, 3.0f, 3.0f};
-    out.initial_up_velocity = 3000.0f / std::sqrt(101.0f);
+    out.initial_up_velocity = 0.0f;
     out.release_delay = 0.1f;
     out.launch = launch_type::bat;
     out.secondary_attack = true;
-    return true;
-
-  case TF_WEAPON_GRENADE_GAS:
-    out.speed = 2000.0f;
-    out.gravity_mod = 0.4f;
-    out.life_time = 3.0f;
-    out.splash_radius = 256.0f;
-    out.offset = {3.0f, 7.0f, -9.0f};
-    out.hull = {3.0f, 3.0f, 3.0f};
-    out.initial_up_velocity = 200.0f;
-    out.no_flip_offset = true;
-    out.trace_launch = true;
-    out.launch = launch_type::grenade;
-    out.direct_hit = false;
+    out.trace_launch = false;
     return true;
 
   case TF_WEAPON_THROWABLE:
@@ -599,12 +803,11 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     out.gravity_mod = 1.0f;
     out.life_time = attribute(5.0f, "throwable_detonation_time", weapon->to_entity());
     out.splash_radius = 250.0f;
-    out.offset = {3.0f, 7.0f, -9.0f};
-    out.hull = {2.0f, 2.0f, 2.0f};
+    out.offset = {16.0f, 8.0f, -6.0f};
+    out.hull = {3.0f, 3.0f, 3.0f};
     out.initial_up_velocity = 200.0f;
     out.release_delay = 0.1f;
     out.launch = launch_type::hand;
-    out.trace_launch = true;
     return true;
 
   case TF_WEAPON_GRAPPLINGHOOK: {
@@ -617,15 +820,58 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     out.life_time = out.speed > 1.0f ? max_distance / out.speed : 0.5f;
     out.offset = {23.5f, -8.0f, -3.0f};
     out.hull = {1.2f, 1.2f, 1.2f};
+    out.forward_redirect = 2000.0f;
     return true;
   }
+
+  case TF_WEAPON_LUNCHBOX:
+    switch (weapon->get_def_id()) {
+    case Heavy_s_Sandvich:
+    case Heavy_s_FestiveSandvich:
+    case Heavy_s_Fishcake:
+    case Heavy_s_TheDalokohsBar:
+    case Heavy_s_SecondBanana:
+    case Heavy_s_RoboSandvich:
+      out.speed = 500.0f;
+      out.gravity_mod = 1.0f;
+      out.life_time = 2.0f;
+      out.offset = {0.0f, 0.0f, -8.0f};
+      out.hull = {17.0f, 17.0f, 7.0f};
+      out.launch = launch_type::hand;
+      return true;
+    default:
+      return false;
+    }
+
+  case TF_WEAPON_PASSTIME_GUN:
+    out.speed = std::max(game_convar_float("tf_passtime_speedball_throwspeed", 1200.0f), 1.0f);
+    out.gravity_mod = 1.0f;
+    out.life_time = 8.0f;
+    out.offset = {16.0f, 8.0f, -6.0f};
+    out.hull = {3.0f, 3.0f, 3.0f};
+    out.owner_velocity_projection = true;
+    return true;
 
   default:
     break;
   }
 
+  if (fill_from_projectile_type(local, weapon, weapon->get_projectile_type(), out)) {
+    return true;
+  }
+
+  const float data_speed = weapon->get_projectile_speed_from_data();
+  if (data_speed > 1.0f) {
+    out.speed = projectile_speed(weapon, data_speed);
+    out.life_time = 10.0f;
+    out.offset = {23.5f, 12.0f, weapon_z};
+    out.hull = {1.0f, 1.0f, 1.0f};
+    return true;
+  }
+
   return false;
 }
+
 
 inline float latency_seconds() {
   const backtrack::backtrack_timing timing = backtrack::current_timing();
@@ -669,22 +915,28 @@ inline bool launch_position(Player* local, const projectile_info& info, const Ve
     return finite(out);
   }
 
-  if (info.launch == launch_type::fire_setup) {
-    Vec3 fire_offset = info.offset;
-    if (!info.no_flip_offset) {
-      static Convar* cl_flipviewmodels = nullptr;
-      if (cl_flipviewmodels == nullptr && convar_system != nullptr) {
-        cl_flipviewmodels = convar_system->find_var("cl_flipviewmodels");
-      }
-      if (cl_flipviewmodels != nullptr && cl_flipviewmodels->get_int() != 0) {
-        fire_offset.y *= -1.0f;
-      }
+  Vec3 fire_offset = info.offset;
+  if (!info.no_flip_offset) {
+    static Convar* cl_flipviewmodels = nullptr;
+    if (cl_flipviewmodels == nullptr && convar_system != nullptr) {
+      cl_flipviewmodels = convar_system->find_var("cl_flipviewmodels");
     }
-    out = eye + (forward * fire_offset.x) + (right * fire_offset.y) + (up * fire_offset.z);
+    if (cl_flipviewmodels != nullptr && cl_flipviewmodels->get_int() != 0) {
+      fire_offset.y *= -1.0f;
+    }
+  }
 
-    Vec3 fire_end = eye + forward * 2000.0f;
-    Vec3 effective_end = fire_end;
-    if (engine_trace != nullptr) {
+  if (info.launch == launch_type::grenade) {
+    out = eye + forward * 16.0f - right * 8.0f - up * 20.0f;
+  } else if (info.launch == launch_type::hand) {
+    out = eye + (forward * fire_offset.x) + (right * fire_offset.y) + (up * fire_offset.z);
+  } else {
+    out = eye + (forward * fire_offset.x) + (right * fire_offset.y) + (up * fire_offset.z);
+  }
+
+  if (info.forward_redirect > 0.0f) {
+    Vec3 fire_end = eye + forward * info.forward_redirect;
+    if (info.redirect_cutoff < 1.0f && engine_trace != nullptr) {
       Vec3 trace_start = eye;
       Vec3 trace_end = fire_end;
       ray_t ray = engine_trace->init_ray(&trace_start, &trace_end);
@@ -696,27 +948,12 @@ inline bool launch_position(Player* local, const projectile_info& info, const Ve
       }
       trace_t trace{};
       engine_trace->trace_ray(&ray, projectile_collision_mask, &filter, &trace);
-      if (trace.start_solid || trace.all_solid) {
-        return false;
+      if (!trace.start_solid && !trace.all_solid && trace.fraction > info.redirect_cutoff &&
+          trace.fraction < 1.0f) {
+        fire_end = trace.endpos;
       }
-      effective_end = trace.fraction > 0.1f ? trace.endpos : fire_end;
     }
-
-    launch_angles = aimbot_calculate_angles_to_position(out, effective_end);
-    if (!finite(out) || !finite(launch_angles)) {
-      return false;
-    }
-
-    if (launch_angles_out != nullptr) {
-      *launch_angles_out = launch_angles;
-    }
-    return true;
-  }
-
-  if (info.launch == launch_type::grenade) {
-    out = eye + forward * 16.0f - right * 8.0f - up * 20.0f;
-  } else {
-    out = eye + (forward * info.offset.x) + (right * info.offset.y) + (up * info.offset.z);
+    launch_angles = aimbot_calculate_angles_to_position(out, fire_end);
   }
 
   if (info.trace_launch && engine_trace != nullptr) {
@@ -729,7 +966,7 @@ inline bool launch_position(Player* local, const projectile_info& info, const Ve
     engine_trace->init_world_and_props_trace_filter(&filter);
     trace_t trace{};
     engine_trace->trace_ray(&ray, projectile_collision_mask, &filter, &trace);
-    if (trace.start_solid || trace.all_solid || trace.fraction < 0.999f) {
+    if (trace.all_solid) {
       return false;
     }
     out = trace.endpos;
@@ -738,7 +975,7 @@ inline bool launch_position(Player* local, const projectile_info& info, const Ve
   if (launch_angles_out != nullptr) {
     *launch_angles_out = launch_angles;
   }
-  return finite(out);
+  return finite(out) && finite(launch_angles);
 }
 
 inline Vec3 launch_velocity(const projectile_info& info, const Vec3& launch_angles,

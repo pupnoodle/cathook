@@ -297,6 +297,7 @@ void config_store::import_config(const Config& config)
     set_bool("aimbot.draw_fov", config.aimbot.draw_fov);
     set_bool("aimbot.shoot_through_glass", config.aimbot.shoot_through_glass);
     set_bool("aimbot.spread_compensation", config.aimbot.spread_compensation);
+    set_bool("aimbot.target_dormant", config.aimbot.target_dormant);
     set_bool("aimbot.resolver", config.aimbot.resolver);
     set_int("aimbot.resolver_max_yaws", config.aimbot.resolver_max_yaws);
     set_bool("aimbot.debug_overlay", config.aimbot.debug_overlay);
@@ -307,6 +308,8 @@ void config_store::import_config(const Config& config)
     set_bool("aimbot.melee_walk_to_target", config.aimbot.melee_walk_to_target);
     set_bool("aimbot.melee_auto_backstab", config.aimbot.melee_auto_backstab);
     set_bool("aimbot.melee_ignore_razorback", config.aimbot.melee_ignore_razorback);
+    set_bool("aimbot.melee_whip_team", config.aimbot.melee_whip_team);
+    set_int("aimbot.melee_backstab_ping_mode", config.aimbot.melee_backstab_ping_mode);
     set_bool("aimbot.melee_swing_prediction", config.aimbot.melee_swing_prediction);
     set_int("aimbot.melee_swing_ticks", config.aimbot.melee_swing_ticks);
     set_bool("aimbot.melee_swing_predict_lag", config.aimbot.melee_swing_predict_lag);
@@ -859,6 +862,7 @@ void config_store::export_config(Config& config) const
     config.aimbot.draw_fov = get_bool("aimbot.draw_fov", config.aimbot.draw_fov);
     config.aimbot.shoot_through_glass = get_bool("aimbot.shoot_through_glass", config.aimbot.shoot_through_glass);
     config.aimbot.spread_compensation = get_bool("aimbot.spread_compensation", config.aimbot.spread_compensation);
+    config.aimbot.target_dormant = get_bool("aimbot.target_dormant", config.aimbot.target_dormant);
     config.aimbot.resolver = get_bool("aimbot.resolver", config.aimbot.resolver);
     config.aimbot.resolver_max_yaws = std::clamp(
         get_int("aimbot.resolver_max_yaws", config.aimbot.resolver_max_yaws),
@@ -872,6 +876,9 @@ void config_store::export_config(Config& config) const
     config.aimbot.melee_walk_to_target = get_bool("aimbot.melee_walk_to_target", config.aimbot.melee_walk_to_target);
     config.aimbot.melee_auto_backstab = get_bool("aimbot.melee_auto_backstab", config.aimbot.melee_auto_backstab);
     config.aimbot.melee_ignore_razorback = get_bool("aimbot.melee_ignore_razorback", config.aimbot.melee_ignore_razorback);
+    config.aimbot.melee_whip_team = get_bool("aimbot.melee_whip_team", config.aimbot.melee_whip_team);
+    config.aimbot.melee_backstab_ping_mode = std::clamp(
+        get_int("aimbot.melee_backstab_ping_mode", config.aimbot.melee_backstab_ping_mode), 0, 2);
     config.aimbot.melee_swing_prediction = get_bool("aimbot.melee_swing_prediction", config.aimbot.melee_swing_prediction);
     config.aimbot.melee_swing_ticks = std::clamp(
         get_int("aimbot.melee_swing_ticks", config.aimbot.melee_swing_ticks), 0, 14);

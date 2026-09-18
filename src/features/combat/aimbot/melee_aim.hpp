@@ -1,6 +1,7 @@
 #ifndef MELEE_AIM_HPP
 #define MELEE_AIM_HPP
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <utility>
 #include <vector>
@@ -9,6 +10,7 @@
 #include "features/combat/tickbase/tickbase.hpp"
 #include "games/tf2/sdk/entities/building.hpp"
 #include "games/tf2/sdk/interfaces/client_state.hpp"
+#include "games/tf2/sdk/interfaces/global_vars.hpp"
 #include "aim_utils.hpp"
 #include "resolver.hpp"
 
@@ -18,8 +20,6 @@ inline struct settings {
   bool hold_fire = true;
   bool drain_charge = true;
   bool strafe_prediction = true;
-  int backstab_ping_mode = 0;
-  bool whip_team = false;
   bool sapper_priority = true;
   bool wrench_friendly_buildings = false;
 } cfg{};
@@ -206,50 +206,8 @@ inline user_cmd straight_input_command(Player* local) {
 
 using movesim_guard = movesim::guard;
 
-inline float measured_latency() {
-  if (client_state == nullptr || client_state->m_NetChannel == nullptr) {
-    return 0.0f;
-  }
-  const float latency = client_state->m_NetChannel->get_latency(0) +
-    client_state->m_NetChannel->get_latency(1);
-  return std::isfinite(latency) ? std::clamp(latency, 0.0f, 0.25f) : 0.0f;
-}
-
-inline float lag_yaw_delta(int index) {
-  const float latency = measured_latency();
-  if (latency <= 0.0f) {
-    return 0.0f;
-  }
-  const std::vector<movesim::move_record>& history = movesim::history(index);
-  if (history.size() < 2) {
-    return 0.0f;
-  }
-  float latest_yaw = 0.0f;
-  bool have_latest = false;
-  for (auto entry = history.rbegin(); entry != history.rend(); ++entry) {
-    const float speed_squared = (entry->direction.x * entry->direction.x) +
-      (entry->direction.y * entry->direction.y);
-    if (speed_squared > 1.0f) {
-      latest_yaw = vector_yaw(entry->direction);
-      have_latest = true;
-      break;
-    }
-  }
-  if (!have_latest) {
-    return 0.0f;
-  }
-  const float cutoff = history.back().sim_time - latency;
-  for (auto entry = history.rbegin(); entry != history.rend(); ++entry) {
-    const float speed_squared = (entry->direction.x * entry->direction.x) +
-      (entry->direction.y * entry->direction.y);
-    if (speed_squared <= 1.0f) {
-      continue;
-    }
-    if (entry->sim_time <= cutoff) {
-      return normalize_angle(latest_yaw - vector_yaw(entry->direction));
-    }
-  }
-  return 0.0f;
+inline float lag_yaw_delta(Player* target) {
+  return backtrack::ping_yaw_delta(target);
 }
 
 inline float backstab_target_yaw(Player* target) {
@@ -279,48 +237,50 @@ inline bool razorback_blocks_backstab(Player* target) {
 }
 
 inline bool backstab_dots_pass(const Vec3& to_target, const Vec3& owner_forward,
-                               const Vec3& target_forward, float distance) {
-  const float extra = 0.125f / distance;
+                               const Vec3& target_forward) {
   const float position_vs_target =
     (to_target.x * target_forward.x) + (to_target.y * target_forward.y);
   const float position_vs_owner =
     (to_target.x * owner_forward.x) + (to_target.y * owner_forward.y);
   const float view_dot =
     (target_forward.x * owner_forward.x) + (target_forward.y * owner_forward.y);
-  return position_vs_target > 0.0031f + extra &&
-    position_vs_owner > 0.5f + extra &&
-    view_dot > -0.2969f;
+  return position_vs_target > 0.0f &&
+    position_vs_owner > 0.5f &&
+    view_dot > -0.3f;
 }
 
 inline bool backstab_geometry_ok(Player* target, const Vec3& target_origin,
-                                 const Vec3& swing_start, const Vec3& aim_angles) {
+                                 const Vec3& swing_start, const Vec3& aim_angles,
+                                 const float* record_yaw = nullptr) {
   Vec3 to_target = target_origin - swing_start;
   to_target.z = 0.0f;
   const float distance = std::sqrt((to_target.x * to_target.x) + (to_target.y * to_target.y));
-  if (distance < 0.0884f) {
+  if (distance <= 1.0e-4f) {
     return false;
   }
   to_target = to_target * (1.0f / distance);
 
   const Vec3 owner_forward = forward_xy(aim_angles);
-  const float base_yaw = backstab_target_yaw(target);
-  const bool ping_compensated = melee_aim::cfg.backstab_ping_mode > 0;
+  const float base_yaw = record_yaw != nullptr && std::isfinite(*record_yaw)
+    ? *record_yaw
+    : backstab_target_yaw(target);
+  const int ping_mode = record_yaw != nullptr ? 0 : config.aimbot.melee_backstab_ping_mode;
 
-  if (!ping_compensated) {
+  if (ping_mode <= 0) {
     const Vec3 target_forward = forward_xy(Vec3{0.0f, base_yaw, 0.0f});
-    return backstab_dots_pass(to_target, owner_forward, target_forward, distance);
+    return backstab_dots_pass(to_target, owner_forward, target_forward);
   }
 
-  if (melee_aim::cfg.backstab_ping_mode >= 2) {
+  if (ping_mode >= 2) {
     const Vec3 raw_forward = forward_xy(Vec3{0.0f, base_yaw, 0.0f});
-    if (!backstab_dots_pass(to_target, owner_forward, raw_forward, distance)) {
+    if (!backstab_dots_pass(to_target, owner_forward, raw_forward)) {
       return false;
     }
   }
 
-  const float delta = lag_yaw_delta(target->get_index());
+  const float delta = lag_yaw_delta(target);
   const Vec3 shifted_forward = forward_xy(Vec3{0.0f, normalize_angle(base_yaw + delta), 0.0f});
-  return backstab_dots_pass(to_target, owner_forward, shifted_forward, distance);
+  return backstab_dots_pass(to_target, owner_forward, shifted_forward);
 }
 
 inline Vec3 backstab_approach_position(Player* localplayer, Player* target) {
@@ -573,11 +533,16 @@ inline Vec3 local_eye_at(const target_frame& frame, Player* local, int tick) {
 struct swing_solution {
   bool valid = false;
   bool steer_only = false;
+  bool backtrack = false;
   Vec3 target_origin{};
   Vec3 swing_start{};
   Vec3 aim_position{};
   Vec3 aim_angles{};
   int tick = 0;
+  float simulation_time = 0.0f;
+  int tick_count = 0;
+  float target_yaw = 0.0f;
+  bool target_yaw_valid = false;
 };
 
 inline bool knife_backstab_required(Weapon* weapon, Player* local, Player* target) {
@@ -590,6 +555,11 @@ inline swing_solution evaluate_tick(Player* local, Weapon* weapon, Player* targe
                                     int tick) {
   swing_solution solution{};
   if (local == nullptr || weapon == nullptr || target == nullptr || !point.valid) {
+    return solution;
+  }
+
+  int command_tick = 0;
+  if (!backtrack::command_tick_for_melee_pose(target->get_simulation_time(), tick, &command_tick)) {
     return solution;
   }
 
@@ -628,6 +598,8 @@ inline swing_solution evaluate_tick(Player* local, Weapon* weapon, Player* targe
   solution.swing_start = swing_start;
   solution.aim_position = aim_position;
   solution.aim_angles = aimbot_clamp_angles(aim_angles);
+  solution.simulation_time = target->get_simulation_time() + ticks_to_time(std::max(tick, 0));
+  solution.tick_count = command_tick;
   return solution;
 }
 
@@ -670,7 +642,97 @@ inline swing_solution evaluate_steer(Player* local, Weapon* weapon, Player* targ
   solution.swing_start = swing_start;
   solution.aim_position = aim_position;
   solution.aim_angles = aimbot_clamp_angles(aim_angles);
+  solution.simulation_time = target->get_simulation_time();
   return solution;
+}
+
+inline swing_solution evaluate_record(Player* local, Weapon* weapon, Player* target,
+                                      const aimbot_point& point, const Vec3& swing_start,
+                                      const backtrack::backtrack_record& record,
+                                      float time_mod) {
+  swing_solution solution{};
+  if (local == nullptr || weapon == nullptr || target == nullptr || !point.valid ||
+      !record.valid) {
+    return solution;
+  }
+
+  int command_tick = 0;
+  if (!backtrack::command_tick_for_record(record, target, &command_tick, time_mod)) {
+    return solution;
+  }
+
+  const Vec3 target_origin = record.origin;
+  const bool teammate = target->get_team() == local->get_team();
+  const swing_geometry geometry =
+    swing_geometry_for(local, weapon, target->to_entity(), teammate);
+  if (geometry.range <= 0.0f) {
+    return solution;
+  }
+
+  Vec3 aim_position = clamp_point_to_bounds(target, target_origin, point.position);
+  if (knife_backstab_required(weapon, local, target)) {
+    aim_position.x = target_origin.x;
+    aim_position.y = target_origin.y;
+  }
+  const Vec3 aim_angles = aimbot_calculate_angles_to_position(swing_start, aim_position);
+  if (!melee_reach_hit(local, weapon, target, target_origin, swing_start, aim_angles,
+                       geometry)) {
+    return solution;
+  }
+  if (knife_backstab_required(weapon, local, target) &&
+      (razorback_blocks_backstab(target) ||
+       !backstab_geometry_ok(target, target_origin, swing_start, aim_angles,
+                            &record.yaw_angle))) {
+    return solution;
+  }
+
+  solution.valid = true;
+  solution.backtrack = true;
+  solution.tick = 0;
+  solution.target_origin = target_origin;
+  solution.swing_start = swing_start;
+  solution.aim_position = aim_position;
+  solution.aim_angles = aimbot_clamp_angles(aim_angles);
+  solution.simulation_time = record.sim_time;
+  solution.tick_count = command_tick;
+  solution.target_yaw = record.yaw_angle;
+  solution.target_yaw_valid = std::isfinite(record.yaw_angle);
+  return solution;
+}
+
+inline swing_solution find_backtrack_solution(Player* local, Weapon* weapon, Player* target,
+                                              const aimbot_point& point,
+                                              const target_frame& frame,
+                                              const std::vector<int>& validation_ticks) {
+  swing_solution best{};
+  if (local == nullptr || target == nullptr || !backtrack::is_enabled()) {
+    return best;
+  }
+
+  float best_distance = FLT_MAX;
+  for (const int tick : validation_ticks) {
+    const float time_mod = -ticks_to_time(std::max(tick, 0));
+    const backtrack::backtrack_record_view view = backtrack::valid_records(target, time_mod);
+    const Vec3 swing_start = local_eye_at(frame, local, tick);
+    for (int index = 0; index < view.count; ++index) {
+      const backtrack::backtrack_record* record = view.records[index];
+      if (record == nullptr) {
+        continue;
+      }
+      const swing_solution solution = evaluate_record(
+        local, weapon, target, point, swing_start, *record, time_mod);
+      if (!solution.valid) {
+        continue;
+      }
+      const float distance = std::sqrt(
+        aimbot_distance_squared(solution.swing_start, solution.target_origin));
+      if (!best.valid || distance < best_distance - 1.0f) {
+        best = solution;
+        best_distance = distance;
+      }
+    }
+  }
+  return best;
 }
 
 inline bool is_building_class(Entity* entity) {
@@ -835,12 +897,44 @@ inline uint32_t melee_aim_configured_hitbox_mask() {
     : aim_hitbox_mask_default_melee;
 }
 
+inline const float* melee_aim_record_yaw_for_origin(Player* target, const Vec3& origin,
+                                                    float* storage) {
+  if (target == nullptr || storage == nullptr) {
+    return nullptr;
+  }
+
+  const backtrack::backtrack_history* history = backtrack::records_for_player(target);
+  if (history == nullptr) {
+    return nullptr;
+  }
+
+  const float* best = nullptr;
+  float best_distance = 16.0f;
+  for (int index = 0; index < history->record_count; ++index) {
+    const backtrack::backtrack_record& record = history->records[static_cast<std::size_t>(index)];
+    if (!record.valid || !std::isfinite(record.yaw_angle)) {
+      continue;
+    }
+    const float distance = std::sqrt(aimbot_distance_squared(record.origin, origin));
+    if (distance < best_distance) {
+      best_distance = distance;
+      best = &record.yaw_angle;
+    }
+  }
+  if (best == nullptr) {
+    return nullptr;
+  }
+  *storage = *best;
+  return storage;
+}
+
 inline bool melee_aim_trace_candidate(Player* localplayer,
   Weapon* weapon,
   Player* target,
   const Vec3& target_origin,
   const Vec3& swing_start,
-  const Vec3& aim_angles) {
+  const Vec3& aim_angles,
+  const float* target_yaw = nullptr) {
   if (localplayer == nullptr || weapon == nullptr || target == nullptr) {
     return false;
   }
@@ -867,10 +961,16 @@ inline bool melee_aim_trace_candidate(Player* localplayer,
     return false;
   }
 
+  float stored_yaw = 0.0f;
+  const float* yaw = target_yaw;
+  if (yaw == nullptr &&
+      aimbot_distance_squared(target_origin, target->get_origin()) > 4.0f) {
+    yaw = melee_aim_record_yaw_for_origin(target, target_origin, &stored_yaw);
+  }
   if (melee_aim_detail::knife_backstab_required(weapon, localplayer, target) &&
       (melee_aim_detail::razorback_blocks_backstab(target) ||
        !melee_aim_detail::backstab_geometry_ok(target, target_origin, swing_start,
-                                               aim_angles))) {
+                                               aim_angles, yaw))) {
     return false;
   }
   return true;
@@ -907,7 +1007,7 @@ inline aimbot_candidate melee_aim_find_candidate(Player* localplayer,
 
   const bool teammate = player->get_team() == localplayer->get_team();
   if (teammate && !aimbot_is_friendlyfire_enabled() &&
-      !(melee_aim::cfg.whip_team &&
+      !(config.aimbot.melee_whip_team &&
         melee_aim_detail::attribute_value(0.0f, "speed_buff_ally",
                                           weapon->to_entity()) > 0.0f)) {
     return candidate;
@@ -963,6 +1063,20 @@ inline aimbot_candidate melee_aim_find_candidate(Player* localplayer,
     }
   }
 
+  const melee_aim_detail::swing_solution backtracked =
+    melee_aim_detail::find_backtrack_solution(
+      localplayer, weapon, player, point, frame, validation_ticks);
+  if (backtracked.valid) {
+    const float chosen_distance = chosen.valid
+      ? std::sqrt(aimbot_distance_squared(chosen.swing_start, chosen.target_origin))
+      : FLT_MAX;
+    const float backtrack_distance = std::sqrt(
+      aimbot_distance_squared(backtracked.swing_start, backtracked.target_origin));
+    if (!chosen.valid || backtrack_distance + 1.0f < chosen_distance) {
+      chosen = backtracked;
+    }
+  }
+
   if (!chosen.valid) {
     chosen = melee_aim_detail::evaluate_steer(localplayer, weapon, player, point);
   }
@@ -991,7 +1105,17 @@ inline aimbot_candidate melee_aim_find_candidate(Player* localplayer,
     aimbot_distance_squared(chosen.swing_start, chosen.aim_position));
   candidate.health = player->get_health();
   candidate.visible = true;
-  candidate.simulation_time = player->get_simulation_time();
+  candidate.simulation_time = chosen.simulation_time > 0.0f
+    ? chosen.simulation_time
+    : player->get_simulation_time();
+  candidate.backtrack = chosen.backtrack;
+  candidate.tick_count = chosen.tick_count;
+  candidate.melee_target_yaw = chosen.target_yaw;
+  candidate.melee_target_yaw_valid = chosen.target_yaw_valid;
+  if (candidate.tick_count <= 0 &&
+      !backtrack::command_tick_for_current_pose(candidate.simulation_time, &candidate.tick_count)) {
+    candidate.tick_count = 0;
+  }
   if (chosen.steer_only) {
     candidate.melee_swing_tick = -1;
     candidate.predicted_origin_valid = false;
@@ -999,7 +1123,7 @@ inline aimbot_candidate melee_aim_find_candidate(Player* localplayer,
     candidate.melee_swing_start = chosen.swing_start;
     candidate.melee_swing_tick = chosen.tick;
     candidate.predicted_origin = chosen.target_origin;
-    candidate.predicted_origin_valid = chosen.tick > 0;
+    candidate.predicted_origin_valid = chosen.tick > 0 || chosen.backtrack;
   }
   return candidate;
 }

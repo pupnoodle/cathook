@@ -178,23 +178,10 @@ inline bool boxes_overlap(const Vec3& min_a, const Vec3& max_a, const Vec3& min_
 }
 
 inline bool sky_face(const Vec3* vertices, int count, const Vec3& normal) {
-  if (engine_trace == nullptr || vertices == nullptr || count < 3) {
-    return false;
-  }
-  Vec3 center{};
-  for (int index = 0; index < count; ++index) {
-    center += vertices[index];
-  }
-  center = center * (1.0f / static_cast<float>(count));
-  const Vec3 unit = normalized(normal);
-  Vec3 start = center + unit * 1.0f;
-  Vec3 end = center - unit * 4.0f;
-  ray_t ray = engine_trace->init_ray(&start, &end);
-  trace_filter filter{};
-  engine_trace->init_world_trace_filter(&filter);
-  trace_t trace{};
-  engine_trace->trace_ray(&ray, MASK_SOLID, &filter, &trace);
-  return (trace.surface.flags & SURF_SKY) != 0u;
+  (void)vertices;
+  (void)count;
+  (void)normal;
+  return false;
 }
 
 inline bool append_face(const std::vector<Vec3>& vertices, const Vec3& normal, world_face_type type,
@@ -390,16 +377,18 @@ inline int enum_element(partition_enumerator* self, IHandleEntity* entity) {
 
 }  // namespace detail
 
-inline int get_faces_in_aabb(const Vec3& mins, const Vec3& maxs, int mask, world_face* out, int capacity) {
+inline int get_faces_in_aabb(const Vec3& mins, const Vec3& maxs, int mask, world_face* out, int capacity,
+                            bool cheap = false) {
   int count = 0;
   if (out == nullptr || capacity <= 0 || engine_trace == nullptr) {
     return 0;
   }
 
   int brush_storage[2048]{};
-  CUtlVector<int> brushes(brush_storage, 2048);
+  CUtlVector<int> brushes(brush_storage, cheap ? 256 : 2048);
   engine_trace->get_brushes_in_aabb(mins, maxs, &brushes, mask);
-  for (int index = 0; index < brushes.Count() && count < capacity; ++index) {
+  const int brush_limit = cheap ? std::min(brushes.Count(), 64) : brushes.Count();
+  for (int index = 0; index < brush_limit && count < capacity; ++index) {
     vector4d plane_storage[64]{};
     CUtlVector<vector4d> planes(plane_storage, 64);
     int contents = 0;
@@ -417,9 +406,46 @@ inline int get_faces_in_aabb(const Vec3& mins, const Vec3& maxs, int mask, world
         }
       }
     }
+    if (cheap && !axis_box) {
+      continue;
+    }
+    if (cheap && axis_box) {
+      Vec3 box_min{1.0e8f, 1.0e8f, 1.0e8f};
+      Vec3 box_max{-1.0e8f, -1.0e8f, -1.0e8f};
+      for (int plane = 0; plane < planes.Count(); ++plane) {
+        const Vec3 normal{planes[plane].x, planes[plane].y, planes[plane].z};
+        const float dist = planes[plane].w;
+        if (normal.x > 0.5f) box_max.x = dist;
+        else if (normal.x < -0.5f) box_min.x = -dist;
+        if (normal.y > 0.5f) box_max.y = dist;
+        else if (normal.y < -0.5f) box_min.y = -dist;
+        if (normal.z > 0.5f) box_max.z = dist;
+        else if (normal.z < -0.5f) box_min.z = -dist;
+      }
+      const Vec3 faces[6][4] = {
+        {{box_min.x, box_min.y, box_min.z}, {box_max.x, box_min.y, box_min.z}, {box_max.x, box_max.y, box_min.z}, {box_min.x, box_max.y, box_min.z}},
+        {{box_min.x, box_min.y, box_max.z}, {box_min.x, box_max.y, box_max.z}, {box_max.x, box_max.y, box_max.z}, {box_max.x, box_min.y, box_max.z}},
+        {{box_min.x, box_min.y, box_min.z}, {box_min.x, box_min.y, box_max.z}, {box_max.x, box_min.y, box_max.z}, {box_max.x, box_min.y, box_min.z}},
+        {{box_min.x, box_max.y, box_min.z}, {box_max.x, box_max.y, box_min.z}, {box_max.x, box_max.y, box_max.z}, {box_min.x, box_max.y, box_max.z}},
+        {{box_min.x, box_min.y, box_min.z}, {box_min.x, box_max.y, box_min.z}, {box_min.x, box_max.y, box_max.z}, {box_min.x, box_min.y, box_max.z}},
+        {{box_max.x, box_min.y, box_min.z}, {box_max.x, box_min.y, box_max.z}, {box_max.x, box_max.y, box_max.z}, {box_max.x, box_max.y, box_min.z}},
+      };
+      const Vec3 normals[6] = {
+        {0, 0, -1}, {0, 0, 1}, {0, -1, 0}, {0, 1, 0}, {-1, 0, 0}, {1, 0, 0}
+      };
+      for (int face = 0; face < 6 && count < capacity; ++face) {
+        detail::append_face({faces[face][0], faces[face][1], faces[face][2], faces[face][3]},
+                            normals[face], face_box_brush, mins, maxs, true, out, count, capacity);
+      }
+      continue;
+    }
     detail::faces_from_planes(planes.Base(), planes.Count(),
                               axis_box ? face_box_brush : face_plane_brush, mins, maxs, axis_box, out,
                               count, capacity);
+  }
+
+  if (cheap) {
+    return count;
   }
 
   if (CPhysCollide* displacements =

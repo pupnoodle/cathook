@@ -11,6 +11,7 @@
 #include "aim_utils.hpp"
 #include "hitscan_aim.hpp"
 #include "games/tf2/sdk/interfaces/convar_system.hpp"
+#include "seed_prediction.hpp"
 
 namespace aim_spread {
 
@@ -73,22 +74,7 @@ inline bool fixed_weapon_spread_active(Weapon* weapon, int pellet_count) {
 }
 
 inline int hitscan_spread_seed(user_cmd* user_cmd) {
-
-  if (user_cmd == nullptr) {
-    return 0;
-  }
-
-  static Convar* custom_random_seed = nullptr;
-  static bool looked_up = false;
-  if (!looked_up && convar_system != nullptr) {
-    custom_random_seed = convar_system->find_var("sv_usercmd_custom_random_seed");
-    looked_up = true;
-  }
-
-  if (custom_random_seed != nullptr && custom_random_seed->get_int() != 0) {
-    return user_cmd->random_seed;
-  }
-  return user_cmd->random_seed & 255;
+  return seed_pred::hitscan_seed(user_cmd);
 }
 
 inline float hitscan_first_shot_spread_scale(Weapon* weapon, int pellet_count) {

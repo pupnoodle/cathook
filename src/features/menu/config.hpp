@@ -62,7 +62,9 @@ struct Aim {
   enum projectile_modifier_flags : uint32_t {
     projectile_mod_charge_weapon = 1u << 0,
     projectile_mod_cancel_charge = 1u << 1,
-    projectile_mod_all = projectile_mod_charge_weapon | projectile_mod_cancel_charge
+    projectile_mod_target_dormant = 1u << 2,
+    projectile_mod_default = projectile_mod_charge_weapon | projectile_mod_cancel_charge,
+    projectile_mod_all = projectile_mod_default | projectile_mod_target_dormant
   };
 
   enum ignore_player_flags : uint32_t {
@@ -97,12 +99,13 @@ struct Aim {
     hitscan_mod_extinguish_team   = 1u << 7,
     hitscan_mod_prefer_medics     = 1u << 8,
     hitscan_mod_headshot_only     = 1u << 9,
+    hitscan_mod_target_dormant    = 1u << 10,
     hitscan_mod_default = hitscan_mod_body_aim_if_lethal,
     hitscan_mod_all = hitscan_mod_wait_for_headshot |
       hitscan_mod_wait_for_charge | hitscan_mod_body_aim_if_lethal |
       hitscan_mod_scoped_only | hitscan_mod_tapfire |
       hitscan_mod_auto_rev | hitscan_mod_extinguish_team | hitscan_mod_prefer_medics |
-      hitscan_mod_headshot_only
+      hitscan_mod_headshot_only | hitscan_mod_target_dormant
   };
 
   bool master = true;
@@ -117,6 +120,7 @@ struct Aim {
   bool draw_fov = false;
   bool shoot_through_glass = false;
   bool spread_compensation = true;
+  bool target_dormant = false;
   bool resolver = true;
   int resolver_max_yaws = 12;
   bool debug_overlay = false;
@@ -128,6 +132,8 @@ struct Aim {
   bool melee_walk_to_target = true;
   bool melee_auto_backstab = true;
   bool melee_ignore_razorback = true;
+  bool melee_whip_team = false;
+  int melee_backstab_ping_mode = 1;
 
   bool melee_swing_prediction = true;
   int melee_swing_ticks = 13;
@@ -149,7 +155,7 @@ struct Aim {
   float bone_size_min_scale = 0.4f;
 
   bool projectile_active = true;
-  uint32_t projectile_modifiers = projectile_mod_all;
+  uint32_t projectile_modifiers = projectile_mod_default;
   int projectile_mode = 0;
   ProjectilePredictionMode projectile_prediction_mode = ProjectilePredictionMode::EXTRAPOLATION;
   int projectile_aim_pos = 0;

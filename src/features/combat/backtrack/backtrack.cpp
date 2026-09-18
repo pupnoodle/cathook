@@ -49,7 +49,10 @@ std::array<backtrack_history, max_entities> g_records{};
 std::array<bool, max_entities> g_did_shoot{};
 std::deque<incoming_sequence> g_sequences{};
 int g_last_incoming_sequence = 0;
-float g_latency_ramp = 0.0f;
+int g_last_acked_sequence = 0;
+int g_sequence_tickbase = 0;
+float g_applied_fake_latency = 0.0f;
+float g_real_latency_ema = 0.0f;
 float g_last_sent_interp = -1.0f;
 float g_next_interp_send_time = 0.0f;
 void** g_hooked_net_channel_vtable = nullptr;
@@ -220,19 +223,57 @@ float server_believed_lerp_seconds()
   return distance * distance;
 }
 
-[[nodiscard]] float raw_fake_latency_seconds(float max_unlag, float fake_interp, net_channel* channel)
+[[nodiscard]] float host_timescale_value()
+{
+  static Convar* host_timescale = nullptr;
+  if (host_timescale == nullptr && convar_system != nullptr) {
+    host_timescale = convar_system->find_var("host_timescale");
+  }
+
+  const float value = host_timescale != nullptr ? host_timescale->get_float() : 1.0f;
+  return std::isfinite(value) && value > 0.01f ? value : 1.0f;
+}
+
+[[nodiscard]] float wish_fake_latency_seconds(float max_unlag)
+{
+  return std::clamp(config.backtrack.fake_latency_ms * 0.001f, 0.0f, max_unlag);
+}
+
+[[nodiscard]] float measured_channel_latency(net_channel* channel)
 {
   if (channel == nullptr) {
     return 0.0f;
   }
 
-  const float requested = std::clamp(config.backtrack.fake_latency_ms * 0.001f, 0.0f, max_unlag);
-  const float real_latency = std::clamp(
-    channel->get_latency(flow_outgoing) + channel->get_latency(flow_incoming),
-    0.0f,
-    max_unlag);
-  const float available = std::max(0.0f, max_unlag - real_latency - fake_interp);
-  return g_latency_ramp * std::clamp(requested, 0.0f, available);
+  const float outgoing = std::max(channel->get_latency(flow_outgoing), 0.0f);
+  const float incoming = std::max(channel->get_latency(flow_incoming), 0.0f);
+  const float combined = outgoing + incoming;
+  return std::isfinite(combined) ? combined : 0.0f;
+}
+
+[[nodiscard]] float sequence_age_seconds(const incoming_sequence& sequence)
+{
+  if (global_vars == nullptr) {
+    return 0.0f;
+  }
+
+  return (global_vars->realtime - sequence.realtime) * host_timescale_value() - tick_interval();
+}
+
+void smooth_applied_latency(float applied)
+{
+  if (applied > 1.0f) {
+    applied = 0.0f;
+  }
+
+  const float step = tick_interval();
+  g_applied_fake_latency = std::clamp(
+    g_applied_fake_latency + (applied - g_applied_fake_latency) * 0.1f,
+    g_applied_fake_latency - step,
+    g_applied_fake_latency + step);
+  if (applied <= 0.0f && g_applied_fake_latency < step) {
+    g_applied_fake_latency = 0.0f;
+  }
 }
 
 [[nodiscard]] float round_to_tick_seconds(float seconds)
@@ -292,15 +333,22 @@ float server_believed_lerp_seconds()
   if (channel != nullptr) {
     timing.outgoing_latency = std::clamp(channel->get_latency(flow_outgoing), 0.0f, timing.max_unlag);
     timing.incoming_latency = std::clamp(channel->get_latency(flow_incoming), 0.0f, timing.max_unlag);
-    timing.fake_latency = raw_fake_latency_seconds(timing.max_unlag, timing.fake_interp, channel);
+    timing.fake_latency = g_applied_fake_latency;
     timing.server_tick += time_to_ticks(timing.outgoing_latency);
   }
   if (apply_offset) {
     timing.server_tick += std::clamp(config.backtrack.offset_ticks, -4, 4);
   }
 
+  // Server StartLagCompensation is GetLatency(FLOW_OUTGOING)+lerp. Spoofed ACKs inflate
+  // the server's outgoing flow. Client GetLatency(IN) usually includes that hold after
+  // FlowNewPacket; if it does not yet, add the applied fake so old records stay valid.
+  const float measured = timing.outgoing_latency + timing.incoming_latency;
+  const float latency_for_correct = measured + tick_interval() >= timing.fake_latency
+    ? measured
+    : measured + timing.fake_latency;
   timing.correct = std::clamp(
-    timing.outgoing_latency + timing.incoming_latency - timing.fake_latency + round_to_tick_seconds(timing.fake_interp),
+    latency_for_correct + round_to_tick_seconds(timing.fake_interp),
     0.0f,
     timing.max_unlag);
   const float frame_excess = std::max(0.0f, timing.frame_gap - tick_interval());
@@ -325,7 +373,8 @@ float server_believed_lerp_seconds()
 [[nodiscard]] bool command_tick_for_record_timing(const backtrack_record& record,
   Player* player,
   const backtrack_timing& timing,
-  int* tick_count)
+  int* tick_count,
+  float time_mod = 0.0f)
 {
   if (!record.valid ||
       record.invalid ||
@@ -369,15 +418,15 @@ float server_believed_lerp_seconds()
   const int command_tick = target_tick + timing.lerp_ticks;
   const float server_time = ticks_to_time(timing.server_tick);
   const float age = server_time - record.sim_time;
-  const float max_window = std::min(
-    timing.max_unlag,
-    std::max(timing.window, lag_compensation_delta_limit));
-  if (!std::isfinite(age) || age < -tick_interval() || age > max_window + tick_interval()) {
+  if (!std::isfinite(age) || age < -tick_interval() || age > timing.max_unlag + tick_interval()) {
     return false;
   }
 
-  const float delta = record_delta_for_target_tick(timing, target_tick);
-  if (!std::isfinite(delta) || delta > std::max(lag_compensation_delta_limit, tick_interval())) {
+  const float used_correct = std::clamp(timing.correct + time_mod, 0.0f, timing.max_unlag);
+  const float delta = std::fabs(used_correct - ticks_to_time(timing.server_tick - target_tick));
+  // Server StartLagCompensation remaps the tick when |correct-age| > 200ms.
+  const float allowed = std::max(lag_compensation_delta_limit, tick_interval());
+  if (!std::isfinite(delta) || delta > allowed) {
     return false;
   }
 
@@ -387,9 +436,12 @@ float server_believed_lerp_seconds()
   return true;
 }
 
-[[nodiscard]] bool record_valid_for_timing(const backtrack_record& record, Player* player, const backtrack_timing& timing)
+[[nodiscard]] bool record_valid_for_timing(const backtrack_record& record,
+  Player* player,
+  const backtrack_timing& timing,
+  float time_mod = 0.0f)
 {
-  return command_tick_for_record_timing(record, player, timing, nullptr);
+  return command_tick_for_record_timing(record, player, timing, nullptr, time_mod);
 }
 
 [[nodiscard]] bool world_clear(const Vec3& start_pos, const Vec3& end_pos)
@@ -722,6 +774,13 @@ void update_sequences(net_channel* channel)
     return;
   }
 
+  if (entity_list != nullptr) {
+    Player* localplayer = entity_list->get_localplayer();
+    if (localplayer != nullptr) {
+      g_sequence_tickbase = localplayer->get_tickbase();
+    }
+  }
+
   net_channel_storage* storage = reinterpret_cast<net_channel_storage*>(channel);
   if (storage->in_sequence_number > g_last_incoming_sequence) {
     g_last_incoming_sequence = storage->in_sequence_number;
@@ -737,25 +796,56 @@ void update_sequences(net_channel* channel)
   }
 }
 
-void apply_fake_latency(net_channel* channel)
+float apply_fake_latency(net_channel* channel)
 {
   if (channel == nullptr || g_sequences.empty() || global_vars == nullptr) {
-    return;
+    return 0.0f;
   }
 
-  const float target_latency = fake_latency_seconds();
-  if (target_latency <= 0.0001f) {
-    return;
+  const float max_unlag = max_unlag_seconds();
+  const float wish = wish_fake_latency_seconds(max_unlag);
+  if (wish <= 0.0001f) {
+    return 0.0f;
+  }
+
+  if (entity_list != nullptr) {
+    Player* localplayer = entity_list->get_localplayer();
+    if (localplayer != nullptr) {
+      const float tickbase_span = ticks_to_time(localplayer->get_tickbase() - g_sequence_tickbase);
+      if (std::isfinite(tickbase_span)) {
+        g_real_latency_ema += (tickbase_span + 5.0f * tick_interval() - g_real_latency_ema) * 0.1f;
+        g_real_latency_ema = std::clamp(g_real_latency_ema, 0.0f, max_unlag);
+      }
+    }
   }
 
   net_channel_storage* storage = reinterpret_cast<net_channel_storage*>(channel);
+  int reliable_state = storage->in_reliable_state;
+  int sequence_number = storage->in_sequence_number;
+  float applied = 0.0f;
   for (const incoming_sequence& sequence : g_sequences) {
-    if (global_vars->realtime - sequence.realtime >= target_latency) {
-      storage->in_reliable_state = sequence.reliable_state;
-      storage->in_sequence_number = sequence.sequence_number;
+    const float age = sequence_age_seconds(sequence);
+    if (!std::isfinite(age)) {
+      continue;
+    }
+    reliable_state = sequence.reliable_state;
+    sequence_number = sequence.sequence_number;
+    applied = std::max(age, 0.0f);
+    if (age > wish ||
+        sequence.sequence_number <= g_last_acked_sequence ||
+        age > max_unlag - g_real_latency_ema) {
       break;
     }
   }
+
+  if (applied > 1.0f) {
+    return 0.0f;
+  }
+
+  storage->in_reliable_state = reliable_state;
+  storage->in_sequence_number = sequence_number;
+  g_last_acked_sequence = sequence_number;
+  return applied;
 }
 
 void send_interp_settings(net_channel* channel, float interp)
@@ -793,8 +883,9 @@ int send_datagram_hook(net_channel* channel, bf_write* data)
   const int in_sequence_number = storage->in_sequence_number;
   const int in_reliable_state = storage->in_reliable_state;
 
-  apply_fake_latency(channel);
+  const float applied = apply_fake_latency(channel);
   const int result = g_send_datagram_original(channel, data);
+  smooth_applied_latency(applied);
 
   storage->in_sequence_number = in_sequence_number;
   storage->in_reliable_state = in_reliable_state;
@@ -837,12 +928,38 @@ void report_shot(Player* player)
 
 float fake_latency_seconds()
 {
-  net_channel* channel = current_net_channel();
-  const float max_unlag = max_unlag_seconds();
-  const float interp = config.backtrack.fake_interp
-    ? std::clamp(requested_interpolation_time(), interpolation_time_value(), max_unlag)
-    : interpolation_time_value();
-  return raw_fake_latency_seconds(max_unlag, interp, channel);
+  return g_applied_fake_latency;
+}
+
+float real_latency_seconds()
+{
+  const float measured = measured_channel_latency(current_net_channel());
+  return std::max(0.0f, measured - g_applied_fake_latency);
+}
+
+float ping_yaw_delta(Player* player)
+{
+  const backtrack_history* history = records_for_player(player);
+  if (history == nullptr || history->record_count < 2) {
+    return 0.0f;
+  }
+
+  const backtrack_record& newer = history->records[0];
+  const backtrack_record& older = history->records[1];
+  const float span = newer.sim_time - older.sim_time;
+  if (!std::isfinite(span) || span <= 0.0001f) {
+    return 0.0f;
+  }
+
+  float lag = real_latency_seconds();
+  if (client_state != nullptr) {
+    lag += ticks_to_time(std::clamp(client_state->chokedcommands, 0, 16));
+  }
+  if (lag <= 0.0f) {
+    return 0.0f;
+  }
+
+  return std::remainder(newer.yaw_angle - older.yaw_angle, 360.0f) / span * lag;
 }
 
 float interpolation_time()
@@ -873,11 +990,7 @@ bool command_tick_for_current_pose(float simulation_time, int* tick_count)
     return false;
   }
 
-  const float current_correct = std::clamp(
-    timing.outgoing_latency + timing.incoming_latency - timing.fake_latency + ticks_to_time(timing.lerp_ticks),
-    0.0f,
-    timing.max_unlag);
-  const float delta = std::fabs(current_correct - age);
+  const float delta = std::fabs(timing.correct - age);
   if (!std::isfinite(delta) || delta > std::max(lag_compensation_delta_limit, tick_interval())) {
     return false;
   }
@@ -888,9 +1001,22 @@ bool command_tick_for_current_pose(float simulation_time, int* tick_count)
   return true;
 }
 
-bool command_tick_for_record(const backtrack_record& record, Player* player, int* tick_count)
+bool command_tick_for_melee_pose(float simulation_time, int extra_ticks, int* tick_count)
 {
-  return command_tick_for_record_timing(record, player, build_timing(), tick_count);
+  int command_tick = 0;
+  if (!command_tick_for_current_pose(simulation_time, &command_tick)) {
+    return false;
+  }
+
+  if (tick_count != nullptr) {
+    *tick_count = command_tick + std::max(extra_ticks, 0);
+  }
+  return true;
+}
+
+bool command_tick_for_record(const backtrack_record& record, Player* player, int* tick_count, float time_mod)
+{
+  return command_tick_for_record_timing(record, player, build_timing(), tick_count, time_mod);
 }
 
 float lerp_seconds()
@@ -1041,18 +1167,20 @@ void on_create_move(user_cmd* user_cmd)
 
   net_channel* channel = current_net_channel();
   if (!should_run_network_state()) {
-    g_latency_ramp = 0.0f;
+    smooth_applied_latency(0.0f);
     if (channel == nullptr) {
       g_sequences.clear();
       g_last_incoming_sequence = 0;
+      g_last_acked_sequence = 0;
     }
     return;
   }
 
   update_sequences(channel);
-  g_latency_ramp = config.backtrack.fake_latency_ms > 0.0f
-    ? std::min(1.0f, g_latency_ramp + tick_interval())
-    : 0.0f;
+  if (config.backtrack.fake_latency_ms <= 0.0f) {
+    smooth_applied_latency(0.0f);
+    g_last_acked_sequence = 0;
+  }
   send_interp_settings(channel, interpolation_time());
   run_manual_backtrack(user_cmd);
 }
@@ -1069,9 +1197,11 @@ void record_player(Player* player)
     return;
   }
 
+  const bool keep_team =
+    aimbot_is_friendlyfire_enabled() || config.aimbot.melee_whip_team;
   if (localplayer == nullptr ||
       player == localplayer ||
-      player->get_team() == localplayer->get_team() ||
+      (!keep_team && player->get_team() == localplayer->get_team()) ||
       player->is_friend() ||
       player->is_ignored()) {
     g_records[ent_index] = {};
@@ -1159,7 +1289,10 @@ void clear()
   g_did_shoot = {};
   g_sequences.clear();
   g_last_incoming_sequence = 0;
-  g_latency_ramp = 0.0f;
+  g_last_acked_sequence = 0;
+  g_sequence_tickbase = 0;
+  g_applied_fake_latency = 0.0f;
+  g_real_latency_ema = 0.0f;
   g_last_sent_interp = -1.0f;
   g_next_interp_send_time = 0.0f;
 }
@@ -1234,7 +1367,7 @@ bool implicit_rewind_position(Player* player, Vec3* position)
   return true;
 }
 
-backtrack_record_view valid_records(Player* player)
+backtrack_record_view valid_records(Player* player, float time_mod)
 {
   backtrack_record_view view{};
   const backtrack_history* history = records_for_player(player);
@@ -1248,13 +1381,13 @@ backtrack_record_view valid_records(Player* player)
 
   for (int index = 0; index < history->record_count && view.count < max_records; ++index) {
     const backtrack_record& record = history->records[index];
-    if (record_valid_for_timing(record, player, timing)) {
-      if (!is_dormant && std::fabs(record.sim_time - current_sim_time) <= 0.0001f) {
-        continue;
-      }
-
-      view.records[view.count++] = &record;
+    if (!record_valid_for_timing(record, player, timing, time_mod)) {
+      continue;
     }
+    if (!is_dormant && std::fabs(record.sim_time - current_sim_time) <= 0.0001f) {
+      continue;
+    }
+    view.records[view.count++] = &record;
   }
 
   std::sort(view.records.begin(), view.records.begin() + view.count, [&](const backtrack_record* left, const backtrack_record* right) {
@@ -1294,9 +1427,9 @@ backtrack_record_view visual_records(Player* player)
   return view;
 }
 
-bool is_record_valid(const backtrack_record& record, Player* player)
+bool is_record_valid(const backtrack_record& record, Player* player, float time_mod)
 {
-  return record_valid_for_timing(record, player, build_timing());
+  return record_valid_for_timing(record, player, build_timing(), time_mod);
 }
 
 Vec3 dormant_extrapolated_origin(const backtrack_record& record)

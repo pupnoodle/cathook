@@ -17,7 +17,9 @@ V  o o  V  file: src/core/hooks/frame_stage_notify.cpp
 #include <utility>
 #include "games/tf2/sdk/entities/player.hpp"
 #include "core/entity_cache.hpp"
+#include "core/dormancy.hpp"
 #include "core/player_resource.hpp"
+#include "features/combat/aimbot/seed_prediction.hpp"
 #include "core/commands.hpp"
 #include "core/detach.hpp"
 #include "core/identify/identify.hpp"
@@ -239,6 +241,8 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
   if (!runtime_ready) {
     entity_cache_clear_lists();
     entity_cache_clear_snapshot();
+    dormancy::clear();
+    seed_pred::reset();
     cathook::core::player_resource::invalidate_player_resource_cache();
     last_time = 0.0f;
     run_match_exec_on_level_change();
@@ -255,6 +259,8 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
       !engine->is_connected() || !engine->is_in_game()) {
     entity_cache_clear_lists();
     entity_cache_clear_snapshot();
+    dormancy::clear();
+    seed_pred::reset();
     cathook::core::player_resource::invalidate_player_resource_cache();
     restore_frame_stage_state();
     return;
@@ -324,6 +330,7 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
             auto* player = static_cast<Player*>(entity);
             player_info pinfo{};
             const bool player_info_valid = cache_player_info && engine != nullptr && engine->get_player_info(entity->get_index(), &pinfo);
+            dormancy::update(player);
             if (!player->is_dormant() && player->is_alive()) {
 	      entity_cache[class_id::PLAYER].push_back(entity);
               snapshot.players.push_back({
@@ -338,6 +345,28 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
                 .friends_id = player_info_valid ? pinfo.friends_id : 0,
                 .alive = true,
                 .dormant = false,
+                .friendly = player_info_valid && pinfo.friends_id != 0 && pinfo.fakeplayer != true &&
+                    (cathook::core::players::is_friendly(static_cast<std::uint32_t>(pinfo.friends_id)) ||
+                     friend_cache_lookup(pinfo.friends_id)),
+                .ignored = player_info_valid && pinfo.friends_id != 0 && pinfo.fakeplayer != true &&
+                    cathook::core::players::is_ignored(static_cast<std::uint32_t>(pinfo.friends_id)),
+                .fakeplayer = player_info_valid && pinfo.fakeplayer,
+                .player_info_valid = player_info_valid
+              });
+            } else if (player->is_dormant() && dormancy::usable(player) && player->is_alive()) {
+	      entity_cache[class_id::PLAYER].push_back(entity);
+              snapshot.players.push_back({
+                .player = player,
+                .entity = entity,
+                .index = player->get_index(),
+                .simulation_time = player->get_simulation_time(),
+                .origin = dormancy::origin(player),
+                .velocity = dormancy::velocity(player),
+                .team = player->get_team(),
+                .player_class = static_cast<int>(player->get_tf_class()),
+                .friends_id = player_info_valid ? pinfo.friends_id : 0,
+                .alive = true,
+                .dormant = true,
                 .friendly = player_info_valid && pinfo.friends_id != 0 && pinfo.fakeplayer != true &&
                     (cathook::core::players::is_friendly(static_cast<std::uint32_t>(pinfo.friends_id)) ||
                      friend_cache_lookup(pinfo.friends_id)),
@@ -393,6 +422,7 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
 	case class_id::OBJECT_CART_DISPENSER:
 	case class_id::DISPENSER:
 	case class_id::TELEPORTER:
+	  dormancy::update(entity);
 	  entity_cache[entity_class].push_back(entity);
 	  classified = true;
 	  break;

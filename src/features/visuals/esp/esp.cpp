@@ -29,6 +29,7 @@ V  o o  V  file: src/features/visuals/esp/esp.cpp
 #include <vector>
 #include "core/logger.hpp"
 #include "core/entity_cache.hpp"
+#include "core/dormancy.hpp"
 #include "core/math/math.hpp"
 #include "core/player_manager.hpp"
 #include "core/player_resource.hpp"
@@ -1573,7 +1574,7 @@ void draw_entity_trajectory(ImDrawList* draw_list, Entity* entity, const visual_
     return {};
   }
 
-  return entity->get_collision_origin();
+  return dormancy::origin(entity);
 }
 
 [[nodiscard]] esp_bounds empty_screen_bounds()
@@ -2804,7 +2805,7 @@ void draw_player_esp(ImDrawList* draw_list, Player* player, Player* localplayer,
   if (entity == nullptr || localplayer == nullptr || !entity->is_building()) {
     return false;
   }
-  if (entity->is_dormant()) {
+  if (entity->is_dormant() && (!config.visuals.dormant_esp || !dormancy::usable(entity))) {
     return false;
   }
 

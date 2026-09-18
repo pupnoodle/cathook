@@ -53,6 +53,7 @@ struct create_move_result {
 };
 
 [[nodiscard]] create_move_result on_create_move(user_cmd* cmd, bool aimbot_requested_shot = false);
+[[nodiscard]] int predict_cmd_num(const user_cmd* cmd, Weapon* weapon = nullptr);
 void on_game_event(GameEvent* event);
 void reset();
 void store_health_history(int index, int health, Player* player = nullptr);

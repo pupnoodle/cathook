@@ -6,6 +6,7 @@
 #include "features/combat/random_crits/crit_hack.hpp"
 #include "features/combat/aimbot/aimbot_debug.hpp"
 #include "features/combat/aimbot/aim_utils.hpp"
+#include "features/combat/aimbot/seed_prediction.hpp"
 #include "features/combat/tickbase/tickbase.hpp"
 #include "features/visuals/spectator_list.hpp"
 #include "games/tf2/sdk/entities/player.hpp"
@@ -16,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <deque>
 #include <string>
 #include <utility>
@@ -476,12 +478,15 @@ inline void draw_nospread_indicator()
   }
 
   const bool ready = !weapon->is_melee() && weapon->get_hitscan_spread() > 0.00001f;
+  const char* status = !ready ? "NONE" : seed_pred::status_text();
+  const float progress = !ready ? 0.0f : seed_pred::status_progress();
+  const bool synced = ready && (std::strcmp(status, "SYNC") == 0 || std::strcmp(status, "MD5") == 0);
   draw_progress_indicator(
     section_kind::nospread,
     "NOSPREAD",
-    ready ? 1.0f : 0.0f,
-    ready ? "READY" : "NONE",
-    ready ? indicator_color(11, 232, 129) : muted);
+    progress,
+    status,
+    synced ? indicator_color(11, 232, 129) : muted);
 }
 
 inline void draw_spectator_indicator()

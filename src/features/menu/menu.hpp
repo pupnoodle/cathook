@@ -918,10 +918,11 @@ static void draw_aimbot_content() {
   const char* projectile_prediction_items[] = { "Extrapolation", "Move simulation" };
   const char* projectile_position_items[] = { "Auto", "Feet", "Body", "Head" };
   const char* projectile_splash_items[] = { "Direct", "Balanced", "Splash preferred" };
-  const char* projectile_modifier_items[] = { "Charge weapon", "Cancel charge" };
+  const char* projectile_modifier_items[] = { "Charge weapon", "Cancel charge", "Target dormant" };
   const uint32_t projectile_modifier_bits[] = {
     Aim::projectile_mod_charge_weapon,
-    Aim::projectile_mod_cancel_charge
+    Aim::projectile_mod_cancel_charge,
+    Aim::projectile_mod_target_dormant
   };
   const uint32_t aim_at_bits[] = {
     Aim::aim_at_enemies,
@@ -966,7 +967,8 @@ static void draw_aimbot_content() {
     "Auto rev minigun",
     "Extinguish team",
     "Prefer medics",
-    "Headshot only"
+    "Headshot only",
+    "Target dormant"
   };
   const uint32_t hitscan_modifier_bits[] = {
     Aim::hitscan_mod_wait_for_headshot,
@@ -977,7 +979,8 @@ static void draw_aimbot_content() {
     Aim::hitscan_mod_auto_rev,
     Aim::hitscan_mod_extinguish_team,
     Aim::hitscan_mod_prefer_medics,
-    Aim::hitscan_mod_headshot_only
+    Aim::hitscan_mod_headshot_only,
+    Aim::hitscan_mod_target_dormant
   };
 
   cat_menu::begin_flow_layout("aimbot_layout", 2);
@@ -987,6 +990,7 @@ static void draw_aimbot_content() {
       { "Auto shoot", &config.aimbot.auto_shoot },
       { "Shoot through glass", &config.aimbot.shoot_through_glass },
       { "Spread compensation", &config.aimbot.spread_compensation },
+      { "Target dormant", &config.aimbot.target_dormant },
       { "Auto resolver", &config.aimbot.resolver }
     });
     cat_menu::combo("Aim mode", (int*)&config.aimbot.aim_mode, aim_mode_items, IM_ARRAYSIZE(aim_mode_items));
@@ -1064,13 +1068,17 @@ static void draw_combat_weapons_content() {
     cat_menu::slider_float("Scope distance", &config.aimbot.sniper_scope_distance, 250.0f, 4000.0f, "%.0f HU");
     cat_menu::slider_float("Scope cancel delay", &config.aimbot.sniper_scope_cancel_time, 1.0f, 5.0f, "%.1f s");
   });
-  cat_menu::flow_panel("Melee", 0, 116.0f, [&]() {
+  cat_menu::flow_panel("Melee", 0, 156.0f, [&]() {
     cat_menu::bools_combo("Options", {
       { "Auto backstab", &config.aimbot.melee_auto_backstab },
       { "Ignore razorback", &config.aimbot.melee_ignore_razorback },
+      { "Whip teammates", &config.aimbot.melee_whip_team },
       { "Swing prediction", &config.aimbot.melee_swing_prediction },
       { "Predict lag", &config.aimbot.melee_swing_predict_lag }
     });
+    static const char* backstab_ping_items[] = { "Off", "Account ping", "Account ping + confirm" };
+    cat_menu::combo("Backstab ping", &config.aimbot.melee_backstab_ping_mode,
+      backstab_ping_items, IM_ARRAYSIZE(backstab_ping_items));
     cat_menu::slider_int("Swing ticks", &config.aimbot.melee_swing_ticks, 0, 14);
     static const char* swing_validate_items[] = { "Both", "Swing", "Simulated" };
     cat_menu::combo("Swing validation", &config.aimbot.melee_swing_validate_mode,

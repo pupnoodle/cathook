@@ -314,8 +314,8 @@ class splashbot final {
     const Vec3 center = (target.mins + target.maxs) * 0.5f;
     const Vec3 mins = center - Vec3{radius, radius, radius};
     const Vec3 maxs = center + Vec3{radius, radius, radius};
-    world_face faces[256]{};
-    const int face_count = world_faces::get_faces_in_aabb(mins, maxs, MASK_SOLID, faces, 256);
+    world_face faces[64]{};
+    const int face_count = world_faces::get_faces_in_aabb(mins, maxs, MASK_SOLID, faces, 64, true);
     for (int index = 0; index < face_count && count < capacity; ++index) {
       sample_world_face(faces[index], target, radius, hull, out, count, capacity);
       if (faces[index].vertex_count >= 3) {
@@ -498,8 +498,8 @@ public:
     }
 
     const collect_key key{
-      quantize(target.origin.x, 8.0f), quantize(target.origin.y, 8.0f),
-      quantize(target.origin.z, 8.0f), quantize(radius, 4.0f),
+      quantize(target.origin.x, 24.0f), quantize(target.origin.y, 24.0f),
+      quantize(target.origin.z, 24.0f), quantize(radius, 8.0f),
       sphere_samples, air_point_count, air_splash
     };
     if (last_hit_count_ > 0 &&

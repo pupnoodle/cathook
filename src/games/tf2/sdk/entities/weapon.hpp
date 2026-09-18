@@ -756,6 +756,12 @@ enum {
   TF_WEAPON_GRAPPLINGHOOK,
   TF_WEAPON_PASSTIME_GUN,
   TF_WEAPON_CHARGED_SMG,
+  TF_WEAPON_BREAKABLE_SIGN,
+  TF_WEAPON_ROCKETPACK,
+  TF_WEAPON_SLAP,
+  TF_WEAPON_JAR_GAS,
+  TF_WEAPON_GRENADE_JAR_GAS,
+  TF_WEAPON_FLAME_BALL,
   TF_WEAPON_COUNT
 };
 
@@ -950,6 +956,8 @@ public:
         {"tf_weapon_fireaxe", TF_WEAPON_FIREAXE},
         {"tf_weapon_fists", TF_WEAPON_FISTS},
         {"tf_weapon_flamethrower", TF_WEAPON_FLAMETHROWER},
+        {"tf_weapon_rocketlauncher_fireball", TF_WEAPON_FLAME_BALL},
+        {"tf_weapon_jar_gas", TF_WEAPON_JAR_GAS},
         {"tf_weapon_flaregun", TF_WEAPON_FLAREGUN},
         {"tf_weapon_flaregun_revenge", TF_WEAPON_FLAREGUN_REVENGE},
         {"tf_weapon_grapplinghook", TF_WEAPON_GRAPPLINGHOOK},
@@ -982,6 +990,7 @@ public:
         {"tf_weapon_raygun", TF_WEAPON_RAYGUN},
         {"tf_weapon_revolver", TF_WEAPON_REVOLVER},
         {"tf_weapon_rocketlauncher", TF_WEAPON_ROCKETLAUNCHER},
+        {"tf_weapon_rocketlauncher_airstrike", TF_WEAPON_ROCKETLAUNCHER},
         {"tf_weapon_rocketlauncher_directhit", TF_WEAPON_ROCKETLAUNCHER_DIRECTHIT},
         {"tf_weapon_scattergun", TF_WEAPON_SCATTERGUN},
         {"tf_weapon_sentry_revenge", TF_WEAPON_SENTRY_REVENGE},

@@ -11,6 +11,7 @@
 #include "external/MD5/MD5.hpp"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace crit_hack {
 
@@ -51,6 +52,10 @@ float cached_bucket = 0.0f;
 int cached_crit_checks = 0;
 int cached_crit_seed_requests = 0;
 bool weapon_info_cache_valid = false;
+int cached_search_command = 0;
+int cached_search_weapon = 0;
+int cached_search_result = 0;
+bool cached_search_crit = false;
 
 constexpr int max_crit_command_search = 4096;
 
@@ -83,6 +88,10 @@ void reset_weapon_info() {
   cached_crit_checks = 0;
   cached_crit_seed_requests = 0;
   weapon_info_cache_valid = false;
+  cached_search_command = 0;
+  cached_search_weapon = 0;
+  cached_search_result = 0;
+  cached_search_crit = false;
 }
 
 int command_to_seed(int command_number, Weapon* weapon, bool melee) {
@@ -125,15 +134,46 @@ bool is_crit_command(int command_number, Weapon* weapon, bool crit, bool safe, b
 }
 
 int get_crit_command(Weapon* weapon, int command_number, int max_commands, bool crit, bool safe, bool melee) {
-  if (max_commands <= 0) {
+  if (weapon == nullptr || max_commands <= 0) {
     return 0;
   }
 
+  const int weapon_index = weapon->to_entity() != nullptr ? weapon->to_entity()->get_index() : 0;
+  if (cached_search_result != 0 && cached_search_command == command_number &&
+      cached_search_weapon == weapon_index && cached_search_crit == crit &&
+      cached_search_result >= command_number) {
+    if (is_crit_command(cached_search_result, weapon, crit, safe, melee)) {
+      return cached_search_result;
+    }
+  }
+
   for (int i = command_number; i < command_number + max_commands; i++) {
-    if (is_crit_command(i, weapon, crit, safe, melee))
+    if (is_crit_command(i, weapon, crit, safe, melee)) {
+      cached_search_command = command_number;
+      cached_search_weapon = weapon_index;
+      cached_search_crit = crit;
+      cached_search_result = i;
       return i;
+    }
   }
   return 0;
+}
+
+void apply_command_number(user_cmd* cmd, int command_number) {
+  if (cmd == nullptr || command_number <= 0) {
+    return;
+  }
+  cmd->command_number = command_number;
+  cmd->random_seed = static_cast<int>(MD5_PseudoRandom(static_cast<unsigned int>(command_number)) &
+                                      std::numeric_limits<int>::max());
+}
+
+int select_command_number(user_cmd* cmd, Weapon* weapon, bool wants_crit) {
+  if (cmd == nullptr || weapon == nullptr) {
+    return 0;
+  }
+  return get_crit_command(
+    weapon, cmd->command_number, max_crit_command_search, wants_crit, true, is_melee_weapon);
 }
 
 float active_rapid_fire_crit_check_time(Weapon* weapon) {
@@ -487,8 +527,7 @@ create_move_result on_create_move(user_cmd* cmd, bool aimbot_requested_shot) {
     }
   }
 
-  bool attacking = is_attack_command(cmd, weapon) || aimbot_requested_shot;
-
+  const bool attacking = is_attack_command(cmd, weapon) || aimbot_requested_shot;
   if (!attacking) {
     return result;
   }
@@ -498,35 +537,63 @@ create_move_result on_create_move(user_cmd* cmd, bool aimbot_requested_shot) {
     return result;
   }
 
-  crit_request req = get_crit_request(cmd, weapon);
+  const crit_request req = get_crit_request(cmd, weapon);
   if (req == crit_request::any) {
     return result;
   }
 
   const bool wants_crit = req == crit_request::crit;
-
-  if (!is_crit_command(cmd->command_number, weapon, wants_crit, true, is_melee_weapon)) {
-    const int selected_command = get_crit_command(
-      weapon,
-      cmd->command_number,
-      max_crit_command_search,
-      wants_crit,
-      true,
-      is_melee_weapon);
-
-    result.attack_suppressed = true;
-    if (selected_command > 0) {
-      queued_crit_command = selected_command;
-      queued_ticks = selected_command - cmd->command_number;
-      current_queue_state = queue_state::waiting_for_seed;
-    } else {
+  if (config.misc.exploits.anti_cheat_compat) {
+    if (!is_crit_command(cmd->command_number, weapon, wants_crit, false, is_melee_weapon)) {
+      result.attack_suppressed = true;
       current_queue_state = queue_state::blocked;
     }
     return result;
   }
 
-  current_queue_state = wants_crit ? queue_state::releasing : queue_state::idle;
+  const int selected_command = select_command_number(cmd, weapon, wants_crit);
+  if (selected_command > 0) {
+    queued_crit_command = selected_command;
+    queued_ticks = selected_command - cmd->command_number;
+    apply_command_number(cmd, selected_command);
+    current_queue_state = wants_crit ? queue_state::releasing : queue_state::idle;
+  }
   return result;
+}
+
+int predict_cmd_num(const user_cmd* cmd, Weapon* weapon) {
+  if (cmd == nullptr || config.misc.exploits.anti_cheat_compat) {
+    return cmd != nullptr ? cmd->command_number : 0;
+  }
+
+  auto* local = entity_list != nullptr ? entity_list->get_localplayer() : nullptr;
+  if (!config.crithack.enabled || local == nullptr || !local->is_alive() || local->is_dormant()) {
+    return cmd->command_number;
+  }
+
+  if (weapon == nullptr) {
+    weapon = local->get_weapon();
+  }
+  if (weapon == nullptr || !weapon_can_crit(weapon) || local->is_crit_boosted() ||
+      weapon->crit_time() > global_vars->curtime) {
+    return cmd->command_number;
+  }
+
+  update_info(local, weapon);
+  if (weapon->is_rapid_fire() &&
+      global_vars->curtime < active_rapid_fire_crit_check_time(weapon) + 1.0f) {
+    return cmd->command_number;
+  }
+
+  const crit_request req = get_crit_request(const_cast<user_cmd*>(cmd), weapon);
+  if (req == crit_request::any) {
+    return cmd->command_number;
+  }
+
+  const int selected = get_crit_command(
+    weapon, cmd->command_number, max_crit_command_search, req == crit_request::crit, true,
+    is_melee_weapon);
+  return selected > 0 ? selected : cmd->command_number;
 }
 
 void on_game_event(GameEvent* event) {
