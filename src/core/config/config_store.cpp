@@ -324,6 +324,7 @@ void config_store::import_config(const Config& config)
     set_int("aimbot.hitscan_modifiers", static_cast<int>(config.aimbot.hitscan_modifiers));
     set_int("aimbot.hitscan_modifier_version", 5);
     set_float("aimbot.tapfire_distance", config.aimbot.tapfire_distance);
+    set_int("aimbot.peek_ticks", config.aimbot.peek_ticks);
     set_float("aimbot.ignore_invisible", config.aimbot.ignore_invisible);
     set_int("aimbot.ignore_unsimulated_ticks", config.aimbot.ignore_unsimulated_ticks);
     set_float("aimbot.multipoint_scale", config.aimbot.multipoint_scale);
@@ -943,6 +944,8 @@ void config_store::export_config(Config& config) const
     }
     config.aimbot.tapfire_distance = std::clamp(
         get_float("aimbot.tapfire_distance", config.aimbot.tapfire_distance), 250.0f, 2000.0f);
+    config.aimbot.peek_ticks = std::clamp(
+        get_int("aimbot.peek_ticks", config.aimbot.peek_ticks), 0, 8);
     config.aimbot.ignore_invisible = std::clamp(
         get_float("aimbot.ignore_invisible", config.aimbot.ignore_invisible), 0.0f, 100.0f);
     config.aimbot.ignore_unsimulated_ticks = std::clamp(

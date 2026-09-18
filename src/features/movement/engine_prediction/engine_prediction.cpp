@@ -20,7 +20,6 @@ V  o o  V  file: src/features/movement/engine_prediction/engine_prediction.cpp
 #include "games/tf2/sdk/interfaces/entity_list.hpp"
 #include "games/tf2/sdk/interfaces/game_movement.hpp"
 #include "games/tf2/sdk/interfaces/global_vars.hpp"
-#include "games/tf2/sdk/interfaces/input.hpp"
 #include "games/tf2/sdk/interfaces/move_helper.hpp"
 #include "games/tf2/sdk/interfaces/prediction.hpp"
 #include "features/menu/config.hpp"
@@ -101,21 +100,16 @@ int engine_prediction_tickbase(user_cmd* current_user_cmd, Player* localplayer) 
 
   const int player_handle = localplayer->get_ref_handle();
   const int player_tickbase = localplayer->get_tickbase();
-  const auto* previous_command = input != nullptr && last_command_number > 0
-    ? input->get_user_cmd(last_command_number) : nullptr;
-  const bool same_command = current_user_cmd->command_number == last_command_number;
-  const bool consecutive_command = last_command_number > 0 &&
-    current_user_cmd->command_number > last_command_number &&
-    current_user_cmd->command_number - last_command_number == 1;
+  const int command_number = current_user_cmd->command_number;
+  const bool same_command = command_number == last_command_number;
   if (last_command_number <= 0 || player_handle != last_player_handle ||
-      player_tickbase != last_player_tickbase || current_user_cmd->has_been_predicted ||
-      (!same_command && (!consecutive_command || previous_command == nullptr || !previous_command->has_been_predicted))) {
+      player_tickbase != last_player_tickbase || current_user_cmd->has_been_predicted) {
     predicted_tickbase = player_tickbase;
   } else if (!same_command && predicted_tickbase < INT_MAX) {
     ++predicted_tickbase;
   }
 
-  last_command_number = current_user_cmd->command_number;
+  last_command_number = command_number;
   last_player_handle = player_handle;
   last_player_tickbase = player_tickbase;
   return predicted_tickbase;

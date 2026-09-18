@@ -154,6 +154,9 @@ static bool call_client_mode_create_move(void* me, float sample_time, user_cmd* 
 
 struct move_features_result {
   bool use_psilent = false;
+  bool requested_shot = false;
+  bool psilent_command = false;
+  Vec3 pre_aimbot_view_angles{};
 };
 
 static move_features_result run_move_features(user_cmd* user_cmd) {
@@ -228,16 +231,10 @@ static move_features_result run_move_features(user_cmd* user_cmd) {
   const bool auto_edgebug_psilent = !menu_movement_blocked && auto_edgebug_create_move(user_cmd);
   const bool moonwalk_psilent = !menu_movement_blocked && moonwalk_create_move(user_cmd);
 
-  const crit_hack::create_move_result crit_result = crit_hack::on_create_move(user_cmd, aimbot_result.requested_shot);
-  if (crit_result.attack_suppressed) {
-    user_cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2 | IN_ATTACK3);
-    if (aimbot_result.psilent_command) {
-      user_cmd->view_angles = pre_aimbot_view_angles;
-    }
-  }
-
-  result.use_psilent = (aimbot_result.psilent_command && !crit_result.attack_suppressed) ||
-    fast_accelerate_psilent || moonwalk_psilent || auto_edgebug_psilent;
+  result.requested_shot = aimbot_result.requested_shot;
+  result.psilent_command = aimbot_result.psilent_command;
+  result.pre_aimbot_view_angles = pre_aimbot_view_angles;
+  result.use_psilent = fast_accelerate_psilent || moonwalk_psilent || auto_edgebug_psilent;
   return result;
 }
 
@@ -271,6 +268,17 @@ static move_features_result run_move_feature_pipeline(user_cmd* user_cmd, Player
   update_player_head_emoji_cache();
   result = run_move_features(user_cmd);
   run_post_create_move_features(user_cmd);
+
+  const crit_hack::create_move_result crit_result =
+    crit_hack::on_create_move(user_cmd, result.requested_shot);
+  if (crit_result.attack_suppressed) {
+    user_cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2 | IN_ATTACK3);
+    if (result.psilent_command) {
+      user_cmd->view_angles = result.pre_aimbot_view_angles;
+    }
+  }
+  result.use_psilent = (result.psilent_command && !crit_result.attack_suppressed) ||
+    result.use_psilent;
   return result;
 }
 

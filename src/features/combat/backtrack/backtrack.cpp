@@ -400,8 +400,7 @@ void smooth_applied_latency(float applied)
       return false;
     }
     if (timing.valid) {
-      const int target_tick = time_to_ticks(record.sim_time);
-      const int command_tick = target_tick + timing.lerp_ticks;
+      const int command_tick = time_to_ticks(record.sim_time + timing.fake_interp);
       if (tick_count != nullptr) {
         *tick_count = command_tick;
       }
@@ -415,7 +414,7 @@ void smooth_applied_latency(float applied)
   }
 
   const int target_tick = time_to_ticks(record.sim_time);
-  const int command_tick = target_tick + timing.lerp_ticks;
+  const int command_tick = time_to_ticks(record.sim_time + timing.fake_interp);
   const float server_time = ticks_to_time(timing.server_tick);
   const float age = server_time - record.sim_time;
   if (!std::isfinite(age) || age < -tick_interval() || age > timing.max_unlag + tick_interval()) {
@@ -983,8 +982,7 @@ bool command_tick_for_current_pose(float simulation_time, int* tick_count)
     return false;
   }
 
-  const int target_tick = time_to_ticks(simulation_time);
-  const int command_tick = target_tick + timing.lerp_ticks;
+  const int command_tick = time_to_ticks(simulation_time + timing.fake_interp);
   const float age = ticks_to_time(timing.server_tick) - simulation_time;
   if (!std::isfinite(age) || age < -tick_interval() || age > timing.max_unlag + tick_interval()) {
     return false;
@@ -1078,7 +1076,7 @@ bool command_tick_for_rewind(float sim_time, int* tick_count)
   }
 
   if (tick_count != nullptr) {
-    *tick_count = target_tick + time_to_ticks(server_believed_lerp_seconds());
+    *tick_count = time_to_ticks(sim_time + server_believed_lerp_seconds());
   }
   return true;
 }
@@ -1152,6 +1150,11 @@ void mark_stale(Player* player)
 
 void on_create_move(user_cmd* user_cmd)
 {
+  if (user_cmd != nullptr && user_cmd->tick_count > 0 && is_enabled() && config.backtrack.fake_interp) {
+    user_cmd->tick_count += time_to_ticks(interpolation_time());
+    user_cmd->tick_count -= time_to_ticks(lerp_seconds());
+  }
+
   if (is_enabled() && config.backtrack.fake_latency_ms > 0.0f) {
     install_net_channel_hook();
   } else {
@@ -1367,7 +1370,7 @@ bool implicit_rewind_position(Player* player, Vec3* position)
   return true;
 }
 
-backtrack_record_view valid_records(Player* player, float time_mod)
+backtrack_record_view valid_records(Player* player, float time_mod, bool include_current)
 {
   backtrack_record_view view{};
   const backtrack_history* history = records_for_player(player);
@@ -1384,7 +1387,7 @@ backtrack_record_view valid_records(Player* player, float time_mod)
     if (!record_valid_for_timing(record, player, timing, time_mod)) {
       continue;
     }
-    if (!is_dormant && std::fabs(record.sim_time - current_sim_time) <= 0.0001f) {
+    if (!include_current && !is_dormant && std::fabs(record.sim_time - current_sim_time) <= 0.0001f) {
       continue;
     }
     view.records[view.count++] = &record;

@@ -29,8 +29,7 @@
 namespace projectile_aim {
 namespace detail {
 
-static constexpr unsigned int projectile_collision_mask =
-  MASK_SOLID | CONTENTS_DEBRIS | CONTENTS_HITBOX;
+static constexpr unsigned int projectile_collision_mask = MASK_SOLID;
 static constexpr float grenade_check_interval = 0.195f;
 static constexpr float rocket_radius_default = 146.0f;
 static constexpr float flare_det_radius = 132.0f;
@@ -119,22 +118,8 @@ inline bool solve_quadratic_front_root(float a, float b, float c, float& root) {
   if (discriminant < 0.0f) {
     return false;
   }
-  const float sqrt_discriminant = std::sqrt(discriminant);
-  const float root_a = (-b - sqrt_discriminant) / (2.0f * a);
-  const float root_b = (-b + sqrt_discriminant) / (2.0f * a);
-  if (root_a > 0.0f && root_b > 0.0f) {
-    root = std::min(root_a, root_b);
-    return true;
-  }
-  if (root_a > 0.0f) {
-    root = root_a;
-    return true;
-  }
-  if (root_b > 0.0f) {
-    root = root_b;
-    return true;
-  }
-  return false;
+  root = (-b + std::sqrt(discriminant)) / (2.0f * a);
+  return true;
 }
 
 inline int weapon_id(Weapon* weapon) {
@@ -239,6 +224,13 @@ inline bool is_rocket_weapon(int weapon_id) {
     weapon_id == TF_WEAPON_ROCKETLAUNCHER_DIRECTHIT;
 }
 
+inline bool is_toss_projectile(int weapon_id) {
+  return weapon_id == TF_WEAPON_CLEAVER ||
+    weapon_id == TF_WEAPON_GRENADE_CLEAVER ||
+    weapon_id == TF_WEAPON_BAT_WOOD ||
+    weapon_id == TF_WEAPON_BAT_GIFTWRAP;
+}
+
 inline float projectile_speed(Weapon* weapon, float fallback) {
   if (weapon == nullptr) {
     return fallback;
@@ -254,7 +246,7 @@ inline float effective_drag(const projectile_info& info, float velocity, bool lo
   const int id = info.weapon_id_value;
   switch (id) {
   case TF_WEAPON_GRENADELAUNCHER: {
-    const bool no_spin = info.spin_drag_key;
+    const bool no_spin = !info.spin_drag_key;
     if (lob) {
       return no_spin ? remap_clamped(velocity, 1217.0f, max_velocity_reference, 0.030f, 0.033f)
                      : remap_clamped(velocity, 1217.0f, max_velocity_reference, 0.056f, 0.062f);
@@ -408,6 +400,7 @@ inline bool fill_from_projectile_type(Player* local, Weapon* weapon, int type, p
     out.offset = {23.5f, 8.0f, weapon_z};
     out.forward_redirect = 2000.0f;
     out.life_time = 10.0f;
+    out.hull = {0.0f, 0.0f, 0.0f};
     return true;
   case 13:
     out.speed = 1200.0f;
@@ -459,6 +452,7 @@ inline bool fill_from_projectile_type(Player* local, Weapon* weapon, int type, p
     out.offset = {23.5f, 12.0f, weapon_z};
     out.forward_redirect = 2000.0f;
     out.life_time = 10.0f;
+    out.hull = {0.0f, 0.0f, 0.0f};
     return true;
   case 7:
   case 10:
@@ -507,7 +501,7 @@ inline bool fill_from_projectile_type(Player* local, Weapon* weapon, int type, p
     out.gravity_mod = 1.0f;
     out.life_time = 2.2f;
     out.offset = {16.0f, 8.0f, -6.0f};
-    out.initial_up_velocity = 200.0f;
+    out.initial_up_velocity = out.speed * 0.1f;
     out.hull = {1.0f, 1.0f, 10.0f};
     out.launch = launch_type::hand;
     return true;
@@ -583,7 +577,7 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     out.no_flip_offset = true;
     out.owner_velocity_projection = true;
     out.direct_hit = true;
-    out.trace_launch = false;
+    out.trace_launch = true;
     return true;
   }
 
@@ -608,15 +602,17 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     out.forward_redirect = 2000.0f;
     out.normal_offset = 1.0f;
     out.life_time = 10.0f;
-    if (id != TF_WEAPON_PARTICLE_CANNON) {
-      out.hull = {0.0f, 0.0f, 0.0f};
-    }
+    out.hull = {0.0f, 0.0f, 0.0f};
     return true;
   }
 
   case TF_WEAPON_GRENADELAUNCHER: {
     const bool iron_bomber = weapon->get_def_id() == Demoman_m_TheIronBomber;
-    out.speed = std::min(projectile_speed(weapon, 1200.0f), 3500.0f);
+    out.speed = local->in_cond(TF_COND_RUNE_PRECISION)
+      ? 3000.0f
+      : std::min(projectile_speed(weapon, 1200.0f), 3500.0f);
+    out.speed = std::min(attribute(out.speed, "mult_projectile_range", weapon->to_entity()),
+                         3500.0f);
     out.gravity_mod = 1.0f;
     out.life_time =
       iron_bomber ? 1.4f : attribute(2.0f, "fuse_mult", weapon->to_entity());
@@ -638,8 +634,13 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     const float charge_begin = weapon->get_charge_begin_time();
     const float now = global_vars != nullptr ? global_vars->curtime
                                              : local->get_tickbase() * interval();
-    const float charge = std::clamp(now - charge_begin + interval(), 0.0f, charge_rate);
-    out.speed = std::min(std::lerp(900.0f, 2400.0f, charge / charge_rate), 3500.0f);
+    const float charge = charge_begin > 0.0f
+      ? std::clamp(now - charge_begin, 0.0f, charge_rate)
+      : 0.0f;
+    out.speed = std::min(
+      attribute(std::lerp(900.0f, 2400.0f, charge / charge_rate), "mult_projectile_range",
+                weapon->to_entity()),
+      3500.0f);
     out.gravity_mod = 1.0f;
     out.life_time = 8.0f;
     out.splash_radius =
@@ -667,10 +668,10 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
   case TF_WEAPON_FLAREGUN: {
     out.speed = projectile_speed(weapon, 2000.0f);
     out.gravity_mod = 0.3f;
-    out.initial_up_velocity = weapon->get_def_id() == Pyro_s_TheScorchShot ? 150.0f : 0.0f;
     out.offset = {23.5f, 12.0f, weapon_z};
     out.forward_redirect = 2000.0f;
     out.life_time = 10.0f;
+    out.hull = {0.0f, 0.0f, 0.0f};
     if (weapon->get_def_id() == Pyro_s_TheScorchShot) {
       out.splash_radius = rocket_radius_default;
       out.air_splash = true;
@@ -687,6 +688,7 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     out.offset = {23.5f, 12.0f, weapon_z};
     out.forward_redirect = 2000.0f;
     out.life_time = 10.0f;
+    out.hull = {0.0f, 0.0f, 0.0f};
     return true;
 
   case TF_WEAPON_RAYGUN:
@@ -777,7 +779,7 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     out.gravity_mod = 1.0f;
     out.life_time = 2.2f;
     out.offset = {16.0f, 8.0f, -6.0f};
-    out.initial_up_velocity = 200.0f;
+    out.initial_up_velocity = out.speed * 0.1f;
     out.release_delay = 0.1f;
     out.hull = {1.0f, 1.0f, 10.0f};
     out.launch = launch_type::hand;
@@ -787,11 +789,11 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
   case TF_WEAPON_BAT_GIFTWRAP:
     out.speed = game_convar_float("tf_scout_stunball_base_speed", 3000.0f * (10.0f / std::sqrt(101.0f)));
     out.gravity_mod = 1.0f;
-    out.life_time = 2.2f;
+    out.life_time = id == TF_WEAPON_BAT_GIFTWRAP ? 2.3f : 100.0f;
     out.splash_radius = id == TF_WEAPON_BAT_GIFTWRAP ? 50.0f : 0.0f;
     out.offset = {0.0f, 0.0f, 0.0f};
     out.hull = {3.0f, 3.0f, 3.0f};
-    out.initial_up_velocity = 0.0f;
+    out.initial_up_velocity = out.speed * 0.1f;
     out.release_delay = 0.1f;
     out.launch = launch_type::bat;
     out.secondary_attack = true;
@@ -980,10 +982,23 @@ inline bool launch_position(Player* local, const projectile_info& info, const Ve
 
 inline Vec3 launch_velocity(const projectile_info& info, const Vec3& launch_angles,
                             Player* local) {
+  Vec3 angles = launch_angles;
+  if (info.weapon_id_value == TF_WEAPON_LUNCHBOX) {
+    angles.x -= 10.0f;
+  }
   Vec3 forward{};
   Vec3 up{};
-  angle_vectors(launch_angles, &forward, nullptr, &up);
-  Vec3 velocity = forward * info.speed + up * info.initial_up_velocity;
+  angle_vectors(angles, &forward, nullptr, &up);
+  Vec3 velocity{};
+  if (is_toss_projectile(info.weapon_id_value) || info.launch == launch_type::bat) {
+    velocity = forward * 10.0f + up;
+    const float toss_length = length(velocity);
+    if (toss_length > 0.001f) {
+      velocity = velocity * (info.speed / toss_length);
+    }
+  } else {
+    velocity = forward * info.speed + up * info.initial_up_velocity;
+  }
   if (info.owner_velocity_projection && local != nullptr) {
     const Vec3 owner_velocity = local->get_velocity();
     velocity = velocity + forward * dot(owner_velocity, forward);
@@ -1001,8 +1016,10 @@ inline bool solve_ballistic(const projectile_info& info, const Vec3& from, const
   }
 
   const float gravity = 800.0f * info.gravity_mod;
-  const float v0 = std::hypot(info.speed, info.initial_up_velocity);
-  const float launch_pitch = std::atan2(info.initial_up_velocity, info.speed);
+  const bool toss = is_toss_projectile(info.weapon_id_value) || info.launch == launch_type::bat;
+  const float v0 = toss ? info.speed : std::hypot(info.speed, info.initial_up_velocity);
+  const float launch_pitch = toss ? std::atan2(1.0f, 10.0f)
+                                  : std::atan2(info.initial_up_velocity, info.speed);
   float velocity = v0;
   float pitch = 0.0f;
 

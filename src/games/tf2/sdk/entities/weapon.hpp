@@ -1152,7 +1152,9 @@ public:
   }
 
   float get_charge_begin_time() {
-    static tf2_netvars::lazy_offset offset{"DT_WeaponPipebombLauncher", {"m_flChargeBeginTime"}};
+    static tf2_netvars::lazy_offset pipe{"DT_WeaponPipebombLauncher", {"m_flChargeBeginTime"}};
+    static tf2_netvars::lazy_offset bow{"DT_WeaponCompoundBow", {"m_flChargeBeginTime"}};
+    const int offset = pipe > 0 ? static_cast<int>(pipe) : static_cast<int>(bow);
     if (offset <= 0) {
       return 0.0f;
     }

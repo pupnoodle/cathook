@@ -147,6 +147,8 @@ struct aimbot_candidate {
   bool spread_compensated = false;
   bool backtrack = false;
   bool backtrack_hitbox_valid = false;
+  bool hull_valid = false;
+  float fire_inset = 0.0f;
   int pellet_index = -1;
   int pellet_count = 0;
   float spread = 0.0f;
@@ -1306,13 +1308,29 @@ inline Vec3 aimbot_inverse_transform_point(const Vec3& point, const matrix_3x4& 
     point.y - matrix.mat[1][3],
     point.z - matrix.mat[2][3]
   };
+  const Vec3 x_axis{matrix.mat[0][0], matrix.mat[1][0], matrix.mat[2][0]};
+  const Vec3 y_axis{matrix.mat[0][1], matrix.mat[1][1], matrix.mat[2][1]};
+  const Vec3 z_axis{matrix.mat[0][2], matrix.mat[1][2], matrix.mat[2][2]};
+  const float x_len_sq = (x_axis.x * x_axis.x) + (x_axis.y * x_axis.y) + (x_axis.z * x_axis.z);
+  const float y_len_sq = (y_axis.x * y_axis.x) + (y_axis.y * y_axis.y) + (y_axis.z * y_axis.z);
+  const float z_len_sq = (z_axis.x * z_axis.x) + (z_axis.y * z_axis.y) + (z_axis.z * z_axis.z);
+  if (x_len_sq <= 0.00000001f || y_len_sq <= 0.00000001f || z_len_sq <= 0.00000001f) {
+    return {};
+  }
 
   return Vec3{
-    (delta.x * matrix.mat[0][0]) + (delta.y * matrix.mat[1][0]) + (delta.z * matrix.mat[2][0]),
-    (delta.x * matrix.mat[0][1]) + (delta.y * matrix.mat[1][1]) + (delta.z * matrix.mat[2][1]),
-    (delta.x * matrix.mat[0][2]) + (delta.y * matrix.mat[1][2]) + (delta.z * matrix.mat[2][2])
+    ((delta.x * x_axis.x) + (delta.y * x_axis.y) + (delta.z * x_axis.z)) / x_len_sq,
+    ((delta.x * y_axis.x) + (delta.y * y_axis.y) + (delta.z * y_axis.z)) / y_len_sq,
+    ((delta.x * z_axis.x) + (delta.y * z_axis.y) + (delta.z * z_axis.z)) / z_len_sq
   };
 }
+
+inline bool aimbot_segment_aabb_clip(const Vec3& start,
+  const Vec3& end,
+  const Vec3& mins,
+  const Vec3& maxs,
+  float* enter_fraction_out = nullptr,
+  float* exit_fraction_out = nullptr);
 
 inline Vec3 aimbot_clamp_to_hitbox(const Vec3& point, const studio_box& hitbox) {
   return Vec3{
@@ -1363,6 +1381,65 @@ inline float aimbot_effective_bone_size_min_scale() {
   }
 
   return std::clamp(configured, 0.05f, 1.0f);
+}
+
+inline float aimbot_aabb_inset(const Vec3& point, const Vec3& mins, const Vec3& maxs) {
+  return std::min({
+    point.x - mins.x,
+    maxs.x - point.x,
+    point.y - mins.y,
+    maxs.y - point.y,
+    point.z - mins.z,
+    maxs.z - point.z
+  });
+}
+
+inline bool aimbot_shrink_aabb(const Vec3& mins, const Vec3& maxs, Vec3* out_mins, Vec3* out_maxs) {
+  if (out_mins == nullptr || out_maxs == nullptr) {
+    return false;
+  }
+
+  const Vec3 center = (mins + maxs) * 0.5f;
+  const Vec3 half = (maxs - mins) * 0.5f;
+  const float subtract = aimbot_effective_bone_size_subtract();
+  const float minimum_scale = aimbot_effective_bone_size_min_scale();
+  const Vec3 safe{
+    std::min(half.x, std::max(half.x - subtract, half.x * minimum_scale)),
+    std::min(half.y, std::max(half.y - subtract, half.y * minimum_scale)),
+    std::min(half.z, std::max(half.z - subtract, half.z * minimum_scale))
+  };
+  if (safe.x <= 0.01f || safe.y <= 0.01f || safe.z <= 0.01f) {
+    return false;
+  }
+
+  *out_mins = center - safe;
+  *out_maxs = center + safe;
+  return true;
+}
+
+inline bool aimbot_ray_hits_obb(const Vec3& start,
+  const Vec3& end,
+  const matrix_3x4& bone,
+  const Vec3& mins,
+  const Vec3& maxs,
+  float* enter_fraction_out = nullptr,
+  float* inset_out = nullptr) {
+  const Vec3 local_start = aimbot_inverse_transform_point(start, bone);
+  const Vec3 local_end = aimbot_inverse_transform_point(end, bone);
+  float enter = 0.0f;
+  float exit = 1.0f;
+  if (!aimbot_segment_aabb_clip(local_start, local_end, mins, maxs, &enter, &exit)) {
+    return false;
+  }
+
+  if (enter_fraction_out != nullptr) {
+    *enter_fraction_out = enter;
+  }
+  if (inset_out != nullptr) {
+    const Vec3 local_mid = local_start + (local_end - local_start) * ((enter + exit) * 0.5f);
+    *inset_out = aimbot_aabb_inset(local_mid, mins, maxs);
+  }
+  return true;
 }
 
 inline float aimbot_multipoint_scale_for_hitbox(int base_hitbox) {
@@ -2347,11 +2424,12 @@ inline aimbot_point aimbot_find_best_point(Player* localplayer,
   return best_point;
 }
 
-inline bool aimbot_segment_aabb_enter_fraction(const Vec3& start,
+inline bool aimbot_segment_aabb_clip(const Vec3& start,
   const Vec3& end,
   const Vec3& mins,
   const Vec3& maxs,
-  float* enter_fraction_out = nullptr) {
+  float* enter_fraction_out,
+  float* exit_fraction_out) {
   Vec3 delta = end - start;
   float enter = 0.0f;
   float exit = 1.0f;
@@ -2377,11 +2455,25 @@ inline bool aimbot_segment_aabb_enter_fraction(const Vec3& start,
     clip_axis(start.x, delta.x, mins.x, maxs.x) &&
     clip_axis(start.y, delta.y, mins.y, maxs.y) &&
     clip_axis(start.z, delta.z, mins.z, maxs.z);
-  if (intersects && enter_fraction_out != nullptr) {
-    *enter_fraction_out = std::clamp(enter, 0.0f, 1.0f);
+  if (!intersects) {
+    return false;
   }
 
-  return intersects;
+  if (enter_fraction_out != nullptr) {
+    *enter_fraction_out = std::clamp(enter, 0.0f, 1.0f);
+  }
+  if (exit_fraction_out != nullptr) {
+    *exit_fraction_out = std::clamp(exit, 0.0f, 1.0f);
+  }
+  return true;
+}
+
+inline bool aimbot_segment_aabb_enter_fraction(const Vec3& start,
+  const Vec3& end,
+  const Vec3& mins,
+  const Vec3& maxs,
+  float* enter_fraction_out = nullptr) {
+  return aimbot_segment_aabb_clip(start, end, mins, maxs, enter_fraction_out, nullptr);
 }
 
 inline bool aimbot_segment_intersects_aabb(const Vec3& start,

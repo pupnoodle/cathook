@@ -78,6 +78,8 @@ inline drag_profile drag_for_weapon(int weapon_id) {
     profile.angular = {0.000799f, 0.001515f, 0.000879f};
     profile.spin = {300.0f, 0.0f, 0.0f};
     break;
+  case TF_WEAPON_JAR_GAS:
+  case TF_WEAPON_GRENADE_JAR_GAS:
   case TF_WEAPON_GRENADE_GAS:
     profile.coefficient = 1.0f;
     profile.linear = {0.026360f, 0.021780f, 0.058978f};
@@ -97,7 +99,7 @@ struct params {
   float gravity = 800.0f;
   float drag = 0.0f;
   Vec3 hull{2.0f, 2.0f, 2.0f};
-  unsigned int collision_mask = MASK_SOLID | CONTENTS_DEBRIS | CONTENTS_HITBOX;
+  unsigned int collision_mask = MASK_SOLID;
   trace_filter filter{};
   int weapon_id = 0;
   bool spin = false;
@@ -179,7 +181,6 @@ struct simulation {
 
     const drag_profile drag = drag_for_weapon(p.weapon_id);
     physics_mode = drag.coefficient > 0.0f && length_squared(drag.linear) > 0.0f && ensure_env();
-    const float dt = tick_interval();
 
     if (physics_mode) {
       env_state& state = shared_env();
@@ -211,11 +212,11 @@ struct simulation {
       state.object->SetPosition(p.origin, p.angles, true);
       state.object->SetVelocity(&velocity, &angular);
       state.object->Wake();
-      state.env->Simulate(dt);
+      state.env->Simulate(tick_interval());
       state.object->GetPosition(&position, nullptr);
       state.object->GetVelocity(&velocity, nullptr);
     } else if (p.gravity != 0.0f) {
-      velocity.z += p.gravity * dt * 0.5f;
+      velocity.z += p.gravity * tick_interval() * 0.5f;
     }
     path.push_back(position);
   }

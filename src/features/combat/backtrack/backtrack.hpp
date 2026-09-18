@@ -134,7 +134,7 @@ void mark_stale(Player* player);
 [[nodiscard]] bool command_tick_for_record(const backtrack_record& record, Player* player, int* tick_count, float time_mod = 0.0f);
 [[nodiscard]] bool implicit_rewind_position(Player* player, Vec3* position);
 [[nodiscard]] const backtrack_history* records_for_player(Player* player);
-[[nodiscard]] backtrack_record_view valid_records(Player* player, float time_mod = 0.0f);
+[[nodiscard]] backtrack_record_view valid_records(Player* player, float time_mod = 0.0f, bool include_current = false);
 [[nodiscard]] backtrack_record_view visual_records(Player* player);
 [[nodiscard]] bool is_record_valid(const backtrack_record& record, Player* player, float time_mod = 0.0f);
 [[nodiscard]] float record_timing_score(const backtrack_timing& timing, const backtrack_record& record);

@@ -918,11 +918,14 @@ static void draw_aimbot_content() {
   const char* projectile_prediction_items[] = { "Extrapolation", "Move simulation" };
   const char* projectile_position_items[] = { "Auto", "Feet", "Body", "Head" };
   const char* projectile_splash_items[] = { "Direct", "Balanced", "Splash preferred" };
-  const char* projectile_modifier_items[] = { "Charge weapon", "Cancel charge", "Target dormant" };
+  const char* projectile_modifier_items[] = {
+    "Charge weapon", "Cancel charge", "Target dormant", "Lob angles"
+  };
   const uint32_t projectile_modifier_bits[] = {
     Aim::projectile_mod_charge_weapon,
     Aim::projectile_mod_cancel_charge,
-    Aim::projectile_mod_target_dormant
+    Aim::projectile_mod_target_dormant,
+    Aim::projectile_mod_lob_angles
   };
   const uint32_t aim_at_bits[] = {
     Aim::aim_at_enemies,
@@ -1017,9 +1020,10 @@ static void draw_aimbot_content() {
     cat_menu::slider_int("Unsimulated ticks", &config.aimbot.ignore_unsimulated_ticks, 0, 21);
     cat_menu::slider_int("Max targets", &config.aimbot.max_targets, 1, 6);
   });
-  cat_menu::flow_panel("Hitscan", 0, 164.0f, [&]() {
+  cat_menu::flow_panel("Hitscan", 0, 188.0f, [&]() {
     cat_menu::multi_select_combo("Modifiers", &config.aimbot.hitscan_modifiers, hitscan_modifier_items, hitscan_modifier_bits, IM_ARRAYSIZE(hitscan_modifier_items));
     cat_menu::slider_float("Tapfire distance", &config.aimbot.tapfire_distance, 250.0f, 2000.0f, "%.0f HU");
+    cat_menu::slider_int("Peek ticks", &config.aimbot.peek_ticks, 0, 8);
     cat_menu::slider_float("Multipoint scale", &config.aimbot.multipoint_scale, 0.0f, 100.0f, "%.0f%%");
     cat_menu::slider_float("Bone size subtract", &config.aimbot.bone_size_subtract, 0.0f, 12.0f, "%.1f HU");
     cat_menu::slider_float("Bone size min scale", &config.aimbot.bone_size_min_scale, 0.05f, 1.0f, "%.2f");

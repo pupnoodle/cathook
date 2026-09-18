@@ -78,8 +78,7 @@ public:
     auto* command_buffer = commands();
     if (command_buffer == nullptr) return nullptr;
 
-    auto* usercmd = &command_buffer[sequence_number % command_buffer_size];
-    return usercmd->command_number == sequence_number ? usercmd : nullptr;
+    return &command_buffer[sequence_number % command_buffer_size];
   }
 
   verified_user_cmd* get_verified_user_cmd(int sequence_number) {

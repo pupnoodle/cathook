@@ -42,8 +42,8 @@ inline float weapon_hitscan_spread(Weapon* weapon) {
 
   if (init_bullet_spread()) {
     const float spread = get_bullet_spread(weapon);
-    if (std::isfinite(spread) && spread > 0.0f) {
-      return std::clamp(spread, 0.0f, 1.0f);
+    if (std::isfinite(spread)) {
+      return spread > 0.0f ? std::clamp(spread, 0.0f, 1.0f) : 0.0f;
     }
   }
 
@@ -77,14 +77,18 @@ inline int hitscan_spread_seed(user_cmd* user_cmd) {
   return seed_pred::hitscan_seed(user_cmd);
 }
 
-inline float hitscan_first_shot_spread_scale(Weapon* weapon, int pellet_count) {
-  if (weapon == nullptr || attribute_manager == nullptr || global_vars == nullptr) {
-    return 0.0f;
+inline bool hitscan_perfect_first_shot(Weapon* weapon, int pellet_count) {
+  if (weapon == nullptr || global_vars == nullptr) {
+    return false;
   }
 
   const float elapsed = global_vars->curtime - weapon->get_last_attack();
   const float ready_time = pellet_count > 1 ? 0.25f : 1.25f;
-  if (!std::isfinite(elapsed) || elapsed <= ready_time) {
+  return std::isfinite(elapsed) && elapsed > ready_time;
+}
+
+inline float hitscan_first_shot_attrib_scale(Weapon* weapon) {
+  if (weapon == nullptr || attribute_manager == nullptr) {
     return 0.0f;
   }
 
@@ -160,10 +164,18 @@ inline bool hitscan_spread_offset(user_cmd* user_cmd,
     return true;
   }
 
-  const float first_shot_scale = hitscan_first_shot_spread_scale(weapon, pellet_count);
-  const float spread_range = first_shot_scale != 0.0f ? first_shot_scale : 0.5f;
+  const int safe_pellet_index = std::max(0, pellet_index);
+  float spread_range = 0.5f;
+  if (safe_pellet_index == 0 && hitscan_perfect_first_shot(weapon, pellet_count)) {
+    const float first_shot_scale = hitscan_first_shot_attrib_scale(weapon);
+    if (first_shot_scale == 0.0f) {
+      return true;
+    }
+    spread_range = first_shot_scale;
+  }
+
   valve_random_stream stream{};
-  stream.set_seed(hitscan_spread_seed(user_cmd) + std::max(0, pellet_index));
+  stream.set_seed(hitscan_spread_seed(user_cmd) + safe_pellet_index);
   offset_out->x = (stream.random_float(-spread_range, spread_range) + stream.random_float(-spread_range, spread_range)) * spread;
   offset_out->y = (stream.random_float(-spread_range, spread_range) + stream.random_float(-spread_range, spread_range)) * spread;
   return true;
@@ -225,18 +237,31 @@ inline hitscan_fire_solution prepare_hitscan_fire_solution(Player* localplayer,
   }
 
   const float spread = weapon_hitscan_spread(weapon);
-  const bool use_spread = config.aimbot.spread_compensation && spread > 0.00001f;
-  const int pellet_count = use_spread ? std::max(1, weapon->get_bullets_per_shot()) : 1;
-  const bool use_fixed_spread = use_spread && fixed_weapon_spread_active(weapon, pellet_count);
+  const bool want_spread = config.aimbot.spread_compensation && spread > 0.00001f;
+  const int pellet_count = want_spread ? std::max(1, weapon->get_bullets_per_shot()) : 1;
+  const bool use_fixed_spread = want_spread && fixed_weapon_spread_active(weapon, pellet_count);
+  const bool perfect_first = want_spread && hitscan_perfect_first_shot(weapon, pellet_count);
+  const bool seed_ready = !seed_pred::custom_random_seed() || seed_pred::synced;
+  const bool deterministic_first =
+    (perfect_first && hitscan_first_shot_attrib_scale(weapon) == 0.0f) ||
+    (use_fixed_spread && pellet_count <= 14);
   solution.spread = spread;
   solution.pellet_count = pellet_count;
   solution.spread_signature = bullet_spread_signature_found;
   solution.spread_fixed = use_fixed_spread;
 
+  if (want_spread && !seed_ready && !deterministic_first) {
+    solution.seed_missing = true;
+    return solution;
+  }
+
+  const bool use_spread = want_spread && (seed_ready || deterministic_first);
+  const int spread_pellet_count = (!seed_ready && deterministic_first) ? 1 : pellet_count;
   std::vector<std::pair<float, int>> pellet_order{};
-  pellet_order.reserve(static_cast<std::size_t>(pellet_count));
+  pellet_order.reserve(static_cast<std::size_t>(spread_pellet_count));
   Vec3 average_direction{};
-  std::vector<Vec3> spread_offsets(static_cast<std::size_t>(pellet_count));
+  std::vector<Vec3> spread_offsets(static_cast<std::size_t>(spread_pellet_count));
+  bool first_pellet_straight = !use_spread;
   if (use_spread) {
     Vec3 base_forward{};
     Vec3 base_right{};
@@ -244,7 +269,7 @@ inline hitscan_fire_solution prepare_hitscan_fire_solution(Player* localplayer,
     angle_vectors(hitscan_aim_bullet_angles(localplayer, command_view_angles),
       &base_forward, &base_right, &base_up);
 
-    for (int pellet_index = 0; pellet_index < pellet_count; ++pellet_index) {
+    for (int pellet_index = 0; pellet_index < spread_pellet_count; ++pellet_index) {
       Vec3& spread_offset = spread_offsets[static_cast<std::size_t>(pellet_index)];
       if (!hitscan_spread_offset(user_cmd, weapon, pellet_index, pellet_count, spread, use_fixed_spread, &spread_offset)) {
         solution.seed_missing = true;
@@ -260,22 +285,27 @@ inline hitscan_fire_solution prepare_hitscan_fire_solution(Player* localplayer,
       average_direction += direction;
     }
 
-    average_direction = aimbot_normalize_vector(average_direction);
-    if (!aimbot_vec3_is_finite(average_direction)) {
-      average_direction = base_forward;
-    }
+    first_pellet_straight =
+      std::fabs(spread_offsets[0].x) <= 0.00001f && std::fabs(spread_offsets[0].y) <= 0.00001f;
+    if (first_pellet_straight) {
+      pellet_order.emplace_back(0.0f, 0);
+    } else {
+      average_direction = aimbot_normalize_vector(average_direction);
+      if (!aimbot_vec3_is_finite(average_direction)) {
+        average_direction = base_forward;
+      }
 
-    for (int pellet_index = 0; pellet_index < pellet_count; ++pellet_index) {
-      const Vec3 direction = aimbot_normalize_vector(
-        base_forward + base_right * spread_offsets[static_cast<std::size_t>(pellet_index)].x +
-        base_up * spread_offsets[static_cast<std::size_t>(pellet_index)].y);
-      const Vec3 delta = direction - average_direction;
-      pellet_order.emplace_back(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z, pellet_index);
+      for (int pellet_index = 0; pellet_index < spread_pellet_count; ++pellet_index) {
+        const Vec3 direction = aimbot_normalize_vector(
+          base_forward + base_right * spread_offsets[static_cast<std::size_t>(pellet_index)].x +
+          base_up * spread_offsets[static_cast<std::size_t>(pellet_index)].y);
+        const Vec3 delta = direction - average_direction;
+        pellet_order.emplace_back(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z, pellet_index);
+      }
+      std::sort(pellet_order.begin(), pellet_order.end(),
+        [](const auto& left, const auto& right) { return left.first < right.first; });
     }
-    std::sort(pellet_order.begin(), pellet_order.end(),
-      [](const auto& left, const auto& right) { return left.first < right.first; });
-  }
-  else {
+  } else {
     pellet_order.emplace_back(0.0f, 0);
   }
 
@@ -289,12 +319,14 @@ inline hitscan_fire_solution prepare_hitscan_fire_solution(Player* localplayer,
       break;
     }
 
-    const Vec3 trace_angles = use_spread
+    const bool compensate = use_spread && !first_pellet_straight;
+    const Vec3 trace_angles = compensate
       ? compensate_hitscan_spread(localplayer, command_view_angles, spread_offset)
       : command_view_angles;
 
     hitscan_aim_trace_result trace_result{};
-    if (!hitscan_aim_trace_candidate(localplayer, weapon, candidate, trace_angles, spread_offset, use_spread, &trace_result)) {
+    if (!hitscan_aim_trace_candidate(
+          localplayer, weapon, candidate, trace_angles, spread_offset, compensate, &trace_result)) {
       solution.trace_contents = trace_result.contents;
       solution.trace_fraction = trace_result.fraction;
       solution.trace_end = trace_result.end;
@@ -311,8 +343,8 @@ inline hitscan_fire_solution prepare_hitscan_fire_solution(Player* localplayer,
 
     solution.ready = true;
     solution.command_angles = trace_angles;
-    solution.spread_compensated = use_spread;
-    solution.pellet_index = use_spread ? pellet_index : -1;
+    solution.spread_compensated = compensate;
+    solution.pellet_index = compensate ? pellet_index : (use_spread ? 0 : -1);
     solution.trace_hitbox = trace_result.hitbox;
     solution.trace_entity_index = trace_result.entity != nullptr ? trace_result.entity->get_index() : -1;
     solution.trace_contents = trace_result.contents;
@@ -337,7 +369,7 @@ inline bool hitscan_candidate_ready_for_selection(Player* localplayer, Weapon* w
   const Vec3 command_angles = candidate.player != nullptr
     ? candidate.command_angles
     : hitscan_aim_command_angles(localplayer, candidate.aim_angles);
-  if (!config.aimbot.spread_compensation || weapon_hitscan_spread(weapon) <= 0.00001f) {
+  if (weapon_hitscan_spread(weapon) <= 0.00001f) {
     return true;
   }
   return prepare_hitscan_fire_solution(localplayer, weapon, user_cmd, candidate, command_angles).ready;

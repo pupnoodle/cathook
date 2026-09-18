@@ -281,6 +281,10 @@ inline bool projectile_trace_should_hit_entity(struct trace_filter* interface, E
   if (entity == nullptr || (interface != nullptr && trace_filter_same_entity(entity, interface->skip))) {
     return false;
   }
+  if (interface != nullptr && interface->ignore_target &&
+      entity->get_class_id() == class_id::PLAYER) {
+    return false;
+  }
   if (interface != nullptr && trace_filter_same_entity(entity, interface->target)) {
     return !interface->ignore_target;
   }

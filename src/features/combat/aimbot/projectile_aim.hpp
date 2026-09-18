@@ -39,7 +39,6 @@ inline struct settings {
   bool air_splash = true;
   bool sticky_arm_time = true;
   bool huntsman_pull_point = true;
-  bool lob_angles = true;
   bool lob_underpredict = false;
   bool cannon_hitcharge = true;
   bool beggars_clip_guard = true;
@@ -327,6 +326,22 @@ inline bool validate_shot(Player* local, const projectile_info& info, const shot
 
   const target_bounds_guard bounds_guard(test.target, test.predicted_origin);
 
+  if (direct && info.gravity_mod <= 0.001f) {
+    trace_t blocked{};
+    if (!trace_hull_segment(local, info, nullptr, test.launch, test.aim_point, blocked)) {
+      return false;
+    }
+    const bool blocked_hit =
+      blocked.start_solid || blocked.all_solid || blocked.fraction < 0.999f;
+    Entity* hit_entity = static_cast<Entity*>(blocked.entity);
+    const bool target_hit = hit_entity == test.target ||
+      (hit_entity != nullptr && test.target != nullptr &&
+       hit_entity->get_ref_handle() == test.target->get_ref_handle());
+    if (blocked_hit && !target_hit) {
+      return false;
+    }
+  }
+
   const int tolerance_ticks =
     std::max(time_to_ticks(length(test.state.maxs - test.state.mins) /
                            std::max(length(test.velocity), 1.0f)), 1);
@@ -351,8 +366,7 @@ inline bool validate_shot(Player* local, const projectile_info& info, const shot
     simulation.last_trace = segment;
     traced = current;
 
-    const bool solid_hit = segment.start_solid || segment.all_solid ||
-      segment.fraction < 1.0f || segment.entity != nullptr;
+    const bool solid_hit = segment.start_solid || segment.all_solid || segment.fraction < 1.0f;
     bool candidate_hit = false;
     switch (test.kind) {
     case 0:
@@ -373,12 +387,17 @@ inline bool validate_shot(Player* local, const projectile_info& info, const shot
     const float aim_slop = std::max(24.0f, splash_radius * 0.45f);
     bool valid = false;
     switch (test.kind) {
-    case 0:
-      valid = segment.entity == test.target && (test.sim_ticks - tick) < tolerance_ticks;
+    case 0: {
+      Entity* hit_entity = static_cast<Entity*>(segment.entity);
+      const bool target_hit = hit_entity == test.target ||
+        (hit_entity != nullptr && test.target != nullptr &&
+         hit_entity->get_ref_handle() == test.target->get_ref_handle());
+      valid = target_hit && (test.sim_ticks - tick) < tolerance_ticks;
       if (!valid) {
         return false;
       }
       break;
+    }
     case 1:
       valid = hull_distance <= splash_radius &&
         length_squared(endpos - test.aim_point) <= aim_slop * aim_slop &&
@@ -413,7 +432,8 @@ inline point_solution solve_point(Player* local, const projectile_info& info, co
     return result;
   }
 
-  const bool needs_two_pass = two_pass && info.launch != launch_type::bat;
+  const bool needs_two_pass = two_pass && info.launch != launch_type::bat &&
+    length_squared(info.offset) > 0.0001f;
   if (!needs_two_pass) {
     result.calculated = calc_state::good;
     result.pitch = pitch_command;
@@ -439,58 +459,59 @@ inline point_solution solve_point(Player* local, const projectile_info& info, co
     return result;
   }
 
-  if (info.launch == launch_type::muzzle && length_squared(info.offset) > 0.0001f) {
-    Vec3 forward{};
-    angle_vectors(launch_angles, &forward, nullptr, nullptr);
+  const float first_pitch = pitch_command;
+  const float first_yaw = yaw_command;
+  float rotate_yaw = first_yaw;
+  yaw_command = muzzle_yaw;
+  pitch_command = muzzle_pitch;
 
-    const Vec3 shoot_offset = launch - eye;
-    const Vec3 target_offset = point - eye;
-    const Vec3 forward_xy = normalized({forward.x, forward.y, 0.0f});
-    float corrected_yaw = muzzle_yaw;
-    if (length_squared(forward_xy) > 0.0001f) {
-      const Vec3 shoot_xy{shoot_offset.x, shoot_offset.y, 0.0f};
-      const Vec3 target_xy{target_offset.x, target_offset.y, 0.0f};
-      float root = 0.0f;
-      if (solve_quadratic_front_root(1.0f, 2.0f * dot(shoot_xy, forward_xy),
-                                     length_squared(shoot_xy) - length_squared(target_xy),
-                                     root)) {
-        const Vec3 shifted = shoot_xy + forward_xy * root;
-        corrected_yaw = std::atan2(shifted.y, shifted.x) * radpi;
-      }
+  Vec3 forward{};
+  angle_vectors(launch_angles, &forward, nullptr, nullptr);
+  const Vec3 shoot_offset = launch - eye;
+  const Vec3 target_offset = point - eye;
+  const Vec3 forward_xy = normalized({forward.x, forward.y, 0.0f});
+  if (length_squared(forward_xy) > 0.0001f) {
+    const Vec3 shoot_xy{shoot_offset.x, shoot_offset.y, 0.0f};
+    const Vec3 target_xy{target_offset.x, target_offset.y, 0.0f};
+    float root = 0.0f;
+    if (solve_quadratic_front_root(1.0f, 2.0f * dot(shoot_xy, forward_xy),
+                                   length_squared(shoot_xy) - length_squared(target_xy),
+                                   root)) {
+      const Vec3 shifted = shoot_xy + forward_xy * root;
+      const float geom_yaw = std::atan2(shifted.y, shifted.x) * radpi;
+      yaw_command = first_yaw - (geom_yaw - first_yaw);
+      rotate_yaw = geom_yaw;
     }
-    yaw_command = corrected_yaw;
+  }
 
-    if (800.0f * info.gravity_mod > 0.001f) {
-      pitch_command = muzzle_pitch + (pitch_command - launch_angles.x);
-    } else {
-      const float cyaw = std::cos(yaw_command * pideg);
-      const float syaw = std::sin(yaw_command * pideg);
-      const auto flatten = [cyaw, syaw](const Vec3& value) {
-        return Vec3{value.x * cyaw + value.y * syaw, 0.0f, value.z};
-      };
-      const Vec3 shoot_plane = flatten(shoot_offset);
-      const Vec3 target_plane = flatten(target_offset);
-      const Vec3 forward_plane_raw = flatten(forward);
-      Vec3 forward_plane = forward_plane_raw;
-      const float plane_length =
-        std::sqrt(forward_plane.x * forward_plane.x + forward_plane.z * forward_plane.z);
-      if (plane_length > 0.0001f) {
-        forward_plane = Vec3{forward_plane.x / plane_length, 0.0f,
-                             forward_plane.z / plane_length};
-        const float planar_b =
-          2.0f * (shoot_plane.x * forward_plane.x + shoot_plane.z * forward_plane.z);
-        const float planar_c = (shoot_plane.x * shoot_plane.x + shoot_plane.z * shoot_plane.z) -
-          (target_plane.x * target_plane.x + target_plane.z * target_plane.z);
-        float plane_root = 0.0f;
-        if (solve_quadratic_front_root(1.0f, planar_b, planar_c, plane_root)) {
-          const Vec3 shifted_plane = shoot_plane + forward_plane * plane_root;
-          pitch_command = -std::atan2(shifted_plane.z, shifted_plane.x) * radpi;
-        }
-      }
-    }
+  if (800.0f * info.gravity_mod > 0.001f) {
+    pitch_command = muzzle_pitch + (first_pitch - launch_angles.x);
   } else {
-    pitch_command = muzzle_pitch;
-    yaw_command = muzzle_yaw;
+    const float cyaw = std::cos(rotate_yaw * pideg);
+    const float syaw = std::sin(rotate_yaw * pideg);
+    const auto flatten = [cyaw, syaw](const Vec3& value) {
+      return Vec3{value.x * cyaw + value.y * syaw, 0.0f, value.z};
+    };
+    const Vec3 shoot_plane = flatten(shoot_offset);
+    const Vec3 target_plane = flatten(target_offset);
+    const Vec3 forward_plane_raw = flatten(forward);
+    Vec3 forward_plane = forward_plane_raw;
+    const float plane_length =
+      std::sqrt(forward_plane.x * forward_plane.x + forward_plane.z * forward_plane.z);
+    if (plane_length > 0.0001f) {
+      forward_plane = Vec3{forward_plane.x / plane_length, 0.0f,
+                           forward_plane.z / plane_length};
+      const float planar_b =
+        2.0f * (shoot_plane.x * forward_plane.x + shoot_plane.z * forward_plane.z);
+      const float planar_c = (shoot_plane.x * shoot_plane.x + shoot_plane.z * shoot_plane.z) -
+        (target_plane.x * target_plane.x + target_plane.z * target_plane.z);
+      float plane_root = 0.0f;
+      if (solve_quadratic_front_root(1.0f, planar_b, planar_c, plane_root)) {
+        const Vec3 shifted_plane = shoot_plane + forward_plane * plane_root;
+        const float geom_pitch = -std::atan2(shifted_plane.z, shifted_plane.x) * radpi;
+        pitch_command = first_pitch - (geom_pitch - first_pitch);
+      }
+    }
   }
 
   result.calculated = calc_state::good;
@@ -502,11 +523,18 @@ inline point_solution solve_point(Player* local, const projectile_info& info, co
   return result;
 }
 
+inline int ballistic_ticks(float seconds) {
+  if (seconds <= 0.0f) {
+    return 0;
+  }
+  return std::max(static_cast<int>(std::ceil(seconds / std::max(tick_interval(), 0.0001f))), 0);
+}
+
 inline bool solution_within_timing(const point_solution& solution, int sim_tick, int tolerance) {
   if (solution.calculated != calc_state::good) {
     return false;
   }
-  const int time_to = time_to_ticks(solution.time);
+  const int time_to = ballistic_ticks(solution.time);
   if (tolerance == INT_MAX) {
     return true;
   }
@@ -642,9 +670,16 @@ inline seed_outcome evaluate_seed(Player* local, Weapon* weapon, const projectil
   const int arm_ticks = cfg.sticky_arm_time && info.arm_time > 0.0f
                           ? time_to_ticks(info.arm_time)
                           : 0;
-  const bool lob_enabled = cfg.lob_angles && info.gravity_mod > 0.0f;
+  const bool lob_enabled =
+    (config.aimbot.projectile_modifiers & Aim::projectile_mod_lob_angles) != 0 &&
+    info.gravity_mod > 0.0f;
   const bool underpredict = cfg.lob_underpredict && radius > 0.0f;
-  const float drag_base = effective_drag(info, speed, lob_enabled);
+  const bool account_drag = projsim::drag_for_weapon(weapon_id_value).coefficient > 0.0f &&
+    projsim::ensure_env();
+  const auto shot_drag = [&](float velocity) {
+    return account_drag ? effective_drag(info, velocity, lob_enabled) : 0.0f;
+  };
+  const float drag_base = shot_drag(speed);
   const int splash_policy = std::clamp(config.aimbot.projectile_splash_policy, 0, 2);
   const bool splash_allowed = radius > 0.0f && splash_policy != 0 && info.direct_hit;
   const bool splash_only = !info.direct_hit;
@@ -837,13 +872,12 @@ inline seed_outcome evaluate_seed(Player* local, Weapon* weapon, const projectil
       shot_test test{};
       test.launch = launch;
       test.velocity = velocity;
-      test.drag = effective_drag(info, length(velocity), lob_enabled);
+      test.drag = shot_drag(length(velocity));
       test.target = seed.entity;
       test.predicted_origin = entry.origin;
       test.state = make_target_state(seed, entry.origin);
       test.aim_point = entry.point;
-      test.sim_ticks = std::max(
-        time_to_ticks(entry.solution.time + info.release_delay) + 1, 1);
+      test.sim_ticks = std::max(entry.tick + ballistic_ticks(info.release_delay), 1);
       test.kind = 0;
       test.radius_sqr = FLT_MAX;
       test.normal_offset = 0.0f;
@@ -921,12 +955,15 @@ inline seed_outcome evaluate_seed(Player* local, Weapon* weapon, const projectil
         shot_test test{};
         test.launch = launch;
         test.velocity = velocity;
-        test.drag = effective_drag(info, length(velocity), lob_enabled);
+        test.drag = shot_drag(length(velocity));
         test.target = seed.entity;
         test.predicted_origin = entry.origin;
         test.state = state;
         test.aim_point = candidate.point;
-        test.sim_ticks = std::max(time_to_ticks(solution.time + info.release_delay) + 1, 1);
+        test.sim_ticks = std::max(
+          std::max(entry.tick, ballistic_ticks(solution.time)) +
+            ballistic_ticks(info.release_delay),
+          1);
         test.kind = candidate.kind == splash_point_kind::air ? 2 : 1;
         test.radius_sqr = effective_radius * effective_radius;
         test.normal_offset = info.normal_offset;

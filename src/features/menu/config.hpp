@@ -63,6 +63,7 @@ struct Aim {
     projectile_mod_charge_weapon = 1u << 0,
     projectile_mod_cancel_charge = 1u << 1,
     projectile_mod_target_dormant = 1u << 2,
+    projectile_mod_lob_angles = 1u << 3,
     projectile_mod_default = projectile_mod_charge_weapon | projectile_mod_cancel_charge,
     projectile_mod_all = projectile_mod_default | projectile_mod_target_dormant
   };
@@ -148,6 +149,7 @@ struct Aim {
   float auto_rev_threshold = 450.0f;
   uint32_t hitscan_modifiers = hitscan_mod_default;
   float tapfire_distance = 1000.0f;
+  int peek_ticks = 2;
   float ignore_invisible = 50.0f;
   int ignore_unsimulated_ticks = 4;
   float multipoint_scale = 75.0f;
