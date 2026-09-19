@@ -15,7 +15,7 @@ static settings::Boolean null_graphics("hack.nullgraphics", "true");
 typedef ITexture *(*FindTexture_t)(void *, const char *, const char *, bool, int);
 typedef IMaterial *(*FindMaterialEx_t)(void *, const char *, const char *, int, bool, const char *);
 typedef IMaterial *(*FindMaterial_t)(void *, const char *, const char *, bool, const char *);
-// 81
+// live linux64 CMaterialSystem FindTexture = vtables::material_system::find_texture
 FindTexture_t FindTexture_Original;
 FindMaterialEx_t FindMaterialEx_Original;
 FindMaterial_t FindMaterial_Original;
@@ -26,14 +26,14 @@ ITexture *FindTexture_null_hook(void *this_, char const *pTextureName, const cha
     return st;
 }
 
-// 123
+// live linux64 CMaterialSystem FindMaterialEx = vtables::material_system::find_material_ex
 IMaterial *FindMaterialEx_null_hook(void *this_, char const *pMaterialName, const char *pTextureGroupName, int nContext, bool complain, const char *pComplainPrefix)
 {
     static IMaterial *st = FindMaterialEx_Original(this_, pMaterialName, pTextureGroupName, nContext, complain, pComplainPrefix);
     return st;
 }
 
-// 73
+// live linux64 CMaterialSystem FindMaterial = vtables::material_system::find_material
 IMaterial *FindMaterial_null_hook(void *this_, char const *pMaterialName, const char *pTextureGroupName, bool complain, const char *pComplainPrefix)
 {
     static IMaterial *st = FindMaterial_Original(this_, pMaterialName, pTextureGroupName, complain, pComplainPrefix);
@@ -209,9 +209,12 @@ static const char *FSHook_FindFirst(void *this_, const char *pWildCard, void **p
     return p;
 }
 
-static bool (*FSorig_Precache)(const char *, const char *);
-static bool FSHook_Precache(const char *pFileName, const char *pPathID)
+static bool (*FSorig_Precache)(void *, const char *, const char *);
+static bool FSHook_Precache(void *this_, const char *pFileName, const char *pPathID)
 {
+    (void) this_;
+    (void) pFileName;
+    (void) pPathID;
     return true;
 }
 
@@ -230,18 +233,18 @@ static void ReduceRamUsage()
          */
         hooked_fs = true;
         fs_hook.Set(reinterpret_cast<void *>(g_IFileSystem));
-        fs_hook.HookMethod(FSHook_FindFirst, 27, &FSorig_FindFirst);
-        fs_hook.HookMethod(FSHook_FindNext, 28, &FSorig_FindNext);
-        fs_hook.HookMethod(FSHook_AsyncReadMultiple, 37, &FSorig_AsyncReadMultiple);
-        fs_hook.HookMethod(FSHook_OpenEx, 69, &FSorig_OpenEx);
-        fs_hook.HookMethod(FSHook_ReadFileEx, 71, &FSorig_ReadFileEx);
-        fs_hook.HookMethod(FSHook_AddFilesToFileCache, 103, &FSorig_AddFilesToFileCache);
+        fs_hook.HookMethod(FSHook_FindFirst, vtables::filesystem::find_first, &FSorig_FindFirst);
+        fs_hook.HookMethod(FSHook_FindNext, vtables::filesystem::find_next, &FSorig_FindNext);
+        fs_hook.HookMethod(FSHook_AsyncReadMultiple, vtables::filesystem::async_read_multiple, &FSorig_AsyncReadMultiple);
+        fs_hook.HookMethod(FSHook_OpenEx, vtables::filesystem::open_ex, &FSorig_OpenEx);
+        fs_hook.HookMethod(FSHook_ReadFileEx, vtables::filesystem::read_file_ex, &FSorig_ReadFileEx);
+        fs_hook.HookMethod(FSHook_AddFilesToFileCache, vtables::filesystem::add_files_to_file_cache, &FSorig_AddFilesToFileCache);
         fs_hook.Apply();
 
-        fs_hook2.Set(reinterpret_cast<void *>(g_IFileSystem), 4);
-        fs_hook2.HookMethod(FSHook_Open, 2, &FSorig_Open);
-        fs_hook2.HookMethod(FSHook_Precache, 9, &FSorig_Precache);
-        fs_hook2.HookMethod(FSHook_ReadFile, 14, &FSorig_ReadFile);
+        fs_hook2.Set(reinterpret_cast<void *>(g_IFileSystem), vtables::filesystem::ibasefilesystem_vptr_offset);
+        fs_hook2.HookMethod(FSHook_Open, vtables::filesystem::open, &FSorig_Open);
+        fs_hook2.HookMethod(FSHook_Precache, vtables::filesystem::precache, &FSorig_Precache);
+        fs_hook2.HookMethod(FSHook_ReadFile, vtables::filesystem::read_file, &FSorig_ReadFile);
         fs_hook2.Apply();
         /* Might give performance benefit, but mostly fixes annoying console
          * spam related to mdl not being able to play sequence that it
@@ -276,27 +279,10 @@ static void UnHookFs()
 static InitRoutineEarly nullify_textmode(
     []()
     {
-        // SDL_CreateWindow has a "flag" parameter. We simply give it HIDDEN as a flag
-        // 0x8 = SDL_HIDDEN
-        static BytePatch patch1(gSignatures.GetLauncherSignature, "C7 43 ? ? ? ? ? C7 44 24 ? ? ? ? ? C7 44 24", 0xb, { 0x8 });
-
-        // all are the same size so use same patch for all
-        std::vector<unsigned char> patch_arr = { 0x90, 0x90, 0x90, 0x90, 0x90 };
-
-        // Hide the SDL window
-        static BytePatch patch2(gSignatures.GetLauncherSignature, "E8 ? ? ? ? C6 43 25 01 83 C4 5C", 0x0, patch_arr);
-        static BytePatch patch3(gSignatures.GetLauncherSignature, "E8 ? ? ? ? 8B 43 14 89 04 24 E8 ? ? ? ? C6 43 25 01 83 C4 1C", 0x0, patch_arr);
-        static BytePatch patch4(gSignatures.GetLauncherSignature, "89 14 24 E8 ? ? ? ? 8B 45 B4", 0x3, patch_arr);
-
         ReduceRamUsage();
         static BytePatch patch5(gSignatures.GetEngineSignature(sigs::video_mode_setup_startup_graphic), { 0xC3 });
         static BytePatch patch6(gSignatures.GetEngineSignature, sigs::material_system_swap_buffers, 0x0, { 0x31, 0xC0, 0x40, 0xC3 });
         static BytePatch patch7(gSignatures.GetEngineSignature, sigs::v_render_view, 0x0, { 0xC3 });
-
-        patch1.Patch();
-        patch2.Patch();
-        patch3.Patch();
-        patch4.Patch();
         patch5.Patch();
         patch6.Patch();
         patch7.Patch();
@@ -319,20 +305,23 @@ static InitRoutine nullifiy_textmode2(
                     UnHookFs();
             });
 #if ENABLE_TEXTMODE
-        // Catbots still hit properly, this just makes it easier to Stub stuff not needed in textmode
-        uintptr_t g_bTextMode_ptrptr = gSignatures.GetEngineSignature("A2 ? ? ? ? 8B 43 04") + 0x1;
-
-        BytePatch::mprotectAddr(g_bTextMode_ptrptr, 4, PROT_READ | PROT_WRITE | PROT_EXEC);
-        BytePatch::mprotectAddr(*(uintptr_t *) g_bTextMode_ptrptr, 4, PROT_READ | PROT_WRITE | PROT_EXEC);
-        BytePatch::mprotectAddr(**(uintptr_t **) g_bTextMode_ptrptr, 4, PROT_READ | PROT_WRITE | PROT_EXEC);
-
-        bool *g_bTextMode_ptr = *((bool **) g_bTextMode_ptrptr);
-        *g_bTextMode_ptr      = true;
-        // Skip downloading ressources
-        static BytePatch patch1(gSignatures.GetEngineSignature, "0F 85 ? ? ? ? A1 ? ? ? ? 8D 8B ? ? ? ?", 0x1, { 0x81 });
-        patch1.Patch();
-        // CViewRender::Render
+        ReduceRamUsage();
         static BytePatch patch2(gSignatures.GetClientSignature, sigs::view_render_render, 0x0, { 0x31, 0xC0, 0x40, 0xC3 });
+        static BytePatch patch_ss(gSignatures.GetClientSignature, sigs::view_render_perform_screen_space_effects, 0x0, { 0xC3 });
+        static BytePatch patch_ov(gSignatures.GetClientSignature, sigs::view_render_perform_screen_overlay, 0x0, { 0xC3 });
+        static BytePatch patch_scene(gSignatures.GetServerSignature, sigs::server_scene_entity_should_transmit, 0x0, { 0xB8, 0x00, 0x00, 0x00, 0x00, 0xC3 });
+        static BytePatch patch_base(gSignatures.GetServerSignature, sigs::server_base_entity_should_transmit, 0x0, { 0xB8, 0x00, 0x00, 0x00, 0x00, 0xC3 });
         patch2.Patch();
+        patch_ss.Patch();
+        patch_ov.Patch();
+        patch_scene.Patch();
+        patch_base.Patch();
+        uintptr_t textmode_store = gSignatures.GetClientSignature(sigs::client_textmode_flag_store);
+        if (textmode_store)
+        {
+            auto *flag = reinterpret_cast<bool *>(textmode_store + 14 + *reinterpret_cast<int *>(textmode_store + 9));
+            BytePatch::mprotectAddr(uintptr_t(flag), 1, PROT_READ | PROT_WRITE | PROT_EXEC);
+            *flag = true;
+        }
 #endif
     });

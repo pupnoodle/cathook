@@ -31,7 +31,7 @@ DEFINE_HOOKED_METHOD(IsPlayingTimeDemo, bool, void *_this)
     return original::IsPlayingTimeDemo(_this);
 }
 
-DEFINE_HOOKED_METHOD(ServerCmdKeyValues, void, IVEngineClient013 *_this, KeyValues *kv)
+DEFINE_HOOKED_METHOD(ServerCmdKeyValues, void, CEngineClient *_this, KeyValues *kv)
 {
     if (!enable_debug_servercmd)
         return original::ServerCmdKeyValues(_this, kv);

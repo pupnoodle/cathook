@@ -26,5 +26,15 @@ static void CreateMove()
         g_IEngine->ServerCmd("tournament_player_readystate 1");
 }
 
+static CatCommand mvm_tour_mask("mvm_tour_mask", "Print MvM completed tour/mission masks",
+                                []()
+                                {
+                                    using Fn = bool (*)(unsigned, unsigned *, unsigned *);
+                                    static auto fn = Fn(gSignatures.GetClientSignature(sigs::mvm_completed_tour_mask));
+                                    unsigned tour = 0, missions = 0;
+                                    bool ok = fn && fn(0, &tour, &missions);
+                                    logging::Info("mvm tour mask ok=%d tour=%u missions=%u fn=%p", ok, tour, missions, reinterpret_cast<void *>(fn));
+                                });
+
 static InitRoutine init([]() { EC::Register(EC::CreateMove, CreateMove, "mvmtools_createmove"); });
 } // namespace hacks::tf2::mvmtools

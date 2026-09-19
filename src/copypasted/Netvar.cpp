@@ -1,4 +1,11 @@
 #include "common.hpp"
+#include "sdk/dt_recv_redef.h"
+#include <cstddef>
+
+static_assert(offsetof(RecvPropRedef, m_ProxyFn) == 0x30, "RecvProp::m_ProxyFn");
+static_assert(offsetof(RecvPropRedef, m_Offset) == 0x48, "RecvProp::m_Offset");
+static_assert(offsetof(RecvTable, m_nProps) == 8, "RecvTable::m_nProps");
+static_assert(offsetof(RecvTable, m_pNetTableName) == 24, "RecvTable::m_pNetTableName");
 
 /**
  * netvar_tree - Constructor
@@ -31,14 +38,11 @@ void netvar_tree::populate_nodes(RecvTable *recv_table, map_type *map)
     map->clear();
     for (auto i = 0; i < recv_table->GetNumProps(); i++)
     {
-        const auto *prop     = recv_table->GetProp(i);
-        const auto prop_info = std::make_shared<node>(prop->GetOffset(), const_cast<RecvProp *>(prop));
-        if (prop->GetType() == DPT_DataTable)
-        {
-            populate_nodes(prop->GetDataTable(), &prop_info->nodes);
-        }
-        //(*map)[prop->GetName()] = std::shared_ptr<node>(prop_info);
-        map->emplace(prop->GetName(), prop_info);
+        auto *prop               = reinterpret_cast<RecvPropRedef *>(recv_table->GetProp(i));
+        const auto prop_info     = std::make_shared<node>(prop->m_Offset, reinterpret_cast<RecvProp *>(prop));
+        if (prop->m_RecvType == DPT_DataTable && prop->m_pDataTable)
+            populate_nodes(prop->m_pDataTable, &prop_info->nodes);
+        map->emplace(prop->m_pVarName, prop_info);
     }
 }
 

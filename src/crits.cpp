@@ -208,7 +208,7 @@ static int nextCritTick(int loops = 4096)
     auto wep = RAW_ENT(LOCAL_W);
 
     // Already have a tick, use it
-    if (previous_weapon == wep->entindex() && previous_crit >= current_late_user_cmd->command_number)
+    if (previous_weapon == EntIndex(wep) && previous_crit >= current_late_user_cmd->command_number)
         return previous_crit;
 
     int old_seed = MD5_PseudoRandom(current_late_user_cmd->command_number) & 0x7FFFFFFF;
@@ -231,7 +231,7 @@ static int nextCritTick(int loops = 4096)
         {
             SetPredictionRandomSeed(old_seed);
             previous_crit           = cmd_number;
-            previous_weapon         = wep->entindex();
+            previous_weapon         = EntIndex(wep);
             return cmd_number;
         }
     }
@@ -511,7 +511,7 @@ static void updateCmds()
     bool old_cmds = false;
 
     // Try to find current weapon
-    auto weapon_cmds = crit_cmds.find(weapon->entindex());
+    auto weapon_cmds = crit_cmds.find(EntIndex(weapon));
 
     // Nothing indexed, mark as outdated
     if (weapon_cmds == crit_cmds.end())
@@ -528,12 +528,12 @@ static void updateCmds()
     if (old_cmds)
     {
         // Used later for the seed
-        int xor_dat = (weapon->entindex() << 8 | LOCAL_E->m_IDX);
+        int xor_dat = (EntIndex(weapon) << 8 | LOCAL_E->m_IDX);
         if (g_pLocalPlayer->weapon_mode == weapon_melee)
-            xor_dat = (weapon->entindex() << 16 | LOCAL_E->m_IDX << 8);
+            xor_dat = (EntIndex(weapon) << 16 | LOCAL_E->m_IDX << 8);
 
         // Clear old data
-        crit_cmds[weapon->entindex()].clear();
+        crit_cmds[EntIndex(weapon)].clear();
         added_per_shot = 0.0f;
 
         // 100000 should be fine performance wise, as they are very spread out
@@ -554,7 +554,7 @@ static void updateCmds()
             if (iResult == 0 && i > cur_cmdnum + 200)
             {
                 // Add to magic crit array
-                crit_cmds[weapon->entindex()].push_back(i);
+                crit_cmds[EntIndex(weapon)].push_back(i);
                 // We found a cmd, store it
                 j--;
             }
@@ -562,7 +562,7 @@ static void updateCmds()
     }
 
     // We haven't calculated the amount added to the bucket yet
-    if (added_per_shot == 0.0f || previous_weapon != weapon->entindex())
+    if (added_per_shot == 0.0f || previous_weapon != EntIndex(weapon))
     {
         weapon_info info(weapon);
         int nProjectilesPerShot = GetWeaponData(weapon)->m_nBulletsPerShot;
@@ -589,7 +589,7 @@ static void updateCmds()
         }
     }
 
-    previous_weapon = weapon->entindex();
+    previous_weapon = EntIndex(weapon);
 }
 
 // Fix observed crit chance
@@ -605,7 +605,7 @@ static weapon_info last_weapon_info;
 // Fix bucket on non-local servers
 void fixBucket(IClientEntity *weapon, CUserCmd *cmd)
 {
-    INetChannel *ch = (INetChannel *) g_IEngine->GetNetChannelInfo();
+    CNetChan *ch = g_IEngine->GetNetChannelInfo();
     if (!ch)
         return;
 
@@ -620,10 +620,10 @@ void fixBucket(IClientEntity *weapon, CUserCmd *cmd)
     weapon_info info(weapon);
 
     // Changed bucket more than once this tick, this is wrong and needs to be corrected.
-    if (weapon->entindex() == last_weapon && info != last_weapon_info && last_update_command == cmd->command_number)
+    if (EntIndex(weapon) == last_weapon && info != last_weapon_info && last_update_command == cmd->command_number)
         info = last_weapon_info;
 
-    last_weapon = weapon->entindex();
+    last_weapon = EntIndex(weapon);
     // Bucket changed, update
     if (last_weapon_info.crit_bucket != original_info.crit_bucket)
         last_update_command = cmd->command_number;
@@ -837,7 +837,7 @@ void Draw()
         // Used by multiple things
         bool can_crit = canWeaponCrit(true);
 
-        if (bucket != last_bucket || wep->entindex() != last_wep || update_shots.test_and_set(500))
+        if (bucket != last_bucket || EntIndex(wep) != last_wep || update_shots.test_and_set(500))
         {
             // Recalculate shots until crit
             if (!can_crit)
@@ -845,7 +845,7 @@ void Draw()
         }
 
         // Reset because too old
-        if (!shots_until_crit && added_per_shot && (wep->entindex() != last_wep || last_crit_tick - current_late_user_cmd->command_number < 0 || (last_crit_tick - current_late_user_cmd->command_number) * g_GlobalVars->interval_per_tick > 30))
+        if (!shots_until_crit && added_per_shot && (EntIndex(wep) != last_wep || last_crit_tick - current_late_user_cmd->command_number < 0 || (last_crit_tick - current_late_user_cmd->command_number) * g_GlobalVars->interval_per_tick > 30))
             last_crit_tick = nextCritTick();
 
         // Get Crit multiplier info
@@ -1002,7 +1002,7 @@ void Draw()
 
         // Update
         last_bucket = bucket;
-        last_wep    = wep->entindex();
+        last_wep    = EntIndex(wep);
         DrawCritStrings();
     }
 }

@@ -288,7 +288,7 @@ class SVC_Print : public CNetMessage
 
 public:
     const char unk_pad[4]{};
-    const char *m_szText; // show this text
+    const char *m_szText; // show this text; linux64 CBaseClientState::ProcessPrint reads this at +0x28
 
 private:
     char m_szTextBuffer[2048]; // buffer for received messages

@@ -96,8 +96,13 @@ static std::vector<std::string> africa_datacenters        = { { "jnb" } };
 static CatCommand print("dc_print", "Print codes of all available data centers",
                         []()
                         {
-                            static auto GetPOPCount = *(int (**)(void *))(*(uintptr_t *) g_ISteamNetworkingUtils + 37);
-                            static auto GetPOPList  = *(int (**)(void *, SteamNetworkingPOPID_decl *, int))(*(uintptr_t *) g_ISteamNetworkingUtils + 41);
+                            if (!g_ISteamNetworkingUtils)
+                            {
+                                logging::Info("dc_print: ISteamNetworkingUtils missing");
+                                return;
+                            }
+                            auto GetPOPCount = vfunc<int (*)(void *)>(g_ISteamNetworkingUtils, 10);
+                            auto GetPOPList  = vfunc<int (*)(void *, SteamNetworkingPOPID_decl *, int)>(g_ISteamNetworkingUtils, 11);
 
                             char region[5];
 
@@ -124,11 +129,9 @@ static CatCommand print("dc_print", "Print codes of all available data centers",
 
 static void Refresh()
 {
-    auto gc = (bool *) re::CTFGCClientSystem::GTFGCClientSystem();
-    if (!gc)
-        return;
-    /* GC's flag to force ping refresh */
-    gc[0x374] = true;
+    auto *gc = re::CTFGCClientSystem::GTFGCClientSystem();
+    if (gc)
+        gc->ForcePingRefresh();
 }
 
 static CatCommand force_refersh("dc_refresh", "Force refresh of ping data", Refresh);
@@ -227,7 +230,13 @@ static void Init()
         {
             if (!g_ISteamNetworkingUtils)
             {
-                g_ISteamNetworkingUtils = ((void *(*) ())(dlsym(sharedobj::steamnetworkingsockets().lmap, "SteamNetworkingUtils_LibV4")))();
+                auto *sockets = sharedobj::steamnetworkingsockets().lmap;
+                if (!sockets)
+                {
+                    logging::Info("DataCenter.cpp: libsteamnetworkingsockets.so is not loaded");
+                    return;
+                }
+                g_ISteamNetworkingUtils = ((void *(*) ())(dlsym(sockets, "SteamNetworkingUtils_LibV4")))();
                 if (!g_ISteamNetworkingUtils)
                 {
                     logging::Info("DataCenter.cpp: Failed to create ISteamNetworkingUtils!");

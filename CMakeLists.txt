@@ -103,12 +103,12 @@ find_package(Boost REQUIRED)
 
 if (Git_FOUND)
     execute_process(COMMAND
-            "${GIT_EXECUTABLE}" log -1 --pretty=\"%h\"
+            "${GIT_EXECUTABLE}" log -1 --pretty=%h
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             OUTPUT_VARIABLE GIT_COMMIT_HASH
             ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
     execute_process(COMMAND
-            "${GIT_EXECUTABLE}" log -1 --pretty=\"%ai\"
+            "${GIT_EXECUTABLE}" log -1 --pretty=%ai
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             OUTPUT_VARIABLE GIT_COMMITTER_DATE
             ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
@@ -187,10 +187,30 @@ add_custom_target(data
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         VERBATIM)
 
+set(TF2_LINUX64_DIR "/run/media/sex/tf/SteamLibrary/steamapps/common/Team Fortress 2/bin/linux64" CACHE PATH "TF2 linux64 binary directory for libtier0/libvstdlib")
+if(NOT EXISTS "${TF2_LINUX64_DIR}/libtier0.so")
+    foreach(_tf2_candidate
+            "/run/media/sex/tf/SteamLibrary/steamapps/common/Team Fortress 2/bin/linux64"
+            "/run/media/sex/Nowy/SteamLibrary/steamapps/common/Team Fortress 2/bin/linux64"
+            "$ENV{HOME}/.local/share/Steam/steamapps/common/Team Fortress 2/bin/linux64"
+            "$ENV{HOME}/.steam/steam/steamapps/common/Team Fortress 2/bin/linux64")
+        if(EXISTS "${_tf2_candidate}/libtier0.so")
+            set(TF2_LINUX64_DIR "${_tf2_candidate}" CACHE PATH "TF2 linux64 binary directory for libtier0/libvstdlib" FORCE)
+            break()
+        endif()
+    endforeach()
+endif()
+if(NOT EXISTS "${TF2_LINUX64_DIR}/libtier0.so")
+    message(FATAL_ERROR "TF2 linux64 binaries not found (libtier0.so). Set TF2_LINUX64_DIR.")
+endif()
+target_link_directories(cathook PRIVATE "${TF2_LINUX64_DIR}")
 target_link_libraries(cathook
-        ${SDL2_LIBRARY}
         "${CMAKE_SOURCE_DIR}/libs/funchook/libfunchook.a"
         "${CMAKE_SOURCE_DIR}/libs/funchook/libdistorm.a"
+        tier0
+        vstdlib
+        atomic
+        xcb
         dl
         pthread)
 set_target_properties(cathook PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)

@@ -15,6 +15,9 @@
 #include "classinfo/classinfo.hpp"
 #include "client_class.h"
 #include "Constants.hpp"
+#include "core/vfunc.hpp"
+#include "core/vtables.hpp"
+#include "sdk/client_entity.hpp"
 #include <cfloat>
 #include <optional>
 #include <soundcache.hpp>
@@ -23,11 +26,6 @@ class IClientEntity;
 struct player_info_s;
 
 #define RAW_ENT(ce) (ce)->InternalEntity()
-
-inline ClientClass *EntClientClass(IClientEntity *entity)
-{
-    return entity ? entity->GetClientClass() : nullptr;
-}
 
 #define CE_VAR(entity, offset, type) NET_VAR(RAW_ENT(entity), offset, type)
 
@@ -70,7 +68,7 @@ public:
     bool Good() const
     {
         IClientEntity *e = InternalEntity();
-        if (!e || e->IsDormant())
+        if (!e || EntIsDormant(e))
             return false;
         ClientClass *cc = EntClientClass(e);
         return cc && cc->m_ClassID;
@@ -106,7 +104,10 @@ public:
     Vector m_vecOrigin() const
     {
         IClientEntity *e = InternalEntity();
-        return e ? e->GetAbsOrigin() : Vector{};
+        if (!e)
+            return {};
+        typedef const Vector &(*fn_t)(IClientEntity *);
+        return vfunc<fn_t>(e, vtables::entity::get_abs_origin)(e);
     }
 
     std::optional<Vector> m_vecDormantOrigin() const
@@ -114,8 +115,11 @@ public:
         IClientEntity *e = InternalEntity();
         if (!e)
             return std::nullopt;
-        if (!e->IsDormant())
-            return e->GetAbsOrigin();
+        if (!EntIsDormant(e))
+        {
+            typedef const Vector &(*fn_t)(IClientEntity *);
+            return vfunc<fn_t>(e, vtables::entity::get_abs_origin)(e);
+        }
         auto vec = soundcache::GetSoundLocation(m_IDX);
         if (vec)
             return *vec;
@@ -126,6 +130,12 @@ public:
     {
         IClientEntity *e = InternalEntity();
         return e ? NET_INT(e, netvar.iTeamNum) : 0;
+    }
+
+    unsigned char m_MoveType() const
+    {
+        IClientEntity *e = InternalEntity();
+        return (e && netvar.movetype) ? NET_BYTE(e, netvar.movetype) : 0;
     }
 
     bool m_bAlivePlayer() const
@@ -221,7 +231,7 @@ public:
     bool was_dormant() const
     {
         IClientEntity *e = InternalEntity();
-        return !e || e->IsDormant();
+        return !e || EntIsDormant(e);
     }
 
     bool m_bAnyHitboxVisible{ false };

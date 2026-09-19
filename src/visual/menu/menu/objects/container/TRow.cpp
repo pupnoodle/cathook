@@ -38,12 +38,7 @@ void zerokernel::TRow::setParent(zerokernel::BaseMenuObject *parent)
 {
     Container::setParent(parent);
 
-    printf("TRow::setParent\n");
-
     table = dynamic_cast<Table *>(parent);
-
-    if (!table)
-        printf("WARNING: TRow::setParent is not a table\n");
 }
 
 zerokernel::TRow::TRow() : Container{}

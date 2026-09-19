@@ -70,14 +70,21 @@ private:
      * Get the offset of the last netvar from map and return the sum of it and
      * accum
      */
-    int get_offset_recursive(map_type &map, int acc, const char *name)
+    int get_offset_recursive(map_type &map, int acc, const char *name, int depth = 0)
     {
-        if (!map.count(name))
-        {
-            logging::Info("can't find %s!", name);
+        if (depth > 32)
             return 0;
+        if (auto it = map.find(name); it != map.end())
+            return acc + it->second->offset;
+        for (auto &kv : map)
+        {
+            if (kv.second->nodes.empty())
+                continue;
+            int nested = get_offset_recursive(kv.second->nodes, acc + kv.second->offset, name, depth + 1);
+            if (nested)
+                return nested;
         }
-        return acc + map[name]->offset;
+        return 0;
     }
 
     /**
@@ -87,29 +94,62 @@ private:
      * @name:	Netvar name to search for
      * @args:	Remaining netvar names
      *
-     * Perform tail recursion with the nodes of the specified branch of the tree
-     * passed for map and the offset of that branch added to acc
+     * Descend into nested datatables when an intermediate name is omitted so
+     * lookups stay valid across recvtable reshuffles.
      */
     template <typename... args_t> int get_offset_recursive(map_type &map, int acc, const char *name, args_t... args)
     {
-        if (!map.count(name))
-        {
-            logging::Info("can't find %s!", name);
+        return get_offset_recursive_path(map, acc, 0, name, args...);
+    }
+
+    int get_offset_recursive_path(map_type &map, int acc, int depth, const char *name)
+    {
+        return get_offset_recursive(map, acc, name, depth);
+    }
+
+    template <typename... args_t> int get_offset_recursive_path(map_type &map, int acc, int depth, const char *name, args_t... args)
+    {
+        if (depth > 32)
             return 0;
+        if (auto it = map.find(name); it != map.end())
+            return get_offset_recursive_path(it->second->nodes, acc + it->second->offset, depth + 1, args...);
+        for (auto &kv : map)
+        {
+            if (kv.second->nodes.empty())
+                continue;
+            int nested = get_offset_recursive_path(kv.second->nodes, acc + kv.second->offset, depth + 1, name, args...);
+            if (nested)
+                return nested;
         }
-        const auto &node = map[name];
-        return get_offset_recursive(node->nodes, acc + node->offset, args...);
+        return 0;
     }
 
     RecvProp *get_prop_recursive(map_type &map, const char *name)
     {
-        return map[name]->prop;
+        if (auto it = map.find(name); it != map.end())
+            return it->second->prop;
+        for (auto &kv : map)
+        {
+            if (kv.second->nodes.empty())
+                continue;
+            if (RecvProp *nested = get_prop_recursive(kv.second->nodes, name))
+                return nested;
+        }
+        return nullptr;
     }
 
     template <typename... args_t> RecvProp *get_prop_recursive(map_type &map, const char *name, args_t... args)
     {
-        const auto &node = map[name];
-        return get_prop_recursive(node->nodes, args...);
+        if (auto it = map.find(name); it != map.end())
+            return get_prop_recursive(it->second->nodes, args...);
+        for (auto &kv : map)
+        {
+            if (kv.second->nodes.empty())
+                continue;
+            if (RecvProp *nested = get_prop_recursive(kv.second->nodes, name, args...))
+                return nested;
+        }
+        return nullptr;
     }
 
 public:
@@ -130,12 +170,16 @@ public:
             return 0;
         }
         int offset = get_offset_recursive(node->nodes, node->offset, args...);
+        if (!offset)
+            logging::Info("can't find netvar %s", name);
         return offset;
     }
 
     template <typename... args_t> RecvProp *get_prop(const char *name, args_t... args)
     {
         const auto &node = nodes[name];
+        if (node == 0)
+            return nullptr;
         return get_prop_recursive(node->nodes, args...);
     }
 

@@ -8,9 +8,9 @@ int last_tick   = 0;
 int last_weapon = 0;
 
 // Credits to blackfire for telling me to do this :)
-DEFINE_HOOKED_METHOD(RunCommand, void, IPrediction *prediction, IClientEntity *entity, CUserCmd *usercmd, IMoveHelper *move)
+DEFINE_HOOKED_METHOD(RunCommand, void, CPrediction *prediction, IClientEntity *entity, CUserCmd *usercmd, IMoveHelper *move)
 {
-    if (CE_GOOD(LOCAL_E) && CE_GOOD(LOCAL_W) && entity && entity->entindex() == g_pLocalPlayer->entity_idx && usercmd && usercmd->command_number)
+    if (CE_GOOD(LOCAL_E) && CE_GOOD(LOCAL_W) && entity && EntIndex(entity) == g_pLocalPlayer->entity_idx && usercmd && usercmd->command_number)
     {
         original::RunCommand(prediction, entity, usercmd, move);
         criticals::fixBucket(RAW_ENT(LOCAL_W), usercmd);
@@ -27,19 +27,19 @@ DEFINE_HOOKED_METHOD(CalcIsAttackCriticalHelper_brokenweps, bool, IClientEntity 
     if (CE_GOOD(LOCAL_E) && CE_GOOD(LOCAL_W) && ent && re::C_TFWeaponBase::GetOwnerViaInterface(ent) == LOCAL_E->InternalEntity() && !criticals::calling_crithelper)
     {
         auto current_ammo = CE_INT(LOCAL_E, netvar.m_iAmmo + 4);
-        if (previous_ammo[ent->entindex()] == current_ammo)
+        if (previous_ammo[EntIndex(ent)] == current_ammo)
         {
             weapon_info info(ent);
             auto ret = original::CalcIsAttackCriticalHelper_brokenweps(ent);
             info.restore_data(ent);
             return ret;
         }
-        previous_ammo[ent->entindex()] = current_ammo;
+        previous_ammo[EntIndex(ent)] = current_ammo;
     }
 
     if (LOCAL_W->m_iClassID() == CL_CLASS(CTFMinigun))
     {
-        const offset_t mode_off = netvar.iReloadMode ? netvar.iReloadMode - 4 : 0;
+        const offset_t mode_off = netvar.m_iWeaponMode;
         int weapon_mode         = mode_off ? NET_INT(ent, mode_off) : 0;
         if (mode_off)
             NET_INT(ent, mode_off) = 0;

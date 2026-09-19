@@ -6,31 +6,27 @@
 #include <MiscTemporary.hpp>
 #include <visual/SDLHooks.hpp>
 #include "HookedMethods.hpp"
-#include "timer.hpp"
-#include <SDL2/SDL_syswm.h>
-#include <dlfcn.h>
+#include <SDL2/SDL.h>
+#include <GL/gl.h>
+#include <exception>
 #include <menu/menu/Menu.hpp>
+#if ENABLE_CLIP
 #include "clip.h"
+#endif
 #if ENABLE_VISUALS
 #include "drawmgr.hpp"
 #endif
 
 static bool swapwindow_init{ false };
-static bool init_wminfo{ false };
-static SDL_SysWMinfo wminfo{};
+static bool overlay_failed{ false };
 
-int static_init_wminfo = (wminfo.version.major = 2, wminfo.version.minor = 0, 1);
-
-typedef SDL_bool (*SDL_GetWindowWMInfo_t)(SDL_Window *window, SDL_SysWMinfo *info);
-static SDL_GetWindowWMInfo_t GetWindowWMInfo = nullptr;
-static SDL_GLContext tf2_sdl                 = nullptr;
-static SDL_GLContext imgui_sdl               = nullptr;
-Timer delay{};
 namespace hooked_methods
 {
 #if ENABLE_CLIP
 DEFINE_HOOKED_METHOD(SDL_SetClipboardText, int, const char *text)
 {
+    if (original::SDL_SetClipboardText)
+        original::SDL_SetClipboardText(text);
     clip::set_text(text);
     return 0;
 }
@@ -38,56 +34,72 @@ DEFINE_HOOKED_METHOD(SDL_SetClipboardText, int, const char *text)
 
 DEFINE_HOOKED_METHOD(SDL_GL_SwapWindow, void, SDL_Window *window)
 {
-    if (!init_wminfo)
+    static thread_local bool reentrant = false;
+    auto *orig                         = original::SDL_GL_SwapWindow;
+    if (!orig)
+        return;
+
+    // Never skip the game's swap. A hang/exception in overlay code used to
+    // freeze TF2 because this hook never presented a frame.
+    if (reentrant)
     {
-        GetWindowWMInfo = reinterpret_cast<SDL_GetWindowWMInfo_t>(dlsym(sharedobj::libsdl().lmap, "SDL_GetWindowWMInfo"));
-        if (!GetWindowWMInfo)
-            GetWindowWMInfo = reinterpret_cast<SDL_GetWindowWMInfo_t>(dlsym(RTLD_DEFAULT, "SDL_GetWindowWMInfo"));
-        if (GetWindowWMInfo)
-            GetWindowWMInfo(window, &wminfo);
-        init_wminfo = true;
+        orig(window);
+        return;
     }
+    reentrant = true;
+
     if (!sdl_hooks::window)
         sdl_hooks::window = window;
 
-    if (!tf2_sdl)
-        tf2_sdl = SDL_GL_GetCurrentContext();
-
-#if ENABLE_IMGUI_DRAWING && !EXTERNAL_DRAWING
-    if (!imgui_sdl)
-        imgui_sdl = SDL_GL_CreateContext(window);
-#endif
-
-    if (isHackActive() && !disable_visuals)
+    if (isHackActive() && !disable_visuals && !overlay_failed)
     {
-#if ENABLE_IMGUI_DRAWING && !EXTERNAL_DRAWING
-        SDL_GL_MakeCurrent(window, imgui_sdl);
-#endif
-        static int prev_width, prev_height;
-        PROF_SECTION(SWAPWINDOW_cathook);
-        if (not swapwindow_init || draw::width != prev_width || draw::height != prev_height)
+        try
         {
+            // Draw in whatever GL context is current for this swap. Creating a
+            // second SDL_GL context deadlocks NVIDIA on linux64. SDL's context
+            // pointer can be null even when the game's context is bound.
+            int w = 0, h = 0;
+            SDL_GetWindowSize(window, &w, &h);
+            if (w > 0 && h > 0)
+            {
+                draw::width  = w;
+                draw::height = h;
+            }
+
+            static int prev_width = 0, prev_height = 0;
+            if (!swapwindow_init)
+            {
+                const char *gl_ver = reinterpret_cast<const char *>(glGetString(GL_VERSION));
+                logging::Info("SDL overlay: GL_VERSION=%s ctx=%p", gl_ver ? gl_ver : "?", SDL_GL_GetCurrentContext());
+                draw::InitGL();
+                swapwindow_init = true;
+            }
+            else if (zerokernel::Menu::instance && (draw::width != prev_width || draw::height != prev_height))
+                zerokernel::Menu::instance->resize(draw::width, draw::height);
             prev_width  = draw::width;
             prev_height = draw::height;
-            draw::InitGL();
-            if (zerokernel::Menu::instance)
-                zerokernel::Menu::instance->resize(draw::width, draw::height);
-            swapwindow_init = true;
-        }
-        draw::BeginGL();
-        DrawCache();
-        draw::EndGL();
-    }
-    {
-        PROF_SECTION(SWAPWINDOW_tf2);
+
+            draw::BeginGL();
 #if ENABLE_IMGUI_DRAWING
-        SDL_GL_MakeCurrent(window, tf2_sdl);
+            render_cheat_visuals();
+#else
+            DrawCache();
 #endif
-        original::SDL_GL_SwapWindow(window);
-        // glXMakeContextCurrent(wminfo.info.x11.display,
-        // wminfo.info.x11.window,
-        //                      wminfo.info.x11.window, tf2);
-        // glXSwapBuffers(wminfo.info.x11.display, wminfo.info.x11.window);
+            draw::EndGL();
+        }
+        catch (const std::exception &e)
+        {
+            logging::Info("SDL overlay failed: %s — drawing disabled", e.what());
+            overlay_failed = true;
+        }
+        catch (...)
+        {
+            logging::Info("SDL overlay failed — drawing disabled");
+            overlay_failed = true;
+        }
     }
+
+    orig(window);
+    reentrant = false;
 }
 } // namespace hooked_methods

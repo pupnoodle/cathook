@@ -13,6 +13,5 @@ inline bool class_is(int id, Ids... ids)
     return ((id == int(ids)) || ...);
 }
 
-#define RCC_CLASS(tf, hl2dm, css, def) CL_CLASS(tf)
 #define RCC_PLAYER CL_CLASS(CTFPlayer)
 #define RCC_PLAYERRESOURCE CL_CLASS(CTFPlayerResource)

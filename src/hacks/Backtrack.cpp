@@ -72,11 +72,11 @@ std::vector<std::vector<BacktrackData>> bt_data;
 // Update our sequences
 void updateDatagram()
 {
-    INetChannel *ch = (INetChannel *) g_IEngine->GetNetChannelInfo();
+    CNetChan *ch = g_IEngine->GetNetChannelInfo();
     if (ch)
     {
-        int m_nInSequenceNr = NetChan(ch)->m_nInSequenceNr;
-        int instate         = NetChan(ch)->m_nInReliableState;
+        int m_nInSequenceNr = NetChan(ch)->m_nInSequenceNr();
+        int instate         = NetChan(ch)->m_nInReliableState();
         if (m_nInSequenceNr > lastincomingsequence)
         {
             lastincomingsequence = m_nInSequenceNr;
@@ -90,7 +90,7 @@ void updateDatagram()
 // Latency to add for backtrack
 float getLatency()
 {
-    INetChannel *ch = (INetChannel *) g_IEngine->GetNetChannelInfo();
+    CNetChan *ch = g_IEngine->GetNetChannelInfo();
     // Track what actual latency we have
     float real_latency = 0.0f;
 
@@ -168,8 +168,8 @@ void adjustPing(INetChannel *ch)
     {
         if (g_GlobalVars->realtime - seq.curtime >= getLatency() / 1000.0f)
         {
-            NetChan(ch)->m_nInReliableState = seq.inreliablestate;
-            NetChan(ch)->m_nInSequenceNr    = seq.sequencenr;
+            NetChan(ch)->m_nInReliableState() = seq.inreliablestate;
+            NetChan(ch)->m_nInSequenceNr()    = seq.sequencenr;
             break;
         }
     }

@@ -10,6 +10,24 @@
 
 #include "hack.hpp"
 
+void detach();
+
+extern "C" __attribute__((visibility("default"))) int cathook_attach(void)
+{
+    return 1;
+}
+
+extern "C" __attribute__((visibility("default"))) int cathook_is_detached(void)
+{
+    return hack::shutdown ? 1 : 0;
+}
+
+extern "C" __attribute__((visibility("default"))) int cathook_detach(void)
+{
+    detach();
+    return 1;
+}
+
 pthread_mutex_t mutex_quit;
 pthread_t thread_main;
 
@@ -52,6 +70,10 @@ void __attribute__((constructor)) attach()
 
 void detach()
 {
+    static bool detached = false;
+    if (detached)
+        return;
+    detached = true;
     logging::Info("Detaching");
     pthread_mutex_unlock(&mutex_quit);
     pthread_join(thread_main, 0);

@@ -189,10 +189,10 @@ static InitRoutine init(
                         return;
                     netvar_name = std::move(new_name);
                     NET_SetConVar setname("name", netvar_name.c_str());
-                    INetChannel *ch = (INetChannel *) g_IEngine->GetNetChannelInfo();
+                    CNetChan *ch = g_IEngine->GetNetChannelInfo();
                     if (ch)
                     {
-                        setname.SetNetChannel(ch);
+                        setname.SetNetChannel(ch->AsINetChannel());
                         setname.SetReliable(false);
                         ch->SendNetMsg(setname, false);
                     }
@@ -214,9 +214,9 @@ static void cm()
         {
             static std::string previous_server = "";
             static int retry_count             = 0;
-            if (previous_server != ((INetChannel *) g_IEngine->GetNetChannelInfo())->GetAddress())
+            if (previous_server != g_IEngine->GetNetChannelInfo()->GetAddress())
             {
-                previous_server = ((INetChannel *) g_IEngine->GetNetChannelInfo())->GetAddress();
+                previous_server = g_IEngine->GetNetChannelInfo()->GetAddress();
                 retry_count     = 0;
             }
             retry_count++;
@@ -239,10 +239,10 @@ static void cm()
     has_changed = true;
     netvar_name = std::move(new_name);
     NET_SetConVar setname("name", netvar_name.c_str());
-    INetChannel *ch = (INetChannel *) g_IEngine->GetNetChannelInfo();
+    CNetChan *ch = g_IEngine->GetNetChannelInfo();
     if (ch)
     {
-        setname.SetNetChannel(ch);
+        setname.SetNetChannel(ch->AsINetChannel());
         setname.SetReliable(false);
         ch->SendNetMsg(setname, false);
     }

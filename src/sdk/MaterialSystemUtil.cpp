@@ -43,16 +43,9 @@ CMaterialReference::~CMaterialReference()
 //-----------------------------------------------------------------------------
 void CMaterialReference::Init(char const *pMaterialName, const char *pTextureGroupName, bool bComplain)
 {
-    IMaterial *pMaterial;
-    IF_GAME(IsTF2())
-    {
-        pMaterial = g_IMaterialSystem->FindMaterial(pMaterialName, pTextureGroupName, bComplain);
-    }
-    else
-    {
-        pMaterial = g_IMaterialSystemHL->FindMaterial(pMaterialName, pTextureGroupName, bComplain);
-    }
-    if (IsErrorMaterial(pMaterial))
+    CMaterial *found = g_IMaterialSystem->FindMaterial(pMaterialName, pTextureGroupName, bComplain);
+    IMaterial *pMaterial = found ? found->AsIMaterial() : nullptr;
+    if (!found || found->IsErrorMaterial())
     {
         if (IsOSX())
         {
@@ -70,19 +63,15 @@ void CMaterialReference::Init(const char *pMaterialName, KeyValues *pVMTKeyValue
 {
     // CreateMaterial has a refcount of 1
     Shutdown();
-    IF_GAME(IsTF2())
-    m_pMaterial      = g_IMaterialSystem->CreateMaterial(pMaterialName, pVMTKeyValues);
-    else m_pMaterial = g_IMaterialSystemHL->CreateMaterial(pMaterialName, pVMTKeyValues);
+    CMaterial *created = g_IMaterialSystem->CreateMaterial(pMaterialName, pVMTKeyValues);
+    m_pMaterial        = created ? created->AsIMaterial() : nullptr;
 }
 
 void CMaterialReference::Init(const char *pMaterialName, const char *pTextureGroupName, KeyValues *pVMTKeyValues)
 {
-    IMaterial *pMaterial;
-    IF_GAME(IsTF2())
-    pMaterial      = g_IMaterialSystem->FindProceduralMaterial(pMaterialName, pTextureGroupName, pVMTKeyValues);
-    else pMaterial = g_IMaterialSystemHL->FindProceduralMaterial(pMaterialName, pTextureGroupName, pVMTKeyValues);
+    CMaterial *pMaterial = g_IMaterialSystem->FindProceduralMaterial(pMaterialName, pTextureGroupName, pVMTKeyValues);
     Assert(pMaterial);
-    Init(pMaterial);
+    Init(pMaterial ? pMaterial->AsIMaterial() : nullptr);
 }
 
 void CMaterialReference::Init(IMaterial *pMaterial)
@@ -93,7 +82,7 @@ void CMaterialReference::Init(IMaterial *pMaterial)
         m_pMaterial = pMaterial;
         if (m_pMaterial)
         {
-            m_pMaterial->IncrementReferenceCount();
+            LiveMaterial(m_pMaterial)->IncrementReferenceCount();
         }
     }
 }
@@ -106,7 +95,7 @@ void CMaterialReference::Init(CMaterialReference &ref)
         m_pMaterial = ref.m_pMaterial;
         if (m_pMaterial)
         {
-            m_pMaterial->IncrementReferenceCount();
+            LiveMaterial(m_pMaterial)->IncrementReferenceCount();
         }
     }
 }
@@ -118,7 +107,7 @@ void CMaterialReference::Shutdown()
 {
     if (m_pMaterial && g_IMaterialSystem)
     {
-        m_pMaterial->DecrementReferenceCount();
+        LiveMaterial(m_pMaterial)->DecrementReferenceCount();
         m_pMaterial = NULL;
     }
 }
@@ -139,7 +128,7 @@ CTextureReference::CTextureReference(const CTextureReference &ref)
     m_pTexture = ref.m_pTexture;
     if (m_pTexture)
     {
-        m_pTexture->IncrementReferenceCount();
+        LiveTexture(m_pTexture)->IncrementReferenceCount();
     }
 }
 
@@ -148,7 +137,7 @@ void CTextureReference::operator=(CTextureReference &ref)
     m_pTexture = ref.m_pTexture;
     if (m_pTexture)
     {
-        m_pTexture->IncrementReferenceCount();
+        LiveTexture(m_pTexture)->IncrementReferenceCount();
     }
 }
 
@@ -163,12 +152,11 @@ CTextureReference::~CTextureReference()
 void CTextureReference::Init(char const *pTextureName, const char *pTextureGroupName, bool bComplain)
 {
     Shutdown();
-    IF_GAME(IsTF2())
-    m_pTexture      = g_IMaterialSystem->FindTexture(pTextureName, pTextureGroupName, bComplain);
-    else m_pTexture = g_IMaterialSystemHL->FindTexture(pTextureName, pTextureGroupName, bComplain);
+    CTexture *found = g_IMaterialSystem->FindTexture(pTextureName, pTextureGroupName, bComplain);
+    m_pTexture      = found ? found->AsITexture() : nullptr;
     if (m_pTexture)
     {
-        m_pTexture->IncrementReferenceCount();
+        LiveTexture(m_pTexture)->IncrementReferenceCount();
     }
 }
 
@@ -179,7 +167,7 @@ void CTextureReference::Init(ITexture *pTexture)
     m_pTexture = pTexture;
     if (m_pTexture)
     {
-        m_pTexture->IncrementReferenceCount();
+        LiveTexture(m_pTexture)->IncrementReferenceCount();
     }
 }
 
@@ -187,9 +175,8 @@ void CTextureReference::InitProceduralTexture(const char *pTextureName, const ch
 {
     Shutdown();
 
-    IF_GAME(IsTF2())
-    m_pTexture      = g_IMaterialSystem->CreateProceduralTexture(pTextureName, pTextureGroupName, w, h, fmt, nFlags);
-    else m_pTexture = g_IMaterialSystemHL->CreateProceduralTexture(pTextureName, pTextureGroupName, w, h, fmt, nFlags);
+    CTexture *created = g_IMaterialSystem->CreateProceduralTexture(pTextureName, pTextureGroupName, w, h, fmt, nFlags);
+    m_pTexture        = created ? created->AsITexture() : nullptr;
     // NOTE: The texture reference is already incremented internally above!
     /*
     if ( m_pTexture )
@@ -214,14 +201,8 @@ void CTextureReference::InitRenderTarget(int w, int h, RenderTargetSizeMode_t si
     // const*,int,int,RenderTargetSizeMode_t,ImageFormat,MaterialRenderTargetDepth_t,uint,uint)>(materials,
     // 87, 0)(materials, pStrOptionalName, w, h, sizeMode, fmt, 		depth,
     // textureFlags, renderTargetFlags);
-    IF_GAME(IsTF2())
-    {
-        m_pTexture = g_IMaterialSystem->CreateNamedRenderTargetTextureEx(pStrOptionalName, w, h, sizeMode, fmt, depth, textureFlags, renderTargetFlags);
-    }
-    else
-    {
-        m_pTexture = g_IMaterialSystemHL->CreateNamedRenderTargetTextureEx(pStrOptionalName, w, h, sizeMode, fmt, depth, textureFlags, renderTargetFlags);
-    }
+    CTexture *rt = g_IMaterialSystem->CreateNamedRenderTargetTextureEx(pStrOptionalName, w, h, sizeMode, fmt, depth, textureFlags, renderTargetFlags);
+    m_pTexture   = rt ? rt->AsITexture() : nullptr;
 
     Assert(m_pTexture);
 }
@@ -233,7 +214,7 @@ void CTextureReference::Shutdown(bool bDeleteIfUnReferenced)
 {
     if (m_pTexture && g_IMaterialSystem)
     {
-        m_pTexture->DecrementReferenceCount();
+        LiveTexture(m_pTexture)->DecrementReferenceCount();
         if (bDeleteIfUnReferenced)
         {
             m_pTexture->DeleteIfUnreferenced();

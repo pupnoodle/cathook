@@ -27,6 +27,8 @@ const char *sig_GetItemSchema            = sigs::item_schema_lookup_map;
 ItemSystem_t ItemSystem{ nullptr };
 GetAttributeDefinition_t GetAttributeDefinitionFn{ nullptr };
 SetRuntimeAttributeValue_t SetRuntimeAttributeValueFn{ nullptr };
+using GetItemDefinition_t = void *(*)(void *, unsigned);
+static GetItemDefinition_t GetItemDefinitionFn{ nullptr };
 
 ItemSchemaPtr_t GetItemSchema(void)
 {
@@ -262,6 +264,20 @@ static CatCommand remove_redirect("skinchanger_remove_redirect", "Remove redirec
 static CatCommand reset("skinchanger_reset", "Reset", []() { modifier_map.clear(); });
 
 static CatCommand invalidate_cookies("skinchanger_bite_cookie", "Bite Cookie", InvalidateCookie);
+static CatCommand dump_itemdef("skinchanger_dump_def", "Dump CEconItemDefinition for the active weapon",
+                               []()
+                               {
+                                   if (!GetItemDefinitionFn)
+                                       GetItemDefinitionFn = GetItemDefinition_t(gSignatures.GetClientSignature(sigs::item_definition_lookup));
+                                   void *schema = GetItemSchema();
+                                   if (CE_BAD(LOCAL_W) || !schema || !GetItemDefinitionFn)
+                                   {
+                                       logging::Info("item definition lookup unavailable");
+                                       return;
+                                   }
+                                   unsigned def = unsigned(CE_INT(LOCAL_W, netvar.iItemDefinitionIndex));
+                                   logging::Info("item definition %u -> %p", def, GetItemDefinitionFn(schema, def));
+                               });
 
 void FrameStageNotify(int stage)
 {
@@ -273,7 +289,7 @@ void FrameStageNotify(int stage)
         return;
     if (!enable)
         return;
-    if (CE_BAD(LOCAL_E))
+    if (CE_BAD(LOCAL_E) || !netvar.hMyWeapons)
         return;
 
     if (!SetRuntimeAttributeValueFn)
@@ -285,6 +301,11 @@ void FrameStageNotify(int stage)
     {
         GetAttributeDefinitionFn = (GetAttributeDefinition_t) (gSignatures.GetClientSignature((char *) sig_GetAttributeDefinition));
         logging::Info("GetAttributeDefinition: %p", GetAttributeDefinitionFn);
+    }
+    if (!GetItemDefinitionFn)
+    {
+        GetItemDefinitionFn = GetItemDefinition_t(gSignatures.GetClientSignature(sigs::item_definition_lookup));
+        logging::Info("GetItemDefinition: %p", GetItemDefinitionFn);
     }
 
     weapon_list   = (int *) ((uintptr_t) (RAW_ENT(LOCAL_E)) + netvar.hMyWeapons);
@@ -304,8 +325,6 @@ void FrameStageNotify(int stage)
         entity = g_IEntityList->GetClientEntity(eid);
         if (!entity)
             continue;
-        // TODO IsBaseCombatWeapon
-        // or TODO PlatformOffset
         if (!re::C_BaseCombatWeapon::IsBaseCombatWeapon(entity))
             continue;
         if ((my_weapon_ptr != last_weapon_out) || !cookie.Check())
@@ -471,7 +490,7 @@ void patched_weapon_cookie::Update(int entity)
     CAttributeList *list;
 
     ent = g_IEntityList->GetClientEntity(entity);
-    if (!ent || ent->IsDormant())
+    if (!ent || EntIsDormant(ent))
         return;
     if (debug)
         logging::Info("Updating cookie for %i", entity); // FIXME DEBUG LOGS!
@@ -494,7 +513,7 @@ bool patched_weapon_cookie::Check()
     if (!valid)
         return false;
     ent = g_IEntityList->GetClientEntity(eidx);
-    if (!ent || ent->IsDormant())
+    if (!ent || EntIsDormant(ent))
         return false;
     list = (CAttributeList *) ((uintptr_t) ent + netvar.AttributeList);
     if (attrs != list->m_Attributes.Size())

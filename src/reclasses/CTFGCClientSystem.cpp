@@ -10,6 +10,67 @@
 
 using namespace re;
 
+struct gc_layout
+{
+    int party_off{ int(vtables::gc::party) };
+    int match_id_off{ int(vtables::gc::assigned_match_id) };
+    int match_ended_off{ int(vtables::gc::assigned_match_ended) };
+    int force_ping_off{ int(vtables::gc::force_ping_refresh) };
+};
+
+static gc_layout live_gc_layout()
+{
+    static gc_layout layout = [] {
+        gc_layout out;
+        auto *code = reinterpret_cast<uint8_t *>(gSignatures.GetClientSignature(sigs::gc_connected_to_match_server));
+        if (!code)
+            return out;
+        if (code[9] == 0x0F && code[10] == 0xB6 && code[11] == 0x97)
+        {
+            int universe_byte = *reinterpret_cast<int *>(code + 12);
+            out.match_id_off  = universe_byte - 6;
+        }
+        for (int i = 0; i < 0x180; ++i)
+        {
+            if (code[i] == 0x0F && code[i + 1] == 0xB6 && code[i + 2] == 0x87)
+            {
+                int disp = *reinterpret_cast<int *>(code + i + 3);
+                if (disp > out.match_id_off && disp < out.match_id_off + 16)
+                {
+                    out.match_ended_off = disp;
+                    break;
+                }
+            }
+        }
+        auto *force = reinterpret_cast<uint8_t *>(gSignatures.GetClientSignature(sigs::gc_force_ping_refresh));
+        if (force)
+        {
+            for (int i = 0; i < 64; ++i)
+            {
+                if (force[i] == 0xC6 && force[i + 1] == 0x83 && force[i + 6] == 0x01)
+                {
+                    out.force_ping_off = *reinterpret_cast<int *>(force + i + 2);
+                    break;
+                }
+            }
+        }
+        auto *party = reinterpret_cast<uint8_t *>(gSignatures.GetClientSignature(sigs::party_allowed_to_party_with));
+        if (party)
+        {
+            for (int i = 0; i < 32; ++i)
+            {
+                if (party[i] == 0x48 && party[i + 1] == 0x8B && party[i + 2] == 0x7F)
+                {
+                    out.party_off = party[i + 3];
+                    break;
+                }
+            }
+        }
+        return out;
+    }();
+    return layout;
+}
+
 CTFGCClientSystem *CTFGCClientSystem::GTFGCClientSystem()
 {
     typedef CTFGCClientSystem *(*GTFGCClientSystem_t)();
@@ -30,20 +91,31 @@ void CTFGCClientSystem::AbandonCurrentMatch()
     fn(this);
 }
 
-bool CTFGCClientSystem::BConnectedToMatchServer(bool)
+bool CTFGCClientSystem::BConnectedToMatchServer(bool flag)
 {
-    return g_IEngine && g_IEngine->IsInGame();
+    using Fn = char (*)(CTFGCClientSystem *, char);
+    static auto fn = Fn(gSignatures.GetClientSignature(sigs::gc_connected_to_match_server));
+    return fn ? fn(this, flag) : false;
 }
 
 bool CTFGCClientSystem::BHaveLiveMatch()
 {
-    return g_IEngine && g_IEngine->IsInGame();
+    using Fn = char (*)(CTFGCClientSystem *, char);
+    static auto fn = Fn(gSignatures.GetClientSignature(sigs::gc_connected_to_match_server));
+    if (fn && fn(this, 1))
+        return true;
+    if (!this)
+        return false;
+    const auto layout = live_gc_layout();
+    auto *base        = reinterpret_cast<uint8_t *>(this);
+    uint64_t match_id = *reinterpret_cast<uint64_t *>(base + layout.match_id_off);
+    bool ended        = base[layout.match_ended_off] != 0;
+    return match_id != 0 && !ended;
 }
 
 CTFParty *CTFGCClientSystem::GetParty()
 {
-    // IDA: sub_1B9B2D0 tests *(this + 48) after GTFGCClientSystem()
-    return *reinterpret_cast<CTFParty **>(uintptr_t(this) + 48);
+    return *reinterpret_cast<CTFParty **>(uintptr_t(this) + live_gc_layout().party_off);
 }
 
 int CTFGCClientSystem::JoinMMMatch()
@@ -51,4 +123,11 @@ int CTFGCClientSystem::JoinMMMatch()
     typedef int (*JoinMMMatch_t)(CTFGCClientSystem *);
     static auto fn = JoinMMMatch_t(gSignatures.GetClientSignature(sigs::tf_gc_client_system_join_mm_match));
     return fn ? fn(this) : 0;
+}
+
+void CTFGCClientSystem::ForcePingRefresh()
+{
+    if (!this)
+        return;
+    reinterpret_cast<uint8_t *>(this)[live_gc_layout().force_ping_off] = 1;
 }

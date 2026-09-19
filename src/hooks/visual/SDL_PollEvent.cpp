@@ -15,10 +15,8 @@ DEFINE_HOOKED_METHOD(SDL_PollEvent, int, SDL_Event *event)
 #if ENABLE_GUI
     if (!isHackActive())
         return ret;
-    static Timer waitfirst{};
     if (!ignoreKeys && gui::handleSdlEvent(event))
         return 0;
-    g_IEngine->GetScreenSize(draw::width, draw::height);
 #endif
     return ret;
 }

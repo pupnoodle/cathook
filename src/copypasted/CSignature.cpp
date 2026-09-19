@@ -76,13 +76,17 @@ uintptr_t CSignature::dwFindPattern(uintptr_t dwAddress, uintptr_t dwLength, con
             if (firstMatch == 0)
                 firstMatch = pos;
 
-            if (pattern[2] == 0)
+            // Tokens are "HH" or "?". A trailing "?" used to read pattern[2] past the
+            // NUL into the next rodata string, so the match never completed.
+            const char *next = pattern + (currentPattern == '\?' ? 1 : 2);
+            if (*next == ' ')
+                ++next;
+            if (*next == 0)
             {
                 logging::Info("Found pattern \"%s\" at %p.", szPattern, reinterpret_cast<void *>(firstMatch));
                 return firstMatch;
             }
-
-            pattern += currentPattern != '\?' ? 3 : 2;
+            pattern = next;
         }
         else
         {

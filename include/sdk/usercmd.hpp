@@ -130,8 +130,7 @@ inline CRC32_t GetChecksum(CUserCmd *cmd)
     return cmd->GetChecksum();
 }
 
-// Live CTFInput::GetUserCmd reads m_pCommands at this+0x108; Init_All stores
-// verified commands at this+0x110. Parse the load first, then fall back.
+// Live CTFInput::GetUserCmd (vtable[8]) loads m_pCommands with 48 8B 87 disp32.
 inline std::ptrdiff_t InputCommandsOffset(void *iinput)
 {
     static std::ptrdiff_t off = 0;
@@ -163,8 +162,6 @@ inline std::ptrdiff_t InputCommandsOffset(void *iinput)
             off      = cathook::core::memory::member_store_after_alloc(fn, fn + 0x800, 90 * sizeof(CUserCmd) + 8);
         }
     }
-    if (off <= 0)
-        off = 0x108;
     return off;
 }
 

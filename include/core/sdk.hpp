@@ -3,6 +3,10 @@
  *
  *  Created on: Dec 5, 2016
  *      Author: nullifiedcat
+ *
+ * 2013 headers remain for types (Vector, ClientClass, CViewSetup, ...).
+ * Live linux64 calls go through include/sdk wrappers + vtables.hpp, not
+ * leftover 2013 multiple-inheritance vtables.
  */
 
 #pragma once
@@ -31,6 +35,13 @@
 #include <iclient.h>
 #include <inetchannel.h>
 #include "sdk/CNetChan.hpp"
+#include "sdk/engine_client.hpp"
+#include "sdk/client_dll.hpp"
+#include "sdk/cvar.hpp"
+#include "sdk/engine_trace.hpp"
+#include "sdk/model_info.hpp"
+#include "sdk/prediction.hpp"
+#include "sdk/client_entity.hpp"
 #include <ivrenderview.h>
 #include <iconvar.h>
 #include <studio.h>
@@ -63,6 +74,13 @@
 #include "sdk/imaterialsystemfixed.h"
 #include "sdk/ScreenSpaceEffects.h"
 #include "sdk/iinput.h"
+#include "sdk/input_system.hpp"
+#include "sdk/vgui_surface.hpp"
+#include "sdk/vgui_panel.hpp"
+#include "sdk/material.hpp"
+#include "sdk/texture.hpp"
+#include "sdk/render_view.hpp"
+#include "sdk/model_render.hpp"
 #include "sdk/igamemovement.h"
 #include "sdk/HUD.h"
 #include "sdk/CGameRules.h"

@@ -14,6 +14,7 @@
 settings::Button open_gui_button{ "visual.open-gui-button", "Insert" };
 
 static bool init_done{ false };
+static bool listener_added{ false };
 
 static std::unique_ptr<zerokernel::special::PlayerListController> controller{ nullptr };
 
@@ -196,17 +197,26 @@ static CatCommand reload("gui_reload", "Reload", []() { load(); });
 void gui::init()
 {
     zerokernel::Menu::init(draw::width, draw::height);
-    g_IGameEventManager->AddListener(&listener, false);
-
     load();
-
     init_done = true;
+
+    // AddListener from the SDL swap thread can deadlock the engine.
+    EC::Register(
+        EC::CreateMove,
+        []() {
+            if (listener_added || !g_IGameEventManager)
+                return;
+            g_IGameEventManager->AddListener(&listener, false);
+            listener_added = true;
+        },
+        "gui_gameevent_listener");
 }
 
 void gui::shutdown()
 {
-    if (init_done)
+    if (listener_added && g_IGameEventManager)
         g_IGameEventManager->RemoveListener(&listener);
+    listener_added = false;
 }
 
 void gui::draw()

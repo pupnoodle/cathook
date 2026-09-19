@@ -71,7 +71,7 @@ void Paint()
 {
     if (!wait_timer.test_and_set(1000))
         return;
-    INetChannel *server = (INetChannel *) g_IEngine->GetNetChannelInfo();
+    CNetChan *server = g_IEngine->GetNetChannelInfo();
     if (server)
         reset_it.update();
     if (reset_it.test_and_set(20000))
@@ -149,7 +149,7 @@ DEFINE_HOOKED_METHOD(DispatchUserMessage, bool, void *this_, int type, bf_read &
     {
         if (*anti_votekick && buf.GetNumBytesLeft() > 35)
         {
-            INetChannel *server = (INetChannel *) g_IEngine->GetNetChannelInfo();
+            CNetChan *server = g_IEngine->GetNetChannelInfo();
             data                = std::string(buf_data);
             logging::Info("%s", data.c_str());
             if (data.find("TeamChangeP") != data.npos && CE_GOOD(LOCAL_E))

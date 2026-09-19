@@ -31,19 +31,19 @@ inline offset_t reload_mode()
 }
 inline offset_t weapon_mode()
 {
-    return netvar.iReloadMode ? netvar.iReloadMode - 4 : 0;
+    return netvar.m_iWeaponMode;
 }
 inline offset_t crit_bucket()
 {
-    return netvar.iReloadMode ? netvar.iReloadMode - 240 : 0;
+    return netvar.m_flCritTokenBucket;
 }
 inline offset_t crit_attempts()
 {
-    return netvar.iReloadMode ? netvar.iReloadMode - 236 : 0;
+    return netvar.m_nCritChecks;
 }
 inline offset_t crit_count()
 {
-    return netvar.iReloadMode ? netvar.iReloadMode - 232 : 0;
+    return netvar.m_nCritSeedRequests;
 }
 inline offset_t last_crit_check_time()
 {
@@ -51,31 +51,23 @@ inline offset_t last_crit_check_time()
 }
 inline offset_t crit_time()
 {
-    return netvar.flLastCritCheckTime ? netvar.flLastCritCheckTime - 4 : 0;
+    return netvar.m_flCritTime;
 }
 inline offset_t last_crit_check_frame()
 {
-    return netvar.flLastCritCheckTime ? netvar.flLastCritCheckTime + 4 : 0;
+    return netvar.m_iLastCritCheckFrame;
 }
 inline offset_t weapon_seed()
 {
-    return netvar.flLastCritCheckTime ? netvar.flLastCritCheckTime + 8 : 0;
-}
-inline offset_t unknown1()
-{
-    return netvar.flLastCritCheckTime ? netvar.flLastCritCheckTime - 20 : 0;
-}
-inline offset_t unknown2()
-{
-    return netvar.flLastCritCheckTime ? netvar.flLastCritCheckTime - 16 : 0;
+    return netvar.m_iCurrentSeed;
 }
 inline offset_t current_attack_is_crit()
 {
-    return netvar.iReloadMode ? netvar.iReloadMode + 22 : 0;
+    return netvar.m_bCurrentAttackIsCrit;
 }
 inline offset_t current_crit_is_random()
 {
-    return netvar.iReloadMode ? netvar.iReloadMode + 23 : 0;
+    return netvar.m_bCurrentCritIsRandom;
 }
 } // namespace weapon_layout
 
@@ -103,10 +95,6 @@ public:
             crit_bucket = *(float *) ((uintptr_t) weapon + off);
         if (auto off = weapon_layout::weapon_seed())
             weapon_seed = *(unsigned int *) ((uintptr_t) weapon + off);
-        if (auto off = weapon_layout::unknown1())
-            unknown1 = *(unsigned int *) ((uintptr_t) weapon + off);
-        if (auto off = weapon_layout::unknown2())
-            unknown2 = *(unsigned int *) ((uintptr_t) weapon + off);
         if (auto off = weapon_layout::current_attack_is_crit())
             unknown3 = *(bool *) ((uintptr_t) weapon + off);
         if (auto off = weapon_layout::crit_time())
@@ -121,13 +109,8 @@ public:
             unknown7 = *(bool *) ((uintptr_t) weapon + off);
         if (auto off = weapon_layout::weapon_mode())
             weapon_mode = *(int *) ((uintptr_t) weapon + off);
-        if (netvar.flLastCritCheckTime)
-        {
-            typedef int (*GetSlot_t)(IClientEntity *);
-            int slot     = vfunc<GetSlot_t>(weapon, 398, 0)(weapon);
-            int info_off = netvar.flLastCritCheckTime + (slot == 2 ? 240 : -40);
-            weapon_data  = *reinterpret_cast<uintptr_t *>((uintptr_t) weapon + info_off);
-        }
+        if (netvar.m_pWeaponInfo)
+            weapon_data = *reinterpret_cast<uintptr_t *>((uintptr_t) weapon + netvar.m_pWeaponInfo);
     }
     weapon_info(IClientEntity *weapon)
     {
@@ -141,10 +124,6 @@ public:
             *(float *) ((uintptr_t) weapon + off) = crit_bucket;
         if (auto off = weapon_layout::weapon_seed())
             *(unsigned int *) ((uintptr_t) weapon + off) = weapon_seed;
-        if (auto off = weapon_layout::unknown1())
-            *(unsigned int *) ((uintptr_t) weapon + off) = unknown1;
-        if (auto off = weapon_layout::unknown2())
-            *(unsigned int *) ((uintptr_t) weapon + off) = unknown2;
         if (auto off = weapon_layout::current_attack_is_crit())
             *(bool *) ((uintptr_t) weapon + off) = unknown3;
         if (auto off = weapon_layout::crit_time())
@@ -181,5 +160,21 @@ inline WeaponData_t *GetWeaponData(IClientEntity *weapon)
         mode = 0;
     if (mode > 1)
         mode = 1;
-    return reinterpret_cast<WeaponData_t *>(info.weapon_data + 1828 + sizeof(WeaponData_t) * mode);
+    static std::size_t weapon_data_array = 1828;
+    static bool parsed                   = false;
+    if (!parsed)
+    {
+        parsed = true;
+        if (auto *p = reinterpret_cast<std::uint8_t *>(gSignatures.GetClientSignature(sigs::tf_weapon_info_primary_data)))
+        {
+            if (p[0] == 0x48 && p[1] == 0xC7 && p[2] == 0x83)
+            {
+                int disp = *reinterpret_cast<int *>(p + 3);
+                if (disp > 0x100 && disp < 0x4000)
+                    weapon_data_array = std::size_t(disp);
+            }
+        }
+        logging::Info("WeaponData array off=%zu", weapon_data_array);
+    }
+    return reinterpret_cast<WeaponData_t *>(info.weapon_data + weapon_data_array + sizeof(WeaponData_t) * mode);
 }

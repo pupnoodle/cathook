@@ -14,8 +14,6 @@ static settings::Boolean global_enable{ "hack.enable", "true" };
 
 time_t time_injected{ 0 };
 
-int g_AppID = 0;
-
 ConVar *sv_client_min_interp_ratio;
 ConVar *sv_client_max_interp_ratio;
 ConVar *cl_interp_ratio;

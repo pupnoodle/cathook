@@ -73,7 +73,7 @@ void BeginConVars()
         }
     }
     logging::Info(":b:");
-    SetCVarInterface(g_ICvar);
+    SetCVarInterface(reinterpret_cast<ICvar *>(g_ICvar));
 }
 
 void EndConVars()
@@ -1251,8 +1251,6 @@ bool GetProjectileData(CachedEntity *weapon, float &speed, float &gravity, float
 {
     float rspeed, rgrav, rinitial_vel;
 
-    IF_GAME(!IsTF()) return false;
-
     if (CE_BAD(weapon))
         return false;
     rspeed       = 0.0f;
@@ -1345,7 +1343,7 @@ bool GetProjectileData(CachedEntity *weapon, float &speed, float &gravity, float
 /*const char* MakeInfoString(IClientEntity* player) {
     char* buf = new char[256]();
     player_info_t info;
-    if (!GetPlayerInfo(player->entindex(), &info)) return (const
+    if (!GetPlayerInfo(EntIndex(player), &info)) return (const
 char*)0; logging::Info("a"); int hWeapon = NET_INT(player,
 netvar.hActiveWeapon); if (NET_BYTE(player, netvar.iLifeState)) { sprintf(buf,
 "%s is dead %s", info.name, tfclasses[NET_INT(player, netvar.iClass)]); return
@@ -1428,7 +1426,7 @@ void WhatIAmLookingAt(int *result_eindex, Vector *result_pos)
     if (result_eindex)
         *result_eindex = -1;
     if (trace.m_pEnt && result_eindex)
-        *result_eindex = ((IClientEntity *) (trace.m_pEnt))->entindex();
+        *result_eindex = EntIndex((IClientEntity *) (trace.m_pEnt));
 }
 
 Vector GetForwardVector(Vector origin, Vector viewangles, float distance, CachedEntity *punch_entity)
@@ -1463,7 +1461,6 @@ bool IsSentryBuster(CachedEntity *entity)
 
 bool IsAmbassador(CachedEntity *entity)
 {
-    IF_GAME(!IsTF2()) return false;
     if (entity->m_iClassID() != CL_CLASS(CTFRevolver))
         return false;
     const int &defidx = CE_INT(entity, netvar.iItemDefinitionIndex);
@@ -1592,7 +1589,7 @@ void FastStop()
     static auto sv_stopspeed = g_ICvar->FindVar("sv_stopspeed");
 
     auto speed    = vel.Length2D();
-    auto friction = sv_friction->GetFloat() * CE_FLOAT(LOCAL_E, 0x12b8);
+    auto friction = sv_friction->GetFloat() * CE_FLOAT(LOCAL_E, netvar.m_surfaceFriction);
     auto control  = (speed < sv_stopspeed->GetFloat()) ? sv_stopspeed->GetFloat() : speed;
     auto drop     = control * friction * g_GlobalVars->interval_per_tick;
 
@@ -1797,10 +1794,10 @@ void ChangeName(std::string name)
 
     ReplaceSpecials(name);
     NET_SetConVar setname("name", name.c_str());
-    INetChannel *ch = (INetChannel *) g_IEngine->GetNetChannelInfo();
+    CNetChan *ch = g_IEngine->GetNetChannelInfo();
     if (ch)
     {
-        setname.SetNetChannel(ch);
+        setname.SetNetChannel(ch->AsINetChannel());
         setname.SetReliable(false);
         ch->SendNetMsg(setname, false);
     }

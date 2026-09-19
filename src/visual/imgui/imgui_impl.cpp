@@ -4,9 +4,113 @@
 #include "visual/drawing.hpp"
 #include "visual/imgui/imgui.h"
 #include "visual/imgui/imgui_freetype.h"
+#include "core/logging.hpp"
 #include <GL/gl.h>
+#include <SDL2/SDL.h>
+#include <sys/stat.h>
 
 #include "pathio.hpp"
+
+#ifndef GL_CURRENT_PROGRAM
+#define GL_CURRENT_PROGRAM 0x8B8D
+#endif
+#ifndef GL_FRAMEBUFFER_SRGB
+#define GL_FRAMEBUFFER_SRGB 0x8DB9
+#endif
+#ifndef GL_ACTIVE_TEXTURE
+#define GL_ACTIVE_TEXTURE 0x84E0
+#endif
+#ifndef GL_TEXTURE0
+#define GL_TEXTURE0 0x84C0
+#endif
+#ifndef GL_ARRAY_BUFFER
+#define GL_ARRAY_BUFFER 0x8892
+#endif
+#ifndef GL_ELEMENT_ARRAY_BUFFER
+#define GL_ELEMENT_ARRAY_BUFFER 0x8893
+#endif
+#ifndef GL_ARRAY_BUFFER_BINDING
+#define GL_ARRAY_BUFFER_BINDING 0x8894
+#endif
+#ifndef GL_ELEMENT_ARRAY_BUFFER_BINDING
+#define GL_ELEMENT_ARRAY_BUFFER_BINDING 0x8895
+#endif
+#ifndef GL_VERTEX_ARRAY_BINDING
+#define GL_VERTEX_ARRAY_BINDING 0x85B5
+#endif
+#ifndef GL_PIXEL_UNPACK_BUFFER
+#define GL_PIXEL_UNPACK_BUFFER 0x88EC
+#endif
+#ifndef GL_PIXEL_UNPACK_BUFFER_BINDING
+#define GL_PIXEL_UNPACK_BUFFER_BINDING 0x88EF
+#endif
+#ifndef GL_DRAW_FRAMEBUFFER
+#define GL_DRAW_FRAMEBUFFER 0x8CA9
+#endif
+#ifndef GL_READ_FRAMEBUFFER
+#define GL_READ_FRAMEBUFFER 0x8CA8
+#endif
+#ifndef GL_DRAW_FRAMEBUFFER_BINDING
+#define GL_DRAW_FRAMEBUFFER_BINDING 0x8CA6
+#endif
+#ifndef GL_READ_FRAMEBUFFER_BINDING
+#define GL_READ_FRAMEBUFFER_BINDING 0x8CAA
+#endif
+#ifndef GL_DRAW_BUFFER
+#define GL_DRAW_BUFFER 0x0C01
+#endif
+#ifndef GL_COLOR_WRITEMASK
+#define GL_COLOR_WRITEMASK 0x0C23
+#endif
+#ifndef GL_TEXTURE_3D
+#define GL_TEXTURE_3D 0x806F
+#endif
+#ifndef GL_TEXTURE_CUBE_MAP
+#define GL_TEXTURE_CUBE_MAP 0x8513
+#endif
+#ifndef GL_COLOR_SUM
+#define GL_COLOR_SUM 0x8458
+#endif
+#ifndef GL_SAMPLE_ALPHA_TO_COVERAGE
+#define GL_SAMPLE_ALPHA_TO_COVERAGE 0x809E
+#endif
+
+using GlUseProgramFn = void (*)(GLuint);
+using GlBindBufferFn = void (*)(GLenum, GLuint);
+using GlBindVertexArrayFn = void (*)(GLuint);
+using GlBindFramebufferFn = void (*)(GLenum, GLuint);
+
+static GlUseProgramFn gl_use_program()
+{
+    static GlUseProgramFn fn;
+    if (!fn)
+        fn = reinterpret_cast<GlUseProgramFn>(SDL_GL_GetProcAddress("glUseProgram"));
+    return fn;
+}
+
+static GlBindBufferFn gl_bind_buffer()
+{
+    static GlBindBufferFn fn;
+    if (!fn)
+        fn = reinterpret_cast<GlBindBufferFn>(SDL_GL_GetProcAddress("glBindBuffer"));
+    return fn;
+}
+
+static GlBindVertexArrayFn gl_bind_vertex_array()
+{
+    static GlBindVertexArrayFn fn;
+    if (!fn)
+        fn = reinterpret_cast<GlBindVertexArrayFn>(SDL_GL_GetProcAddress("glBindVertexArray"));
+    return fn;
+}
+
+static GlBindFramebufferFn gl_bind_framebuffer()
+{
+    static GlBindFramebufferFn fn;
+    if (!fn)
+        fn = reinterpret_cast<GlBindFramebufferFn>(SDL_GL_GetProcAddress("glBindFramebuffer"));
+    return fn;
+}
 
 static Uint64 g_Time                                      = 0;
 static bool g_MousePressed[3]                             = { false, false, false };
@@ -15,6 +119,9 @@ static char *g_ClipboardTextData                          = NULL;
 
 void ImGui_Impl_Render(ImDrawData *draw_data)
 {
+    if (!draw_data)
+        return;
+
     // Avoid rendering when minimized, scale coordinates for retina displays
     // (screen coordinates != framebuffer coordinates)
     ImGuiIO &io   = ImGui::GetIO();
@@ -23,10 +130,63 @@ void ImGui_Impl_Render(ImDrawData *draw_data)
     if (fb_width == 0 || fb_height == 0)
         return;
 
+    // TF2's context still has a GLSL program bound. Fixed-pipeline imgui
+    // draws are discarded until that program is unbound.
+    GLint last_program = 0;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &last_program);
+    if (auto use_program = gl_use_program())
+        use_program(0);
+
+    GLint last_active_texture = 0;
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &last_active_texture);
+    glActiveTexture(GL_TEXTURE0);
+
+    const GLboolean framebuffer_srgb = glIsEnabled(GL_FRAMEBUFFER_SRGB);
+    if (framebuffer_srgb)
+        glDisable(GL_FRAMEBUFFER_SRGB);
+
     // We are using the OpenGL fixed pipeline to make the example code simpler
     // to read! Setup render state: alpha-blending enabled, no face culling, no
     // depth testing, scissor enabled, vertex/texcoord/color pointers, polygon
     // fill.
+    // ToGL keeps VBOs/VAOs bound. With GL_ARRAY_BUFFER bound, gl*Pointer
+    // arguments become byte offsets into the buffer, so our CPU pointers turn
+    // into huge offsets -> OOB reads -> driver abort at swap.
+    GLint last_vao = 0;
+    if (auto bind_vao = gl_bind_vertex_array())
+    {
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &last_vao);
+        if (last_vao)
+            bind_vao(0);
+    }
+    GLint last_array_buffer = 0, last_element_array_buffer = 0;
+    if (auto bind_buffer = gl_bind_buffer())
+    {
+        glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &last_array_buffer);
+        glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &last_element_array_buffer);
+        if (last_array_buffer)
+            bind_buffer(GL_ARRAY_BUFFER, 0);
+        if (last_element_array_buffer)
+            bind_buffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    }
+    // ToGL may leave an FBO bound on this thread; drawing then lands in an
+    // offscreen target and never reaches the backbuffer being swapped.
+    GLint last_draw_fbo = 0, last_read_fbo = 0;
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &last_draw_fbo);
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &last_read_fbo);
+    if (auto bind_fb = gl_bind_framebuffer())
+    {
+        if (last_draw_fbo || last_read_fbo)
+            bind_fb(GL_FRAMEBUFFER, 0);
+    }
+    GLint last_draw_buffer = GL_BACK;
+    glGetIntegerv(GL_DRAW_BUFFER, &last_draw_buffer);
+    if (last_draw_buffer != GL_BACK)
+        glDrawBuffer(GL_BACK);
+    GLboolean last_color_mask[4];
+    glGetBooleanv(GL_COLOR_WRITEMASK, last_color_mask);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
     GLint last_texture;
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &last_texture);
     GLint last_polygon_mode[2];
@@ -44,6 +204,48 @@ void ImGui_Impl_Render(ImDrawData *draw_data)
     glDisable(GL_LIGHTING);
     glDisable(GL_COLOR_MATERIAL);
     glEnable(GL_SCISSOR_TEST);
+    // Leftover discard/mask state silently eats every pixel we emit.
+    glDisable(GL_STENCIL_TEST);
+    glDisable(GL_ALPHA_TEST);
+    glDisable(GL_FOG);
+    glDisable(GL_COLOR_LOGIC_OP);
+    glDisable(GL_COLOR_SUM);
+    glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+    // ToGL leaves user clip planes enabled for water reflections/portals while
+    // in-game; they clip our overlay geometry away entirely.
+    for (int i = 0; i < 6; i++)
+        glDisable((GLenum) (GL_CLIP_PLANE0 + i));
+    // Enabled ARB programs completely bypass the fixed pipeline.
+    glDisable((GLenum) 0x8620); // GL_VERTEX_PROGRAM_ARB
+    glDisable((GLenum) 0x8804); // GL_FRAGMENT_PROGRAM_ARB
+    // Extra texture units left enabled modulate our output into nothing.
+    for (int i = 7; i > 0; i--)
+    {
+        glActiveTexture((GLenum) (GL_TEXTURE0 + i));
+        glDisable(GL_TEXTURE_2D);
+        glDisable(GL_TEXTURE_1D);
+        glDisable(GL_TEXTURE_3D);
+        glDisable(GL_TEXTURE_CUBE_MAP);
+    }
+    glActiveTexture(GL_TEXTURE0);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+    // Client-state leftovers either read stale pointers or poison our arrays.
+    glClientActiveTexture(GL_TEXTURE0);
+    glDisableClientState(GL_NORMAL_ARRAY);
+    glDisableClientState(GL_INDEX_ARRAY);
+    glDisableClientState(GL_EDGE_FLAG_ARRAY);
+    glDisableClientState((GLenum) 0x8457); // GL_FOG_COORD_ARRAY
+    glDisableClientState((GLenum) 0x845E); // GL_SECONDARY_COLOR_ARRAY
+    {
+        // Enabled generic attrib arrays point at ToGL VBO state and break our
+        // draw call validation outright.
+        using GlDisableVertexAttribArrayFn = void (*)(GLuint);
+        static auto disable_attrib = reinterpret_cast<GlDisableVertexAttribArrayFn>(
+            SDL_GL_GetProcAddress("glDisableVertexAttribArray"));
+        if (disable_attrib)
+            for (GLuint i = 0; i < 16; i++)
+                disable_attrib(i);
+    }
     glEnableClientState(GL_VERTEX_ARRAY);
     glEnableClientState(GL_TEXTURE_COORD_ARRAY);
     glEnableClientState(GL_COLOR_ARRAY);
@@ -77,6 +279,20 @@ void ImGui_Impl_Render(ImDrawData *draw_data)
     ImVec2 clip_off   = draw_data->DisplayPos;       // (0,0) unless using multi-viewports
     ImVec2 clip_scale = draw_data->FramebufferScale; // (1,1) unless using retina display which
                                                      // are often (2,2)
+
+    static bool dumped_state = false;
+    if (!dumped_state)
+    {
+        dumped_state = true;
+        GLint pix_unpack = 0;
+        glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &pix_unpack);
+        logging::Info("imgui render state: prog=%d vao=%d abo=%d eabo=%d pubo=%d dfbo=%d rfbo=%d dbuf=0x%x cmask=%d%d%d%d vp=%d,%d %dx%d",
+                      (int) last_program, (int) last_vao, (int) last_array_buffer, (int) last_element_array_buffer,
+                      (int) pix_unpack, (int) last_draw_fbo, (int) last_read_fbo, (int) last_draw_buffer,
+                      (int) last_color_mask[0], (int) last_color_mask[1], (int) last_color_mask[2],
+                      (int) last_color_mask[3], (int) last_viewport[0], (int) last_viewport[1], (int) last_viewport[2],
+                      (int) last_viewport[3]);
+    }
 
     // Render command lists
     for (int n = 0; n < draw_data->CmdListsCount; n++)
@@ -112,14 +328,26 @@ void ImGui_Impl_Render(ImDrawData *draw_data)
 
                     // Bind texture, Draw
                     glBindTexture(GL_TEXTURE_2D, (GLuint)(intptr_t) pcmd->TextureId);
-                    glDrawElements(GL_TRIANGLES, (GLsizei) pcmd->ElemCount, GL_UNSIGNED_INT, idx_buffer);
+                    glDrawElements(GL_TRIANGLES, (GLsizei) pcmd->ElemCount, sizeof(ImDrawIdx) == 2 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT, idx_buffer);
                 }
             }
             idx_buffer += pcmd->ElemCount;
         }
     }
 
+
+
     // Restore modified state
+    if (auto bind_buffer = gl_bind_buffer())
+    {
+        bind_buffer(GL_ARRAY_BUFFER, (GLuint) last_array_buffer);
+        bind_buffer(GL_ELEMENT_ARRAY_BUFFER, (GLuint) last_element_array_buffer);
+    }
+    if (auto bind_vao = gl_bind_vertex_array())
+    {
+        if (last_vao)
+            bind_vao((GLuint) last_vao);
+    }
     glDisableClientState(GL_COLOR_ARRAY);
     glDisableClientState(GL_TEXTURE_COORD_ARRAY);
     glDisableClientState(GL_VERTEX_ARRAY);
@@ -133,6 +361,21 @@ void ImGui_Impl_Render(ImDrawData *draw_data)
     glPolygonMode(GL_BACK, (GLenum) last_polygon_mode[1]);
     glViewport(last_viewport[0], last_viewport[1], (GLsizei) last_viewport[2], (GLsizei) last_viewport[3]);
     glScissor(last_scissor_box[0], last_scissor_box[1], (GLsizei) last_scissor_box[2], (GLsizei) last_scissor_box[3]);
+    // Rebind FBOs before restoring the draw buffer; FBO draw-buffer enums are
+    // invalid while the default framebuffer is bound.
+    if (auto bind_fb = gl_bind_framebuffer())
+    {
+        bind_fb(GL_DRAW_FRAMEBUFFER, (GLuint) last_draw_fbo);
+        bind_fb(GL_READ_FRAMEBUFFER, (GLuint) last_read_fbo);
+    }
+    if (last_draw_buffer != GL_BACK)
+        glDrawBuffer((GLenum) last_draw_buffer);
+    glColorMask(last_color_mask[0], last_color_mask[1], last_color_mask[2], last_color_mask[3]);
+    if (framebuffer_srgb)
+        glEnable(GL_FRAMEBUFFER_SRGB);
+    glActiveTexture((GLenum) last_active_texture);
+    if (auto use_program = gl_use_program())
+        use_program((GLuint) last_program);
 }
 
 static const char *ImGui_ImplSdl_GetClipboardText(void *)
@@ -210,19 +453,28 @@ bool ImGui_Impl_CreateFontsTexture(ImFontAtlas *font)
 
     // Upload texture to graphics system
     GLuint texture;
-    GLint last_texture;
+    GLint last_texture, last_unpack_buffer = 0;
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &last_texture);
+    glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &last_unpack_buffer);
     glGenTextures(1, &texture);
     glBindTexture(GL_TEXTURE_2D, texture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    // ToGL may keep a pixel unpack buffer bound; with one bound, the pixels
+    // argument is a buffer offset, not a pointer, and the atlas uploads garbage.
+    if (auto bind_buffer = gl_bind_buffer(); bind_buffer && last_unpack_buffer)
+        bind_buffer(GL_PIXEL_UNPACK_BUFFER, 0);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    logging::Info("imgui: font texture id=%u %dx%d unpack_pbo=%d glerr=%u", texture, width, height, (int) last_unpack_buffer,
+                  (unsigned) glGetError());
 
     // Store our identifier
     font->TexID = (void *) (intptr_t) texture;
 
     // Restore state
+    if (auto bind_buffer = gl_bind_buffer(); bind_buffer && last_unpack_buffer)
+        bind_buffer(GL_PIXEL_UNPACK_BUFFER, (GLuint) last_unpack_buffer);
     glBindTexture(GL_TEXTURE_2D, last_texture);
 
     return true;
@@ -273,18 +525,23 @@ bool ImGui_ImplSdl_Init()
     io.GetClipboardTextFn = ImGui_ImplSdl_GetClipboardText;
     io.ClipboardUserData  = NULL;
 
-    g_MouseCursors[ImGuiMouseCursor_Arrow]      = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
-    g_MouseCursors[ImGuiMouseCursor_TextInput]  = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_IBEAM);
-    g_MouseCursors[ImGuiMouseCursor_ResizeAll]  = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZEALL);
-    g_MouseCursors[ImGuiMouseCursor_ResizeNS]   = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENS);
-    g_MouseCursors[ImGuiMouseCursor_ResizeEW]   = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZEWE);
-    g_MouseCursors[ImGuiMouseCursor_ResizeNESW] = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENESW);
-    g_MouseCursors[ImGuiMouseCursor_ResizeNWSE] = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENWSE);
-    g_MouseCursors[ImGuiMouseCursor_Hand]       = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND);
+    // OS cursors unused (NewFrame path is commented out). Creating them through
+    // the wrong SDL instance (distro libSDL2 vs TF2's) SIGSEGVs in SDL_CreateSystemCursor.
+    (void) g_MouseCursors;
 
-    io.Fonts->AddFontFromFileTTF(paths::getDataPath("/fonts/tf2build.ttf").c_str(), 13, NULL, io.Fonts->GetGlyphRangesDefault());
+    {
+        const std::string font_path = paths::getDataPath("/fonts/tf2build.ttf");
+        struct stat st{};
+        if (stat(font_path.c_str(), &st) == 0)
+            io.Fonts->AddFontFromFileTTF(font_path.c_str(), 13, NULL, io.Fonts->GetGlyphRangesDefault());
+        else
+            logging::Info("imgui: missing font %s, using default atlas", font_path.c_str());
+    }
+    logging::Info("imgui: building font atlas");
     ImGuiFreeType::BuildFontAtlas(io.Fonts, 0x0);
+    logging::Info("imgui: uploading font texture");
     ImGui_Impl_CreateFontsTexture(io.Fonts);
+    logging::Info("imgui: font texture ready");
 
     ImGuiStyle *style = &ImGui::GetStyle();
 

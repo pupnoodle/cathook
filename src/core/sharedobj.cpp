@@ -25,7 +25,7 @@ bool LocateSharedObject(std::string &name, std::string &out_full_path)
         char *filename = strrchr(buffer, '/') + 1;
         if (not path or not filename)
             continue;
-        if (!strncmp(name.c_str(), filename, name.length()) && (filename[name.length()] == '\0' || filename[name.length()] == '\n' || filename[name.length()] == ' ' || filename[name.length()] == '\t'))
+        if (!strncmp(name.c_str(), filename, name.length()) && (filename[name.length()] == '\0' || filename[name.length()] == '\n' || filename[name.length()] == ' ' || filename[name.length()] == '\t' || filename[name.length()] == '.'))
         {
             std::string full(path);
             if (!full.empty() && full.back() == '\n')
@@ -54,20 +54,30 @@ SharedObject::SharedObject(const char *_file, bool _factory) : file(_file), path
     constructed = true;
 }
 
-void SharedObject::Load()
+bool SharedObject::Load(bool required)
 {
-    while (not LocateSharedObject(file, path))
+    int waits = 0;
+    while (!LocateSharedObject(file, path))
     {
+        if (!required || waits++ >= 20)
+        {
+            logging::Info("Shared object %s is not mapped%s", file.c_str(), required ? "" : " (optional)");
+            return false;
+        }
         sleep(1);
     }
+    waits = 0;
     while (!(lmap = (link_map *) dlopen(path.c_str(), RTLD_LAZY | RTLD_NOLOAD)))
     {
+        if (!required || waits++ >= 20)
+        {
+            logging::Info("dlopen NOLOAD failed for %s", file.c_str());
+            return false;
+        }
         sleep(1);
         char *error = dlerror();
         if (error)
-        {
             logging::Info("DLERROR: %s", error);
-        }
     }
     logging::Info("Shared object %s loaded at %p", basename(lmap->l_name), reinterpret_cast<void *>(lmap->l_addr));
     if (factory)
@@ -78,6 +88,7 @@ void SharedObject::Load()
             logging::Info("Failed to create interface factory for %s", basename(lmap->l_name));
         }
     }
+    return true;
 }
 
 void SharedObject::Unload()
@@ -141,7 +152,7 @@ void LoadAllSharedObjects()
         steamclient().Load();
         client().Load();
         steamapi().Load();
-        steamnetworkingsockets().Load();
+        steamnetworkingsockets().Load(false);
         vstdlib().Load();
         inputsystem().Load();
         datacache().Load();

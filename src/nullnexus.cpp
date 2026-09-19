@@ -96,9 +96,9 @@ static std::string server_steamid = "";
 // Update info about the current server we are on.
 void updateServer(NullNexus::UserSettings &settings)
 {
-    INetChannel *ch = (INetChannel *) g_IEngine->GetNetChannelInfo();
+    CNetChan *ch = g_IEngine->GetNetChannelInfo();
     // Additional currently inactive security measure, may be activated at any time
-    static int *gHostSpawnCount = *reinterpret_cast<int **>(gSignatures.GetEngineSignature("A3 ? ? ? ? A1 ? ? ? ? 8B 10 89 04 24 FF 52 ? 83 C4 2C") + sizeof(char));
+    static int host_spawn_count = 0;
     if (ch && *authenticate && server_steamid != "")
     {
         // SDR Makes this unusable :(
@@ -115,7 +115,7 @@ void updateServer(NullNexus::UserSettings &settings)
             for (auto i : result.bits)
                 ss << std::setw(2) << std::setfill('0') << (int) i;
             steamidhash        = ss.str();
-            settings.tf2server = NullNexus::TF2Server(true, server_steamid, steamidhash, *gHostSpawnCount);
+            settings.tf2server = NullNexus::TF2Server(true, server_steamid, steamidhash, host_spawn_count);
             return;
         }
     }
@@ -127,7 +127,7 @@ static bool waiting_status_data = false;
 
 static DetourHook ProcessPrint_detour_hook;
 
-typedef bool *(*ProcessPrint_t)(void *baseclient, SVC_Print *msg);
+typedef bool (*ProcessPrint_t)(void *baseclient, SVC_Print *msg);
 
 // Need to do this so the function below resolves
 void updateServer();
@@ -281,8 +281,9 @@ static InitRoutine init(
                 nexus.connect(*address, *port, *endpoint, true);
         }
 
-        uintptr_t processprint_addr = gSignatures.GetEngineSignature("55 89 E5 56 53 83 EC 50 C7 45 ? 00 00 00 00 A1 ? ? ? ? C7 45 ? 00 00 00 00 85 C0 0F 84 ? ? ? ? 8D 55 ? 89 04 24 89 54 24 ? C7 44 24 ? ? ? ? ? C7 44 24 ? ? ? ? ? C7 44 24 ? ? ? ? ? C7 44 24 ? ? ? ? ? C7 44 24 ? 55 04 00 00");
-        ProcessPrint_detour_hook.Init(processprint_addr, (void *) ProcessPrint_detour_fn);
+        uintptr_t processprint_addr = gSignatures.GetEngineSignature(sigs::client_state_process_print);
+        if (processprint_addr)
+            ProcessPrint_detour_hook.Init(processprint_addr, (void *) ProcessPrint_detour_fn);
 
         EC::Register(
             EC::Shutdown,

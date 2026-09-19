@@ -16,12 +16,11 @@
 #include "HookTools.hpp"
 #include "teamroundtimer.hpp"
 
-// CPrediction::StartCommand stores m_pCurrentCommand immediately before m_hConstraintEntity.
+// CPrediction::StartCommand stores m_pCurrentCommand; resolved via datamap / m_hConstraintEntity.
 #include "HookedMethods.hpp"
 #include "nospread.hpp"
 #include "Warp.hpp"
 
-static settings::Boolean minigun_jump{ "misc.minigun-jump-tf2c", "false" };
 static settings::Boolean roll_speedhack{ "misc.roll-speedhack", "false" };
 static settings::Boolean forward_speedhack{ "misc.roll-speedhack.forward", "false" };
 settings::Boolean engine_pred{ "misc.engine-prediction", "true" };
@@ -39,12 +38,6 @@ void RunEnginePrediction(IClientEntity *ent, CUserCmd *ucmd)
     if (!ent)
         return;
 
-    typedef void (*SetupMoveFn)(IPrediction *, IClientEntity *, CUserCmd *, class IMoveHelper *, CMoveData *);
-    typedef void (*FinishMoveFn)(IPrediction *, IClientEntity *, CUserCmd *, CMoveData *);
-
-    void **predictionVtable  = *((void ***) g_IPrediction);
-    SetupMoveFn oSetupMove   = (SetupMoveFn) predictionVtable[19];
-    FinishMoveFn oFinishMove = (FinishMoveFn) predictionVtable[20];
     CMoveData movedata{};
     CMoveData *pMoveData = &movedata;
 
@@ -52,7 +45,7 @@ void RunEnginePrediction(IClientEntity *ent, CUserCmd *ucmd)
     float frameTime = g_GlobalVars->frametime;
     float curTime   = g_GlobalVars->curtime;
     int tickcount   = g_GlobalVars->tickcount;
-    original_origin = ent->GetAbsOrigin();
+    original_origin = re::C_BaseEntity::GetAbsOrigin(ent);
 
     CUserCmd defaultCmd{};
     if (ucmd == nullptr)
@@ -71,9 +64,9 @@ void RunEnginePrediction(IClientEntity *ent, CUserCmd *ucmd)
 
     // Run The Prediction
     g_IGameMovement->StartTrackPredictionErrors(reinterpret_cast<CBasePlayer *>(ent));
-    oSetupMove(g_IPrediction, ent, ucmd, NULL, pMoveData);
+    g_IPrediction->SetupMove(ent, ucmd, NULL, pMoveData);
     g_IGameMovement->ProcessMovement(reinterpret_cast<CBasePlayer *>(ent), pMoveData);
-    oFinishMove(g_IPrediction, ent, ucmd, pMoveData);
+    g_IPrediction->FinishMove(ent, ucmd, pMoveData);
     g_IGameMovement->FinishTrackPredictionErrors(reinterpret_cast<CBasePlayer *>(ent));
 
     // Reset User CMD
@@ -91,7 +84,7 @@ void RunEnginePrediction(IClientEntity *ent, CUserCmd *ucmd)
 // Restore Origin
 void FinishEnginePrediction(IClientEntity *ent, CUserCmd *ucmd)
 {
-    const_cast<Vector &>(ent->GetAbsOrigin()) = original_origin;
+    re::C_BaseEntity::SetAbsOrigin(ent, original_origin);
     original_origin.Invalidate();
 }
 } // namespace engine_prediction
@@ -264,6 +257,29 @@ DEFINE_HOOKED_METHOD(CreateMove, bool, void *this_, float input_sample_time, CUs
     {
         PROF_SECTION(CM_LocalPlayer);
         g_pLocalPlayer->Update();
+    }
+    {
+        static int cm_logs = 0;
+        if (cm_logs < 8)
+        {
+            IClientEntity *lp = CE_GOOD(g_pLocalPlayer->entity) ? RAW_ENT(g_pLocalPlayer->entity) : nullptr;
+            logging::Info("CreateMove #%d in_game=%d invalid=%d idx=%d", cm_logs, (int) g_IEngine->IsInGame(), (int) g_Settings.bInvalid, lp ? EntIndex(lp) : -1);
+            if (lp)
+            {
+                const Vector &o = re::C_BaseEntity::GetAbsOrigin(lp);
+                Vector eye      = re::C_BasePlayer::GetEyePosition(lp);
+                Vector &ang     = re::C_BasePlayer::GetEyeAngles(lp);
+                auto *cc        = EntClientClass(lp);
+                logging::Info("  class=%s origin=%.1f %.1f %.1f eye=%.1f %.1f %.1f ang=%.1f %.1f dormant=%d", cc && cc->GetName() ? cc->GetName() : "?", o.x, o.y, o.z, eye.x, eye.y, eye.z, ang.x, ang.y, (int) EntIsDormant(lp));
+            }
+            if (CE_GOOD(LOCAL_W))
+            {
+                IClientEntity *w = RAW_ENT(LOCAL_W);
+                auto *wcc        = EntClientClass(w);
+                logging::Info("  weapon class=%s id=%d slot=%d", wcc && wcc->GetName() ? wcc->GetName() : "?", re::C_TFWeaponBase::GetWeaponID(w), re::C_BaseCombatWeapon::GetSlot(w));
+            }
+            cm_logs++;
+        }
     }
     PrecalculateCanShoot();
     if (firstcm)

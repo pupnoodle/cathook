@@ -223,7 +223,6 @@ void ApplySpreadCorrection(Vector &angles, int seed, float spread)
 
     bool is_first_shot_perfect = IsPerfectShot(weapon);
 
-    // Size of one WeaponMode_t is 0x40, 0x6fc is the offset to bullets per shot
     int nBulletsPerShot = GetWeaponData(weapon)->m_nBulletsPerShot;
     if (nBulletsPerShot >= 1)
         nBulletsPerShot = ATTRIB_HOOK_FLOAT(nBulletsPerShot, "mult_bullets_per_shot", RAW_ENT(LOCAL_W), 0x0, true);
@@ -392,7 +391,7 @@ void SendNetMessagePost()
     NET_StringCmd sCmd("playerperf");
 
     // And send it along with our clc_move. Yes, we are calling SendNetMsg from inside SendNetMsg
-    ((INetChannel *) (g_IEngine->GetNetChannelInfo()))->SendNetMsg(sCmd, true);
+    g_IEngine->GetNetChannelInfo()->SendNetMsg(sCmd, true);
 
     // remember client float time
     should_update_time = false;
@@ -401,18 +400,26 @@ void SendNetMessagePost()
         sent_client_floattime = Plat_FloatTime();
 
     // force transmit now
-    ((INetChannel *) (g_IEngine->GetNetChannelInfo()))->Transmit();
+    g_IEngine->GetNetChannelInfo()->Transmit();
 
     if (use_avg_latency)
-        ping_at_send = ((INetChannel *) (g_IEngine->GetNetChannelInfo()))->GetAvgLatency(FLOW_OUTGOING);
+        ping_at_send = g_IEngine->GetNetChannelInfo()->GetAvgLatency(FLOW_OUTGOING);
     else
-        ping_at_send = ((INetChannel *) (g_IEngine->GetNetChannelInfo()))->GetLatency(FLOW_OUTGOING);
+        ping_at_send = g_IEngine->GetNetChannelInfo()->GetLatency(FLOW_OUTGOING);
 
     waiting_perf_data = true;
     wait_perf.update();
 }
 
-CatCommand debug_flows("debug_flows", "debug", []() { logging::Info("Incoming: %f\n Outgoing: %f", ((INetChannel *) g_IEngine->GetNetChannelInfo())->GetLatency(FLOW_INCOMING), ((INetChannel *) g_IEngine->GetNetChannelInfo())->GetLatency(FLOW_OUTGOING)); });
+CatCommand debug_flows("debug_flows", "debug", []() {
+    auto *ch = g_IEngine ? g_IEngine->GetNetChannelInfo() : nullptr;
+    if (!ch)
+    {
+        logging::Info("debug_flows: no netchannel");
+        return;
+    }
+    logging::Info("Incoming: %f\n Outgoing: %f", ch->GetLatency(FLOW_INCOMING), ch->GetLatency(FLOW_OUTGOING));
+});
 
 // false == don't call original, true == call original
 // This function is used to parse the playerperf data
@@ -604,7 +611,7 @@ void CL_SendMove_hook()
 
     int *choked_packets = nullptr;
     if (!choked_packets)
-        choked_packets = (int *) ((uintptr_t) g_IBaseClientState + offsets::lastoutgoingcommand() + 4);
+        choked_packets = &g_IBaseClientState->chokedcommands();
 
     int new_packets = 1 + *choked_packets;
 
@@ -643,9 +650,9 @@ void CL_SendMove_hook()
     double predicted_time   = asumed_real_time;
 
     predicted_time += write_usercmd_correction * new_packets;
-    double ping = ((INetChannel *) (g_IEngine->GetNetChannelInfo()))->GetLatency(FLOW_OUTGOING);
+    double ping = g_IEngine->GetNetChannelInfo()->GetLatency(FLOW_OUTGOING);
     if (use_avg_latency)
-        ping = ((INetChannel *) (g_IEngine->GetNetChannelInfo()))->GetAvgLatency(FLOW_OUTGOING);
+        ping = g_IEngine->GetNetChannelInfo()->GetAvgLatency(FLOW_OUTGOING);
 
     if (correct_ping)
         // Ping changed, adjust (Provided we are not fakelagging)
@@ -857,8 +864,6 @@ static InitRoutine init_bulletnospread(
         cl_writeusercmd_detour.Init(writeusercmd_addr, (void *) WriteUserCmd_hook);
         static auto fx_firebullets_addr = gSignatures.GetClientSignature(sigs::fx_fire_bullets);
         fx_firebullets_detour.Init(fx_firebullets_addr, (void *) FX_FireBullets_hook);
-        /*static auto net_sendpacket_addr = gSignatures.GetEngineSignature("55 89 E5 57 56 53 81 EC EC 20 00 00 C7 85 ? ? ? ? 00 00 00 00 8B 45");
-        net_sendpacket_detour.Init(net_sendpacket_addr, (void *) NET_SendPacket_hook);*/
 
         // Register Event callbacks
         EC::Register(EC::CreateMove, CreateMove2, "nospread_createmove2");

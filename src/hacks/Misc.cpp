@@ -28,9 +28,7 @@ static settings::Boolean render_zoomed{ "visual.render-local-zoomed", "true" };
 #endif
 static settings::Boolean anti_afk{ "misc.anti-afk", "false" };
 static settings::Int auto_strafe{ "misc.autostrafe", "0" };
-static settings::Boolean tauntslide{ "misc.tauntslide-tf2c", "false" };
 static settings::Boolean tauntslide_tf2{ "misc.tauntslide", "false" };
-static settings::Boolean flashlight_spam{ "misc.flashlight-spam", "false" };
 static settings::Boolean auto_balance_spam{ "misc.auto-balance-spam", "false" };
 static settings::Boolean nopush_enabled{ "misc.no-push", "false" };
 static settings::Boolean dont_hide_stealth_kills{ "misc.dont-hide-stealth-kills", "true" };
@@ -138,7 +136,6 @@ void SendAutoBalanceRequest()
 CatCommand SendAutoBlRqCatCom("request_balance", "Request Infinite Auto-Balance", [](const CCommand &args) { SendAutoBalanceRequest(); });
 
 int last_number{ 0 };
-static bool flash_light_spam_switch{ false };
 static Timer auto_balance_timer{};
 
 static ConVar *teammatesPushaway{ nullptr };
@@ -239,7 +236,7 @@ static void CreateMove()
     if (auto_strafe && CE_GOOD(LOCAL_E) && !g_pLocalPlayer->life_state)
     {
         auto flags    = CE_INT(LOCAL_E, netvar.iFlags);
-        auto movetype = (uintptr_t) CE_VAR(LOCAL_E, 0x194, unsigned char);
+        auto movetype = CE_BYTE(LOCAL_E, netvar.movetype);
 
         // Noclip
         if (movetype != 8)
@@ -311,100 +308,79 @@ static void CreateMove()
         }
     }
 
-    // TF2c Tauntslide
-    IF_GAME(IsTF2C())
+    // Tauntslide needs improvement for movement but it mostly works
+    if (tauntslide_tf2)
     {
-        if (tauntslide)
-            RemoveCondition<TFCond_Taunting>(LOCAL_E);
-    }
-
-    // HL2DM flashlight spam
-    IF_GAME(IsHL2DM())
-    {
-        if (flashlight_spam)
+        // Check to prevent crashing
+        if (CE_GOOD(LOCAL_E))
         {
-            if (flash_light_spam_switch && !current_user_cmd->impulse)
-                current_user_cmd->impulse = 100;
-            flash_light_spam_switch = !flash_light_spam_switch;
-        }
-    }
-
-    IF_GAME(IsTF2())
-    {
-        // Tauntslide needs improvement for movement but it mostly works
-        if (tauntslide_tf2)
-        {
-            // Check to prevent crashing
-            if (CE_GOOD(LOCAL_E))
+            if (HasCondition<TFCond_Taunting>(LOCAL_E))
             {
-                if (HasCondition<TFCond_Taunting>(LOCAL_E))
-                {
-                    // get directions
-                    float forward = 0;
-                    float side    = 0;
-                    if (current_user_cmd->buttons & IN_FORWARD)
-                        forward += 450;
-                    if (current_user_cmd->buttons & IN_BACK)
-                        forward -= 450;
-                    if (current_user_cmd->buttons & IN_MOVELEFT)
-                        side -= 450;
-                    if (current_user_cmd->buttons & IN_MOVERIGHT)
-                        side += 450;
-                    current_user_cmd->forwardmove = forward;
-                    current_user_cmd->sidemove    = side;
+                // get directions
+                float forward = 0;
+                float side    = 0;
+                if (current_user_cmd->buttons & IN_FORWARD)
+                    forward += 450;
+                if (current_user_cmd->buttons & IN_BACK)
+                    forward -= 450;
+                if (current_user_cmd->buttons & IN_MOVELEFT)
+                    side -= 450;
+                if (current_user_cmd->buttons & IN_MOVERIGHT)
+                    side += 450;
+                current_user_cmd->forwardmove = forward;
+                current_user_cmd->sidemove    = side;
 
-                    QAngle camera_angle;
-                    g_IEngine->GetViewAngles(camera_angle);
+                QAngle camera_angle;
+                g_IEngine->GetViewAngles(camera_angle);
 
-                    // Doesnt work with anti-aim as well as I hoped... I guess
-                    // this is as far as I can go with such a simple tauntslide
-                    if (!hacks::shared::antiaim::isEnabled())
-                        current_user_cmd->viewangles.y = camera_angle[1];
-                    g_pLocalPlayer->v_OrigViewangles.y = camera_angle[1];
+                // Doesnt work with anti-aim as well as I hoped... I guess
+                // this is as far as I can go with such a simple tauntslide
+                if (!hacks::shared::antiaim::isEnabled())
+                    current_user_cmd->viewangles.y = camera_angle[1];
+                g_pLocalPlayer->v_OrigViewangles.y = camera_angle[1];
 
-                    // Use silent since we dont want to prevent the player from
-                    // looking around
-                    g_pLocalPlayer->bUseSilentAngles = true;
-                }
+                // Use silent since we dont want to prevent the player from
+                // looking around
+                g_pLocalPlayer->bUseSilentAngles = true;
             }
         }
+    }
 
-        // Spams infinite autobalance spam function
-        if (auto_balance_spam && auto_balance_timer.test_and_set(150))
-            SendAutoBalanceRequest();
+    // Spams infinite autobalance spam function
+    if (auto_balance_spam && auto_balance_timer.test_and_set(150))
+        SendAutoBalanceRequest();
 
-        // Simple No-Push through cvars
-        if (teammatesPushaway)
+    // Simple No-Push through cvars
+    if (teammatesPushaway)
+    {
+        if (*nopush_enabled == teammatesPushaway->GetBool())
+            teammatesPushaway->SetValue(!nopush_enabled);
+    }
+    else
+        teammatesPushaway = g_ICvar->FindVar("tf_avoidteammates_pushaway");
+
+    // Ping Reducer
+    if (ping_reducer && !hacks::tf2::antianticheat::enabled)
+    {
+        static ConVar *cmdrate = g_ICvar->FindVar("cl_cmdrate");
+        if (cmdrate == nullptr)
         {
-            if (*nopush_enabled == teammatesPushaway->GetBool())
-                teammatesPushaway->SetValue(!nopush_enabled);
+            cmdrate = g_ICvar->FindVar("cl_cmdrate");
+            return;
         }
-        else
-            teammatesPushaway = g_ICvar->FindVar("tf_avoidteammates_pushaway");
-
-        // Ping Reducer
-        if (ping_reducer && !hacks::tf2::antianticheat::enabled)
+        int ping = g_pPlayerResource->GetPing(g_IEngine->GetLocalPlayer());
+        static Timer updateratetimer{};
+        if (updateratetimer.test_and_set(500))
         {
-            static ConVar *cmdrate = g_ICvar->FindVar("cl_cmdrate");
-            if (cmdrate == nullptr)
+            if (*force_ping <= ping)
             {
-                cmdrate = g_ICvar->FindVar("cl_cmdrate");
-                return;
+                NET_SetConVar command("cl_cmdrate", "-1");
+                g_IEngine->GetNetChannelInfo()->SendNetMsg(command);
             }
-            int ping = g_pPlayerResource->GetPing(g_IEngine->GetLocalPlayer());
-            static Timer updateratetimer{};
-            if (updateratetimer.test_and_set(500))
+            else if (*force_ping > ping)
             {
-                if (*force_ping <= ping)
-                {
-                    NET_SetConVar command("cl_cmdrate", "-1");
-                    ((INetChannel *) g_IEngine->GetNetChannelInfo())->SendNetMsg(command);
-                }
-                else if (*force_ping > ping)
-                {
-                    NET_SetConVar command("cl_cmdrate", std::to_string(cmdrate->GetInt()).c_str());
-                    ((INetChannel *) g_IEngine->GetNetChannelInfo())->SendNetMsg(command);
-                }
+                NET_SetConVar command("cl_cmdrate", std::to_string(cmdrate->GetInt()).c_str());
+                g_IEngine->GetNetChannelInfo()->SendNetMsg(command);
             }
         }
     }
@@ -478,81 +454,6 @@ void Draw()
             AddSideString(format("Weapon state: ", CE_INT(local, netvar.iWeaponState)));
         AddSideString(format("ItemDefinitionIndex: ", CE_INT(local, netvar.iItemDefinitionIndex)));
         AddSideString(format("Maxspeed: ", CE_FLOAT(LOCAL_E, netvar.m_flMaxspeed)));
-        /*AddSideString(colors::white, "Weapon: %s [%i]",
-        RAW_ENT(g_pLocalPlayer->weapon())->GetClientClass()->GetName(),
-        g_pLocalPlayer->weapon()->m_iClassID());
-        //AddSideString(colors::white, "flNextPrimaryAttack: %f",
-        CE_FLOAT(g_pLocalPlayer->weapon(), netvar.flNextPrimaryAttack));
-        //AddSideString(colors::white, "nTickBase: %f",
-        (float)(CE_INT(g_pLocalPlayer->entity, netvar.nTickBase)) *
-        gvars->interval_per_tick); AddSideString(colors::white, "CanShoot: %i",
-        CanShoot());
-        //AddSideString(colors::white, "Damage: %f",
-        CE_FLOAT(g_pLocalPlayer->weapon(), netvar.flChargedDamage)); if (TF2)
-        AddSideString(colors::white, "DefIndex: %i",
-        CE_INT(g_pLocalPlayer->weapon(), netvar.iItemDefinitionIndex));
-        //AddSideString(colors::white, "GlobalVars: 0x%08x", gvars);
-        //AddSideString(colors::white, "realtime: %f", gvars->realtime);
-        //AddSideString(colors::white, "interval_per_tick: %f",
-        gvars->interval_per_tick);
-        //if (TF2) AddSideString(colors::white, "ambassador_can_headshot: %i",
-        (gvars->curtime - CE_FLOAT(g_pLocalPlayer->weapon(),
-        netvar.flLastFireTime)) > 0.95); AddSideString(colors::white,
-        "WeaponMode: %i", GetWeaponMode(g_pLocalPlayer->entity));
-        AddSideString(colors::white, "ToGround: %f",
-        DistanceToGround(g_pLocalPlayer->v_Origin));
-        AddSideString(colors::white, "ServerTime: %f",
-        CE_FLOAT(g_pLocalPlayer->entity, netvar.nTickBase) *
-        g_GlobalVars->interval_per_tick); AddSideString(colors::white, "CurTime:
-        %f", g_GlobalVars->curtime); AddSideString(colors::white, "FrameCount:
-        %i", g_GlobalVars->framecount); float speed, gravity;
-        GetProjectileData(g_pLocalPlayer->weapon(), speed, gravity);
-        AddSideString(colors::white, "ALT: %i",
-        g_pLocalPlayer->bAttackLastTick); AddSideString(colors::white, "Speed:
-        %f", speed); AddSideString(colors::white, "Gravity: %f", gravity);
-        AddSideString(colors::white, "CIAC: %i", *(bool*)(RAW_ENT(LOCAL_W) +
-        2380)); if (TF2) AddSideString(colors::white, "Melee: %i",
-        vfunc<bool(*)(IClientEntity*)>(RAW_ENT(LOCAL_W), 1860 / 4,
-        0)(RAW_ENT(LOCAL_W))); if (TF2) AddSideString(colors::white, "Bucket:
-        %.2f", *(float*)((uintptr_t)RAW_ENT(LOCAL_W) + 2612u));
-        //if (TF2C) AddSideString(colors::white, "Seed: %i",
-        *(int*)(sharedobj::client->lmap->l_addr + 0x00D53F68ul));
-        //AddSideString(colors::white, "IsZoomed: %i", g_pLocalPlayer->bZoomed);
-        //AddSideString(colors::white, "CanHeadshot: %i", CanHeadshot());
-        //AddSideString(colors::white, "IsThirdPerson: %i",
-        iinput->CAM_IsThirdPerson());
-        //if (TF2C) AddSideString(colors::white, "Crits: %i", s_bCrits);
-        //if (TF2C) AddSideString(colors::white, "CritMult: %i",
-        RemapValClampedNC( CE_INT(LOCAL_E, netvar.iCritMult), 0, 255, 1.0, 6 ));
-        for (int i = 0; i <= HIGHEST_ENTITY; ++i) {
-            CachedEntity* e = ENTITY(i);
-            if (CE_GOOD(e)) {
-                if (e->m_Type() == EntityType::ENTITY_PROJECTILE) {
-                    //logging::Info("Entity %i [%s]: V %.2f (X: %.2f, Y: %.2f,
-        Z: %.2f) ACC %.2f (X: %.2f, Y: %.2f, Z: %.2f)", i,
-        RAW_ENT(e)->GetClientClass()->GetName(), e->m_vecVelocity.Length(),
-        e->m_vecVelocity.x, e->m_vecVelocity.y, e->m_vecVelocity.z,
-        e->m_vecAcceleration.Length(), e->m_vecAcceleration.x,
-        e->m_vecAcceleration.y, e->m_vecAcceleration.z);
-                    AddSideString(colors::white, "Entity %i [%s]: V %.2f (X:
-        %.2f, Y: %.2f, Z: %.2f) ACC %.2f (X: %.2f, Y: %.2f, Z: %.2f)", i,
-        RAW_ENT(e)->GetClientClass()->GetName(), e->m_vecVelocity.Length(),
-        e->m_vecVelocity.x, e->m_vecVelocity.y, e->m_vecVelocity.z,
-        e->m_vecAcceleration.Length(), e->m_vecAcceleration.x,
-        e->m_vecAcceleration.y, e->m_vecAcceleration.z);
-                }
-            }
-        }//AddSideString(draw::white, draw::black, "???: %f",
-        NET_FLOAT(g_pLocalPlayer->entity, netvar.test));
-        //AddSideString(draw::white, draw::black, "VecPunchAngle: %f %f %f",
-        pa.x, pa.y, pa.z);
-        //draw::DrawString(10, y, draw::white, draw::black, false,
-        "VecPunchAngleVel: %f %f %f", pav.x, pav.y, pav.z);
-        //y += 14;
-        //AddCenterString(fonts::font_handle,
-        input->GetAnalogValue(AnalogCode_t::MOUSE_X),
-        input->GetAnalogValue(AnalogCode_t::MOUSE_Y), draw::white,
-        L"S\u0FD5");*/
     }
 }
 
@@ -575,7 +476,7 @@ static CatCommand generateschema("schema_generate", "Generate custom schema", ge
 bool InitSchema(const char *fileName, const char *pathID, CUtlVector<CUtlString> *pVecErrors /* = NULL */)
 {
     auto insn = gSignatures.GetClientSignature(sigs::item_schema_lookup_map);
-    static auto BInitTextBuffer = reinterpret_cast<bool (*)(void *, CUtlBuffer &, CUtlVector<CUtlString> *)>(uintptr_t(0));
+    static auto BInitTextBuffer = reinterpret_cast<bool (*)(void *, CUtlBuffer &, CUtlVector<CUtlString> *)>(gSignatures.GetClientSignature(sigs::econ_item_schema_init_text_buffer));
     void *schema                = nullptr;
     if (insn)
     {
@@ -642,10 +543,10 @@ CatCommand name("name_set", "Immediate name change",
                     std::string new_name(args.ArgS());
                     ReplaceSpecials(new_name);
                     NET_SetConVar setname("name", new_name.c_str());
-                    INetChannel *ch = (INetChannel *) g_IEngine->GetNetChannelInfo();
+                    CNetChan *ch = g_IEngine->GetNetChannelInfo();
                     if (ch)
                     {
-                        setname.SetNetChannel(ch);
+                        setname.SetNetChannel(ch->AsINetChannel());
                         setname.SetReliable(false);
                         ch->SendNetMsg(setname, false);
                     }
@@ -686,7 +587,7 @@ CatCommand say_lines("say_lines", "Say with newlines (\\n)",
 CatCommand disconnect("disconnect", "Disconnect with custom reason",
                       [](const CCommand &args)
                       {
-                          INetChannel *ch = (INetChannel *) g_IEngine->GetNetChannelInfo();
+                          CNetChan *ch = g_IEngine->GetNetChannelInfo();
                           if (!ch)
                               return;
                           std::string string = args.ArgS();
@@ -697,7 +598,7 @@ CatCommand disconnect("disconnect", "Disconnect with custom reason",
 CatCommand disconnect_vac("disconnect_vac", "Disconnect (fake VAC)",
                           []()
                           {
-                              INetChannel *ch = (INetChannel *) g_IEngine->GetNetChannelInfo();
+                              CNetChan *ch = g_IEngine->GetNetChannelInfo();
                               if (!ch)
                                   return;
                               ch->Shutdown("VAC banned from secure server\n");
@@ -774,7 +675,7 @@ static CatCommand dump_vars_by_name("debug_dump_netvars_name", "Dump netvars of 
                                         for (auto const &ent : entity_cache::valid_ents)
                                         {
 
-                                            ClientClass *clz = RAW_ENT(ent)->GetClientClass();
+                                            ClientClass *clz = EntClientClass(RAW_ENT(ent));
                                             if (!clz)
                                                 continue;
                                             std::string clazz_name(clz->GetName());
@@ -923,19 +824,20 @@ static InitRoutine init(
 } // namespace ScoreboardColoring
 
 typedef void (*UpdateLocalPlayerVisionFlags_t)();
-UpdateLocalPlayerVisionFlags_t UpdateLocalPlayerVisionFlags_fn;
+static DetourHook vision_detour;
 
 int *g_nLocalPlayerVisionFlags;
 int *g_nLocalPlayerVisionFlagsWeaponsCheck;
-// If you wish then change this to some other flag you want to apply/remove
 constexpr int PYROVISION = 1;
 
 static settings::Int force_pyrovision("visual.force-pyrovision", "0");
 
 void UpdateLocalPlayerVisionFlags()
 {
-    UpdateLocalPlayerVisionFlags_fn();
-    if (!force_pyrovision)
+    auto orig = (UpdateLocalPlayerVisionFlags_t) vision_detour.GetOriginalFunc();
+    if (orig)
+        orig();
+    if (!force_pyrovision || !g_nLocalPlayerVisionFlags || !g_nLocalPlayerVisionFlagsWeaponsCheck)
         return;
     if (*force_pyrovision == 2)
     {
@@ -950,23 +852,66 @@ void UpdateLocalPlayerVisionFlags()
 }
 #define access_ptr(p, i) ((unsigned char *) &p)[i]
 
+static void set_kart_unlimited(bool on)
+{
+    if (!g_ICvar)
+        return;
+    static ConVar *dash   = nullptr;
+    static ConVar *normal = nullptr;
+    static float dash_backup   = 1000.f;
+    static float normal_backup = 650.f;
+    if (!dash)
+        dash = g_ICvar->FindVar("tf_halloween_kart_dash_speed");
+    if (!normal)
+        normal = g_ICvar->FindVar("tf_halloween_kart_normal_speed");
+    if (on)
+    {
+        if (dash)
+        {
+            dash_backup = dash->GetFloat();
+            dash->SetValue(5000.f);
+        }
+        if (normal)
+        {
+            normal_backup = normal->GetFloat();
+            normal->SetValue(5000.f);
+        }
+    }
+    else
+    {
+        if (dash)
+            dash->SetValue(dash_backup);
+        if (normal)
+            normal->SetValue(normal_backup);
+    }
+}
+
 static InitRoutine init_pyrovision(
     []()
     {
-        uintptr_t addr = 0;
+        uintptr_t addr = gSignatures.GetClientSignature(sigs::update_local_player_vision_flags);
         if (!addr)
             return;
-        g_nLocalPlayerVisionFlags             = *reinterpret_cast<int **>(addr + 2);
-        g_nLocalPlayerVisionFlagsWeaponsCheck = *reinterpret_cast<int **>(addr + 8 + 2);
-        addr += 17;
-        UpdateLocalPlayerVisionFlags_fn = UpdateLocalPlayerVisionFlags_t(e8call_direct(addr));
-
-        auto relAddr = ((uintptr_t) UpdateLocalPlayerVisionFlags - (uintptr_t) addr) - 5;
-
-        static BytePatch patch{ addr, { 0xE8, access_ptr(relAddr, 0), access_ptr(relAddr, 1), access_ptr(relAddr, 2), access_ptr(relAddr, 3) } };
-        patch.Patch();
+        auto *code = reinterpret_cast<uint8_t *>(addr);
+        int found  = 0;
+        for (int i = 0; i < 48 && found < 2; ++i)
+        {
+            if (code[i] != 0xC7 || code[i + 1] != 0x05)
+                continue;
+            int32_t disp = *reinterpret_cast<int32_t *>(code + i + 2);
+            int *global  = reinterpret_cast<int *>(addr + i + 10 + disp);
+            if (found == 0)
+                g_nLocalPlayerVisionFlagsWeaponsCheck = global;
+            else
+                g_nLocalPlayerVisionFlags = global;
+            ++found;
+            i += 9;
+        }
+        if (!g_nLocalPlayerVisionFlags || !g_nLocalPlayerVisionFlagsWeaponsCheck)
+            return;
+        vision_detour.Init(addr, (void *) UpdateLocalPlayerVisionFlags);
         EC::Register(
-            EC::Shutdown, []() { patch.Shutdown(); }, "shutdown_pyrovis");
+            EC::Shutdown, []() { vision_detour.Shutdown(); }, "shutdown_pyrovis");
 #if !ENFORCE_STREAM_SAFETY
         EC::Register(
             EC::Paint,
@@ -979,35 +924,12 @@ static InitRoutine init_pyrovision(
                 }
             },
             "remove_cart_cond");
-        static BytePatch cart_patch1(uintptr_t(0), { 0x90, 0xE9 });
-        static BytePatch cart_patch2(uintptr_t(0), { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
         if (unlimit_bumpercart_movement)
-        {
-            cart_patch1.Patch();
-            cart_patch2.Patch();
-        }
+            set_kart_unlimited(true);
         unlimit_bumpercart_movement.installChangeCallback(
-            [](settings::VariableBase<bool> &, bool after)
-            {
-                if (after)
-                {
-                    cart_patch1.Patch();
-                    cart_patch2.Patch();
-                }
-                else
-                {
-                    cart_patch1.Shutdown();
-                    cart_patch2.Shutdown();
-                }
-            });
+            [](settings::VariableBase<bool> &, bool after) { set_kart_unlimited(after); });
         EC::Register(
-            EC::Shutdown,
-            []()
-            {
-                cart_patch1.Shutdown();
-                cart_patch2.Shutdown();
-            },
-            "cartpatch_shutdown");
+            EC::Shutdown, []() { set_kart_unlimited(false); }, "cartpatch_shutdown");
         ping_reducer.installChangeCallback(
             [](settings::VariableBase<bool> &, bool)
             {
@@ -1091,32 +1013,14 @@ static InitRoutine init(
         if (render_zoomed)
             tryPatchLocalPlayerShouldDraw(true);
         render_zoomed.installChangeCallback([](settings::VariableBase<bool> &, bool after) { tryPatchLocalPlayerShouldDraw(after); });
-        /*
-        patch_playerpanel     = std::make_unique<BytePatch>(gSignatures.GetClientSignature, "0F 94 45 ? 85 C0 0F 8E", 0x0, std::vector<unsigned char>{ 0xC6, 0x45, 0xDF, 0x01 });
-        uintptr_t addr_scrbrd = gSignatures.GetClientSignature("8B 10 89 74 24 04 89 04 24 FF 92 ? ? ? ? 83 F8 02 75 09");
-
-        // Address to the function we need to jump to
-        uintptr_t target_addr = e8call_direct(gSignatures.GetClientSignature("E8 ? ? ? ? 83 FE 2D"));
-        uintptr_t rel_addr    = ((uintptr_t) target_addr - ((uintptr_t) addr_scrbrd + 2)) - 5;
-
-        patch_scoreboard1 = std::make_unique<BytePatch>(addr_scrbrd, std::vector<unsigned char>{ 0xEB, 0x31, 0xE8, foffset(rel_addr, 0), foffset(rel_addr, 1), foffset(rel_addr, 2), foffset(rel_addr, 3), 0xE9, 0xC9, 0x06, 0x00, 0x00 });
-        patch_scoreboard2 = std::make_unique<BytePatch>(addr_scrbrd + 0xA0, std::vector<unsigned char>{ 0xE9, 0x5D, 0xFF, 0xFF, 0xFF });
-        patch_scoreboard3 = std::make_unique<BytePatch>(addr_scrbrd + 0x84A, std::vector<unsigned char>{ 0x8f, 0xFE });
-        patch_playerpanel->Patch();
-        patch_scoreboard1->Patch();
-        patch_scoreboard2->Patch();
-        patch_scoreboard3->Patch();
-        */
         static BytePatch stealth_kill{ gSignatures.GetClientSignature, sigs::stealth_kill_notice, 15, { 0xEB } };
         if (dont_hide_stealth_kills)
             stealth_kill.Patch();
-        static BytePatch cyoa_patch{ uintptr_t(0), { 0xEB } };
         EC::Register(
             EC::Shutdown,
             []()
             {
                 stealth_kill.Shutdown();
-                cyoa_patch.Shutdown();
                 tryPatchLocalPlayerShouldDraw(false);
                 force_wait_func(false);
             },
@@ -1174,7 +1078,7 @@ void CC_DumpVars(const CCommand& args) {
     int idx = atoi(args[1]);
     CachedEntity* ent = ENTITY(idx);
     if (CE_BAD(ent)) return;
-    ClientClass* clz = RAW_ENT(ent)->GetClientClass();
+    ClientClass* clz = EntClientClass(RAW_ENT(ent));
     logging::Info("Entity %i: %s", ent->m_IDX, clz->GetName());
     const char* ft = (args.ArgC() > 1 ? args[2] : 0);
     DumpRecvTable(ent, clz->m_pRecvTable, 0, ft, 0);

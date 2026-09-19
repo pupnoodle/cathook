@@ -229,7 +229,6 @@ bool FormatSpamMessage(std::string &message)
     ReplaceSpecials(message);
     bool team       = g_pLocalPlayer->team - 2;
     bool enemy_team = !team;
-    IF_GAME(IsTF2())
     {
         ReplaceString(message, "%myteam%", teams[team]);
         ReplaceString(message, "%enemyteam%", teams[enemy_team]);
@@ -244,7 +243,6 @@ static size_t current_teamspam_idx = 0;
 
 static void CreateMove()
 {
-    IF_GAME(IsTF2())
     {
         // Spam changes the tournament name in casual and compeditive gamemodes
         if (teamname_spam)

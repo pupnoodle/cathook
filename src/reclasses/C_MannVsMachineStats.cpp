@@ -9,9 +9,14 @@ using namespace re;
 
 C_MannVsMachineStats *C_MannVsMachineStats::G_MannVsMachineStats()
 {
-    return nullptr;
+    typedef C_MannVsMachineStats *(*fn_t)();
+    static auto fn = fn_t(SigAdd(gSignatures.GetClientSignature(sigs::mvm_stats_singleton), sigs::mvm_stats_singleton_offset));
+    return fn ? fn() : nullptr;
 }
-int *C_MannVsMachineStats::AddLocalPlayerUpgrade(int, int &)
+
+int *C_MannVsMachineStats::AddLocalPlayerUpgrade(int id, int &item_def)
 {
-    return nullptr;
+    typedef int *(*fn_t)(C_MannVsMachineStats *, int, int16_t);
+    static auto fn = fn_t(gSignatures.GetClientSignature(sigs::mvm_add_local_player_upgrade));
+    return fn ? fn(this, id, int16_t(item_def)) : nullptr;
 }

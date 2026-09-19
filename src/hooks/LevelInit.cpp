@@ -12,6 +12,9 @@
 #include "MiscTemporary.hpp"
 #include "navparser.hpp"
 #include "AntiAntiAim.hpp"
+#if ENABLE_IMGUI_DRAWING
+#include "visual/imgui/imrenderer.hpp"
+#endif
 
 static settings::Boolean halloween_mode{ "misc.force-halloween", "false" };
 static settings::Int skybox_changer{ "misc.skybox-override", "0" };
@@ -57,6 +60,10 @@ DEFINE_HOOKED_METHOD(LevelInit, void, void *this_, const char *name)
     g_IEngine->ClientCmd_Unrestricted("exec cat_matchexec");
     chat_stack::Reset();
     original::LevelInit(this_, name);
+    logging::Info("LevelInit map=%s", name ? name : "?");
+#if ENABLE_IMGUI_DRAWING
+    im_renderer::resetFrameLog();
+#endif
     EC::run(EC::LevelInit);
 #if ENABLE_IPC
     if (ipc::peer)

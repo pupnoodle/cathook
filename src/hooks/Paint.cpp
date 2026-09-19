@@ -14,12 +14,14 @@
 #include "drawmgr.hpp"
 #endif
 extern settings::Boolean die_if_vac;
+void prof_arm_main_thread();
 static Timer checkmmban{};
 namespace hooked_methods
 {
 
 DEFINE_HOOKED_METHOD(Paint, void, IEngineVGui *this_, PaintMode_t mode)
 {
+    prof_arm_main_thread(); // TEMP: main-thread sampler
     if (!isHackActive())
     {
         return original::Paint(this_, mode);
@@ -28,8 +30,7 @@ DEFINE_HOOKED_METHOD(Paint, void, IEngineVGui *this_, PaintMode_t mode)
     if (!g_IEngine->IsInGame())
         g_Settings.bInvalid = true;
 
-    INetChannel *ch;
-    ch = (INetChannel *) g_IEngine->GetNetChannelInfo();
+    CNetChan *ch = g_IEngine->GetNetChannelInfo();
     if (ch && !hooks::netchannel.IsHooked((void *) ch))
     {
         hooks::netchannel.Set(ch);
@@ -93,8 +94,8 @@ DEFINE_HOOKED_METHOD(Paint, void, IEngineVGui *this_, PaintMode_t mode)
             last_stdin = std::chrono::system_clock::now();
         }
 #endif
-        // MOVED BACK because glez and imgui flicker in painttraveerse
-#if ENABLE_IMGUI_DRAWING || ENABLE_GLEZ_DRAWING
+        // IMGUI is presented from SDL_GL_SwapWindow on the GL thread.
+#if ENABLE_GLEZ_DRAWING
         render_cheat_visuals();
 #endif
         // Call all paint functions

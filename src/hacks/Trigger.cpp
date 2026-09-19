@@ -154,7 +154,6 @@ bool ShouldShoot()
     if (!UpdateAimkey())
         return false;
 
-    IF_GAME(IsTF2())
     {
         // Check if Carrying A building
         if (CE_BYTE(g_pLocalPlayer->entity, netvar.m_bCarryingObject))
@@ -186,7 +185,6 @@ bool ShouldShoot()
         }
     }
 
-    IF_GAME(IsTF2())
     {
         switch (GetWeaponMode())
         {
@@ -203,7 +201,6 @@ bool ShouldShoot()
             return false;
         };
     }
-    IF_GAME(IsTF())
     {
         // Check if player is zooming
         if (g_pLocalPlayer->bZoomed)
@@ -240,7 +237,6 @@ bool IsTargetStateGood(CachedEntity *entity, std::optional<tf2::backtrack::Backt
         if (!player_tools::shouldTarget(entity))
             return false;
 
-        IF_GAME(IsTF())
         {
             // If settings allow waiting for charge, and current charge cant
             // kill target, dont aim
@@ -391,7 +387,7 @@ CachedEntity *FindEntInSight(float range, bool no_players)
     if (trace.DidHit() && trace.m_pEnt && (IClientEntity *) trace.m_pEnt != g_IEntityList->GetClientEntity(0))
     {
         last_hb_traced    = trace.hitbox;
-        CachedEntity *ent = ENTITY(((IClientEntity *) trace.m_pEnt)->entindex());
+        CachedEntity *ent = ENTITY(EntIndex(reinterpret_cast<IClientEntity *>(trace.m_pEnt)));
         // Player check
         if (!no_players || ent->m_Type() != ENTITY_PLAYER)
             return ent;
@@ -412,7 +408,6 @@ bool HeadPreferable(CachedEntity *target)
     { // AUTO-HEAD priority
         // Var to keep if we can bodyshot
         bool headonly = false;
-        IF_GAME(IsTF())
         {
             // If user is using a sniper rifle, Set headonly to whether we can
             // headshot or not,
@@ -472,11 +467,6 @@ bool HeadPreferable(CachedEntity *target)
                     headonly = false;
                 }
             }
-            // In counter-strike source, headshots are what we want
-        }
-        else IF_GAME(IsCSS())
-        {
-            headonly = true;
         }
         // Return our var of if we need to headshot
         return headonly;

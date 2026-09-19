@@ -63,7 +63,6 @@ bool IsTarget(CachedEntity *ent)
         if (!player_tools::shouldTarget(ent))
             return false;
 
-        IF_GAME(IsTF())
         {
             // Dont target invulnerable players, ex: uber, bonk
             if (IsPlayerInvulnerable(ent))
@@ -98,9 +97,6 @@ static void CreateMove()
     // Check user settings if auto-sticky is enabled
     if (!enable)
         return;
-
-    // Check if game is a tf game
-    // IF_GAME (!IsTF()) return;
 
     // Check if player is demoman
     if (g_pLocalPlayer->clazz != tf_demoman)
@@ -150,9 +146,7 @@ static void CreateMove()
         // Don't blow yourself up
         if (dontblowmeup)
         {
-            auto collideable = RAW_ENT(LOCAL_E)->GetCollideable();
-
-            auto position = LOCAL_E->m_vecOrigin() + (collideable->OBBMins() + collideable->OBBMaxs()) / 2;
+            auto position = LOCAL_E->m_vecOrigin() + (EntOBBMins(RAW_ENT(LOCAL_E)) + EntOBBMaxs(RAW_ENT(LOCAL_E))) / 2;
             if (bomb->m_vecOrigin().DistTo(position) < 130)
             {
                 // Vis check the target from the bomb
@@ -166,9 +160,7 @@ static void CreateMove()
             auto position = target->m_vecDormantOrigin();
             if (!position)
                 continue;
-            auto collideable = RAW_ENT(target)->GetCollideable();
-
-            position = *position + (collideable->OBBMins() + collideable->OBBMaxs()) / 2;
+            position = *position + (EntOBBMins(RAW_ENT(target)) + EntOBBMaxs(RAW_ENT(target))) / 2;
 
             if (!found)
                 if (bomb->m_vecOrigin().DistTo(*position) < *min_dist)

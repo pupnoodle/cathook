@@ -62,9 +62,6 @@ static settings::Boolean item_explosive{ "esp.item.explosive", "true" };
 static settings::Boolean item_crumpkin{ "esp.item.crumpkin", "true" };
 static settings::Boolean item_gargoyle{ "esp.item.gargoyle", "true" };
 static settings::Boolean item_objectives{ "esp.item.objectives", "false" };
-// TF2C
-static settings::Boolean item_weapon_spawners{ "esp.item.weapon-spawner", "true" };
-static settings::Boolean item_adrenaline{ "esp.item.adrenaline", "true" };
 
 static settings::Boolean proj_esp{ "esp.projectile.enable", "false" };
 static settings::Int proj_rockets{ "esp.projectile.rockets", "1" };
@@ -106,7 +103,7 @@ void SetEntityColor(CachedEntity *entity, const rgba_t &color)
 inline void repaintEnt(CachedEntity *ent, float distance)
 {
     rgba_t color = colors::EntityF(ent);
-    if (RAW_ENT(ent)->IsDormant())
+    if (EntIsDormant(RAW_ENT(ent)))
     {
         color.r *= 0.5f;
         color.g *= 0.5f;
@@ -175,7 +172,12 @@ void bonelist_s::Setup(const studiohdr_t *hdr)
         return;
     }
     bones.clear();
-    for (int i = 0; i < hdr->numbones; ++i)
+    int n = hdr->numbones;
+    if (n < 0)
+        n = 0;
+    if (n > 128)
+        n = 128;
+    for (int i = 0; i < n; ++i)
         bones.emplace(std::make_pair(std::string(hdr->pBone(i)->pszName()), i));
     for (const auto &spine_str : bonenames_spine)
         if (bones.contains(spine_str))
@@ -218,7 +220,7 @@ void _FASTCALL bonelist_s::DrawBoneList(const matrix3x4_t *bones, std::vector<in
 
 void _FASTCALL bonelist_s::Draw(CachedEntity *ent, const rgba_t &color)
 {
-    const model_t *model = RAW_ENT(ent)->GetModel();
+    const model_t *model = EntGetModel(RAW_ENT(ent));
     if (!model)
         return;
 
@@ -287,12 +289,9 @@ const std::string sentry_str               = "Sentry Gun";
 const std::string dispenser_str            = "Dispenser";
 const std::string rare_spell_str           = "Rare Spell";
 const std::string spell_str                = "Spell";
-const std::string tf2c_spawner_respawn_str = "-- Respawning --";
 const std::string ammo_big_str             = "Big Ammo";
 const std::string ammo_medium_str          = "Medium Ammo";
 const std::string ammo_small_str           = "Small Ammo";
-const std::string tf2c_adrenaline_str      = "[a]";
-const std::string hl_battery_str           = "[Z]";
 const std::string health_big_str           = "Big Medkit";
 const std::string health_medium_str        = "Medium Medkit";
 const std::string health_small_str         = "Small Medkit";
@@ -674,7 +673,7 @@ void _FASTCALL BoxEsp(EntityType &type, bool &transparent, rgba_t &fg, CachedEnt
             fg = colors::EntityF(ent);
         if (transparent)
             fg = colors::Transparent(fg);
-        if (RAW_ENT(ent)->IsDormant())
+        if (EntIsDormant(RAW_ENT(ent)))
         {
             fg.r *= 0.75f;
             fg.g *= 0.75f;
@@ -692,7 +691,7 @@ void _FASTCALL BoxEsp(EntityType &type, bool &transparent, rgba_t &fg, CachedEnt
             fg = colors::EntityF(ent);
         if (transparent)
             fg = colors::Transparent(fg);
-        if (RAW_ENT(ent)->IsDormant())
+        if (EntIsDormant(RAW_ENT(ent)))
         {
             fg.r *= 0.75f;
             fg.g *= 0.75f;
@@ -748,7 +747,7 @@ void _FASTCALL BoxEsp(EntityType &type, bool &transparent, rgba_t &fg, CachedEnt
 void _FASTCALL ShowConditions(CachedEntity *ent)
 {
     auto clr = colors::EntityF(ent);
-    if (RAW_ENT(ent)->IsDormant())
+    if (EntIsDormant(RAW_ENT(ent)))
     {
         clr.r *= 0.5f;
         clr.g *= 0.5f;
@@ -820,7 +819,7 @@ void _FASTCALL ShowConditions(CachedEntity *ent)
     if (HasCondition<TFCond_Taunting>(ent))
         AddEntityString(ent, taunting_str, colors::FromRGBA8(220.0f, 220.0f, 220.0f, 255.0f));
     // Dormant
-    if (CE_VALID(ent) && RAW_ENT(ent)->IsDormant())
+    if (CE_VALID(ent) && EntIsDormant(RAW_ENT(ent)))
         AddEntityString(ent, dormant_str, colors::red);
 }
 // Used when processing entitys with cached data from createmove in draw
@@ -834,7 +833,7 @@ void ProcessEntityPT()
             continue;
         // Dormant
         bool dormant = false;
-        if (RAW_ENT(ent)->IsDormant())
+        if (EntIsDormant(RAW_ENT(ent)))
         {
             if (!ent->m_vecDormantOrigin())
                 continue;
@@ -895,7 +894,7 @@ void ProcessEntityPT()
             static bonelist_s bl;
             bl.success = false;
             bl.setup   = false;
-            if (!CE_INVALID(ent) && ent->m_bAlivePlayer() && !RAW_ENT(ent)->IsDormant())
+            if (!CE_INVALID(ent) && ent->m_bAlivePlayer() && !EntIsDormant(RAW_ENT(ent)))
             {
                 if (bones_color)
                     bl.Draw(ent, bone_color);
@@ -947,7 +946,7 @@ void _FASTCALL ProcessEntity(CachedEntity *ent)
         }
         if (entity_model)
         {
-            const model_t *model = RAW_ENT(ent)->GetModel();
+            const model_t *model = EntGetModel(RAW_ENT(ent));
             if (model)
                 AddEntityString(ent, std::string(g_IModelInfo->GetModelName(model)));
         }
@@ -1079,7 +1078,6 @@ void _FASTCALL ProcessEntity(CachedEntity *ent)
                     int max_health = g_pPlayerResource->GetMaxHealth(ent);
                     AddEntityString(ent, format(health, '/', max_health, " HP"), colors::Health(health, max_health));
                 }
-                IF_GAME(IsTF())
                 {
                     // Medigun Ubercharge esp
                     if (show_ubercharge)
@@ -1371,7 +1369,7 @@ void _FASTCALL ProcessEntity(CachedEntity *ent)
             {
                 rgba_t color = colors::empty;
                 // Health pack esp
-                if (item_health_packs && ((itemtype >= ITEM_HEALTH_SMALL && itemtype <= EDIBLE_MEDIUM) || itemtype == ITEM_HL_BATTERY))
+                if (item_health_packs && (itemtype >= ITEM_HEALTH_SMALL && itemtype <= EDIBLE_MEDIUM))
                 {
                     switch (itemtype)
                     {
@@ -1384,9 +1382,6 @@ void _FASTCALL ProcessEntity(CachedEntity *ent)
                     case ITEM_HEALTH_LARGE:
                         write_str = health_big_str;
                         break;
-                    case ITEM_HL_BATTERY:
-                        write_str = hl_battery_str;
-                        break;
                     case EDIBLE_MEDIUM:
                         write_str = mediumhealth_str;
                         color     = colors::green;
@@ -1396,12 +1391,6 @@ void _FASTCALL ProcessEntity(CachedEntity *ent)
                         color     = colors::green;
                         break;
                     }
-                    // TF2C Adrenaline esp
-                }
-                else if (item_adrenaline && itemtype == ITEM_TF2C_PILL)
-                {
-                    write_str = pill_str;
-
                     // Ammo pack esp
                 }
                 else if (item_ammo_packs && itemtype >= ITEM_AMMO_SMALL && itemtype <= ITEM_AMMO_LARGE)
@@ -1423,14 +1412,6 @@ void _FASTCALL ProcessEntity(CachedEntity *ent)
                 else if (item_powerups && itemtype >= ITEM_POWERUP_FIRST && itemtype <= ITEM_POWERUP_LAST)
                 {
                     write_str = powerups[itemtype - ITEM_POWERUP_FIRST];
-
-                    // TF2C weapon spawner esp
-                }
-                else if (item_weapon_spawners && itemtype >= ITEM_TF2C_W_FIRST && itemtype <= ITEM_TF2C_W_LAST)
-                {
-                    write_str = std::string(tf2c_weapon_names[itemtype - ITEM_TF2C_W_FIRST]) + " Spawner";
-                    if (CE_BYTE(ent, netvar.bRespawning))
-                        AddEntityString(ent, tf2c_spawner_respawn_str);
                 }
                 // Halloween spell esp
                 else if (item_spellbooks && (itemtype == ITEM_SPELL || itemtype == ITEM_SPELL_RARE))
@@ -1476,11 +1457,11 @@ void _FASTCALL Draw3DBox(CachedEntity *ent, const rgba_t &clr)
     if (CE_INVALID(ent) || !ent->m_bAlivePlayer())
         return;
 
-    Vector origin = RAW_ENT(ent)->GetCollideable()->GetCollisionOrigin();
-    Vector mins   = RAW_ENT(ent)->GetCollideable()->OBBMins();
-    Vector maxs   = RAW_ENT(ent)->GetCollideable()->OBBMaxs();
+    Vector origin = EntCollisionOrigin(RAW_ENT(ent));
+    Vector mins   = EntOBBMins(RAW_ENT(ent));
+    Vector maxs   = EntOBBMaxs(RAW_ENT(ent));
     // Dormant
-    if (RAW_ENT(ent)->IsDormant())
+    if (EntIsDormant(RAW_ENT(ent)))
     {
         origin = *ent->m_vecDormantOrigin();
     }
@@ -1618,17 +1599,17 @@ bool GetCollide(CachedEntity *ent)
     {
 
         // Get collision center, max, and mins
-        Vector origin = RAW_ENT(ent)->GetCollideable()->GetCollisionOrigin();
+        Vector origin = EntCollisionOrigin(RAW_ENT(ent));
         // Dormant
-        if (RAW_ENT(ent)->IsDormant())
+        if (EntIsDormant(RAW_ENT(ent)))
         {
             auto vec = ent->m_vecDormantOrigin();
             if (!vec)
                 return false;
             origin = *vec;
         }
-        Vector mins = RAW_ENT(ent)->GetCollideable()->OBBMins() + origin;
-        Vector maxs = RAW_ENT(ent)->GetCollideable()->OBBMaxs() + origin;
+        Vector mins = EntOBBMins(RAW_ENT(ent)) + origin;
+        Vector maxs = EntOBBMaxs(RAW_ENT(ent)) + origin;
 
         // Create a array for storing box points
         Vector points_r[8]; // World vectors

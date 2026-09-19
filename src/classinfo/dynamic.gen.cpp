@@ -380,41 +380,34 @@ dynamic::dynamic()
     classid_mapping["CBaseGrenade"]                          = &CBaseGrenade;
     classid_mapping["CBaseCombatWeapon"]                     = &CBaseCombatWeapon;
     classid_mapping["CVoteController"]                       = &CVoteController;
-    classid_mapping["CWeaponSpawner"]                        = &CWeaponSpawner;
-    classid_mapping["CCSPlayerResource"]                     = &CCSPlayerResource;
-    classid_mapping["CCSPlayer"]                             = &CCSPlayer;
-    classid_mapping["CHL2MP_Player"]                         = &CHL2MP_Player;
-    classid_mapping["CWeaponStunStick"]                      = &CWeaponStunStick;
-    classid_mapping["CWeaponSMG1"]                           = &CWeaponSMG1;
-    classid_mapping["CWeapon_SLAM"]                          = &CWeapon_SLAM;
-    classid_mapping["CWeaponShotgun"]                        = &CWeaponShotgun;
-    classid_mapping["CWeaponRPG"]                            = &CWeaponRPG;
-    classid_mapping["CWeaponPistol"]                         = &CWeaponPistol;
-    classid_mapping["CWeaponPhysCannon"]                     = &CWeaponPhysCannon;
-    classid_mapping["CWeaponAnnabelle"]                      = &CWeaponAnnabelle;
-    classid_mapping["CWeaponBinoculars"]                     = &CWeaponBinoculars;
-    classid_mapping["CWeaponBugBait"]                        = &CWeaponBugBait;
-    classid_mapping["CWeaponHL2MPBase"]                      = &CWeaponHL2MPBase;
-    classid_mapping["CWeaponFrag"]                           = &CWeaponFrag;
-    classid_mapping["CWeaponCrowbar"]                        = &CWeaponCrowbar;
-    classid_mapping["CWeaponCrossbow"]                       = &CWeaponCrossbow;
-    classid_mapping["CWeaponAR2"]                            = &CWeaponAR2;
-    classid_mapping["CWeapon357"]                            = &CWeapon357;
-    classid_mapping["CWeaponCitizenSuitcase"]                = &CWeaponCitizenSuitcase;
-    classid_mapping["CWeaponCitizenPackage"]                 = &CWeaponCitizenPackage;
-    classid_mapping["CWeaponAlyxGun"]                        = &CWeaponAlyxGun;
 }
 
 void dynamic::Populate()
 {
+    if (!g_IBaseClient)
+        return;
     ClientClass *cc = g_IBaseClient->GetAllClasses();
+    int walked = 0, mapped = 0, nonzero = 0;
     while (cc)
     {
-        std::string name(cc->GetName());
-        if (classid_mapping.find(name) != classid_mapping.end())
-            *classid_mapping[name] = cc->m_ClassID;
+        const char *raw = cc->GetName();
+        if (raw && raw[0])
+        {
+            if (walked < 8)
+                logging::Info("ClientClass [%d] %s", cc->m_ClassID, raw);
+            ++walked;
+            if (cc->m_ClassID)
+                ++nonzero;
+            auto it = classid_mapping.find(std::string(raw));
+            if (it != classid_mapping.end())
+            {
+                *it->second = cc->m_ClassID;
+                ++mapped;
+            }
+        }
         cc = cc->m_pNext;
     }
+    logging::Info("ClientClass walk=%d mapped=%d nonzero=%d", walked, mapped, nonzero);
 }
 
 dynamic dynamic_list;

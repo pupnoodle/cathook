@@ -115,7 +115,7 @@ void Update()
         // Resolver
         if (LOCAL_W->m_iClassID() == CL_CLASS(CTFSniperRifle) || LOCAL_W->m_iClassID() == CL_CLASS(CTFSniperRifleDecap))
         {
-            auto ch = (INetChannel *) g_IEngine->GetNetChannelInfo();
+            auto ch = g_IEngine->GetNetChannelInfo();
             if (ch)
                 for (int i = 1; i < PLAYER_ARRAY_SIZE; i++)
                 {

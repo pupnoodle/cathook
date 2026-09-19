@@ -260,9 +260,9 @@ bool ShouldRenderChams(IClientEntity *entity)
     }
     if (!enable)
         return false;
-    if (entity->entindex() < 0)
+    if (EntIndex(entity) < 0)
         return false;
-    CachedEntity *ent = ENTITY(entity->entindex());
+    CachedEntity *ent = ENTITY(EntIndex(entity));
     if (ent && LOCAL_E && ent->m_IDX == LOCAL_E->m_IDX)
         return *chamsself;
 
@@ -336,7 +336,7 @@ bool ShouldRenderChams(IClientEntity *entity)
 // Purpose => Get ChamColors struct from internal entity
 static ChamColors GetChamColors(IClientEntity *entity, bool ignorez)
 {
-    CachedEntity *ent = ENTITY(entity->entindex());
+    CachedEntity *ent = ENTITY(EntIndex(entity));
 
     if (CE_BAD(ent))
         return ChamColors(colors::white);
@@ -409,9 +409,9 @@ static ChamColors GetChamColors(IClientEntity *entity, bool ignorez)
 // Purpose => Render entity attachments (weapons, hats)
 void RenderAttachment(IClientEntity *entity, IClientEntity *attach, CMaterialReference &mat)
 {
-    if (attach->ShouldDraw())
+    if (EntRenderableShouldDraw(attach))
     {
-        attachment_draw_list.emplace_back(attach->entindex(), entity->entindex());
+        attachment_draw_list.emplace_back(EntIndex(attach), EntIndex(entity));
         ClientClass *owner_cc = EntClientClass(entity);
         if (owner_cc && owner_cc->m_ClassID == RCC_PLAYER && re::C_BaseCombatWeapon::IsBaseCombatWeapon(attach))
         {
@@ -426,10 +426,10 @@ void RenderAttachment(IClientEntity *entity, IClientEntity *attach, CMaterialRef
                 // Setup material
                 g_IVRenderView->SetBlend((*weapons_base).a);
                 if (mat && envmap)
-                    mat->FindVar("$envmaptint", nullptr)->SetVecValue(*envmap_tint_weapons_r, *envmap_tint_weapons_g, *envmap_tint_weapons_b);
+                    LiveMaterial(mat)->FindVar("$envmaptint", nullptr)->SetVecValue(*envmap_tint_weapons_r, *envmap_tint_weapons_g, *envmap_tint_weapons_b);
 
                 // Render
-                attach->DrawModel(1);
+                EntDrawModel(attach, 1);
 
                 if (overlay_chams)
                 {
@@ -437,10 +437,10 @@ void RenderAttachment(IClientEntity *entity, IClientEntity *attach, CMaterialRef
                     g_IVRenderView->SetColorModulation(*weapons_overlay);
                     g_IVRenderView->SetBlend((*weapons_overlay).a);
                     if (mat && envmap)
-                        mat->FindVar("$envmaptint", nullptr)->SetVecValue(*envmap_tint_weapons_r, *envmap_tint_weapons_g, *envmap_tint_weapons_b);
+                        LiveMaterial(mat)->FindVar("$envmaptint", nullptr)->SetVecValue(*envmap_tint_weapons_r, *envmap_tint_weapons_g, *envmap_tint_weapons_b);
 
                     // Render
-                    attach->DrawModel(1);
+                    EntDrawModel(attach, 1);
                 }
 
                 // Reset it!
@@ -448,11 +448,11 @@ void RenderAttachment(IClientEntity *entity, IClientEntity *attach, CMaterialRef
             }
             else
             {
-                attach->DrawModel(1);
+                EntDrawModel(attach, 1);
             }
         }
         else
-            attach->DrawModel(1);
+            EntDrawModel(attach, 1);
     }
 }
 
@@ -473,13 +473,13 @@ void RenderChamsRecursive(IClientEntity *entity, CMaterialReference &mat, IVMode
     IClientEntity *attach;
     int passes = 0;
 
-    attach = g_IEntityList->GetClientEntity(HandleToIDX(*(int *) ((uintptr_t) entity + netvar.m_Collision - 24)));
+    attach = re::C_BaseEntity::FirstMoveChild(entity);
     while (attach && passes++ < 32)
     {
         chams_attachment_drawing = true;
         RenderAttachment(entity, attach, mat);
         chams_attachment_drawing = false;
-        attach                   = g_IEntityList->GetClientEntity(HandleToIDX(*(int *) ((uintptr_t) attach + netvar.m_Collision - 20)));
+        attach                   = re::C_BaseEntity::NextMovePeer(attach);
     }
 #endif
 }
@@ -494,13 +494,13 @@ void ApplyChams(ChamColors colors, bool recurse, bool render_original, bool over
     // Setup material
     g_IVRenderView->SetColorModulation(colors.rgba);
     g_IVRenderView->SetBlend((colors.rgba).a);
-    mat->AlphaModulate((colors.rgba).a);
+    LiveMaterial(mat)->AlphaModulate((colors.rgba).a);
     if (envmap && envmap_tint)
-        mat->FindVar("$envmaptint", nullptr)->SetVecValue(colors.envmap_r, colors.envmap_g, colors.envmap_b);
+        LiveMaterial(mat)->FindVar("$envmaptint", nullptr)->SetVecValue(colors.envmap_r, colors.envmap_g, colors.envmap_b);
 
     // Setup wireframe and ignorez using material vars
-    mat->SetMaterialVarFlag(MATERIAL_VAR_IGNOREZ, ignorez);
-    mat->SetMaterialVarFlag(MATERIAL_VAR_WIREFRAME, wireframe);
+    LiveMaterial(mat)->SetMaterialVarFlag(MATERIAL_VAR_IGNOREZ, ignorez);
+    LiveMaterial(mat)->SetMaterialVarFlag(MATERIAL_VAR_WIREFRAME, wireframe);
 
     // Override
     g_IVModelRender->ForcedMaterialOverride(mat);
@@ -510,9 +510,9 @@ void ApplyChams(ChamColors colors, bool recurse, bool render_original, bool over
     if (overlay)
     {
         // Use white if no color was supplied
-        if (colors.rgba_overlay == colors::empty && entity && IDX_GOOD(entity->entindex()))
+        if (colors.rgba_overlay == colors::empty && entity && IDX_GOOD(EntIndex(entity)))
         {
-            CachedEntity *ent = ENTITY(entity->entindex());
+            CachedEntity *ent = ENTITY(EntIndex(entity));
             if (ent->m_Type() != ENTITY_PLAYER && ent->m_Type() != ENTITY_PROJECTILE && ent->m_Type() != ENTITY_BUILDING)
                 colors.rgba_overlay = colors::white;
             else
@@ -524,10 +524,10 @@ void ApplyChams(ChamColors colors, bool recurse, bool render_original, bool over
 
         static auto &mat_overlay = mats.mat_dme_lit_overlay;
         if (envmap && envmap_tint)
-            mat_overlay->FindVar("$envmaptint", nullptr)->SetVecValue(colors.envmap_r, colors.envmap_g, colors.envmap_b);
+            LiveMaterial(mat_overlay)->FindVar("$envmaptint", nullptr)->SetVecValue(colors.envmap_r, colors.envmap_g, colors.envmap_b);
 
-        mat_overlay->SetMaterialVarFlag(MATERIAL_VAR_IGNOREZ, ignorez);
-        mat_overlay->AlphaModulate((colors.rgba_overlay).a);
+        LiveMaterial(mat_overlay)->SetMaterialVarFlag(MATERIAL_VAR_IGNOREZ, ignorez);
+        LiveMaterial(mat_overlay)->AlphaModulate((colors.rgba_overlay).a);
 
         // Override and apply
         g_IVModelRender->ForcedMaterialOverride(mat_overlay);
@@ -817,14 +817,9 @@ DEFINE_HOOKED_METHOD(DrawModelExecute, void, IVModelRender *this_, const DrawMod
             }
         }
     }
-    IClientUnknown *unk = info.pRenderable->GetIClientUnknown();
-    if (unk)
-    {
-        IClientEntity *ent = unk->GetIClientEntity();
-        if (ent)
-            if (ent->entindex() == spectator_target)
-                return;
-    }
+    IClientEntity *ent = EntFromRenderable(info.pRenderable);
+    if (ent && EntIndex(ent) == spectator_target)
+        return;
     // Don't do it when we are trying to enforce backtrack chams
     // if (!hacks::tf2::backtrack::isDrawing)
     return original::DrawModelExecute(this_, state, info, bone);

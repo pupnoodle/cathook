@@ -103,7 +103,6 @@ void DrawCheatVisuals()
     }
     if (CE_GOOD(g_pLocalPlayer->entity) && !g_Settings.bInvalid)
     {
-        IF_GAME(IsTF2())
         {
             PROF_SECTION(DRAW_skinchanger);
             hacks::tf2::skinchanger::DrawText();

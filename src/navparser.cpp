@@ -646,10 +646,10 @@ static void followCrumbs()
 
         trace::filter_default.SetSelf(RAW_ENT(LOCAL_E));
 
-        ray.Init(g_pLocalPlayer->v_Origin, end, RAW_ENT(LOCAL_E)->GetCollideable()->OBBMins(), RAW_ENT(LOCAL_E)->GetCollideable()->OBBMaxs());
+        ray.Init(g_pLocalPlayer->v_Origin, end, EntOBBMins(RAW_ENT(LOCAL_E)), EntOBBMaxs(RAW_ENT(LOCAL_E)));
         g_ITrace->TraceRay(ray, MASK_PLAYERSOLID, &trace::filter_default, &trace);
         // Only reset if we are standing on a building
-        if (trace.DidHit() && trace.m_pEnt && ENTITY(((IClientEntity *) trace.m_pEnt)->entindex())->m_Type() == ENTITY_BUILDING)
+        if (trace.DidHit() && trace.m_pEnt && ENTITY(EntIndex((IClientEntity *) trace.m_pEnt))->m_Type() == ENTITY_BUILDING)
             reset_z = true;
     }
 

@@ -22,7 +22,7 @@ public:
     inline static bool Interpolate(IClientEntity *self, float time)
     {
         typedef bool (*fn_t)(IClientEntity *, float);
-        return vfunc<fn_t>(self, offsets::PlatformOffset(143, offsets::undefined, 143), 0)(self, time);
+        return vfunc<fn_t>(self, vtables::entity::interpolate, 0)(self, time);
     }
 };
 } // namespace re

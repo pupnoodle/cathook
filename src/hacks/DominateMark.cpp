@@ -30,11 +30,10 @@ static InitRoutine init([]() {
                     if (!ent->hitboxes.GetHitbox(0))
                         continue;
                     // Calculate draw pos
-                    auto c        = ent->InternalEntity()->GetCollideable();
                     auto draw_pos = ent->m_vecDormantOrigin();
                     if (!draw_pos)
                         continue;
-                    draw_pos->z += c->OBBMaxs().z;
+                    draw_pos->z += EntOBBMaxs(ent->InternalEntity()).z;
                     // Calculate draw size
                     size = *max_size * 1.5f - ent->m_flDistance() / 20.0f;
                     size = fminf(*max_size, size);

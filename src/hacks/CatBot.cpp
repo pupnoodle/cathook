@@ -376,9 +376,8 @@ static InitRoutine init_routine([]() {
                 static bool resolved  = false;
                 if (!resolved)
                 {
-                    resolved          = true;
-                    auto sig          = uintptr_t(0);
-                    addr              = sig ? e8call_direct(sig) : 0;
+                    resolved = true;
+                    addr     = gSignatures.GetClientSignature(sigs::hud_upgrade_panel_cancel_upgrades);
                 }
                 if (upgrade_panel && addr)
                 {
@@ -559,18 +558,11 @@ Timer level_init_timer{};
 
 Timer micspam_on_timer{};
 Timer micspam_off_timer{};
-static bool patched_report;
 static std::atomic_bool can_report = false;
 static std::vector<unsigned> to_report;
 void reportall()
 {
     can_report = false;
-    if (!patched_report)
-    {
-        static BytePatch patch(uintptr_t(0), { 0x89, 0xe0 });
-        patch.Patch();
-        patched_report = true;
-    }
     for (auto const &ent: entity_cache::player_cache)
     {
        

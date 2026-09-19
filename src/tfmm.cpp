@@ -123,6 +123,8 @@ void startQueue()
     re::CTFPartyClient *client = re::CTFPartyClient::GTFPartyClient();
     if (client)
     {
+        if (auto *criteria = client->MutLocalGroupCriteria(client))
+            re::ITFGroupMatchCriteria::SetMatchGroup(criteria, (int) queue);
         if (*queue == 7)
             client->LoadSavedCasualCriteria();
         client->RequestQueueForMatch((int) queue);
@@ -143,10 +145,14 @@ void startQueueStandby()
 void leaveQueue()
 {
     re::CTFPartyClient *client = re::CTFPartyClient::GTFPartyClient();
-    if (client)
-        client->RequestLeaveForMatch((int) queue);
-    else
+    if (!client)
+    {
         logging::Info("queue_start: CTFPartyClient == null!");
+        return;
+    }
+    if (client->BInQueueForStandby())
+        client->RequestLeaveStandby();
+    client->RequestLeaveForMatch((int) queue);
 }
 
 void disconnectAndAbandon()

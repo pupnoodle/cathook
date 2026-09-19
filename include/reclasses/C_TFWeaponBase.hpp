@@ -42,12 +42,12 @@ public:
     inline static int GetWeaponID(IClientEntity *self)
     {
         typedef int (*fn_t)(IClientEntity *);
-        return vfunc<fn_t>(self, 451, 0)(self);
+        return vfunc<fn_t>(self, vtables::weapon::get_weapon_id, 0)(self);
     }
     inline static bool IsViewModelFlipped(IClientEntity *self)
     {
-        typedef bool (*fn_t)(IClientEntity *);
-        return vfunc<fn_t>(self, offsets::PlatformOffset(501, offsets::undefined, 501), 0)(self);
+        static lazy_netvar flip{ "DT_TFWeaponBase", "m_bFlipViewModel" };
+        return self && flip && NET_VAR(self, flip, bool);
     }
     inline static IClientEntity *GetOwnerViaInterface(IClientEntity *self)
     {
@@ -55,13 +55,29 @@ public:
     }
     inline static bool UsesPrimaryAmmo(IClientEntity *self)
     {
-        typedef bool (*fn_t)(IClientEntity *);
-        return vfunc<fn_t>(self, offsets::PlatformOffset(452, offsets::undefined, 452), 0)(self);
+        if (!self || !netvar.m_iPrimaryAmmoType)
+            return false;
+        return NET_INT(self, netvar.m_iPrimaryAmmoType) >= 0;
     }
     inline static bool HasPrimaryAmmo(IClientEntity *self)
     {
-        typedef bool (*fn_t)(IClientEntity *);
-        return vfunc<fn_t>(self, offsets::PlatformOffset(320, offsets::undefined, 320), 0)(self);
+        if (!UsesPrimaryAmmo(self))
+            return false;
+        if (netvar.m_iClip1)
+        {
+            int clip = NET_INT(self, netvar.m_iClip1);
+            if (clip > 0)
+                return true;
+            if (clip < 0)
+                return true;
+        }
+        IClientEntity *owner = GetOwnerViaInterface(self);
+        if (!owner || !netvar.m_iAmmo || !netvar.m_iPrimaryAmmoType)
+            return false;
+        int ammo_type = NET_INT(self, netvar.m_iPrimaryAmmoType);
+        if (ammo_type < 0)
+            return false;
+        return reinterpret_cast<int *>(uintptr_t(owner) + netvar.m_iAmmo)[ammo_type] > 0;
     }
     inline static bool AreRandomCritsEnabled(IClientEntity *self)
     {
@@ -78,94 +94,49 @@ public:
         }
         return tf_weapon_criticals && tf_weapon_criticals->GetInt() != 0;
     }
+    inline static int WeaponVtableSlot(IClientEntity *self, const char *sig, int fallback)
+    {
+        if (!self)
+            return fallback;
+        auto *fn = reinterpret_cast<void *>(gSignatures.GetClientSignature(sig));
+        auto **vt = *reinterpret_cast<void ***>(self);
+        if (!fn || !vt)
+            return fallback;
+        for (int i = 2; i < 600; ++i)
+            if (vt[i] == fn)
+                return i;
+        return fallback;
+    }
     inline static bool CalcIsAttackCriticalHelper(IClientEntity *self)
     {
         typedef bool (*fn_t)(IClientEntity *);
-        return vfunc<fn_t>(self, 468, 0)(self);
+        static int slot = -1;
+        if (slot < 0)
+            slot = WeaponVtableSlot(self, sigs::ctf_weapon_base_calc_is_attack_critical, int(vtables::weapon::calc_is_attack_critical_helper));
+        return vfunc<fn_t>(self, slot, 0)(self);
     }
     inline static bool CalcIsAttackCriticalHelperNoCrits(IClientEntity *self)
     {
         typedef bool (*fn_t)(IClientEntity *);
-        return vfunc<fn_t>(self, 469, 0)(self);
+        static int slot = -1;
+        if (slot < 0)
+            slot = WeaponVtableSlot(self, sigs::ctf_weapon_base_melee_calc_is_attack_critical, int(vtables::weapon::calc_is_attack_critical_helper_no_crits));
+        return vfunc<fn_t>(self, slot, 0)(self);
     }
     inline static bool CanFireCriticalShot(IClientEntity *self, bool unknown1, IClientEntity *unknown2)
     {
         typedef bool (*fn_t)(IClientEntity *, bool, IClientEntity *);
-        return vfunc<fn_t>(self, offsets::PlatformOffset(497, offsets::undefined, 497), 0)(self, unknown1, unknown2);
+        return vfunc<fn_t>(self, vtables::weapon::can_fire_critical_shot, 0)(self, unknown1, unknown2);
     }
     inline static float ApplyFireDelay(IClientEntity *self, float delay)
     {
         typedef float (*fn_t)(IClientEntity *, float);
-        return vfunc<fn_t>(self, 481, 0)(self, delay);
+        return vfunc<fn_t>(self, vtables::weapon::apply_fire_delay, 0)(self, delay);
     }
     inline static void AddToCritBucket(IClientEntity *self, float value)
     {
         constexpr float max_bucket_capacity = 1000.0f;
         crit_bucket_(self)                  = fminf(crit_bucket_(self) + value, max_bucket_capacity);
-    }
-    inline static bool IsAllowedToWithdrawFromCritBucket(IClientEntity *self, float value)
-    {
-        uint16_t weapon_info_handle = weapon_info_handle_(self);
-        void *weapon_info           = nullptr; // GetFileWeaponInfoFromHandle(weapon_info_handle);
-        /*
-        if (!weapon_info->unk_1736)
-        {
-
-        }
-        */
-    }
-    inline static bool CalcIsAttackCriticalHelper_re(IClientEntity *self)
-    {
-        IClientEntity *owner = GetOwnerViaInterface(self);
-
-        if (owner == nullptr)
-            return false;
-
-        if (!C_BaseEntity::IsPlayer(owner))
-            return false;
-
-        CTFPlayerShared *shared = &C_BasePlayer::shared_(owner);
-        float critmult          = CTFPlayerShared::GetCritMult(shared);
-        if (!CanFireCriticalShot(self, 0, nullptr))
-            return false;
-
-        if (CTFPlayerShared::IsCritBoosted(shared))
-            return true;
-
-        int unk1 = *(int *) (uintptr_t(self) + 2832u);
-        int unk2 = *(int *) (uintptr_t(self) + 2820u);
-        unk2 <<= 6;
-
-        int unk3  = unk1 + unk2 + 1784;
-        char unk4 = *(char *) (unk1 + unk2 + 1844);
-        if (unk4 && *(float *) (uintptr_t(self) + 2864u) > g_GlobalVars->curtime)
-            return true;
-
-        int unk5         = *(int *) (unk1 + unk2 + 1788);
-        int bullet_count = 0;
-        if (unk5 > 0)
-        {
-            // mult_bullets_per_shot
-        }
-        else
-        {
-            bullet_count = 1;
-        }
-
-        float mult2 = *(float *) (unk3);
-
-        float multiplier = 0.5f;
-        int seed         = C_BaseEntity::m_nPredictionRandomSeed() ^ (owner->entindex() | (self->entindex() << 8));
-        RandomSeed(seed);
-
-        bool result = true;
-        if (multiplier * 10000.0f <= RandomInt(0, 9999))
-        {
-            result     = false;
-            multiplier = 0.0f;
-        }
-
-        return false;
     }
     inline static int CalcIsAttackCritical(IClientEntity *self)
     {
@@ -203,12 +174,12 @@ public:
     inline static uint16_t &weapon_info_handle_(IClientEntity *self)
     {
         static uint16_t dummy;
-        return netvar.iReloadMode ? *(uint16_t *) (uintptr_t(self) + netvar.iReloadMode - 4) : dummy;
+        return netvar.m_iWeaponMode ? *(uint16_t *) (uintptr_t(self) + netvar.m_iWeaponMode) : dummy;
     }
     inline static float &crit_bucket_(IClientEntity *self)
     {
         static float dummy;
-        return netvar.iReloadMode ? *(float *) (uintptr_t(self) + netvar.iReloadMode - 240) : dummy;
+        return netvar.m_flCritTokenBucket ? *(float *) (uintptr_t(self) + netvar.m_flCritTokenBucket) : dummy;
     }
 };
 } // namespace re

@@ -10,6 +10,7 @@
 #include <core/logging.hpp>
 #include <utlvector.h>
 #include "core/vfunc.hpp"
+#include "core/vtables.hpp"
 
 class CHudBaseChat
 {
@@ -18,7 +19,7 @@ public:
     inline void Printf(const char *string)
     {
         typedef void (*original_t)(CHudBaseChat *, int, const char *, ...);
-        original_t function = vfunc<original_t>(this, 22);
+        original_t function = vfunc<original_t>(this, vtables::hud_chat::chat_printf);
         function(this, 0, "%s", string);
     }
 };
@@ -32,8 +33,6 @@ public:
 class CHud
 {
 public:
-    void *vtable;
-
     CHudElement *FindElement(const char *name);
     float &GetSensitivityFactor();
 };

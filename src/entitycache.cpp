@@ -129,7 +129,7 @@ void Update()
                 ent.player_info = new player_info_s{};
             GetPlayerInfo(ent.m_IDX, ent.player_info);
         }
-        if (raw->IsDormant())
+        if (EntIsDormant(raw))
             continue;
         valid_ents.push_back(&ent);
         if ((ent.m_Type() == ENTITY_PLAYER || ent.m_Type() == ENTITY_BUILDING || ent.m_Type() == ENTITY_NPC) && ent.m_bAlivePlayer())

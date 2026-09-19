@@ -901,7 +901,7 @@ bool meleeAttack(int slot, std::pair<CachedEntity *, float> &nearest)
         auto hb = nearest.first->hitboxes.GetHitbox(spine_3);
         if (hb)
         {
-            ray.Init(g_pLocalPlayer->v_Origin + Vector{ 0, 0, 20 }, hb->center, raw_local->GetCollideable()->OBBMins(), raw_local->GetCollideable()->OBBMaxs());
+            ray.Init(g_pLocalPlayer->v_Origin + Vector{ 0, 0, 20 }, hb->center, EntOBBMins(raw_local), EntOBBMaxs(raw_local));
             g_ITrace->TraceRay(ray, MASK_PLAYERSOLID, &trace::filter_default, &trace);
             isVisible = (IClientEntity *) trace.m_pEnt == RAW_ENT(nearest.first);
         }

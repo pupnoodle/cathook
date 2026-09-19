@@ -116,22 +116,22 @@ inline void CMoveData::SetAbsOrigin(const Vector &vec)
 // Purpose: The basic player movement interface
 //-----------------------------------------------------------------------------
 
-abstract_class IGameMovement
+#include "core/vfunc.hpp"
+#include "core/vtables.hpp"
+
+class IGameMovement
 {
 public:
-    virtual ~IGameMovement(void)
+    void ProcessMovement(CBasePlayer *pPlayer, CMoveData *pMove)
     {
+        vfunc<void (*)(IGameMovement *, CBasePlayer *, CMoveData *)>(this, vtables::game_movement::process_movement)(this, pPlayer, pMove);
     }
-
-    // Process the current movement command
-    virtual void ProcessMovement(CBasePlayer * pPlayer, CMoveData * pMove) = 0;
-    virtual void StartTrackPredictionErrors(CBasePlayer * pPlayer)         = 0;
-    virtual void FinishTrackPredictionErrors(CBasePlayer * pPlayer)        = 0;
-    virtual void DiffPrint(PRINTF_FORMAT_STRING char const *fmt, ...)      = 0;
-
-    // Allows other parts of the engine to find out the normal and ducked player
-    // bbox sizes
-    virtual Vector GetPlayerMins(bool ducked) const       = 0;
-    virtual Vector GetPlayerMaxs(bool ducked) const       = 0;
-    virtual Vector GetPlayerViewOffset(bool ducked) const = 0;
+    void StartTrackPredictionErrors(CBasePlayer *pPlayer)
+    {
+        vfunc<void (*)(IGameMovement *, CBasePlayer *)>(this, vtables::game_movement::start_track_prediction_errors)(this, pPlayer);
+    }
+    void FinishTrackPredictionErrors(CBasePlayer *pPlayer)
+    {
+        vfunc<void (*)(IGameMovement *, CBasePlayer *)>(this, vtables::game_movement::finish_track_prediction_errors)(this, pPlayer);
+    }
 };

@@ -73,7 +73,7 @@ struct ShaderStencilState_t
         m_nTestMask = m_nWriteMask = 0xFFFFFFFF;
     }
 
-    inline void SetStencilState(CMatRenderContextPtr &pRenderContext) const
+    inline void SetStencilState(CMatRenderContext *pRenderContext) const
     {
         pRenderContext->SetStencilEnable(m_bEnable);
         pRenderContext->SetStencilFailOperation(m_FailOp);
@@ -92,29 +92,30 @@ ITexture *GetBuffer(int i)
 {
     if (!buffers[i])
     {
-        ITexture *fullframe;
-        IF_GAME(IsTF2())
-        fullframe      = g_IMaterialSystem->FindTexture("_rt_FullFrameFB", TEXTURE_GROUP_RENDER_TARGET);
-        else fullframe = g_IMaterialSystemHL->FindTexture("_rt_FullFrameFB", TEXTURE_GROUP_RENDER_TARGET);
-        // char *newname    = new char[32];
+        CTexture *fullframe = g_IMaterialSystem->FindTexture("_rt_FullFrameFB", TEXTURE_GROUP_RENDER_TARGET);
+        if (!fullframe || fullframe->IsError())
+        {
+            logging::Info("Glow: FindTexture(_rt_FullFrameFB) failed");
+            return nullptr;
+        }
         std::unique_ptr<char[]> newname(new char[32]);
         std::string name = format("_cathook_buff", i);
-        strncpy(newname.get(), name.c_str(), 30);
+        strncpy(newname.get(), name.c_str(), 31);
+        newname[31] = '\0';
         logging::Info("Creating new buffer %d with size %dx%d %s", i, fullframe->GetActualWidth(), fullframe->GetActualHeight(), newname.get());
 
         int textureFlags      = TEXTUREFLAGS_CLAMPS | TEXTUREFLAGS_CLAMPT | TEXTUREFLAGS_EIGHTBITALPHA;
         int renderTargetFlags = CREATERENDERTARGETFLAGS_HDR;
 
-        ITexture *texture;
-        IF_GAME(IsTF2())
+        g_IMaterialSystem->OverrideRenderTargetAllocation(true);
+        CTexture *texture = g_IMaterialSystem->CreateNamedRenderTargetTextureEx(newname.get(), fullframe->GetActualWidth(), fullframe->GetActualHeight(), RT_SIZE_LITERAL, IMAGE_FORMAT_RGBA8888, MATERIAL_RT_DEPTH_SEPARATE, textureFlags, renderTargetFlags);
+        g_IMaterialSystem->OverrideRenderTargetAllocation(false);
+        if (!texture || texture->IsError())
         {
-            texture = g_IMaterialSystem->CreateNamedRenderTargetTextureEx(newname.get(), fullframe->GetActualWidth(), fullframe->GetActualHeight(), RT_SIZE_LITERAL, IMAGE_FORMAT_RGBA8888, MATERIAL_RT_DEPTH_SEPARATE, textureFlags, renderTargetFlags);
+            logging::Info("Glow: CreateNamedRenderTargetTextureEx(%s) failed", newname.get());
+            return nullptr;
         }
-        else
-        {
-            texture = g_IMaterialSystemHL->CreateNamedRenderTargetTextureEx(newname.get(), fullframe->GetActualWidth(), fullframe->GetActualHeight(), RT_SIZE_LITERAL, IMAGE_FORMAT_RGBA8888, MATERIAL_RT_DEPTH_SEPARATE, textureFlags, renderTargetFlags);
-        }
-        buffers[i].Init(texture);
+        buffers[i].Init(texture->AsITexture());
     }
     return buffers[i];
 }
@@ -150,14 +151,17 @@ void EffectGlow::Init()
         mat_unlit_z.Init("__cathook_glow_unlit_z", kv);
     }
     // Initialize 2 buffers
-    GetBuffer(1);
-    GetBuffer(2);
+    if (!GetBuffer(1) || !GetBuffer(2))
+    {
+        logging::Info("Init Glow failed: render targets");
+        return;
+    }
     {
         KeyValues *kv = new KeyValues("UnlitGeneric");
         kv->SetString("$basetexture", "_cathook_buff1");
         kv->SetInt("$additive", 1);
         mat_blit.Init("__cathook_glow_blit", TEXTURE_GROUP_CLIENT_EFFECTS, kv);
-        mat_blit->Refresh();
+        LiveMaterial(mat_blit)->Refresh();
     }
     {
         KeyValues *kv = new KeyValues("BlurFilterX");
@@ -166,7 +170,7 @@ void EffectGlow::Init()
         kv->SetInt("$translucent", 1);
         kv->SetInt("$alphatest", 1);
         mat_blur_x.Init("_cathook_blurx", kv);
-        mat_blur_x->Refresh();
+        LiveMaterial(mat_blur_x)->Refresh();
     }
     {
         KeyValues *kv = new KeyValues("BlurFilterY");
@@ -176,7 +180,7 @@ void EffectGlow::Init()
         kv->SetInt("$translucent", 1);
         kv->SetInt("$alphatest", 1);
         mat_blur_y.Init("_cathook_blury", kv);
-        mat_blur_y->Refresh();
+        LiveMaterial(mat_blur_y)->Refresh();
     }
     {
         SS_NeverSolid.m_bEnable         = true;
@@ -229,7 +233,7 @@ rgba_t EffectGlow::GlowColor(IClientEntity *entity)
     static CachedEntity *ent;
     static IClientEntity *owner;
 
-    ent = ENTITY(entity->entindex());
+    ent = ENTITY(EntIndex(entity));
     if (CE_BAD(ent))
         return colors::white;
     if (ent == hacks::shared::aimbot::CurrentTarget() && aimbot_color)
@@ -270,9 +274,9 @@ bool EffectGlow::ShouldRenderGlow(IClientEntity *entity)
     return false;
 #endif
     static CachedEntity *ent;
-    if (entity->entindex() < 0)
+    if (EntIndex(entity) < 0)
         return false;
-    ent = ENTITY(entity->entindex());
+    ent = ENTITY(EntIndex(entity));
     if (CE_BAD(ent))
         return false;
     if (ent->m_IDX == LOCAL_E->m_IDX && !glowself)
@@ -329,14 +333,14 @@ void EffectGlow::BeginRenderGlow()
 {
 #if !ENFORCE_STREAM_SAFETY
     drawing = true;
-    CMatRenderContextPtr ptr(GET_RENDER_CONTEXT);
+    MatRenderScope ptr(GET_RENDER_CONTEXT);
     ptr->ClearColor4ub(0, 0, 0, 0);
     ptr->PushRenderTargetAndViewport();
     ptr->SetRenderTarget(GetBuffer(1));
     ptr->OverrideAlphaWriteEnable(true, true);
     g_IVRenderView->SetBlend(0.99f);
     ptr->ClearBuffers(true, false);
-    mat_unlit_z->AlphaModulate(1.0f);
+    LiveMaterial(mat_unlit_z)->AlphaModulate(1.0f);
     ptr->DepthRange(0.0f, 0.01f);
 #endif
 }
@@ -345,7 +349,7 @@ void EffectGlow::EndRenderGlow()
 {
 #if !ENFORCE_STREAM_SAFETY
     drawing = false;
-    CMatRenderContextPtr ptr(GET_RENDER_CONTEXT);
+    MatRenderScope ptr(GET_RENDER_CONTEXT);
     ptr->DepthRange(0.0f, 1.0f);
     g_IVModelRender->ForcedMaterialOverride(nullptr);
     ptr->PopRenderTargetAndViewport();
@@ -358,14 +362,14 @@ void EffectGlow::StartStenciling()
     static ShaderStencilState_t state;
     state.Reset();
     state.m_bEnable = true;
-    CMatRenderContextPtr ptr(GET_RENDER_CONTEXT);
+    MatRenderScope ptr(GET_RENDER_CONTEXT);
     switch (*solid_when)
     {
     case 0:
-        SS_NeverSolid.SetStencilState(ptr);
+        SS_NeverSolid.SetStencilState(ptr.get());
         break;
     case 2:
-        SS_SolidInvisible.SetStencilState(ptr);
+        SS_SolidInvisible.SetStencilState(ptr.get());
         break;
         /*case 3: https://puu.sh/vobH4/5da8367aef.png*/
     default:
@@ -380,7 +384,7 @@ void EffectGlow::StartStenciling()
         ptr->DepthRange(0.0f, 1.0f);
     }
     g_IVRenderView->SetBlend(0.0f);
-    mat_unlit->AlphaModulate(1.0f);
+    LiveMaterial(mat_unlit)->AlphaModulate(1.0f);
     g_IVModelRender->ForcedMaterialOverride(*solid_when ? mat_unlit : mat_unlit_z);
 #endif
 }
@@ -391,8 +395,8 @@ void EffectGlow::EndStenciling()
     static ShaderStencilState_t state;
     state.Reset();
     g_IVModelRender->ForcedMaterialOverride(nullptr);
-    CMatRenderContextPtr ptr(GET_RENDER_CONTEXT);
-    state.SetStencilState(ptr);
+    MatRenderScope ptr(GET_RENDER_CONTEXT);
+    state.SetStencilState(ptr.get());
     ptr->DepthRange(0.0f, 1.0f);
     g_IVRenderView->SetBlend(1.0f);
 #endif
@@ -416,11 +420,11 @@ void EffectGlow::DrawEntity(IClientEntity *entity)
     static int passes;
     passes = 0;
 
-    entity->DrawModel(1);
-    attach = g_IEntityList->GetClientEntity(HandleToIDX(*(int *) ((uintptr_t) entity + netvar.m_Collision - 24)));
+    EntDrawModel(entity, 1);
+    attach = re::C_BaseEntity::FirstMoveChild(entity);
     while (attach && passes++ < 32)
     {
-        if (attach->ShouldDraw())
+        if (EntRenderableShouldDraw(attach))
         {
             ClientClass *owner_cc = EntClientClass(entity);
             if (weapons_white && owner_cc && owner_cc->m_ClassID == RCC_PLAYER && re::C_BaseCombatWeapon::IsBaseCombatWeapon(attach))
@@ -428,15 +432,15 @@ void EffectGlow::DrawEntity(IClientEntity *entity)
                 rgba_t mod_original;
                 g_IVRenderView->GetColorModulation(mod_original.rgba);
                 g_IVRenderView->SetColorModulation(colors::white);
-                attach->DrawModel(1);
+                EntDrawModel(attach, 1);
                 g_IVRenderView->SetColorModulation(mod_original.rgba);
             }
             else
             {
-                attach->DrawModel(1);
+                EntDrawModel(attach, 1);
             }
         }
-        attach = g_IEntityList->GetClientEntity(HandleToIDX(*(int *) ((uintptr_t) attach + netvar.m_Collision - 20)));
+        attach = re::C_BaseEntity::NextMovePeer(attach);
     }
 #endif
 }
@@ -444,7 +448,7 @@ void EffectGlow::DrawEntity(IClientEntity *entity)
 void EffectGlow::RenderGlow(IClientEntity *entity)
 {
 #if !ENFORCE_STREAM_SAFETY
-    CMatRenderContextPtr ptr(GET_RENDER_CONTEXT);
+    MatRenderScope ptr(GET_RENDER_CONTEXT);
     g_IVRenderView->SetColorModulation(GlowColor(entity));
     g_IVModelRender->ForcedMaterialOverride(mat_unlit_z);
     DrawEntity(entity);
@@ -458,11 +462,11 @@ void EffectGlow::Render(int x, int y, int w, int h)
         return;
     if (!isHackActive() || (clean_screenshots && g_IEngine->IsTakingScreenshot()) || g_Settings.bInvalid || disable_visuals)
         return;
-    static ITexture *orig;
-    static IMaterialVar *blury_bloomamount;
+    static CTexture *orig;
+    static CMaterialVar *blury_bloomamount;
     if (!init)
         Init();
-    CMatRenderContextPtr ptr(GET_RENDER_CONTEXT);
+    MatRenderScope ptr(GET_RENDER_CONTEXT);
     orig = ptr->GetRenderTarget();
     BeginRenderGlow();
     for (auto const &ent_non_raw : entity_cache::valid_ents)
@@ -493,20 +497,22 @@ void EffectGlow::Render(int x, int y, int w, int h)
     ptr->ClearBuffers(true, false);
     ptr->DrawScreenSpaceRectangle(mat_blur_x, x, y, w, h, 0, 0, w - 1, h - 1, w, h);
     ptr->SetRenderTarget(GetBuffer(1));
-    blury_bloomamount = mat_blur_y->FindVar("$bloomamount", nullptr);
-    blury_bloomamount->SetIntValue(*blur_scale);
+    bool bloom_found = false;
+    blury_bloomamount = LiveMaterial(mat_blur_y)->FindVar("$bloomamount", &bloom_found, false);
+    if (blury_bloomamount && bloom_found)
+        blury_bloomamount->SetIntValue(*blur_scale);
     ptr->DrawScreenSpaceRectangle(mat_blur_y, x, y, w, h, 0, 0, w - 1, h - 1, w, h);
     ptr->Viewport(x, y, w, h);
     ptr->SetRenderTarget(orig);
     g_IVRenderView->SetBlend(0.0f);
     if (*solid_when != 1)
     {
-        SS_Drawing.SetStencilState(ptr);
+        SS_Drawing.SetStencilState(ptr.get());
     }
     ptr->DrawScreenSpaceRectangle(mat_blit, x, y, w, h, 0, 0, w - 1, h - 1, w, h);
     if (*solid_when != -1)
     {
-        SS_Null.SetStencilState(ptr);
+        SS_Null.SetStencilState(ptr.get());
     }
 #endif
 }

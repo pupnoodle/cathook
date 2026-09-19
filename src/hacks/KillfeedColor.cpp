@@ -108,8 +108,8 @@ void DrawText_hook(int *_this, int x, int y, vgui::HFont hFont, Color clr, const
                 if (player_color != colors::empty)
                     draw_clr.SetColor(player_color.r * 255, player_color.g * 255, player_color.b * 255, 255);
 
-                // Draw text
                 std::wstring wide = converter.from_bytes(player.name);
+                g_ISurface->DrawSetTextPos(x, y);
                 original(_this, x, y, hFont, draw_clr, wide.c_str());
 
                 int width, height = 0;
@@ -120,6 +120,7 @@ void DrawText_hook(int *_this, int x, int y, vgui::HFont hFont, Color clr, const
                 if (&player != &displayed_players.back())
                 {
                     static std::wstring seperator = L", ";
+                    g_ISurface->DrawSetTextPos(x, y);
                     original(_this, x, y, hFont, clr, seperator.c_str());
                     g_ISurface->GetTextSize(hFont, seperator.c_str(), width, height);
                     x += width;
@@ -143,7 +144,7 @@ void DrawText_hook(int *_this, int x, int y, vgui::HFont hFont, Color clr, const
 static InitRoutine init(
     []
     {
-        auto drawtext_addr = uintptr_t(0);
+        auto drawtext_addr = gSignatures.GetClientSignature(sigs::hud_death_notice_draw_text);
         if (drawtext_addr)
             drawtext_detour.Init(drawtext_addr, (void *) DrawText_hook);
 

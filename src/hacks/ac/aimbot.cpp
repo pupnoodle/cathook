@@ -80,17 +80,13 @@ void Update(CachedEntity *player)
                     if (IDX_GOOD(widx))
                     {
                         CachedEntity *weapon = ENTITY(widx);
-                        ClientClass *wcc     = weapon ? EntClientClass(weapon->InternalEntity()) : nullptr;
-                        if (wcc && wcc->GetName())
-                            wp_name = wcc->GetName();
-                        /*logging::Info("%d", weapon->m_IDX);
-                        logging::Info("%s", );
-                        IClientEntity* e_weapon = RAW_ENT(weapon);
-                        if (CE_GOOD(weapon)) {
-                            const char* wname = vfunc<const
-                        char*(*)(IClientEntity*)>(e_weapon, 398, 0)(e_weapon);
-                            if (wname) wp_name = wname;
-                        }*/
+                        IClientEntity *e_weapon = weapon ? RAW_ENT(weapon) : nullptr;
+                        if (CE_GOOD(weapon) && e_weapon)
+                        {
+                            const char *wname = re::C_BaseCombatWeapon::GetPrintName(e_weapon);
+                            if (wname && wname[0])
+                                wp_name = wname;
+                        }
                     }
                     hacks::shared::anticheat::Accuse(player->m_IDX, "Aimbot", format("Weapon: ", wp_name, " | Deviation: ", deviation, "° | ", data.detections));
                 }

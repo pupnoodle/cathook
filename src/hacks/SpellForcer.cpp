@@ -140,11 +140,11 @@ CachedEntity *getClosestSpell()
         if (!spell->m_vecDormantOrigin() || (spell->m_ItemType() != ITEM_SPELL && spell->m_ItemType() != ITEM_SPELL_RARE))
             continue;
         float dist = spell->m_flDistance();
-        if (dist < best_dist || (is_dormant && !RAW_ENT(spell)->IsDormant() && dist <= 300.0f))
+        if (dist < best_dist || (is_dormant && !EntIsDormant(RAW_ENT(spell)) && dist <= 300.0f))
         {
             ent        = spell;
             best_dist  = dist;
-            is_dormant = RAW_ENT(spell)->IsDormant();
+            is_dormant = EntIsDormant(RAW_ENT(spell));
         }
     }
     return ent;

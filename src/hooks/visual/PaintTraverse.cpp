@@ -8,6 +8,7 @@
 #include "HookedMethods.hpp"
 #include "CatBot.hpp"
 #include "drawmgr.hpp"
+#include "DetourHook.hpp"
 
 static settings::Int software_cursor_mode{ "visual.software-cursor-mode", "0" };
 static settings::Boolean debug_log_panel_names{ "debug.log-panels", "false" };
@@ -33,7 +34,24 @@ CatCommand join("mm_join", "Join mm Match", []() {
         gc->JoinMMMatch();
 });
 
-bool replaced = false;
+static DetourHook can_report_detour;
+typedef bool (*CanReportPlayer_t)(uint64_t, char);
+static bool CanReportPlayer_hook(uint64_t steamid, char warn)
+{
+    if (no_reportlimit)
+        return true;
+    auto orig = (CanReportPlayer_t) can_report_detour.GetOriginalFunc();
+    return orig ? orig(steamid, warn) : true;
+}
+
+static InitRoutine init_can_report(
+    []()
+    {
+        auto addr = gSignatures.GetClientSignature(sigs::can_report_player);
+        if (addr)
+            can_report_detour.Init(addr, (void *) CanReportPlayer_hook);
+    });
+
 namespace hooked_methods
 {
 DEFINE_HOOKED_METHOD(PaintTraverse, void, vgui::IPanel *this_, vgui::VPANEL panel, bool force, bool allow_force)
@@ -67,19 +85,13 @@ DEFINE_HOOKED_METHOD(PaintTraverse, void, vgui::IPanel *this_, vgui::VPANEL pane
         }
         else if (!joinspam.check(spamdur * 1000) && spamdur)
         {
-            INetChannel *ch = (INetChannel *) g_IEngine->GetNetChannelInfo();
+            CNetChan *ch = g_IEngine->GetNetChannelInfo();
             if (ch)
                 ch->Shutdown("");
         }
     }
     scndwait++;
     switcherido = !switcherido;
-    if (no_reportlimit && !replaced)
-    {
-        static BytePatch no_report_limit(uintptr_t(0), { 0xB8, 0x01, 0x00, 0x00, 0x00 });
-        no_report_limit.Patch();
-        replaced = true;
-    }
     call_default = true;
     if (no_scope && ((panel_scope && panel == panel_scope) || (panel_scope_charge && panel == panel_scope_charge)))
         call_default = false;

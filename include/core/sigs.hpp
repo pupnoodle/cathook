@@ -29,18 +29,8 @@ constexpr const char* in_cond =
   "55 83 FE ? 48 89 E5 41 54 41 89 F4";
 constexpr const char* tfplayer_update_client_side_animation =
   "55 48 89 E5 41 54 49 89 FC 53 E8 ? ? ? ? 48 85 C0 0F 84 ? ? ? ? 48 89 C3 48 8B 00 48 89 DF FF 90 ? ? ? ? 84 C0 0F 84 ? ? ? ? 49 39 DC";
-constexpr const char* load_white_list =
-  "55 48 89 E5 41 55 41 54 49 89 FC 48 83 EC ? 48 8B 07 FF 50";
 constexpr const char* cl_move =
   "55 48 89 E5 41 57 41 56 41 55 41 54 53 48 83 EC 78 83 3D ? ? ? ? 01 F3 0F 11 85 ? ? ? ? 0F 8E ? ? ? ? 41 89 FE E8 ? ? ? ? 84 C0 89 C3 0F 84 ? ? ? ? 4C 8B 3D ? ? ? ? 31";
-constexpr const char* cl_read_packets =
-  "55 31 C0 48 89 E5 41 57 41 56 41 55 41 89 FD 41 54 53 48 83 EC ? 48 8B 1D ? ? ? ? 48 C7 45 ? ? ? ? ?";
-constexpr const char* cl_process_packet_entities =
-  "55 48 89 E5 41 55 49 89 F5 41 54 0F B6 46 30 49 89 FC 84 C0 75 ? 48 8D 05 ? ? ? ? BE 06 00 00 00 48 8B 38 48 8B 07 FF 50 18 48 8D 05 ? ? ? ? 48 8B 38 48 85 FF 74 ? 48 8B 07 FF 50 40 48 8D 05 ? ? ? ? 48 83 38 00 74 ? 41 83 BC 24 4C ? ? ? ?";
-constexpr const char* host_should_run =
-  "48 8B 15 ? ? ? ? B8 01 00 00 00 8B 72 58 85 F6 74 ? 48 8B 0D ? ? ? ? 8B 15";
-constexpr const char* prediction_run_simulation =
-  "55 31 C0 48 89 E5 41 57 41 56 49 89 FE 41 55 41 89 F5 41 54 49 89 D4 53 48 89 CB 48 83 EC ? 4C 8B 3D ? ? ? ? F3 0F 11 45 ?";
 constexpr const char* attribute_hook_value_float =
   "55 31 C0 48 89 E5 41 57 41 56 41 55 49 89 F5 41 54 49 89 FC 53 89 CB";
 constexpr const char* intro_menu_on_tick =
@@ -101,8 +91,12 @@ constexpr const char* ik_context_clear_targets =
   "8B 8F ? ? ? ? 48 8D 97 ? ? ? ? 31 C0 85 C9 7E ? 0F 1F 44 00 00 C7 02 F1 D8 FF FF 83 C0 01 48 81 C2 60 01 00 00 39 87 ? ? ? ? 7F ? C3 90";
 constexpr const char* base_animating_add_eflags =
   "09 B7 ? ? ? ? C3";
+// Unique C_BaseAnimating studiohdr load (disp32 is m_pStudioHdr, live 0xBE8).
 constexpr const char* base_animating_studio_hdr =
-  "4C 8B BB ? ? ? ? 4D 85 FF";
+  "4C 8B BB ? ? ? ? 4D 85 FF 0F 84 ? ? ? ? 4C 89 FF";
+// C_BaseAnimating overlay Element: imul 44; add rax,[rdi+disp32]. disp is m_AnimOverlay (live 0xC10).
+constexpr const char* base_animating_anim_overlay =
+  "89 F0 48 6B C0 2C 48 03 87 ? ? ? ? C3";
 constexpr const char* base_animating_bone_array =
   "48 8B B3 ? ? ? ? 48 8D 14 52";
 
@@ -125,6 +119,12 @@ constexpr const char* tf_gc_client_system_request_accept_match_invite =
 constexpr const char* tf_gc_client_system_join_mm_match =
   "55 48 89 E5 41 55 41 54 0F B6 87 CE 07 00 00 49 89 FC 89 C2 81 E2 F0 00 00 00 0F 84 ? ? ? ? 3C AF 0F 87 ? ? ? ? 0F B6 87 CF 07 00 00 83 E8 01 3C 03 0F 87 ? ? ? ? 80 FA 10 74 ? 80 FA 70 0F 84 ? ? ? ? 80 FA 30 75 ? 8B 87 C8 07 00 00 85 C0 0F 84";
 
+constexpr const char* mut_local_group_criteria =
+  "48 83 7F 30 00 74 06 80 7F 40 00 74 0B 48 8D 87 ? ? ? ? C3";
+// Adjacent int stores: [this+0x2C]=esi; ret; nop; [this+0x30]=esi; ret.
+constexpr const char* group_criteria_set_match_group =
+  "89 77 2C C3 66 66 2E 0F 1F 84 00 00 00 00 00 90 89 77 30 C3";
+constexpr int group_criteria_set_match_group_offset = 16;
 constexpr const char* load_saved_casual_criteria =
   "48 83 7F 30 00 C6 87 10 03 00 00 01 74 ? 80 7F 40 00 74 ? C6 87 30 03 00 00 01 48 8D 35 ? ? ? ? 48 81 C7 B0 01 00 00 E9 ? ? ? ?";
 constexpr const char* is_in_queue_for_match_group =
@@ -157,10 +157,6 @@ constexpr const char* promote_to_leader =
   "55 48 89 E5 41 56 41 55 41 54 53 48 89 FB 48 83 EC 40 48 8B 7F 30 48 89 75 A8 48 85 FF 74 ? 44 0F B6 63 40 45 84 E4 75 ? 48 83 C4 40 45 31 E4 5B 44 89 E0 41 5C 41 5D 41 5E 5D C3 0F 1F 40 00 48 8B 07 4C 8D 75 A8 4C 89 F6 FF 90 ? ? ? ? 83 F8 FF 74 ? 4C 8D 6D B0 BE AF 19 00 00";
 constexpr const char* report_player_account =
   "55 48 89 F8 48 89 E5 48 C1 E8 ? 41 57 41 56 41 55 41 54 53 48 83 EC ?";
-constexpr const char* allow_secure_servers_flag_ref =
-  "48 8D 05 ? ? ? ? 4C 89 E7 C6 00 00 4C 8B 65 ? C9 E9 ? ? ? ?";
-constexpr const char* host_is_secure_server_allowed =
-  "55 48 89 E5 E8 ? ? ? ? 48 8D 35 ? ? ? ? 48 89 C7 48 8B 00 FF 50 50 85 C0 74 ? 31 C0 5D C6 05 ? ? ? ? 00 C3 0F 1F 84 00 00 00 00 00 E8 ? ? ? ? 48 8D 35 ? ? ? ? 48 89 C7 48 8B 00 FF 50 50 85 C0 75 ? 0F B6 05 ? ? ? ? 5D C3";
 constexpr const char* launcher_source_lock =
   "55 48 89 E5 41 55 41 54 4C 8D AD ? ? ? ? 48 81 EC ? ? ? ? E8 ? ? ? ?";
 constexpr const char* video_mode_setup_startup_graphic =
@@ -206,6 +202,8 @@ constexpr const char* protobuf_string_new_element =
 
 constexpr const char* hud_find_element =
   "55 48 89 E5 41 57 41 56 41 55 41 54 49 89 F4 53 48 83 EC 08 8B 47 30 85 C0 7E ?";
+constexpr const char* hud_mouse_sensitivity =
+  "F3 0F 10 48 ? F3 0F 11 50 ?";
 constexpr const char* hud_instance_from_chat =
   "55 48 8D 35 ? ? ? ? 48 89 E5 41 54 53 48 83 EC 70 48 8D 3D ? ? ? ? E8 ? ? ? ?";
 constexpr const char* gamerules_recvproxy =
@@ -231,8 +229,19 @@ constexpr const char* mark_surrounding_bounds_dirty =
 constexpr const char* collision_update_partition =
   "55 48 89 E5 53 48 89 FB 48 83 EC 08 48 8B 7F 08 48 8B 07 FF 90 ? ? ? ? 85 C0 74 ? 48 8B 7B 08 8B 87 ? ? ? ? F6 C4 80 74 ?";
 
+// engine.so CL_SendMove @ 0x3B4300. Called from CL_Move when sending;
+// writes CLC_Move via WriteUsercmdDeltaToBuffer then SendNetMsg.
 constexpr const char* cl_sendmove =
-  "55 49 89 F2 48 89 E5 41 55 41 54 49 89 FC 48 81 EC D0 10 00 00 84 C0";
+  "55 66 0F EF C0 48 89 E5 41 57 41 56 48 8D BD E8 EF FF FF 41 55 41 54 53 48 81 EC 38 10 00 00 44 8B 2D ? ? ? ?";
+// CNetChan::GetSequenceData: mov eax,[rdi+disp]; store out/in/ack.
+constexpr const char* netchan_get_sequence_data =
+  "8B 47 ? 89 06 8B 47 ? 89 02 8B 47 ? 89 01 C3";
+// CNetChan::SetChoked: add [rdi+out],1; add [rdi+choke],1; ret.
+constexpr const char* netchan_set_choked =
+  "83 47 ? 01 83 47 ? 01 C3";
+// Copies out_reliable / in_reliable / choked to optional out-pointers.
+constexpr const char* netchan_get_reliable =
+  "48 85 F6 74 05 8B 47 ? 89 06 48 85 D2 74 05 8B 47 ? 89 02 48 85 C9 74 05 8B 47 ? 89 01";
 constexpr const char* get_mm_ban_data =
   "83 FF FF 0F 84 ? ? ? ? 55 48 89 E5 41 55 49 89 F5 41 54 49 89 D4 53 89 FB 48 83 EC 08 E8";
 constexpr const char* demo_player =
@@ -250,6 +259,74 @@ constexpr const char* interpolate_timedemo_call =
   "FF 90 70 02 00 00 84 C0 0F 85 ? ? ? ? 49 8B 3C 24 48 8B 07 FF 90 A0 02 00 00";
 constexpr const char* stealth_kill_notice =
   "48 8B 06 48 8D 35 ? ? ? ? FF 50 30 84 C0 74 ?";
+
+constexpr const char* get_match_group_description =
+  "48 63 07 83 F8 08 77 ? 48 8D 15 ? ? ? ? 48 8B 04 C2 C3";
+constexpr const char* register_match_desc =
+  "48 63 17 48 8D 05 ? ? ? ? 48 89 34 D0 C3";
+constexpr const char* match_desc_force_client_settings =
+  "66 45 89 54 24 73";
+constexpr const char* client_textmode_flag_store =
+  "FF 50 50 85 C0 74 ? C6 05";
+
+constexpr const char* crafting_panel_craft =
+  "55 48 8D 87 ? ? ? ? 48 89 E5 41 57 49 89 FF 41 56 41 55 4C 8D 6D 80 41 54 53 48 8D 9F ? ? ? ? 48 83 EC 68 48 C7 45 80 ? ? ? ?";
+// CTFWeaponInfo ctor zeros primary WeaponData_t::m_nDamage at this+disp32 (live 1828).
+constexpr const char* tf_weapon_info_primary_data =
+  "48 C7 83 ? ? ? ? 00 00 00 00 48 89 03 B8 01 00 00 00 48 C7 83";
+constexpr const char* store_do_preview_item =
+  "55 31 C0 48 89 E5 41 56 41 55 41 54 4C 8D A5 ? ? ? ? 53 0F B7 DE 4C 89 E7 48 8D 35 ? ? ? ? 48 81 EC 10 01 00 00 89 DA E8 ? ? ? ?";
+constexpr const char* client_state_process_print =
+  "55 31 C0 48 89 E5 41 56 41 55 41 54 53 48 89 F3 48 83 EC 20 4C 8B 25 ? ? ? ? 48 C7 45 C8 ? ? ? ? 49 8B 7C 24 18 48 85 FF 74 ? 48 83 EC 08 45 31 C0 31 C9 48 8D 05 ? ? ? ? 31 D2 50 48 8D 05 ? ? ? ? 50 48 8D 05 ? ? ? ? 50 48 8D 05 ? ? ? ? 50 48 8D 75 C8 31 C0 68 98 04 00 00 4C 8D 0D ? ? ? ? FF 97 ? ? ? ? 49 8B 7C 24 18 48 83 C4 30 48 8B 45 C8";
+constexpr const char* econ_item_schema_init_text_buffer =
+  "55 48 89 E5 41 57 49 89 F7 41 56 41 55 4C 8D AD ? ? ? ? 41 54 49 89 FC 4C 89 EF 53 48 89 D3 48 81 EC C8 00 00 00 E8 ? ? ? ?";
+constexpr const char* dispatch_effect =
+  "55 48 89 E5 41 55 41 54 49 89 FC 53 48 83 EC 08 48 8B 1D ? ? ? ? 48 85 DB 74 ? 49 89 F5 EB ? 0F 1F 80 ? ? ? ? 48 8B 5B 10";
+constexpr const char* fx_tracer =
+  "55 31 C0 48 89 E5 41 57 41 56 41 89 D6 41 55 49 89 F5 41 54 49 89 FC 53 89 CB";
+constexpr const char* get_particle_system_name_from_index =
+  "55 48 89 E5 41 54 41 89 FC 48 83 EC 08 48 8B 3D ? ? ? ? 48 8B 07 FF 50 28 44 39 E0 7E ? 48 8B 3D ? ? ? ? 44 89 E6 4C 8B 65 F8 48 8B 07";
+constexpr const char* particle_effect_callback =
+  "55 48 89 E5 41 57 41 56 41 55 41 54 53 48 89 FB 48 83 EC 48 E8 ? ? ? ? 84 C0 74 ? 48 83 C4 48 5B 41 5C 41 5D 41 5E 41 5F";
+constexpr const char* update_local_player_vision_flags =
+  "55 C7 05 ? ? ? ? 00 00 00 00 48 89 E5 41 54 53 C7 05 ? ? ? ? 00 00 00 00 E8 ? ? ? ? 48 85 C0 74 ?";
+constexpr const char* hud_upgrade_panel_cancel_upgrades =
+  "55 48 89 E5 41 57 41 56 41 55 41 54 53 48 89 FB 48 83 EC 28 48 8D 05 ? ? ? ? C6 45 C7 01 48 8B 00 48 85 C0 74 ? 83 B8 ? ? ? ? ? 0F 9E 45 C7";
+constexpr const char* hud_death_notice_draw_text =
+  "55 48 89 E5 41 56 45 89 C6 41 55 41 89 CD 41 54 4D 89 CC 53 48 8D 1D ? ? ? ? 48 8B 3B 48 8B 07 FF 90 ? ? ? ? 48 8B 3B 44 89 F6 48 8B 07";
+constexpr const char* can_report_player =
+  "55 48 89 E5 41 54 48 83 EC 08 8B 15 ? ? ? ? 85 D2 0F 8E ? ? ? ? 48 8B 05 ? ? ? ? 83 EA 01 48 8D 14 52 48 8D 54 90 0C EB ? 0F 1F 00 48 83 C0 0C";
+
+// CTFPartyClient::BAllowedToPartyWith @ 0x1EAF170 — Steam friend-or-in-party check.
+constexpr const char* party_allowed_to_party_with =
+  "55 48 89 E5 48 83 EC 10 48 8B 7F 30 48 89 75 F8 48 85 FF 74 ? 48 8B 07 48 8D 75 F8 FF 90 88 00 00 00 83 F8 FF 74 ? C9 31 C0 C3 0F 1F 44 00 00 48 8D 05 ? ? ? ? 48 8B 00 48 8B 78 10 48 85 FF 74 ? 48 8B 07 48 8B 75 F8 FF 50 28 C9 83 F8 03";
+// CTFPartyClient can-invite (leader + friend + party not full) @ 0x1EAFBC0.
+constexpr const char* party_can_invite =
+  "55 48 89 E5 41 56 49 89 F6 41 55 41 54 49 89 FC 53 48 83 7F 30 00 74 ? 80 7F 40 00 75 ? 45 31 ED";
+// tf_party_incoming_invites_debug @ 0x1EADFA0. Count is parsed from the 4C 63 A0 disp32.
+constexpr const char* party_incoming_invites_debug =
+  "83 3F 01 74 ? 48 8D 3D ? ? ? ? 31 C0 E9 ? ? ? ? 0F 1F 44 00 00 55 48 89 E5 41 56 41 55 41 54 53 48 83 EC 20 E8 ? ? ? ? 4C 63 A0 ? ? ? ?";
+// CTFGCClientSystem::BConnectedToMatchServer @ 0x1EA1AA0
+constexpr const char* gc_connected_to_match_server =
+  "40 84 F6 0F 84 ? ? ? ? 0F B6 97 CE 07 00 00 31 C0 89 D1 81 E1 F0 00 00 00";
+// Msg("[SDR Ping] Forcing ping refresh"); movb $1, [this+disp32]
+constexpr const char* gc_force_ping_refresh =
+  "55 31 C0 48 89 E5 41 55 41 54 4C 8D 65 B0 53 48 89 FB 48 8D 3D ? ? ? ? 48 83 EC 38 E8 ? ? ? ? 4C 89 E7 C6 83 ? ? ? ? 01";
+// CTFPartyClient::BInvitePlayerToParty @ 0x1EB05D0
+constexpr const char* party_invite_player =
+  "55 48 89 E5 41 55 49 89 FD 41 54 53 89 D3 48 81 EC 28 01 00 00 48 89 B5 C8 FE FF FF E8 ? ? ? ? 84 C0 74 ?";
+// CTFPartyClient::BRequestJoinPlayer @ 0x1EB0850
+constexpr const char* party_request_join_player =
+  "55 48 89 E5 41 55 41 89 D5 41 54 49 89 F4 53 48 89 FB 48 83 EC 48 48 89 75 A8 E8 ? ? ? ? 84 C0 0F 84";
+
+// G_MannVsMachineStats: xor-eax stub then mov rax,[rip]; ret @ 0x1E9C020.
+// Match starts at the xor stub; add mvm_stats_singleton_offset to reach the getter.
+constexpr const char* mvm_stats_singleton =
+  "31 C0 C3 66 66 2E 0F 1F 84 00 00 00 00 00 66 90 48 8B 05 ? ? ? ? C3";
+constexpr int mvm_stats_singleton_offset = 16;
+// C_MannVsMachineStats::AddLocalPlayerUpgrade; CUtlVector size at this+0x8A8.
+constexpr const char* mvm_add_local_player_upgrade =
+  "55 48 89 E5 41 57 41 89 F7 41 56 41 89 D6 41 55 41 54 53 48 89 FB 48 83 EC 08 44 8B A7 A8 08 00 00";
 
 }
 #endif

@@ -854,7 +854,12 @@ bool ConVar::ClampValue(float &value)
 //-----------------------------------------------------------------------------
 void ConVar::InternalSetFloatValue(float fNewValue)
 {
-    if (fNewValue == m_fValue)
+    InternalSetFloatValue2(fNewValue);
+}
+
+void ConVar::InternalSetFloatValue2(float fNewValue, bool bForce)
+{
+    if (fNewValue == m_fValue && !bForce)
         return;
 
     if (IsFlagSet(FCVAR_MATERIAL_THREAD_MASK))
@@ -868,10 +873,8 @@ void ConVar::InternalSetFloatValue(float fNewValue)
 
     Assert(m_pParent == this); // Only valid for root convars.
 
-    // Check bounds
     ClampValue(fNewValue);
 
-    // Redetermine value
     float flOldValue = m_fValue;
     m_fValue         = fNewValue;
     m_nValue         = (int) m_fValue;
@@ -929,6 +932,11 @@ void ConVar::InternalSetIntValue(int nValue)
     {
         Assert(!m_fnChangeCallback);
     }
+}
+
+void ConVar::Create_Vtbl(const char *pName, const char *pDefaultValue, int flags, const char *pHelpString, bool bMin, float fMin, bool bMax, float fMax, FnChangeCallback_t callback)
+{
+    Create(pName, pDefaultValue, flags, pHelpString, bMin, fMin, bMax, fMax, false, 0.0, false, 0.0, callback);
 }
 
 //-----------------------------------------------------------------------------

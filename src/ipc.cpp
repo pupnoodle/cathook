@@ -43,10 +43,22 @@ CatCommand connect("ipc_connect", "Connect to IPC server",
                            logging::Info("Already connected!");
                            return;
                        }
-                       peer = std::make_unique<peer_t>(*server_name, false, false);
+                       auto attach = [](bool manager) {
+                           auto p = std::make_unique<peer_t>(*server_name, false, manager);
+                           p->Connect();
+                           return p;
+                       };
                        try
                        {
-                           peer->Connect();
+                           try
+                           {
+                               peer = attach(false);
+                           }
+                           catch (std::exception &open_error)
+                           {
+                               logging::Info("IPC shm missing (%s), creating it", open_error.what());
+                               peer = attach(true);
+                           }
                            logging::Info("peer count: %i", peer->memory->peer_count);
                            logging::Info("magic number: 0x%08x", peer->memory->global_data.magic_number);
                            logging::Info("magic number offset: 0x%08x", (uintptr_t) &peer->memory->global_data.magic_number - (uintptr_t) peer->memory);

@@ -49,9 +49,9 @@ bool trace::FilterDefault::ShouldHitEntity(IHandleEntity *handle, int mask)
         if (m_pSelf)
         {
             // If what we hit is an enemy it does not matter
-            if (m_pSelf && entity && entity->entindex() != 0 && IDX_GOOD(entity->entindex()) && CE_VALID(ENTITY(entity->entindex())) && ENTITY(entity->entindex())->m_iTeam() == ENTITY(m_pSelf->entindex())->m_iTeam())
+            if (m_pSelf && entity && EntIndex(entity) != 0 && IDX_GOOD(EntIndex(entity)) && CE_VALID(ENTITY(EntIndex(entity))) && ENTITY(EntIndex(entity))->m_iTeam() == ENTITY(EntIndex(m_pSelf))->m_iTeam())
             {
-                auto ent = ENTITY(m_pSelf->entindex());
+                auto ent = ENTITY(EntIndex(m_pSelf));
                 if (CE_GOOD(ent) && ent->m_bAlivePlayer())
                 {
                     // Get held weapon
@@ -146,7 +146,7 @@ bool trace::FilterNavigation::ShouldHitEntity(IHandleEntity *handle, int mask)
         return false;
 
     // Ignore everything that is not the world or a CBaseEntity
-    if (entity->entindex() != 0 && clazz->m_ClassID != CL_CLASS(CBaseEntity))
+    if (EntIndex(entity) != 0 && clazz->m_ClassID != CL_CLASS(CBaseEntity))
     {
         // Besides respawn room areas, we want to explicitly ignore those if they are not on our team
         if (clazz->m_ClassID == CL_CLASS(CFuncRespawnRoomVisualizer))
@@ -290,7 +290,7 @@ bool trace::FilterNoTeammates::ShouldHitEntity(IHandleEntity *handle, int mask)
     if (!handle)
         return false;
     entity = (IClientEntity *) handle;
-    if (ENTITY(entity->entindex())->m_iTeam() == ENTITY(m_pSelf->entindex())->m_iTeam())
+    if (ENTITY(EntIndex(entity))->m_iTeam() == ENTITY(EntIndex(m_pSelf))->m_iTeam())
         return false;
     return true;
 }

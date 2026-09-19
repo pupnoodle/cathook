@@ -1,4 +1,4 @@
-﻿/*
+/*
  * drawing.cpp
  *
  *  Created on: Mar 10, 2019
@@ -462,11 +462,11 @@ bool EntityCenterToScreen(CachedEntity *entity, Vector &out)
 
     if (CE_INVALID(entity))
         return false;
-    RAW_ENT(entity)->GetRenderBounds(min, max);
-    world = RAW_ENT(entity)->GetAbsOrigin();
+    EntGetRenderBounds(RAW_ENT(entity), min, max);
+    world = re::C_BaseEntity::GetAbsOrigin(RAW_ENT(entity));
 
     // Dormant
-    if (RAW_ENT(entity)->IsDormant())
+    if (EntIsDormant(RAW_ENT(entity)))
     {
         if (entity->m_vecDormantOrigin())
             world = *entity->m_vecDormantOrigin();
@@ -503,18 +503,18 @@ bool WorldToScreen(const Vector &origin, Vector &screen)
 
 void StartupSound()
 {
-    // 100% based unique meowhook only feature do not steal
-    std::string cur_line;
-    std::vector<std::string> line_count;
     std::ifstream sfile(paths::getDataPath("/startup_sounds.txt"));
-    int total_lines = 0;
-    while (getline(sfile, cur_line))
+    if (!sfile)
+        return;
+    std::vector<std::string> lines;
+    for (std::string cur_line; getline(sfile, cur_line);)
     {
-        total_lines++;
-        line_count.push_back(cur_line);
+        if (!cur_line.empty())
+            lines.push_back(cur_line);
     }
-    int random_number = rand() % total_lines;
-    g_ISurface->PlaySound(line_count[random_number].c_str());
+    if (lines.empty())
+        return;
+    g_ISurface->PlaySound(lines[static_cast<size_t>(rand()) % lines.size()].c_str());
 }
 
 #if ENABLE_ENGINE_DRAWING
@@ -574,7 +574,7 @@ unsigned int Texture::get()
 
 void InitGL()
 {
-    logging::Info("InitGL: %d, %d", draw::width, draw::height);
+    logging::Info("InitGL: %d, %d ctx=%p", draw::width, draw::height, SDL_GL_GetCurrentContext());
 #if EXTERNAL_DRAWING
     int status = xoverlay_init();
     if (status < 0)
@@ -590,14 +590,17 @@ void InitGL()
 #if ENABLE_GLEZ_DRAWING
     glez::init(xoverlay_library.width, xoverlay_library.height);
 #elif ENABLE_IMGUI_DRAWING
+    logging::Info("InitGL: imgui...");
     im_renderer::init();
+    logging::Info("InitGL: imgui ready");
 #endif
     xoverlay_draw_end();
 #else
 #if ENABLE_IMGUI_DRAWING
-    // glewInit();
+    logging::Info("InitGL: imgui...");
     im_renderer::init();
-#elif ENABLE_GLEZ_DRAWING || ENABLE_IMGUI_DRAWING
+    logging::Info("InitGL: imgui ready");
+#elif ENABLE_GLEZ_DRAWING
     glClearColor(1.0, 0.0, 0.0, 0.5);
     glewExperimental = GL_TRUE;
     glewInit();
@@ -606,9 +609,22 @@ void InitGL()
 #endif
 
 #if ENABLE_GUI
+    logging::Info("InitGL: gui...");
     gui::init();
-    StartupSound();
+    logging::Info("InitGL: gui ready");
+    // PlaySound from the SwapWindow thread can stall Source. Run it once from Paint.
+    EC::Register(
+        EC::Paint,
+        []() {
+            static bool played = false;
+            if (played)
+                return;
+            played = true;
+            StartupSound();
+        },
+        "startup_sound");
 #endif
+    logging::Info("InitGL: done");
 }
 
 void BeginGL()

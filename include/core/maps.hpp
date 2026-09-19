@@ -3,9 +3,12 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <deque>
 #include <fstream>
+#include <mutex>
 #include <string>
 #include <string_view>
+#include <vector>
 #include <sys/mman.h>
 
 namespace cathook::core::memory
@@ -100,18 +103,40 @@ inline void* module_base(std::string_view module_name, bool prefix_match = false
   return reinterpret_cast<void*>(base);
 }
 
+// protection_at used to re-open and re-parse /proc/self/maps on every call,
+// which made each datamap readability probe cost a full file read plus ~1.5k
+// sscanf calls. The cache is rebuilt only when an address misses, so modules
+// loaded later (e.g. server.so at map start) still resolve correctly.
 inline int protection_at(const void* address)
 {
+  static std::vector<entry> entries;
+  static std::deque<std::string> storage;
+  static std::mutex mtx;
   const auto value = reinterpret_cast<std::uintptr_t>(address);
-  int result = -1;
-  for_each([&](const entry& e) {
-    if (value >= e.start && value < e.end) {
-      result = e.protection;
-      return false;
+  std::lock_guard<std::mutex> lock(mtx);
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    for (const auto& e : entries) {
+      if (value >= e.start && value < e.end)
+        return e.protection;
     }
-    return true;
-  });
-  return result;
+    if (attempt)
+      break;
+    entries.clear();
+    storage.clear();
+    std::ifstream maps{"/proc/self/maps"};
+    std::string line;
+    while (std::getline(maps, line)) {
+      entry e{};
+      if (!parse_line(line, e))
+        continue;
+      if (!e.path.empty()) {
+        storage.emplace_back(e.path);
+        e.path = storage.back();
+      }
+      entries.push_back(e);
+    }
+  }
+  return -1;
 }
 
 }

@@ -97,7 +97,11 @@ public:
             void *end_page      = (void *) (((uint64_t)(addr) + size) & ~0xFFF);
             uintptr_t mprot_len = (uint64_t) end_page - (uint64_t) page + 0xFFF;
 
-            mprotect(page, mprot_len, PROT_READ | PROT_WRITE | PROT_EXEC);
+            if (mprotect(page, mprot_len, PROT_READ | PROT_WRITE | PROT_EXEC) != 0)
+            {
+                patched = false;
+                return;
+            }
             memcpy(addr, &original[0], size);
             mprotect(page, mprot_len, PROT_EXEC);
             patched = false;

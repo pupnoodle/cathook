@@ -47,41 +47,40 @@ void GetSkeleton(IClientEntity *ent, CStudioHdr *pStudioHdr, Vector pos[], Quate
         return;
     }
 
-    static uintptr_t m_pIK_offset = 0x568;
-    CIKContext **m_pIk            = (reinterpret_cast<CIKContext **>(reinterpret_cast<uint64_t>(ent) + (m_pIK_offset)));
+    CIKContext **m_pIk = netvar.m_pIk ? reinterpret_cast<CIKContext **>(reinterpret_cast<uint64_t>(ent) + netvar.m_pIk) : nullptr;
 
-    static uintptr_t m_AnimOverlay_offset       = 0x894;
-    CUtlVector<C_AnimationLayer> &m_AnimOverlay = NET_VAR(ent, m_AnimOverlay_offset, CUtlVector<C_AnimationLayer>);
+    CUtlVector<C_AnimationLayer> empty_overlay{};
+    CUtlVector<C_AnimationLayer> &m_AnimOverlay = netvar.m_AnimOverlay ? NET_VAR(ent, netvar.m_AnimOverlay, CUtlVector<C_AnimationLayer>) : empty_overlay;
 
     IBoneSetup boneSetup(pStudioHdr, boneMask, &NET_FLOAT(ent, netvar.m_flPoseParameter));
     boneSetup.InitPose(pos, q);
 
-    boneSetup.AccumulatePose(pos, q, NET_INT(ent, netvar.m_nSequence), NET_FLOAT(ent, netvar.m_flCycle), 1.0, g_GlobalVars->curtime, *m_pIk);
+    CIKContext *ik = m_pIk ? *m_pIk : nullptr;
+    boneSetup.AccumulatePose(pos, q, NET_INT(ent, netvar.m_nSequence), NET_FLOAT(ent, netvar.m_flCycle), 1.0, g_GlobalVars->curtime, ik);
 
-    // sort the layers
+    int overlay_count = m_AnimOverlay.Count();
+    if (overlay_count < 0 || overlay_count > MAX_OVERLAYS)
+        overlay_count = 0;
+
     int layer[MAX_OVERLAYS] = {};
     int i;
-    for (i = 0; i < m_AnimOverlay.Count(); i++)
-    {
+    for (i = 0; i < overlay_count; i++)
         layer[i] = MAX_OVERLAYS;
-    }
-    for (i = 0; i < m_AnimOverlay.Count(); i++)
+    for (i = 0; i < overlay_count; i++)
     {
         CAnimationLayer &pLayer = m_AnimOverlay[i];
-        if ((pLayer.m_flWeight > 0) && pLayer.IsActive() && pLayer.m_nOrder >= 0 && pLayer.m_nOrder < m_AnimOverlay.Count())
-        {
+        if ((pLayer.m_flWeight > 0) && pLayer.IsActive() && pLayer.m_nOrder >= 0 && pLayer.m_nOrder < overlay_count)
             layer[pLayer.m_nOrder] = i;
-        }
     }
-    for (i = 0; i < m_AnimOverlay.Count(); i++)
+    for (i = 0; i < overlay_count; i++)
     {
-        if (layer[i] >= 0 && layer[i] < m_AnimOverlay.Count())
+        if (layer[i] >= 0 && layer[i] < overlay_count)
         {
             CAnimationLayer &pLayer = m_AnimOverlay[layer[i]];
 
             // UNDONE: Is it correct to use overlay weight for IK too?
             if (!remove_taunts || std::find(ignore_sequences.begin(), ignore_sequences.end(), pLayer.m_nSequence) == ignore_sequences.end())
-                boneSetup.AccumulatePose(pos, q, pLayer.m_nSequence, pLayer.m_flCycle, pLayer.m_flWeight, g_GlobalVars->curtime, *m_pIk);
+                boneSetup.AccumulatePose(pos, q, pLayer.m_nSequence, pLayer.m_flCycle, pLayer.m_flWeight, g_GlobalVars->curtime, ik);
         }
     }
 
@@ -89,7 +88,7 @@ void GetSkeleton(IClientEntity *ent, CStudioHdr *pStudioHdr, Vector pos[], Quate
     {
         CIKContext auto_ik;
         QAngle angles = VectorToQAngle(re::C_BasePlayer::GetEyeAngles(ent));
-        auto_ik.Init(pStudioHdr, angles, ent->GetAbsOrigin(), g_GlobalVars->curtime, 0, boneMask);
+        auto_ik.Init(pStudioHdr, angles, re::C_BaseEntity::GetAbsOrigin(ent), g_GlobalVars->curtime, 0, boneMask);
         boneSetup.CalcAutoplaySequences(pos, q, g_GlobalVars->curtime, &auto_ik);
     }
     else
@@ -102,7 +101,7 @@ void GetSkeleton(IClientEntity *ent, CStudioHdr *pStudioHdr, Vector pos[], Quate
 
 bool SetupBones(IClientEntity *ent, matrix3x4_t *pBoneToWorld, int boneMask)
 {
-    CStudioHdr *pStudioHdr = NET_VAR(ent, 0x880, CStudioHdr *);
+    CStudioHdr *pStudioHdr = netvar.m_pStudioHdr ? NET_VAR(ent, netvar.m_pStudioHdr, CStudioHdr *) : nullptr;
 
     if (!pStudioHdr)
         return false;
@@ -112,19 +111,15 @@ bool SetupBones(IClientEntity *ent, matrix3x4_t *pBoneToWorld, int boneMask)
         pBoneToWorld = new matrix3x4_t[sizeof(matrix3x4_t) * MAXSTUDIOBONES];
     }
 
-    int *entity_flags = (int *) ((uintptr_t) ent + 400);
-
-    // EFL_SETTING_UP_BONES
-    *entity_flags |= 1 << 3;
+    if (netvar.m_iEFlags)
+        NET_INT(ent, netvar.m_iEFlags) |= 1 << 3;
 
     Vector pos[MAXSTUDIOBONES];
     Quaternion q[MAXSTUDIOBONES];
 
-    static uintptr_t m_pIK_offset = 0x568;
+    Vector adjOrigin = re::C_BaseEntity::GetAbsOrigin(ent);
 
-    Vector adjOrigin = ent->GetAbsOrigin();
-
-    CIKContext **m_pIk = (reinterpret_cast<CIKContext **>(reinterpret_cast<uint64_t>(ent) + (m_pIK_offset)));
+    CIKContext **m_pIk = netvar.m_pIk ? reinterpret_cast<CIKContext **>(reinterpret_cast<uint64_t>(ent) + netvar.m_pIk) : nullptr;
     QAngle angles = VectorToQAngle(re::C_BasePlayer::GetEyeAngles(ent));
 
     // One function seems to have pitch as it will do weird stuff with the bones, so we just do this as a fix
@@ -132,7 +127,7 @@ bool SetupBones(IClientEntity *ent, matrix3x4_t *pBoneToWorld, int boneMask)
     angles2.x      = 0;
     angles2.z      = 0;
 
-    if (*m_pIk)
+    if (m_pIk && *m_pIk)
     {
         // FIXME: pass this into Studio_BuildMatrices to skip transforms
         CBoneBitList boneComputed;
@@ -140,11 +135,12 @@ bool SetupBones(IClientEntity *ent, matrix3x4_t *pBoneToWorld, int boneMask)
         (*m_pIk)->Init(pStudioHdr, angles, adjOrigin, g_GlobalVars->curtime, 0 /*m_iIKCounter*/, boneMask);
         GetSkeleton(ent, pStudioHdr, pos, q, boneMask);
 
+        typedef void (*IKLocksFn)(IClientEntity *, float);
+        auto *UpdateIKLocks    = vfunc<IKLocksFn>(ent, vtables::entity::update_ik_locks, 0);
+        auto *CalculateIKLocks = vfunc<IKLocksFn>(ent, vtables::entity::calculate_ik_locks, 0);
+        if (UpdateIKLocks)
+            UpdateIKLocks(ent, g_GlobalVars->curtime);
         (*m_pIk)->UpdateTargets(pos, q, pBoneToWorld, boneComputed);
-
-        typedef void (*CalculateIKLocks_t)(IClientEntity *, float);
-        static uintptr_t CalculateIKLocks_sig      = uintptr_t(0);
-        static CalculateIKLocks_t CalculateIKLocks = (CalculateIKLocks_t) CalculateIKLocks_sig;
         if (CalculateIKLocks)
             CalculateIKLocks(ent, g_GlobalVars->curtime);
         (*m_pIk)->SolveDependencies(pos, q, pBoneToWorld, boneComputed);
@@ -158,8 +154,8 @@ bool SetupBones(IClientEntity *ent, matrix3x4_t *pBoneToWorld, int boneMask)
     Studio_BuildMatrices(pStudioHdr, angles2, adjOrigin, pos, q, -1, NET_FLOAT(ent, netvar.m_flModelScale), // Scaling
                          pBoneToWorld, boneMask);
 
-    // EFL_SETTING_UP_BONES
-    *entity_flags &= ~(1 << 3);
+    if (netvar.m_iEFlags)
+        NET_INT(ent, netvar.m_iEFlags) &= ~(1 << 3);
 
     return true;
 }

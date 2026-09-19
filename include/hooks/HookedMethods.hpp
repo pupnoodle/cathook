@@ -60,7 +60,7 @@ DECLARE_HOOKED_METHOD(FireEvent, bool, IGameEventManager2 *, IGameEvent *, bool)
 DECLARE_HOOKED_METHOD(FireEventClientSide, bool, IGameEventManager2 *, IGameEvent *);
 // g_IEngine
 DECLARE_HOOKED_METHOD(IsPlayingTimeDemo, bool, void *);
-DECLARE_HOOKED_METHOD(ServerCmdKeyValues, void, IVEngineClient013 *, KeyValues *);
+DECLARE_HOOKED_METHOD(ServerCmdKeyValues, void, CEngineClient *, KeyValues *);
 #if ENABLE_VISUALS || ENABLE_TEXTMODE
 // vgui::IPanel
 DECLARE_HOOKED_METHOD(PaintTraverse, void, vgui::IPanel *, vgui::VPANEL, bool, bool);
@@ -93,7 +93,7 @@ DECLARE_HOOKED_METHOD(EmitSound1, void, void *, IRecipientFilter &, int, int, co
 DECLARE_HOOKED_METHOD(EmitSound2, void, void *, IRecipientFilter &, int, int, const char *, float, soundlevel_t, int, int, int, const Vector *, const Vector *, CUtlVector<Vector> *, bool, float, int);
 DECLARE_HOOKED_METHOD(EmitSound3, void, void *, IRecipientFilter &, int, int, int, float, soundlevel_t, int, int, int, const Vector *, const Vector *, CUtlVector<Vector> *, bool, float, int);
 // g_IPrediction
-DECLARE_HOOKED_METHOD(RunCommand, void, IPrediction *, IClientEntity *, CUserCmd *, IMoveHelper *);
+DECLARE_HOOKED_METHOD(RunCommand, void, CPrediction *, IClientEntity *, CUserCmd *, IMoveHelper *);
 // g_IToolFramework
 DECLARE_HOOKED_METHOD(Think, void, IToolFrameworkInternal *, bool);
 // CTFMinigun and CTFFlameThrower

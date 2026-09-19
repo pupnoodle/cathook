@@ -7,6 +7,7 @@
 
 #pragma once
 #include "reclasses.hpp"
+#include <cstddef>
 namespace re
 {
 
@@ -21,6 +22,7 @@ public:
     static bool BCanQueueForStandby(CTFPartyClient *this_);
     char RequestQueueForMatch(int type);
     void RequestQueueForStandby();
+    void RequestLeaveStandby();
     bool BInQueueForStandby();
     bool BInQueueForMatchGroup(int type);
     char RequestLeaveForMatch(int type);
@@ -29,6 +31,7 @@ public:
     static bool BInQueue(CTFPartyClient *this_);
     int GetNumOnlineMembers();
     int GetNumMembers();
+    int GetPendingInvites();
     int PromotePlayerToLeader(CSteamID steamid);
     std::vector<unsigned> GetPartySteamIDs();
     int KickPlayer(CSteamID steamid);
@@ -37,10 +40,22 @@ public:
 class ITFMatchGroupDescription
 {
 public:
-    char pad0[4];
-    int m_iID;
-    char pad1[63];
-    bool m_bForceCompetitiveSettings;
+    struct Layout
+    {
+        std::size_t id                    = vtables::match_group::id;
+        std::size_t force_client_settings = vtables::match_group::force_client_settings;
+        int table_max                     = vtables::match_group::table_max;
+    };
+    static Layout &layout();
+
+    int &m_iID()
+    {
+        return *reinterpret_cast<int *>(reinterpret_cast<char *>(this) + layout().id);
+    }
+    bool &m_bForceCompetitiveSettings()
+    {
+        return *reinterpret_cast<bool *>(reinterpret_cast<char *>(this) + layout().force_client_settings);
+    }
 };
 
 ITFMatchGroupDescription *GetMatchGroupDescription(int &idx);

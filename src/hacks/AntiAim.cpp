@@ -236,7 +236,7 @@ bool ShouldAA(CUserCmd *cmd)
         return false;
     int classid = LOCAL_W->m_iClassID();
     auto mode   = GetWeaponMode();
-    if ((cmd->buttons & IN_ATTACK) && !(IsTF2() && (classid == CL_CLASS(CTFCompoundBow) || mode == weapon_melee)) && CanShoot())
+    if ((cmd->buttons & IN_ATTACK) && !(classid == CL_CLASS(CTFCompoundBow) || mode == weapon_melee) && CanShoot())
     {
         return false;
     }

@@ -11,6 +11,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <dlfcn.h>
+#include <pthread.h>
+#include <atomic>
+#include <thread>
 #include <boost/stacktrace.hpp>
 #include <cxxabi.h>
 #include <visual/SDLHooks.hpp>
@@ -31,7 +34,6 @@
 #define STRINGIFY(x) #x
 #define TO_STRING(x) STRINGIFY(x)
 
-#include "copypasted/CDumper.hpp"
 #include "version.h"
 #include <cxxabi.h>
 
@@ -108,6 +110,12 @@ void hack::ExecuteCommand(const std::string &command)
     hack::command_stack().push(command);
 }
 
+extern "C" __attribute__((visibility("default"))) void ch_exec(const char *cmd)
+{
+    if (cmd && *cmd)
+        hack::ExecuteCommand(cmd);
+}
+
 #if ENABLE_LOGGING
 
 std::string getFileName(std::string filePath)
@@ -121,6 +129,54 @@ std::string getFileName(std::string filePath)
         return filePath.substr(sepPos + 1, filePath.size() - (dotPos != std::string::npos ? 1 : dotPos));
     }
     return filePath;
+}
+
+// TEMP: in-process sampler to find the main-thread stall
+static pthread_t g_prof_main_thread;
+static void prof_dump_handler(int)
+{
+    void *bt[32];
+    int n = backtrace(bt, 32);
+    char hdr[64];
+    int hl = snprintf(hdr, sizeof(hdr), "===STACK===\n");
+    write(2, hdr, hl);
+    for (int i = 0; i < n; ++i)
+    {
+        Dl_info di;
+        char buf[256];
+        if (dladdr(bt[i], &di) && di.dli_fname)
+        {
+            uintptr_t off   = uintptr_t(bt[i]) - uintptr_t(di.dli_fbase);
+            const char *bas = strrchr(di.dli_fname, '/');
+            int len         = snprintf(buf, sizeof(buf), "%s+0x%lx\n", bas ? bas + 1 : di.dli_fname, (unsigned long) off);
+            write(2, buf, len);
+        }
+    }
+}
+
+void prof_arm_main_thread()
+{
+    static std::atomic<bool> armed{ false };
+    if (armed.exchange(true))
+        return;
+    g_prof_main_thread = pthread_self();
+    struct sigaction sa
+    {
+    };
+    sa.sa_handler = prof_dump_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGUSR2, &sa, nullptr);
+    std::thread(
+        []
+        {
+            while (true)
+            {
+                usleep(300000);
+                pthread_kill(g_prof_main_thread, SIGUSR2);
+            }
+        })
+        .detach();
 }
 
 void critical_error_handler(int signum)
@@ -169,7 +225,7 @@ void hack::Hook()
 {
     uintptr_t *clientMode = nullptr;
     void **storage        = nullptr;
-    auto *hud_input       = static_cast<const uint8_t *>((*(void ***) g_IBaseClient)[10]);
+    auto *hud_input       = static_cast<const uint8_t *>((*(void ***) g_IBaseClient)[vtables::client_dll::hud_process_input]);
     if (hud_input && hud_input[0] == 0x48 && hud_input[1] == 0x8d && hud_input[2] == 0x05)
         storage = static_cast<void **>(cathook::core::memory::resolve_lea_rip(hud_input));
     if (!storage)
@@ -189,7 +245,7 @@ void hack::Hook()
     hooks::clientmode.HookMethod(HOOK_ARGS(LevelShutdown));
     hooks::clientmode.Apply();
 
-    hooks::clientmode4.Set((void *) (clientMode), 4);
+    hooks::clientmode4.Set((void *) (clientMode), vtables::client_mode::listener_vptr_offset);
     hooks::clientmode4.HookMethod(HOOK_ARGS(FireGameEvent));
     hooks::clientmode4.Apply();
 
@@ -335,16 +391,6 @@ free(logname);*/
 
     sharedobj::LoadEarlyObjects();
 
-// Fix locale issues caused by steam update
-#if ENABLE_TEXTMODE
-    static BytePatch patch(gSignatures.GetEngineSignature, "74 ? 89 5C 24 ? 8D 9D ? ? ? ? 89 74 24", 0, { 0x71 });
-    patch.Patch();
-
-    // Remove intro video which also causes some crashes
-    static BytePatch patch_intro_video(gSignatures.GetEngineSignature, "55 89 E5 57 56 53 83 EC 5C 8B 5D ? 8B 55", 0x9, { 0x83, 0xc4, 0x5c, 0x5b, 0x5e, 0x5f, 0x5d, 0xc3 });
-    patch_intro_video.Patch();
-#endif
-
     CreateEarlyInterfaces();
 
     // Applying the defaults needs to be delayed, because preloaded Cathook can not properly convert SDL codes to names before TF2 init
@@ -359,14 +405,9 @@ free(logname);*/
     logging::Info("Early Initializer stack done");
     sharedobj::LoadAllSharedObjects();
     CreateInterfaces();
-    CDumper dumper;
-    dumper.SaveDump();
-    logging::Info("Is TF2? %d", IsTF2());
-    logging::Info("Is TF2C? %d", IsTF2C());
-    logging::Info("Is HL2DM? %d", IsHL2DM());
-    logging::Info("Is CSS? %d", IsCSS());
-    logging::Info("Is TF? %d", IsTF());
     InitClassTable();
+    EC::Register(EC::LevelInit, InitClassTable, "classinfo_levelinit", EC::very_early);
+    EC::Register(EC::FirstCM, InitClassTable, "classinfo_firstcm", EC::very_early);
 
     BeginConVars();
     g_Settings.Init();
@@ -409,14 +450,14 @@ free(logname);*/
         hack::command_stack().push(extra_exec);
 
     hack::initialized = true;
-    for (int i = 0; i < 12; i++)
+    for (int i = 0; i <= re::ITFMatchGroupDescription::layout().table_max; i++)
     {
         re::ITFMatchGroupDescription *desc = re::GetMatchGroupDescription(i);
-        if (!desc || desc->m_iID > 9) // ID's over 9 are invalid
+        if (!desc || desc->m_iID() > 9) // ID's over 9 are invalid
             continue;
-        if (desc->m_bForceCompetitiveSettings)
+        if (desc->m_bForceCompetitiveSettings())
         {
-            desc->m_bForceCompetitiveSettings = false;
+            desc->m_bForceCompetitiveSettings() = false;
             logging::Info("Bypassed force competitive cvars!");
         }
     }

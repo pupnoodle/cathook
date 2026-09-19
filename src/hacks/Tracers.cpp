@@ -148,7 +148,7 @@ void draw()
             }
             else
             {
-                if ((!RAW_ENT(ent)->IsDormant() && !ent->m_bAlivePlayer()) || !ent->m_vecDormantOrigin())
+                if ((!EntIsDormant(RAW_ENT(ent)) && !ent->m_bAlivePlayer()) || !ent->m_vecDormantOrigin())
                     continue;
                 if (curr_idx <= g_IEngine->GetMaxClients() && !g_pPlayerResource->isAlive(curr_idx))
                     continue;
@@ -161,7 +161,7 @@ void draw()
                 color = getColor(ent);
                 if (!color)
                     continue;
-                if (RAW_ENT(ent)->IsDormant())
+                if (EntIsDormant(RAW_ENT(ent)))
                     color = colors::FromRGBA8(160, 160, 160, *opaque);
                 color->a = *opaque;
             }
@@ -206,7 +206,7 @@ void draw()
             }
             else
             {
-                if ((!RAW_ENT(ent)->IsDormant() && !ent->m_bAlivePlayer()) || !ent->m_vecDormantOrigin())
+                if ((!EntIsDormant(RAW_ENT(ent)) && !ent->m_bAlivePlayer()) || !ent->m_vecDormantOrigin())
                     continue;
                 if (i <= g_IEngine->GetMaxClients() && !g_pPlayerResource->isAlive(i))
                     continue;
@@ -219,7 +219,7 @@ void draw()
                 color = getColor(ent);
                 if (!color)
                     continue;
-                if (RAW_ENT(ent)->IsDormant())
+                if (EntIsDormant(RAW_ENT(ent)))
                     color = colors::FromRGBA8(160, 160, 160, *opaque);
                 color->a = *opaque;
             }

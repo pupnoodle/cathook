@@ -175,7 +175,7 @@ static void pitchHook(const CRecvProxyData *pData, void *pStruct, void *pOut)
     }
 
     auto client_ent   = (IClientEntity *) (pStruct);
-    CachedEntity *ent = ENTITY(client_ent->entindex());
+    CachedEntity *ent = ENTITY(EntIndex(client_ent));
     if (CE_GOOD(ent))
         *flPitch_out = resolveAnglePitch(flPitch, resolver_map[ent->player_info->friendsID], ent);
 }
@@ -192,7 +192,7 @@ static void yawHook(const CRecvProxyData *pData, void *pStruct, void *pOut)
     }
 
     auto client_ent   = (IClientEntity *) (pStruct);
-    CachedEntity *ent = ENTITY(client_ent->entindex());
+    CachedEntity *ent = ENTITY(EntIndex(client_ent));
     if (CE_GOOD(ent))
         *flYaw_out = resolveAngleYaw(flYaw, resolver_map[ent->player_info->friendsID]);
 }

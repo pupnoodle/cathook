@@ -7,23 +7,29 @@ class CGameRules
 public:
     int RoundMode() const
     {
-        return netvar.m_iRoundState ? NET_INT(this, netvar.m_iRoundState) : 0;
+        if (!this || !netvar.m_iRoundState)
+            return 0;
+        return NET_INT(this, netvar.m_iRoundState);
     }
     int WinningTeam() const
     {
-        return netvar.m_iWinningTeam ? NET_INT(this, netvar.m_iWinningTeam) : 0;
+        if (!this || !netvar.m_iWinningTeam)
+            return 0;
+        return NET_INT(this, netvar.m_iWinningTeam);
     }
     bool isPVEMode() const
     {
-        return netvar.m_bPlayingMannVsMachine && NET_VAR(this, netvar.m_bPlayingMannVsMachine, bool);
+        return this && netvar.m_bPlayingMannVsMachine && NET_VAR(this, netvar.m_bPlayingMannVsMachine, bool);
     }
     int halloweenScenario() const
     {
-        return netvar.m_halloweenScenario ? NET_INT(this, netvar.m_halloweenScenario) : 0;
+        if (!this || !netvar.m_halloweenScenario)
+            return 0;
+        return NET_INT(this, netvar.m_halloweenScenario);
     }
     bool isUsingSpells() const
     {
-        return netvar.m_bIsUsingSpells && NET_VAR(this, netvar.m_bIsUsingSpells, bool);
+        return this && netvar.m_bIsUsingSpells && NET_VAR(this, netvar.m_bIsUsingSpells, bool);
     }
     bool isUsingSpells_fn()
     {

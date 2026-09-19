@@ -37,7 +37,7 @@ void ApplySwingHook()
     if (!inited)
     {
         inited = true;
-        melee_range_hook.Init((uintptr_t) vfunc<GetSwingRange_o>(RAW_ENT(LOCAL_W), 528, 0), (void *) GetSwingRange_hook);
+        melee_range_hook.Init((uintptr_t) vfunc<GetSwingRange_o>(RAW_ENT(LOCAL_W), vtables::melee::get_swing_range, 0), (void *) GetSwingRange_hook);
     }
     melee_range_hook.RestorePatch();
 }
@@ -70,7 +70,7 @@ bool doMovedSwingTrace(CachedEntity *target, Vector new_target_origin)
     Vector angles_to_target = GetAimAtAngles(LOCAL_E->m_vecOrigin(), new_target_origin);
 
     // Set Our and entity data to match the target origin
-    const_cast<Vector &>(RAW_ENT(target)->GetAbsOrigin()) = new_target_origin;
+    re::C_BaseEntity::SetAbsOrigin(RAW_ENT(target), new_target_origin);
 
     // We need to update their positions so the rays actually work, this requires some hacky stuff
     uintptr_t collisionprop = (uintptr_t) RAW_ENT(target) + netvar.m_Collision;
@@ -94,7 +94,7 @@ bool doMovedSwingTrace(CachedEntity *target, Vector new_target_origin)
     bool did_trace_hit = doSwingTraceAngle(angles_to_target, trace);
 
     // Restore data
-    const_cast<Vector &>(RAW_ENT(target)->GetAbsOrigin()) = target_origin;
+    re::C_BaseEntity::SetAbsOrigin(RAW_ENT(target), target_origin);
 
     if (MarkSurroundingBoundsDirty_fn)
         MarkSurroundingBoundsDirty_fn(collisionprop);
@@ -195,14 +195,14 @@ static bool angleCheck(CachedEntity *target, std::optional<Vector> target_pos, V
     Vector vecToTarget;
 
     Vector local_worldspace;
-    VectorLerp(RAW_ENT(LOCAL_E)->GetCollideable()->OBBMins(), RAW_ENT(LOCAL_E)->GetCollideable()->OBBMaxs(), 0.5f, local_worldspace);
+    VectorLerp(EntOBBMins(RAW_ENT(LOCAL_E)), EntOBBMaxs(RAW_ENT(LOCAL_E)), 0.5f, local_worldspace);
     local_worldspace += LOCAL_E->m_vecOrigin();
     if (target_pos)
         vecToTarget = *target_pos - local_worldspace;
     else
     {
         Vector target_worldspace;
-        VectorLerp(RAW_ENT(target)->GetCollideable()->OBBMins(), RAW_ENT(target)->GetCollideable()->OBBMaxs(), 0.5f, target_worldspace);
+        VectorLerp(EntOBBMins(RAW_ENT(target)), EntOBBMaxs(RAW_ENT(target)), 0.5f, target_worldspace);
         target_worldspace += target->m_vecOrigin();
         vecToTarget = target_worldspace - local_worldspace;
     }
@@ -243,7 +243,7 @@ static bool doLegitBackstab()
 
     if (!trace.m_pEnt)
         return false;
-    int index = reinterpret_cast<IClientEntity *>(trace.m_pEnt)->entindex();
+    int index = EntIndex(reinterpret_cast<IClientEntity *>(trace.m_pEnt));
     auto ent  = ENTITY(index);
     if (index == 0 || index > g_IEngine->GetMaxClients() || !ent->m_bEnemy() || !player_tools::shouldTarget(ent) || IsPlayerInvulnerable(ent))
         return false;
@@ -279,7 +279,7 @@ static bool doRageBackstab()
             auto angle     = GetAimAtAngles(g_pLocalPlayer->v_Eye, aim_pos, LOCAL_E);
             if (!angleCheck(ent, std::nullopt, angle) && !canFaceStab(ent))
                 continue;
-            if (doSwingTraceAngle(angle, trace) && ((IClientEntity *) trace.m_pEnt)->entindex() == ent->m_IDX)
+            if (doSwingTraceAngle(angle, trace) && EntIndex((IClientEntity *) trace.m_pEnt) == ent->m_IDX)
             {
                 current_user_cmd->buttons |= IN_ATTACK;
                 g_pLocalPlayer->bUseSilentAngles = true;
@@ -298,7 +298,7 @@ static bool doRageBackstab()
         {
             if (doSwingTraceAngle(newangle, trace))
             {
-                int index = reinterpret_cast<IClientEntity *>(trace.m_pEnt)->entindex();
+                int index = EntIndex(reinterpret_cast<IClientEntity *>(trace.m_pEnt));
                 auto ent  = ENTITY(index);
                 if (index == 0 || index > PLAYER_ARRAY_SIZE || !ent->m_bEnemy() || !player_tools::shouldTarget(ent) || IsPlayerInvulnerable(ent))
                     continue;
@@ -328,7 +328,7 @@ bool IsTickGood(hacks::tf2::backtrack::BacktrackData tick)
     Vector target_vec = tick.m_vecOrigin;
 
     Vector target_worldspace = target_vec;
-    target_worldspace += (RAW_ENT(ent)->GetCollideable()->OBBMins() + RAW_ENT(ent)->GetCollideable()->OBBMaxs()) / 2.0f;
+    target_worldspace += (EntOBBMins(RAW_ENT(ent)) + EntOBBMaxs(RAW_ENT(ent))) / 2.0f;
 
     Vector angle = GetAimAtAngles(g_pLocalPlayer->v_Eye, target_worldspace);
     if (legit_stab)

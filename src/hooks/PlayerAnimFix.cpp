@@ -18,10 +18,10 @@ float FrameAdvance_hook(IClientEntity *self, float flInterval)
     float newInterval = flInterval;
 
     // Check if the entity is valid
-    if (enabled && self && IDX_GOOD(self->entindex()) && self->entindex() > 0 && self->entindex() <= (int) previous_simtimes.size())
+    if (enabled && self && IDX_GOOD(EntIndex(self)) && EntIndex(self) > 0 && EntIndex(self) <= (int) previous_simtimes.size())
     {
         // Check if they are an alive player
-        CachedEntity *ent = ENTITY(self->entindex());
+        CachedEntity *ent = ENTITY(EntIndex(self));
         // Set new interval based on their simtime
         if (CE_GOOD(ent) && ent->m_Type() == ENTITY_PLAYER && ent->m_bAlivePlayer())
         {
@@ -49,9 +49,9 @@ bool ShouldInterpolate_hook(IClientEntity *ent)
 {
     if (enabled)
     {
-        if (ent && IDX_GOOD(ent->entindex()))
+        if (ent && IDX_GOOD(EntIndex(ent)))
         {
-            CachedEntity *cent = ENTITY(ent->entindex());
+            CachedEntity *cent = ENTITY(EntIndex(ent));
             if (CE_BAD(cent))
                 return false;
             if (cent->m_Type() == ENTITY_PLAYER && cent->m_IDX != g_pLocalPlayer->entity_idx)

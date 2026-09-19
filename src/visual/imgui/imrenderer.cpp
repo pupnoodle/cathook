@@ -14,9 +14,28 @@
 #include "visual/imgui/imgui_impl.h"
 #include "visual/imgui/imgui_internal.h"
 #include "visual/picopng.hpp"
+#include <GL/gl.h>
+#include <SDL2/SDL.h>
 #include <fstream>           // Loading files
 #include <mathlib/mathlib.h> // SinCos
 #include <stack>             // Loading textures
+
+#ifndef GL_PIXEL_UNPACK_BUFFER
+#define GL_PIXEL_UNPACK_BUFFER 0x88EC
+#endif
+#ifndef GL_PIXEL_UNPACK_BUFFER_BINDING
+#define GL_PIXEL_UNPACK_BUFFER_BINDING 0x88EF
+#endif
+
+using GlBindBufferFn = void (*)(GLenum, GLuint);
+
+static GlBindBufferFn gl_bind_buffer()
+{
+    static GlBindBufferFn fn;
+    if (!fn)
+        fn = reinterpret_cast<GlBindBufferFn>(SDL_GL_GetProcAddress("glBindBuffer"));
+    return fn;
+}
 
 ImDrawListSharedData shared{};
 ImDrawList bufferA{ &shared };
@@ -26,6 +45,12 @@ extern int currentBuffer;
 
 namespace im_renderer
 {
+static int overlay_logs = 0;
+
+void resetFrameLog()
+{
+    overlay_logs = 0;
+}
 std::vector<font *> &fonts()
 {
     static std::vector<font *> stack{};
@@ -133,15 +158,22 @@ void Texture::load()
     }
     {
         // Upload texture to graphics system
-        GLint last_texture;
+        GLint last_texture, last_unpack_buffer = 0;
         glGetIntegerv(GL_TEXTURE_BINDING_2D, &last_texture);
+        glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &last_unpack_buffer);
         glGenTextures(1, &texture_id);
         glBindTexture(GL_TEXTURE_2D, texture_id);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        if (auto bind_buffer = gl_bind_buffer(); bind_buffer && last_unpack_buffer)
+            bind_buffer(GL_PIXEL_UNPACK_BUFFER, 0);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+        if (auto err = glGetError())
+            logging::Info("imgui: texture upload %s glerr=%u", path.c_str(), (unsigned) err);
         // Restore state
+        if (auto bind_buffer = gl_bind_buffer(); bind_buffer && last_unpack_buffer)
+            bind_buffer(GL_PIXEL_UNPACK_BUFFER, (GLuint) last_unpack_buffer);
         glBindTexture(GL_TEXTURE_2D, last_texture);
     }
     return;
@@ -166,8 +198,17 @@ void rebuildAll()
 
 void init()
 {
+    logging::Info("imgui: ImplSdl_Init");
     ImGui_ImplSdl_Init();
-    rebuildAll();
+    logging::Info("imgui: rebuildAll (%zu fonts)", fonts().size());
+    try
+    {
+        rebuildAll();
+    }
+    catch (const std::exception &e)
+    {
+        logging::Info("imgui: rebuildAll failed: %s", e.what());
+    }
 }
 
 void bufferBegin()
@@ -186,31 +227,24 @@ void renderStart()
 void renderEnd()
 {
     ImGui::Render();
-    auto drawdata = ImGui::GetDrawData();
-    if (drawdata && drawdata->Valid && buffers[!currentBuffer]) // anti crash check
-    {                                                           /*
-                                                                   if (!drawdata->CmdLists) // if no window was drawn using ImGui::Begin, this is null!
-                                                                   { */
-        auto c = ImGui::GetCurrentContext();
-        ImGui::AddDrawListToDrawData(&c->DrawDataBuilder.Layers[0],
-                                     buffers[!currentBuffer]); // this is a hack
-        drawdata->CmdLists      = c->DrawDataBuilder.Layers[0].Data;
-        drawdata->CmdListsCount = c->DrawDataBuilder.Layers[0].Size;
-        /* } // THIS CODE IS USEFUL ONLY IF YOU DRAW OTHER WINDOWS!
-            // use bottom code to draw cheat visuals BEHIND the windows
-        else
-        {
-            ImDrawList *old = dmgr::buffers[!dmgr::curbuf];   // first one should be our custom drawlist
-            drawdata->CmdListsCount++;                        // increment to accomodate it
-            for (int n = 0; n < drawdata->CmdListsCount; n++) // move all pointers up by one and make ours the first entry!
-            {
-                auto bold             = drawdata->CmdLists[n];
-                drawdata->CmdLists[n] = old;
-                old                   = bold;
-            }
-        } */
+    auto *c        = ImGui::GetCurrentContext();
+    auto *drawdata = ImGui::GetDrawData();
+    if (!c || !drawdata)
+        return;
+    if (buffers[!currentBuffer])
+        ImGui::AddDrawListToDrawData(&c->DrawDataBuilder.Layers[0], buffers[!currentBuffer]);
+    drawdata->CmdLists      = c->DrawDataBuilder.Layers[0].Data;
+    drawdata->CmdListsCount = c->DrawDataBuilder.Layers[0].Size;
+    if (drawdata->CmdListsCount > 0)
+        ImGui_Impl_Render(drawdata);
+    if (overlay_logs < 5)
+    {
+        int verts = 0;
+        for (int i = 0; i < drawdata->CmdListsCount; i++)
+            verts += drawdata->CmdLists[i]->VtxBuffer.Size;
+        logging::Info("overlay frame lists=%d verts=%d glerr=%u", drawdata->CmdListsCount, verts, (unsigned) glGetError());
+        overlay_logs++;
     }
-    ImGui_Impl_Render(drawdata);
 }
 namespace draw
 {

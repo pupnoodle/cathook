@@ -2,12 +2,13 @@
 #include "dt_common.h"
 #include "tier0/dbg.h"
 #include "dt_recv.h"
+#include <cstddef>
 
 class RecvPropRedef
 {
     // This info comes from the receive data table.
 public:
-    RecvPropRedef();
+    RecvPropRedef() = default;
 
     void InitArray(int nElements, int elementStride);
 
@@ -83,3 +84,6 @@ public:
     // these can be used to get its array property name for debugging.
     const char *m_pParentArrayPropName;
 };
+
+static_assert(offsetof(RecvPropRedef, m_ProxyFn) == 0x30, "linux64 RecvProp::m_ProxyFn");
+static_assert(offsetof(RecvPropRedef, m_Offset) == 0x48, "linux64 RecvProp::m_Offset");

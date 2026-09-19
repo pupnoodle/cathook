@@ -41,23 +41,23 @@ bool ragdollKillByLocal(void *ragdoll)
 {
     // Get the owner of the ragdoll (TFPlayer)
     auto owner = g_IEntityList->GetClientEntity(NET_INT(ragdoll, netvar.m_iPlayerIndex));
-    if (!owner || owner->IsDormant())
+    if (!owner || EntIsDormant(owner))
     {
         return false;
     }
     // Make sure this isn't the own player's ragdoll
     // The player will spectate iteself when the player dies via suicide
-    if (owner->entindex() == g_pLocalPlayer->entity_idx)
+    if (EntIndex(owner) == g_pLocalPlayer->entity_idx)
     {
         return false;
     }
     // Check to see if the owner is spectating the local player
     auto owner_observer = g_IEntityList->GetClientEntityFromHandle(NET_VAR(owner, netvar.hObserverTarget, CBaseHandle));
-    if (!owner_observer || owner_observer->IsDormant())
+    if (!owner_observer || EntIsDormant(owner_observer))
     {
         return false;
     }
-    return owner_observer->entindex() == g_pLocalPlayer->entity_idx;
+    return EntIndex(owner_observer) == g_pLocalPlayer->entity_idx;
 }
 
 /**

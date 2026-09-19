@@ -18,7 +18,7 @@ public:
     inline static bool DoSwingTrace(IClientEntity *self, trace_t *trace)
     {
         typedef bool (*fn_t)(IClientEntity *, trace_t *);
-        return vfunc<fn_t>(self, 530, 0)(self, trace);
+        return vfunc<fn_t>(self, vtables::melee::do_swing_trace, 0)(self, trace);
     }
     inline static int GetSwingRange(IClientEntity *self)
     {
@@ -29,7 +29,7 @@ public:
         CachedEntity *owner_ce = nullptr;
         if (owner)
         {
-            owner_ce = ENTITY(owner->entindex());
+            owner_ce = ENTITY(EntIndex(owner));
             if (CE_GOOD(owner_ce) && HasCondition<TFCond_Charging>(owner_ce))
             {
                 CondBitSet<TFCond_Charging, false>(CE_VAR(owner_ce, netvar.iCond, condition_data_s));
@@ -37,7 +37,7 @@ public:
             }
         }
         typedef int (*fn_t)(IClientEntity *);
-        int return_value = vfunc<fn_t>(self, 528, 0)(self);
+        int return_value = vfunc<fn_t>(self, vtables::melee::get_swing_range, 0)(self);
 
         if (add_charging && CE_GOOD(owner_ce))
             CondBitSet<TFCond_Charging, true>(CE_VAR(owner_ce, netvar.iCond, condition_data_s));

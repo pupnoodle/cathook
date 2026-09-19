@@ -267,13 +267,13 @@ void dodgeProj(CachedEntity *proj_ptr)
 {
 
     Vector eav;
-    const Vector player_origin = RAW_ENT(LOCAL_E)->GetAbsOrigin();
+    const Vector player_origin = re::C_BaseEntity::GetAbsOrigin(RAW_ENT(LOCAL_E));
     velocity::EstimateAbsVelocity(RAW_ENT(proj_ptr), eav);
     // Sometimes EstimateAbsVelocity returns completely BS values (as in 0 for everything on say a rocket)
     // The ent could also be an in-place sticky which we don't care about - we want to catch it while it's in the air
     if (1 < eav.Length())
     {
-        Vector proj_pos         = RAW_ENT(proj_ptr)->GetAbsOrigin();
+        Vector proj_pos         = re::C_BaseEntity::GetAbsOrigin(RAW_ENT(proj_ptr));
         float multipler         = 2.0f;
         bool add_grav           = false;
         float high_time         = 10;
@@ -370,7 +370,7 @@ static void dodgeProj_cm()
 {
     if (!LOCAL_E->m_bAlivePlayer() || proj_map.empty() || !dodge_projectile)
         return;
-    Vector player_pos = RAW_ENT(LOCAL_E)->GetAbsOrigin();
+    Vector player_pos = re::C_BaseEntity::GetAbsOrigin(RAW_ENT(LOCAL_E));
     for (const auto &[proj_ptr, proj_vec] : proj_map)
     {
         if (proj_vec.Length() < 0.1f)
@@ -385,12 +385,12 @@ static void dodgeProj_cm()
         {
             // Since we are sending this warp next tick we need to compensate for fast moving projectiles
             // 2 Ticks in advance is a fairly safe interval
-            float c_1   = ((float) (g_pLocalPlayer->v_Origin - RAW_ENT(proj_ptr)->GetAbsOrigin()).Dot(proj_vec)) / ((float) proj_vec.Dot(proj_vec));
+            float c_1   = ((float) (g_pLocalPlayer->v_Origin - re::C_BaseEntity::GetAbsOrigin(RAW_ENT(proj_ptr))).Dot(proj_vec)) / ((float) proj_vec.Dot(proj_vec));
             float ticks = TIME_TO_TICKS(c_1);
             if (ticks > 30)
                 continue;
             float max_speed   = CE_FLOAT(LOCAL_E, netvar.m_flMaxspeed);
-            Vector dist       = RAW_ENT(proj_ptr)->GetAbsOrigin();
+            Vector dist       = re::C_BaseEntity::GetAbsOrigin(RAW_ENT(proj_ptr));
             float proj_hitbox = hitbox_size_proj(proj_ptr->m_iClassID());
             // Warp sooner for fast moving projectiles.
             trace_t trace;
@@ -401,7 +401,7 @@ static void dodgeProj_cm()
             {
                 // logging::Info("ENTERED");
                 //  We need to determine wether the projectile is coming in from the left or right of us so we don't warp into the projectile.
-                Vector result = GetAimAtAngles(g_pLocalPlayer->v_Eye, RAW_ENT(proj_ptr)->GetAbsOrigin(), LOCAL_E) - g_pLocalPlayer->v_OrigViewangles;
+                Vector result = GetAimAtAngles(g_pLocalPlayer->v_Eye, re::C_BaseEntity::GetAbsOrigin(RAW_ENT(proj_ptr)), LOCAL_E) - g_pLocalPlayer->v_OrigViewangles;
 
                 if (0 <= result.y)
                     yaw_amount = -90.0f;
@@ -1063,10 +1063,17 @@ void warpLogic()
 // Only called if *bSendPackets is true.
 void CL_SendMove_hook()
 {
+    if (!enabled)
+    {
+        auto orig = CL_SendMove_t(cl_sendmove_detour.GetOriginalFunc());
+        if (orig)
+            orig();
+        return;
+    }
     byte data[4000];
 
     // the +4 one is choked commands
-    int nextcommandnr = NET_INT(g_IBaseClientState, offsets::lastoutgoingcommand()) + NET_INT(g_IBaseClientState, offsets::lastoutgoingcommand() + 4) + 1;
+    int nextcommandnr = g_IBaseClientState->lastoutgoingcommand() + g_IBaseClientState->chokedcommands() + 1;
 
     // send the client update packet
 
@@ -1078,11 +1085,11 @@ void CL_SendMove_hook()
     int cl_cmdbackup = 2;
 
     // How many real new commands have queued up
-    moveMsg.m_nNewCommands = 1 + NET_INT(g_IBaseClientState, offsets::lastoutgoingcommand() + 4);
+    moveMsg.m_nNewCommands = 1 + g_IBaseClientState->chokedcommands();
     moveMsg.m_nNewCommands = std::clamp(moveMsg.m_nNewCommands, 0, 15);
 
     // Excessive commands (Used for longer fakelag, credits to https://www.unknowncheats.me/forum/source-engine/370916-23-tick-guwop-fakelag-break-lag-compensation-running.html)
-    int extra_commands        = NET_INT(g_IBaseClientState, offsets::lastoutgoingcommand() + 4) + 1 - moveMsg.m_nNewCommands;
+    int extra_commands        = g_IBaseClientState->chokedcommands() + 1 - moveMsg.m_nNewCommands;
     cl_cmdbackup              = std::max(2, extra_commands);
     moveMsg.m_nBackupCommands = std::clamp(cl_cmdbackup, 0, 7);
 
@@ -1097,10 +1104,10 @@ void CL_SendMove_hook()
         bool isnewcmd = to >= (nextcommandnr - moveMsg.m_nNewCommands + 1);
 
         // Call the write to buffer
-        typedef bool (*WriteUsercmdDeltaToBuffer_t)(IBaseClientDLL *, bf_write *, int, int, bool);
+        typedef bool (*WriteUsercmdDeltaToBuffer_t)(CHLClient *, bf_write *, int, int, bool);
 
         // first valid command number is 1
-        bOK  = bOK && vfunc<WriteUsercmdDeltaToBuffer_t>(g_IBaseClient, offsets::PlatformOffset(23, offsets::undefined, offsets::undefined), 0)(g_IBaseClient, &moveMsg.m_DataOut, from, to, isnewcmd);
+        bOK  = bOK && vfunc<WriteUsercmdDeltaToBuffer_t>(g_IBaseClient, vtables::client_dll::write_usercmd_delta, 0)(g_IBaseClient, &moveMsg.m_DataOut, from, to, isnewcmd);
         from = to;
     }
 
@@ -1108,10 +1115,10 @@ void CL_SendMove_hook()
     {
         // Make fakelag work as we want it to
         if (extra_commands > 0)
-            NetChan((INetChannel *) g_IEngine->GetNetChannelInfo())->m_nChokedPackets -= extra_commands;
+            g_IEngine->GetNetChannelInfo()->m_nChokedPackets() -= extra_commands;
 
         // only write message if all usercmds were written correctly, otherwise parsing would fail
-        ((INetChannel *) g_IEngine->GetNetChannelInfo())->SendNetMsg(moveMsg);
+        g_IEngine->GetNetChannelInfo()->SendNetMsg(moveMsg);
     }
 }
 

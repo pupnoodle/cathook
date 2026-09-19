@@ -9,8 +9,8 @@
 
 class ConVar;
 
-#include <core/sdk.hpp>
 #include <core/interfaces.hpp>
+#include <core/sdk.hpp>
 
 #include <string>
 #include <vector>

@@ -69,6 +69,7 @@ void init();
 void bufferBegin();
 void renderStart();
 void renderEnd();
+void resetFrameLog();
 
 namespace draw
 {

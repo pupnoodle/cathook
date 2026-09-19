@@ -23,7 +23,7 @@ class SharedObject
 {
 public:
     SharedObject(const char *_file, bool _factory);
-    void Load();
+    bool Load(bool required = true);
     void Unload();
     char *Pointer(uintptr_t offset) const;
     void *CreateInterface(const std::string &interface);

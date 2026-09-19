@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "core/resolve.hpp"
+#include "core/sharedobj.hpp"
 
 namespace sdl_hooks
 {
@@ -32,21 +33,35 @@ static bool write_pointer_slot(void **slot, void *value)
         return false;
     long ps   = sysconf(_SC_PAGESIZE);
     auto page = reinterpret_cast<void *>(uintptr_t(slot) & ~uintptr_t(ps - 1));
+    int prot  = cathook::core::memory::protection_at(slot);
     if (mprotect(page, ps, PROT_READ | PROT_WRITE) != 0)
         return false;
     *slot = value;
-    mprotect(page, ps, PROT_READ);
+    int restore = PROT_READ;
+    if (prot & PROT_WRITE)
+        restore |= PROT_WRITE;
+    if (prot & PROT_EXEC)
+        restore |= PROT_EXEC;
+    mprotect(page, ps, restore);
     return true;
 }
 
 static void **slot_for(const char *name)
 {
-    void *fn = dlsym(sharedobj::libsdl().lmap, name);
-    if (!fn)
-        fn = dlsym(RTLD_DEFAULT, name);
+    void *h = sharedobj::libsdl().lmap;
+    if (!h)
+    {
+        std::string path;
+        std::string so = "libSDL2-2.0.so.0";
+        if (sharedobj::LocateSharedObject(so, path))
+            h = dlopen(path.c_str(), RTLD_LAZY | RTLD_NOLOAD);
+    }
+    if (!h)
+        return nullptr;
+    void *fn = dlsym(h, name);
     if (!fn)
     {
-        logging::Info("SDL: dlsym(%s) failed", name);
+        logging::Info("SDL: dlsym(%s) failed on game libSDL2", name);
         return nullptr;
     }
     auto *slot = static_cast<void **>(cathook::core::memory::resolve_jmp_slot(fn));

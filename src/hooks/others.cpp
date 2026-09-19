@@ -16,21 +16,6 @@
 #include "HookedMethods.hpp"
 #if ENABLE_VISUALS
 
-// This hook isn't used yet!
-/*int C_TFPlayer__DrawModel_hook(IClientEntity *_this, int flags)
-{
-    float old_invis = *(float *) ((uintptr_t) _this + 79u);
-    if (no_invisibility)
-    {
-        if (old_invis < 1.0f)
-        {
-            *(float *) ((uintptr_t) _this + 79u) = 0.5f;
-        }
-    }
-
-    *(float *) ((uintptr_t) _this + 79u) = old_invis;
-}*/
-
 float last_say = 0.0f;
 
 CatCommand spectate("spectate", "Spectate", [](const CCommand &args) {

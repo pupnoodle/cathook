@@ -1,57 +1,43 @@
 #!/usr/bin/env bash
+# gdb inject libcathook.so into live linux64 tf_linux64.
+set -euo pipefail
 
-# Thank you LWSS
-# https://github.com/LWSS/Fuzion/commit/a53b6c634cde0ed47b08dd587ba40a3806adf3fe
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+LIB="${LIB:-$ROOT/bin/libcathook.so}"
+GAME_BIN="${GAME_BIN:-tf_linux64}"
 
-[[ ! -z "$SUDO_USER" ]] && RUNUSER="$SUDO_USER" || RUNUSER="$LOGNAME"
-RUNCMD="sudo -u $RUNUSER"
+if [ ! -f "$LIB" ]; then
+    echo "Missing $LIB" >&2
+    exit 1
+fi
 
-$RUNCMD bash ./scripts/updater true
-$RUNCMD bash ./report-crash true
+# Same-user gdb attach works; do not require root.
 
-line=$(pgrep -u $RUNUSER hl2_linux)
-arr=($line)
-
-if [ $# == 1 ]; then
-    proc=$1
-else
-    if [ ${#arr[@]} == 0 ]; then
-        echo TF2 isn\'t running!
-        exit
+PROCID="${1:-}"
+if [ -z "$PROCID" ]; then
+    mapfile -t pids < <(pgrep -x "$GAME_BIN" || true)
+    if [ "${#pids[@]}" -eq 0 ]; then
+        echo "TF2 ($GAME_BIN) isn't running" >&2
+        exit 1
     fi
-    proc=${arr[0]}
+    PROCID="${pids[0]}"
 fi
 
-echo Running instances: "${arr[@]}"
-echo Attaching to "$proc"
-
-# Get a Random name from the build_names file.
-FILENAME=$(shuf -n 1 build_names)
-
-# Create directory if it doesn't exist
-if [ ! -d "/lib/i386-linux-gnu/" ]; then
-    mkdir /lib/i386-linux-gnu/
+if [ ! -r "/proc/$PROCID/maps" ]; then
+    echo "Cannot read /proc/$PROCID/maps" >&2
+    exit 1
 fi
 
-# In case this file exists, get another one. ( checked it works )
-while [ -f "/lib/i386-linux-gnu/${FILENAME}" ]; do
-    FILENAME=$(shuf -n 1 build_names)
-done
+STAGE_DIR="$(mktemp -d /tmp/cathook-runtime-XXXXXX)"
+STAGE_LIB="$STAGE_DIR/libcathook.so"
+install -m 0755 "$LIB" "$STAGE_LIB"
+chmod 0755 "$STAGE_DIR"
 
-# echo $FILENAME > build_id # For detaching
-
-sudo cp "bin/libcathook.so" "/lib/i386-linux-gnu/${FILENAME}"
-
-echo loading "$FILENAME" to "$proc"
-
-gdbbin="gdb"
-$gdbbin -n -q -batch                                                                                \
-    -ex "attach $proc"                                                                          \
-    -ex "echo \033[1mCalling dlopen\033[0m\n"                                                   \
-    -ex "call ((void*(*)(const char*, int))dlopen)(\"/lib/i386-linux-gnu/$FILENAME\", 1)"       \
-    -ex "echo \033[1mCalling dlerror\033[0m\n"                                                  \
-    -ex "call ((char*(*)(void))dlerror)()"                                                      \
-    -ex "detach"                                                                                \
+gdb -n -q --batch \
+    -ex "set pagination off" \
+    -ex "set confirm off" \
+    -ex "attach $PROCID" \
+    -ex "call ((void *(*)(const char *, int)) dlopen)(\"$STAGE_LIB\", 1)" \
+    -ex "call ((char *(*)(void)) dlerror)()" \
+    -ex "detach" \
     -ex "quit"
-
-sudo rm "/lib/i386-linux-gnu/${FILENAME}"

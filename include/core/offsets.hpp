@@ -8,249 +8,186 @@
 #pragma once
 
 #include <stdint.h>
-#include <exception>
-
-enum class platform
-{
-    PLATFORM_LINUX,
-    PLATFORM_WINDOWS,
-    PLATFORM_OSX,
-    PLATFORM_UNSUPPORTED
-};
-
-#ifdef LINUX
-constexpr platform PLATFORM = platform::PLATFORM_LINUX;
-#else
-constexpr platform PLATFORM = platform::PLATFORM_UNSUPPORTED;
-#endif
+#include <cstddef>
+#include "sdk/client_state.hpp"
+#include "core/vtables.hpp"
 
 struct offsets
 {
-    static constexpr uint32_t undefined = std::numeric_limits<uint32_t>::max();
-
-    static constexpr uint32_t PlatformOffset(uint32_t offset_linux, uint32_t offset_windows, uint32_t offset_osx)
-    {
-        uint32_t result = undefined;
-        switch (PLATFORM)
-        {
-        case platform::PLATFORM_LINUX:
-            result = offset_linux;
-            break;
-        case platform::PLATFORM_WINDOWS:
-            result = offset_windows;
-            break;
-        case platform::PLATFORM_OSX:
-            result = offset_osx;
-            break;
-        }
-        // pCompileError.
-        // static_assert(result != undefined, "No offset defined for this
-        // platform!");
-        return result;
-    }
     static constexpr uint32_t GetUserCmd()
     {
-        return PlatformOffset(8, undefined, undefined);
+        return vtables::input::get_user_cmd;
     }
     static constexpr uint32_t ShouldDraw()
     {
-        return PlatformOffset(136, undefined, undefined);
+        return vtables::entity::should_draw;
     }
     static constexpr uint32_t ShouldInterpolate()
     {
-        return PlatformOffset(210, undefined, undefined);
+        return vtables::entity::should_interpolate;
     }
     static constexpr uint32_t FrameAdvance()
     {
-        return PlatformOffset(254, undefined, undefined);
+        return vtables::entity::frame_advance;
     }
     static constexpr uint32_t DrawModelExecute()
     {
-        return PlatformOffset(19, undefined, undefined);
-    }
-    static constexpr uint32_t GetClientName()
-    {
-        return PlatformOffset(44, undefined, undefined);
-    }
-    static constexpr uint32_t ProcessSetConVar()
-    {
-        return PlatformOffset(4, undefined, undefined);
-    }
-    static constexpr uint32_t ProcessMovement()
-    {
-        return PlatformOffset(2, undefined, undefined);
-    }
-    static constexpr uint32_t ProcessGetCvarValue()
-    {
-        return PlatformOffset(29, undefined, undefined);
+        return vtables::model_render::draw_model_execute;
     }
     static constexpr uint32_t GetFriendPersonaName()
     {
-        return PlatformOffset(7, undefined, undefined);
+        return vtables::steam_friends::get_friend_persona_name;
     }
     static constexpr uint32_t CreateMoveInput()
     {
-        return PlatformOffset(3, undefined, undefined);
+        return vtables::input::create_move;
     }
     static constexpr uint32_t CAM_CapYaw()
     {
-        return PlatformOffset(51, undefined, undefined);
+        return vtables::input::cam_cap_yaw;
     }
     static constexpr uint32_t CreateMove()
     {
-        return PlatformOffset(22, undefined, undefined);
+        return vtables::client_mode::create_move;
     }
     static constexpr uint32_t PaintTraverse()
     {
-        return PlatformOffset(42, undefined, undefined);
+        return vtables::vgui_panel::paint_traverse;
     }
     static constexpr uint32_t OverrideView()
     {
-        return PlatformOffset(17, undefined, undefined);
+        return vtables::client_mode::override_view;
     }
     static constexpr uint32_t FrameStageNotify()
     {
-        return PlatformOffset(35, undefined, undefined);
+        return vtables::client_dll::frame_stage_notify;
     }
     static constexpr uint32_t DispatchUserMessage()
     {
-        return PlatformOffset(36, undefined, undefined);
+        return vtables::client_dll::dispatch_user_message;
     }
     static constexpr uint32_t CanPacket()
     {
-        return PlatformOffset(54, undefined, undefined);
+        return vtables::netchan::can_packet;
     }
     static constexpr uint32_t SendNetMsg()
     {
-        return PlatformOffset(38, undefined, undefined);
+        return vtables::netchan::send_net_msg;
     }
     static constexpr uint32_t Shutdown()
     {
-        return PlatformOffset(35, undefined, undefined);
+        return vtables::netchan::shutdown;
     }
     static constexpr uint32_t IN_KeyEvent()
     {
-        return PlatformOffset(20, undefined, undefined);
-    }
-    static constexpr uint32_t HandleInputEvent()
-    {
-        return PlatformOffset(78, undefined, undefined);
+        return vtables::client_dll::in_key_event;
     }
     static constexpr uint32_t LevelInit()
     {
-        return PlatformOffset(23, undefined, undefined);
+        return vtables::client_mode::level_init;
     }
     static constexpr uint32_t LevelShutdown()
     {
-        return PlatformOffset(24, undefined, undefined);
+        return vtables::client_mode::level_shutdown;
     }
     static constexpr uint32_t BeginFrame()
     {
-        return PlatformOffset(5, undefined, undefined);
+        return vtables::studio_render::begin_frame;
     }
     static constexpr uint32_t FireGameEvent()
     {
-        return PlatformOffset(2, undefined, undefined);
+        return vtables::client_mode::fire_game_event;
     }
     static constexpr uint32_t FireEvent()
     {
-        return PlatformOffset(8, undefined, undefined);
+        return vtables::game_event::fire_event;
     }
     static constexpr uint32_t FireEventClientSide()
     {
-        return PlatformOffset(9, undefined, undefined);
-    }
-    static constexpr uint32_t AreRandomCritsEnabled()
-    {
-        return PlatformOffset(466, undefined, 466);
+        return vtables::game_event::fire_event_client_side;
     }
     static constexpr uint32_t lastoutgoingcommand()
     {
-        return PlatformOffset(0x8c74, undefined, undefined);
+        return uint32_t(vtables::client_state::lastoutgoingcommand);
     }
     static constexpr uint32_t m_nSignonState()
     {
-        return PlatformOffset(0x14c, undefined, undefined);
+        return uint32_t(vtables::client_state::signon_state);
     }
     static constexpr uint32_t m_nDeltaTick()
     {
-        return PlatformOffset(0x1b8, undefined, undefined);
+        return uint32_t(vtables::client_state::delta_tick);
     }
     static constexpr uint32_t m_nOutSequenceNr()
     {
-        return PlatformOffset(0xC, undefined, undefined);
+        return uint32_t(vtables::netchan::out_sequence_nr);
     }
     static constexpr uint32_t m_NetChannel()
     {
-        return PlatformOffset(0x20, undefined, undefined);
+        return uint32_t(vtables::client_state::net_channel);
     }
     static constexpr uint32_t RandomInt()
     {
-        return PlatformOffset(2, undefined, undefined);
-    }
-    static constexpr uint32_t PreDataUpdate()
-    {
-        return PlatformOffset(15, undefined, undefined);
+        return vtables::random_stream::random_int;
     }
     static constexpr uint32_t Paint()
     {
-        return PlatformOffset(15, undefined, undefined);
+        return vtables::engine_vgui::paint;
     }
     static constexpr uint32_t SendDatagram()
     {
-        return PlatformOffset(44, undefined, 44);
+        return vtables::netchan::send_datagram;
     }
     static constexpr uint32_t IsPlayingTimeDemo()
     {
-        // IVEngineClient: ISE calls [vtable+0x270] == index 78
-        return PlatformOffset(78, undefined, 78);
+        return vtables::engine_client::is_playing_time_demo;
     }
     static constexpr uint32_t RegisterFileWhitelist()
     {
-        return PlatformOffset(94, undefined, undefined);
+        return vtables::filesystem::register_file_whitelist;
     }
     static constexpr uint32_t StartMessageMode()
     {
-        return PlatformOffset(23, undefined, undefined);
+        return vtables::hud_chat::start_message_mode;
     }
     static constexpr uint32_t StopMessageMode()
     {
-        return PlatformOffset(24, undefined, undefined);
+        return vtables::hud_chat::stop_message_mode;
     }
     static constexpr uint32_t ChatPrintf()
     {
-        return PlatformOffset(22, undefined, undefined);
+        return vtables::hud_chat::chat_printf;
     }
     static constexpr uint32_t ServerCmdKeyValues()
     {
-        return PlatformOffset(127, undefined, undefined);
+        return vtables::engine_client::server_cmd_key_values;
     }
     static constexpr uint32_t EmitSound1()
     {
-        return PlatformOffset(4, undefined, undefined);
+        return vtables::engine_sound::emit_sound_1;
     }
     static constexpr uint32_t EmitSound2()
     {
-        return PlatformOffset(5, undefined, undefined);
+        return vtables::engine_sound::emit_sound_2;
     }
     static constexpr uint32_t EmitSound3()
     {
-        return PlatformOffset(6, undefined, undefined);
+        return vtables::engine_sound::emit_sound_3;
     }
     static constexpr uint32_t GetMaxItemCount()
     {
-        return PlatformOffset(10, undefined, undefined);
+        return vtables::inventory::get_max_item_count;
     }
     static constexpr uint32_t RunCommand()
     {
-        return PlatformOffset(18, undefined, undefined);
+        return vtables::prediction::run_command;
     }
     static constexpr uint32_t Think()
     {
-        return PlatformOffset(27, undefined, undefined);
+        return vtables::tool_framework::think;
     }
     static constexpr uint32_t CalcIsAttackCriticalHelper_brokenweps()
     {
-        return PlatformOffset(468, undefined, 468);
+        return vtables::weapon::calc_is_attack_critical_helper;
     }
 };

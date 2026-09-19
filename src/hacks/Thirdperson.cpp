@@ -54,17 +54,18 @@ void frameStageNotify()
     if (enable)
     {
         // Add thirdperson
-        if (!g_pLocalPlayer->life_state)
+        if (!g_pLocalPlayer->life_state && netvar.nForceTauntCam)
             CE_INT(LOCAL_E, netvar.nForceTauntCam) = 1;
         was_enabled = true;
     }
     if (!enable && was_enabled)
     {
         // Remove thirdperson
-        CE_INT(LOCAL_E, netvar.nForceTauntCam) = 0;
+        if (netvar.nForceTauntCam)
+            CE_INT(LOCAL_E, netvar.nForceTauntCam) = 0;
         was_enabled                            = false;
     }
-    if (real_angles && g_IInput->CAM_IsThirdPerson())
+    if (real_angles && g_IInput->CAM_IsThirdPerson() && netvar.deadflag)
     {
         CE_FLOAT(LOCAL_E, netvar.deadflag + 4) = g_pLocalPlayer->realAngles.x;
         CE_FLOAT(LOCAL_E, netvar.deadflag + 8) = g_pLocalPlayer->realAngles.y;

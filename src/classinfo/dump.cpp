@@ -6,6 +6,7 @@
  */
 
 #include "common.hpp"
+#include "copypasted/CDumper.hpp"
 
 void PerformClassDump()
 {
@@ -23,3 +24,7 @@ void PerformClassDump()
 }
 
 static CatCommand do_dump("debug_dump_classes", "Dump classes", PerformClassDump);
+static CatCommand do_dump_netvars("debug_dump_netvars", "Dump recv tables to /tmp/netdump.txt", []() {
+    CDumper dumper;
+    dumper.SaveDump();
+});

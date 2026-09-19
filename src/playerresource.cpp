@@ -42,8 +42,6 @@ void TFPlayerResource::Update()
 
 int TFPlayerResource::GetHealth(CachedEntity *player)
 {
-    IF_GAME(!IsTF())
-        return 100;
     IClientEntity *ent = ResourceEntity(entity);
     if (!ent || !player)
         return 0;
@@ -55,8 +53,6 @@ int TFPlayerResource::GetHealth(CachedEntity *player)
 
 int TFPlayerResource::GetMaxHealth(CachedEntity *player)
 {
-    IF_GAME(!IsTF())
-        return 100;
     IClientEntity *ent = ResourceEntity(entity);
     if (!ent || !player)
         return 0;
@@ -68,8 +64,6 @@ int TFPlayerResource::GetMaxHealth(CachedEntity *player)
 
 int TFPlayerResource::GetMaxBuffedHealth(CachedEntity *player)
 {
-    IF_GAME(!IsTF())
-        return GetMaxHealth(player);
     IClientEntity *ent = ResourceEntity(entity);
     if (!ent || !player)
         return 0;

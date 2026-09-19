@@ -22,7 +22,7 @@ void EntityHitboxCache::Init()
     parent_ref = entity_cache::Get(hit_idx);
     if (CE_BAD(parent_ref))
         return;
-    model = (model_t *) RAW_ENT(parent_ref)->GetModel();
+    model = (model_t *) EntGetModel(RAW_ENT(parent_ref));
     if (!model)
         return;
     if (!m_bModelSet || model != m_pLastModel)
@@ -136,27 +136,34 @@ matrix3x4_t *EntityHitboxCache::GetBones(int numbones)
             numbones = MAXSTUDIOBONES;
             if (CE_GOOD(parent_ref))
             {
-                auto *mdl = (const model_t *) RAW_ENT(parent_ref)->GetModel();
+                auto *mdl = (const model_t *) EntGetModel(RAW_ENT(parent_ref));
                 if (mdl)
                 {
                     auto *hdr = g_IModelInfo->GetStudiomodel(mdl);
-                    if (hdr && hdr->numbones > 0)
+                    if (hdr && hdr->numbones > 0 && hdr->numbones <= 128)
                         numbones = hdr->numbones;
                 }
             }
         }
 
+        if (numbones <= 0 || numbones > 128)
+            numbones = MAXSTUDIOBONES > 128 ? 128 : MAXSTUDIOBONES;
         if (bones.size() != (size_t) numbones)
             bones.resize(numbones);
         if (g_Settings.is_create_move)
         {
             PROF_SECTION(bone_setup);
-
-            // Only use reconstructed setupbones on players
-            if (parent_ref->m_Type() == ENTITY_PLAYER)
-                bones_setup = setupbones_reconst::SetupBones(RAW_ENT(parent_ref), bones.data(), 0x7FF00);
-            else
-                bones_setup = RAW_ENT(parent_ref)->SetupBones(bones.data(), numbones, 0x7FF00, bones_setup_time);
+            IClientEntity *raw = RAW_ENT(parent_ref);
+            int overlay        = netvar.m_AnimOverlay;
+            bool overlay_ok    = true;
+            if (overlay > 0 && raw)
+            {
+                auto *mem = *reinterpret_cast<void **>(uintptr_t(raw) + overlay);
+                int n     = *reinterpret_cast<int *>(uintptr_t(raw) + overlay + 16);
+                overlay_ok = mem && n >= 0 && n <= 15;
+            }
+            if (overlay_ok)
+                bones_setup = EntSetupBones(raw, bones.data(), numbones, 0x7FF00, bones_setup_time);
         }
     }
     return bones.data();
@@ -176,7 +183,7 @@ CachedHitbox *EntityHitboxCache::GetHitbox(int id)
         return nullptr;
     if (CE_BAD(parent_ref))
         return nullptr;
-    auto model = (const model_t *) RAW_ENT(parent_ref)->GetModel();
+    auto model = (const model_t *) EntGetModel(RAW_ENT(parent_ref));
     if (!model)
         return nullptr;
     auto shdr = g_IModelInfo->GetStudiomodel(model);

@@ -65,14 +65,12 @@ void Paint()
         // No more processing after 3 Seconds of Death
         if (g_GlobalVars->curtime - death_timer[i] > 3.0f)
             continue;
-        auto collidable = RAW_ENT(ent)->GetCollideable();
         if (draw_kda)
         {
-            // Choose point over player's Head
             Vector draw_at_kd = ent->m_vecOrigin();
-            draw_at_kd.x += (collidable->OBBMaxs().x + collidable->OBBMins().x) / 2;
-            draw_at_kd.y += (collidable->OBBMaxs().y + collidable->OBBMins().y) / 2;
-            draw_at_kd.z += collidable->OBBMaxs().z + 30.0f;
+            draw_at_kd.x += (EntOBBMaxs(RAW_ENT(ent)).x + EntOBBMins(RAW_ENT(ent)).x) / 2;
+            draw_at_kd.y += (EntOBBMaxs(RAW_ENT(ent)).y + EntOBBMins(RAW_ENT(ent)).y) / 2;
+            draw_at_kd.z += EntOBBMaxs(RAW_ENT(ent)).z + 30.0f;
             Vector out_kd;
 
             // Base Color
@@ -110,9 +108,9 @@ void Paint()
         {
             // Get Position to draw at
             Vector draw_at_mafia = ent->m_vecOrigin();
-            draw_at_mafia.x += (collidable->OBBMaxs().x + collidable->OBBMins().x) / 2;
-            draw_at_mafia.y += (collidable->OBBMaxs().y + collidable->OBBMins().y) / 2;
-            draw_at_mafia.z += collidable->OBBMaxs().z + 30.0f;
+            draw_at_mafia.x += (EntOBBMaxs(RAW_ENT(ent)).x + EntOBBMins(RAW_ENT(ent)).x) / 2;
+            draw_at_mafia.y += (EntOBBMaxs(RAW_ENT(ent)).y + EntOBBMins(RAW_ENT(ent)).y) / 2;
+            draw_at_mafia.z += EntOBBMaxs(RAW_ENT(ent)).z + 30.0f;
             Vector out_mafia;
 
             // Base Color

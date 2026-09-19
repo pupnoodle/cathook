@@ -48,7 +48,7 @@ DEFINE_HOOKED_METHOD(FrameStageNotify, void, void *this_, ClientFrameStage_t sta
         {
             for (MaterialHandle_t i = g_IMaterialSystem->FirstMaterial(); i != g_IMaterialSystem->InvalidMaterial(); i = g_IMaterialSystem->NextMaterial(i))
             {
-                IMaterial *pMaterial = g_IMaterialSystem->GetMaterial(i);
+                CMaterial *pMaterial = g_IMaterialSystem->GetMaterial(i);
                 if (!pMaterial)
                     continue;
 
@@ -90,6 +90,9 @@ DEFINE_HOOKED_METHOD(FrameStageNotify, void, void *this_, ClientFrameStage_t sta
         update_override_textures = false;
     }
 
+    if (update_nightmode && *nightmode_gui <= 0.0f && *nightmode_world <= 0.0f && *nightmode_skybox <= 0.0f)
+        update_nightmode = false;
+
     if (update_nightmode)
     {
         static ConVar *r_DrawSpecificStaticProp = g_ICvar->FindVar("r_DrawSpecificStaticProp");
@@ -102,14 +105,17 @@ DEFINE_HOOKED_METHOD(FrameStageNotify, void, void *this_, ClientFrameStage_t sta
 
         for (MaterialHandle_t i = g_IMaterialSystem->FirstMaterial(); i != g_IMaterialSystem->InvalidMaterial(); i = g_IMaterialSystem->NextMaterial(i))
         {
-            IMaterial *pMaterial = g_IMaterialSystem->GetMaterial(i);
+            CMaterial *pMaterial = g_IMaterialSystem->GetMaterial(i);
 
             if (!pMaterial)
+                continue;
+            const char *group = pMaterial->GetTextureGroupName();
+            if (!group)
                 continue;
 
             // 0 = do not filter, 1 = Gui filter, 2 = World filter, 3 = Skybox filter
             int should_filter = 0;
-            auto name         = std::string(pMaterial->GetTextureGroupName());
+            auto name         = std::string(group);
 
             for (auto const &entry : gui_strings)
                 if (name.find(entry) != name.npos)
@@ -196,13 +202,10 @@ DEFINE_HOOKED_METHOD(FrameStageNotify, void, void *this_, ClientFrameStage_t sta
     std::optional<Vector> backup_punch;
     if (isHackActive() && !g_Settings.bInvalid && stage == FRAME_RENDER_START)
     {
-        IF_GAME(IsTF())
+        if (no_shake && netvar.vecPunchAngle && CE_GOOD(LOCAL_E) && LOCAL_E->m_bAlivePlayer())
         {
-            if (no_shake && CE_GOOD(LOCAL_E) && LOCAL_E->m_bAlivePlayer())
-            {
-                backup_punch                                       = NET_VECTOR(RAW_ENT(LOCAL_E), netvar.vecPunchAngle);
-                NET_VECTOR(RAW_ENT(LOCAL_E), netvar.vecPunchAngle) = { 0.0f, 0.0f, 0.0f };
-            }
+            backup_punch                                       = NET_VECTOR(RAW_ENT(LOCAL_E), netvar.vecPunchAngle);
+            NET_VECTOR(RAW_ENT(LOCAL_E), netvar.vecPunchAngle) = { 0.0f, 0.0f, 0.0f };
         }
         hacks::tf::thirdperson::frameStageNotify();
     }

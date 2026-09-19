@@ -24,5 +24,6 @@ public:
     bool BHaveLiveMatch();
     CTFParty *GetParty();
     int JoinMMMatch();
+    void ForcePingRefresh();
 };
 } // namespace re
