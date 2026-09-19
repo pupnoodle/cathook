@@ -16,6 +16,7 @@ V  o o  V  file: src/games/tf2/sdk/interfaces/game_movement.hpp
 #include <cstdint>
 
 #include "core/types.hpp"
+#include "games/tf2/sdk/combat_offsets.hpp"
 #include "games/tf2/sdk/entities/player.hpp"
 #include "games/tf2/sdk/interfaces/engine.hpp"
 #include "games/tf2/sdk/netvars.hpp"
@@ -84,80 +85,127 @@ struct CViewVectors {
 };
 
 constexpr float PLAYER_ORIGIN_COMPRESSION = 0.125f;
-constexpr std::size_t k_game_movement_player = 0x8;
-constexpr std::size_t k_game_movement_mv = 0x10;
-constexpr std::size_t k_game_movement_tf_player = 0x16c8;
 
 class GameMovement {
 public:
-  void bind(Player* player, MoveData* move) {
-    auto* bytes = reinterpret_cast<std::uint8_t*>(this);
-    *reinterpret_cast<Player**>(bytes + k_game_movement_player) = player;
-    *reinterpret_cast<MoveData**>(bytes + k_game_movement_mv) = move;
-    *reinterpret_cast<Player**>(bytes + k_game_movement_tf_player) = player;
-  }
+  struct bind_guard {
+    GameMovement* movement = nullptr;
+    Player* old_player = nullptr;
+    MoveData* old_move = nullptr;
+    bool have_player = false;
+    bool have_move = false;
+
+    explicit bind_guard(GameMovement* owner) : movement(owner) {
+      if (movement == nullptr) {
+        return;
+      }
+      auto* bytes = reinterpret_cast<std::uint8_t*>(movement);
+      const std::size_t player_off = tf2_combat::game_movement::player();
+      const std::size_t move_off = tf2_combat::game_movement::move_data();
+      if (player_off > 0 && player_off <= 32) {
+        old_player = *reinterpret_cast<Player**>(bytes + player_off);
+        have_player = true;
+      }
+      if (move_off > 0 && move_off <= 32) {
+        old_move = *reinterpret_cast<MoveData**>(bytes + move_off);
+        have_move = true;
+      }
+    }
+
+    void bind(Player* player, MoveData* move) {
+      if (movement == nullptr) {
+        return;
+      }
+      auto* bytes = reinterpret_cast<std::uint8_t*>(movement);
+      const std::size_t player_off = tf2_combat::game_movement::player();
+      const std::size_t move_off = tf2_combat::game_movement::move_data();
+      if (have_player) {
+        *reinterpret_cast<Player**>(bytes + player_off) = player;
+      }
+      if (have_move) {
+        *reinterpret_cast<MoveData**>(bytes + move_off) = move;
+      }
+    }
+
+    ~bind_guard() {
+      if (movement == nullptr) {
+        return;
+      }
+      auto* bytes = reinterpret_cast<std::uint8_t*>(movement);
+      const std::size_t player_off = tf2_combat::game_movement::player();
+      const std::size_t move_off = tf2_combat::game_movement::move_data();
+      if (have_player) {
+        *reinterpret_cast<Player**>(bytes + player_off) = old_player;
+      }
+      if (have_move) {
+        *reinterpret_cast<MoveData**>(bytes + move_off) = old_move;
+      }
+    }
+
+    bind_guard(const bind_guard&) = delete;
+    bind_guard& operator=(const bind_guard&) = delete;
+  };
 
   CViewVectors* view_vectors() const {
     void* rules = tf2_netvars::game_rules_object();
     if (rules == nullptr) {
       return nullptr;
     }
+    using get_view_vectors_fn = CViewVectors* (*)(void*);
+    if (auto* const direct = reinterpret_cast<get_view_vectors_fn>(tf2_combat::get().get_view_vectors_fn)) {
+      return direct(rules);
+    }
     void** vtable = *reinterpret_cast<void***>(rules);
-    auto fn = reinterpret_cast<CViewVectors* (*)(void*)>(vtable[32]);
-    return fn(rules);
+    const std::size_t slot = tf2_combat::game_movement::get_view_vectors();
+    if (vtable == nullptr || slot == 0 || vtable[slot] == nullptr) {
+      return nullptr;
+    }
+    return reinterpret_cast<get_view_vectors_fn>(vtable[slot])(rules);
   }
 
-  bool set_bounds(Player* player) {
-    if (player == nullptr || engine == nullptr ||
-        player->get_index() == engine->get_localplayer_index()) {
-      return false;
-    }
-    CViewVectors* vectors = view_vectors();
-    if (vectors == nullptr) {
-      return false;
-    }
-    vectors->m_vHullMin = Vec3{-24.0f + PLAYER_ORIGIN_COMPRESSION, -24.0f + PLAYER_ORIGIN_COMPRESSION,
-                               PLAYER_ORIGIN_COMPRESSION};
-    vectors->m_vHullMax = Vec3{24.0f - PLAYER_ORIGIN_COMPRESSION, 24.0f - PLAYER_ORIGIN_COMPRESSION,
-                               82.0f - PLAYER_ORIGIN_COMPRESSION};
-    vectors->m_vDuckHullMin = Vec3{-24.0f + PLAYER_ORIGIN_COMPRESSION, -24.0f + PLAYER_ORIGIN_COMPRESSION,
-                                   PLAYER_ORIGIN_COMPRESSION};
-    vectors->m_vDuckHullMax = Vec3{24.0f - PLAYER_ORIGIN_COMPRESSION, 24.0f - PLAYER_ORIGIN_COMPRESSION,
-                                   62.0f - PLAYER_ORIGIN_COMPRESSION};
-    return true;
-  }
+  struct bounds_guard {
+    GameMovement* movement = nullptr;
+    Player* player = nullptr;
+    CViewVectors saved{};
+    bool active = false;
 
-  void restore_bounds(Player* player) {
-    if (player == nullptr || engine == nullptr ||
-        player->get_index() == engine->get_localplayer_index()) {
-      return;
+    bounds_guard(GameMovement* owner, Player* target) : movement(owner), player(target) {
+      (void)movement;
+      (void)player;
     }
-    CViewVectors* vectors = view_vectors();
-    if (vectors == nullptr) {
-      return;
+
+    ~bounds_guard() {
+      if (!active || movement == nullptr) {
+        return;
+      }
+      CViewVectors* vectors = movement->view_vectors();
+      if (vectors != nullptr) {
+        *vectors = saved;
+      }
     }
-    vectors->m_vHullMin = Vec3{-24.0f, -24.0f, 0.0f};
-    vectors->m_vHullMax = Vec3{24.0f, 24.0f, 82.0f};
-    vectors->m_vDuckHullMin = Vec3{-24.0f, -24.0f, 0.0f};
-    vectors->m_vDuckHullMax = Vec3{24.0f, 24.0f, 62.0f};
-  }
+
+    bounds_guard(const bounds_guard&) = delete;
+    bounds_guard& operator=(const bounds_guard&) = delete;
+  };
 
   int check_stuck(Player* player, MoveData* move) {
     if (this == nullptr || player == nullptr || move == nullptr) {
       return 0;
     }
-    void** vtable = *reinterpret_cast<void***>(this);
-    if (vtable == nullptr || vtable[40] == nullptr) {
-      return 0;
+    using check_stuck_fn = int (*)(void*);
+    check_stuck_fn fn = reinterpret_cast<check_stuck_fn>(tf2_combat::get().check_stuck_fn);
+    if (fn == nullptr) {
+      void** vtable = *reinterpret_cast<void***>(this);
+      const std::size_t slot = tf2_combat::game_movement::check_stuck();
+      if (vtable == nullptr || slot == 0 || vtable[slot] == nullptr) {
+        return 0;
+      }
+      fn = reinterpret_cast<check_stuck_fn>(vtable[slot]);
     }
-    bind(player, move);
-    const bool changed = set_bounds(player);
-    auto fn = reinterpret_cast<int (*)(void*)>(vtable[40]);
-    const int stuck = fn(this);
-    if (changed) {
-      restore_bounds(player);
-    }
-    return stuck;
+    bind_guard pointers(this);
+    pointers.bind(player, move);
+    bounds_guard bounds(this, player);
+    return fn(this);
   }
 
   bool process_movement(Player* player, MoveData* move) {
@@ -165,22 +213,21 @@ public:
       return false;
     }
 
-    void** vtable = *(void***)this;
-    if (vtable == nullptr) {
-      return false;
+    using process_movement_fn = void (*)(void*, Player*, MoveData*);
+    process_movement_fn fn =
+      reinterpret_cast<process_movement_fn>(tf2_combat::get().process_movement_fn);
+    if (fn == nullptr) {
+      void** vtable = *reinterpret_cast<void***>(this);
+      const std::size_t slot = tf2_combat::game_movement::process_movement();
+      if (vtable == nullptr || slot == 0 || vtable[slot] == nullptr) {
+        return false;
+      }
+      fn = reinterpret_cast<process_movement_fn>(vtable[slot]);
     }
 
-    void (*process_movement_fn)(void*, Player*, MoveData*) = (void (*)(void*, Player*, MoveData*))vtable[2];
-    if (process_movement_fn == nullptr) {
-      return false;
-    }
-
-    bind(player, move);
-    const bool changed = set_bounds(player);
-    process_movement_fn(this, player, move);
-    if (changed) {
-      restore_bounds(player);
-    }
+    bind_guard pointers(this);
+    bounds_guard bounds(this, player);
+    fn(this, player, move);
     return true;
   }
 };

@@ -73,7 +73,7 @@ std::int64_t get_overridden_record(const std::uintptr_t panel)
 
 int random_int_hook(const int min, const int max)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (config.visuals.casual_medal.guaranteed_flip && min == 0 && max == 9)
   {
     return 0;
@@ -89,7 +89,7 @@ int random_int_hook(const int min, const int max)
 
 std::int64_t rank_record_hook(const std::uintptr_t panel, const bool target)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (rank_record_original == nullptr)
   {
     return 0;

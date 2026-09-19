@@ -498,7 +498,7 @@ void mono_ui_vulkan_resources_shutdown(const bool release_graphics_resources) {
 
 VkResult create_device_hook(const VkPhysicalDevice physical_device, const VkDeviceCreateInfo *create_info,
     const VkAllocationCallbacks *allocator, VkDevice *out_device) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (create_device_original == nullptr) {
     return VK_ERROR_INITIALIZATION_FAILED;
   }
@@ -521,7 +521,7 @@ VkResult create_device_hook(const VkPhysicalDevice physical_device, const VkDevi
 
 void get_device_queue_hook(const VkDevice device, const std::uint32_t family, const std::uint32_t index,
     VkQueue *out_queue) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (get_device_queue_original == nullptr) {
     return;
   }
@@ -534,7 +534,7 @@ void get_device_queue_hook(const VkDevice device, const std::uint32_t family, co
 
 void get_device_queue2_hook(const VkDevice device, const VkDeviceQueueInfo2 *queue_info,
     VkQueue *out_queue) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (get_device_queue2_original == nullptr) {
     return;
   }
@@ -547,7 +547,7 @@ void get_device_queue2_hook(const VkDevice device, const VkDeviceQueueInfo2 *que
 
 VkResult create_swapchain_hook(const VkDevice device, const VkSwapchainCreateInfoKHR *create_info,
     const VkAllocationCallbacks *allocator, VkSwapchainKHR *out_swapchain) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (create_swapchain_original == nullptr) {
     return VK_ERROR_INITIALIZATION_FAILED;
   }
@@ -570,7 +570,7 @@ VkResult create_swapchain_hook(const VkDevice device, const VkSwapchainCreateInf
 
 void destroy_swapchain_hook(const VkDevice device, const VkSwapchainKHR swapchain,
     const VkAllocationCallbacks *allocator) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (destroy_swapchain_original == nullptr) {
     return;
   }
@@ -586,7 +586,7 @@ void destroy_swapchain_hook(const VkDevice device, const VkSwapchainKHR swapchai
 VkResult acquire_next_image_hook(const VkDevice device, const VkSwapchainKHR swapchain,
     const std::uint64_t timeout, const VkSemaphore semaphore, const VkFence fence,
     std::uint32_t *out_index) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (acquire_next_image_original == nullptr) {
     return VK_ERROR_INITIALIZATION_FAILED;
   }
@@ -605,7 +605,7 @@ VkResult acquire_next_image_hook(const VkDevice device, const VkSwapchainKHR swa
 
 VkResult acquire_next_image2_hook(const VkDevice device, const VkAcquireNextImageInfoKHR *acquire_info,
     std::uint32_t *out_index) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (acquire_next_image2_original == nullptr) {
     return VK_ERROR_INITIALIZATION_FAILED;
   }
@@ -622,7 +622,7 @@ VkResult acquire_next_image2_hook(const VkDevice device, const VkAcquireNextImag
 }
 
 void destroy_device_hook(const VkDevice device, const VkAllocationCallbacks *allocator) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   {
     std::lock_guard<std::mutex> lock(vk_state_mutex);
     for (auto it = vk_swapchains.begin(); it != vk_swapchains.end();) {
@@ -659,7 +659,7 @@ void destroy_device_hook(const VkDevice device, const VkAllocationCallbacks *all
 
 VkResult queue_present_hook(VkQueue queue, const VkPresentInfoKHR* present_info)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (queue_present_original == nullptr) {
     return VK_ERROR_INITIALIZATION_FAILED;
   }
@@ -675,7 +675,7 @@ VkResult queue_present_hook(VkQueue queue, const VkPresentInfoKHR* present_info)
 
     const bool can_overlay = present_info != nullptr && present_info->swapchainCount > 0 &&
         present_info->waitSemaphoreCount >= present_info->swapchainCount &&
-        !cathook::core::is_detach_pending() &&
+        !puphook::core::is_detach_pending() &&
         !nographics::should_skip_rendering_hooks() &&
         !vk_overlay_disabled.load(std::memory_order_acquire);
 
@@ -742,7 +742,7 @@ VkResult queue_present_hook(VkQueue queue, const VkPresentInfoKHR* present_info)
     }
 
     mono_ui_unlock();
-    cathook::core::service_detach_request();
+    puphook::core::service_detach_request();
     return result;
   }
 }

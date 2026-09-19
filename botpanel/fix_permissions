@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-quiet="${CAT_FIX_PERMISSIONS_QUIET:-0}"
+quiet="${PUP_FIX_PERMISSIONS_QUIET:-0}"
 
 usage() {
     cat <<'EOF'

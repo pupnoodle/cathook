@@ -18,10 +18,12 @@ V  o o  V  file: src/games/tf2/sdk/entities/player.hpp
 #include "games/tf2/sdk/interfaces/input.hpp"
 #include "games/tf2/sdk/interfaces/utl_vector.hpp"
 #include "games/tf2/sdk/netvars.hpp"
+#include "games/tf2/sdk/combat_offsets.hpp"
 #include "core/entity_cache.hpp"
 #include "core/memory/resolve.hpp"
 #include "core/ipc/ipc_client.hpp"
 #include "core/player_manager.hpp"
+#include "core/player_resource.hpp"
 #include "core/detach.hpp"
 #include "entity.hpp"
 #include "weapon.hpp"
@@ -40,7 +42,7 @@ inline int max_health() {
     const auto* p = reinterpret_cast<const uint8_t*>(sigscan_module("client.so",
       "48 8B 13 4C 8D 35 ? ? ? ? 44 8B BB ? ? ? ? 48 8B 82 C8 04 00 00 4C 39 F0"));
     if (p) {
-      const int32_t d = cathook::core::memory::read_disp32(p, 13);
+      const int32_t d = puphook::core::memory::read_disp32(p, 13);
       if (d > 0x1000 && d < 0x4000) return static_cast<int>(d);
     }
     return 0;
@@ -349,7 +351,7 @@ public:
     player_info pinfo;
     if (engine->get_player_info(this->get_index(), &pinfo) && pinfo.friends_id != 0 && pinfo.fakeplayer != true) {
       const auto account_id = static_cast<std::uint32_t>(pinfo.friends_id);
-      if (cathook::core::players::is_friendly(account_id)) {
+      if (puphook::core::players::is_friendly(account_id)) {
         return true;
       }
 
@@ -363,7 +365,7 @@ public:
     player_info pinfo;
     if (engine->get_player_info(this->get_index(), &pinfo) && pinfo.friends_id != 0 && pinfo.fakeplayer != true) {
       const auto account_id = static_cast<std::uint32_t>(pinfo.friends_id);
-      return cathook::core::players::is_ignored(account_id);
+      return puphook::core::players::is_ignored(account_id);
     }
 
     return false;
@@ -372,7 +374,7 @@ public:
   bool is_party(void) {
     player_info pinfo;
     if (engine->get_player_info(this->get_index(), &pinfo) && pinfo.friends_id != 0 && pinfo.fakeplayer != true) {
-      return cathook::core::players::is_party(static_cast<std::uint32_t>(pinfo.friends_id));
+      return puphook::core::players::is_party(static_cast<std::uint32_t>(pinfo.friends_id));
     }
 
     return false;
@@ -384,7 +386,18 @@ public:
   }
 
   int get_max_health(void) {
-    static const int offset = tf2_player_offsets::max_health();
+    Entity* resource = puphook::core::player_resource::get_player_resource_entity();
+    static tf2_netvars::lazy_offset resource_offset{"DT_TFPlayerResource", {"m_iMaxHealth"}};
+    const int index = get_index();
+    if (resource != nullptr && resource_offset > 0 && index > 0) {
+      const int from_resource =
+        puphook::core::player_resource::read_value<int>(resource, resource_offset, index);
+      if (from_resource > 0) {
+        return from_resource;
+      }
+    }
+
+    const int offset = tf2_player_offsets::max_health();
     return offset > 0 ? *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)) : 0;
   }
 
@@ -517,11 +530,28 @@ public:
   }
 
   Vec3 get_shoot_pos(void) {
-    void** vtable = *(void ***)this;
+    const Vec3 origin = get_origin();
+    const Vec3 from_origin = origin + get_view_offset();
+    if (Entity::origin_usable(from_origin) && !Entity::origin_is_world_zero(origin)) {
+      return from_origin;
+    }
 
-    Vec3 (*get_shoot_pos_fn)(void*) = (Vec3 (*)(void*))vtable[303];
-
-    return get_shoot_pos_fn(this);
+    using shoot_pos_fn = Vec3 (*)(void*);
+    if (auto* const direct = reinterpret_cast<shoot_pos_fn>(tf2_combat::get().eye_position_fn)) {
+      const Vec3 shoot_pos = direct(this);
+      if (Entity::origin_usable(shoot_pos)) {
+        return shoot_pos;
+      }
+    }
+    void** vtable = *(void***)this;
+    const std::size_t slot = tf2_combat::player::eye_position();
+    if (vtable != nullptr && slot != 0 && vtable[slot] != nullptr) {
+      const Vec3 shoot_pos = reinterpret_cast<shoot_pos_fn>(vtable[slot])(this);
+      if (Entity::origin_usable(shoot_pos)) {
+        return shoot_pos;
+      }
+    }
+    return from_origin;
   }
 
   Vec3 get_punch_angles(void) {
@@ -563,6 +593,25 @@ public:
     };
   }
 
+  Vec3 get_engine_eye_angles(void) {
+    using eye_angles_fn = Vec3* (*)(void*);
+    Vec3* angles = nullptr;
+    if (auto* const direct = reinterpret_cast<eye_angles_fn>(tf2_combat::get().eye_angles_fn)) {
+      angles = direct(this);
+    } else {
+      void** vtable = *reinterpret_cast<void***>(this);
+      const std::size_t slot = tf2_combat::player::eye_angles();
+      if (vtable == nullptr || slot == 0 || vtable[slot] == nullptr) {
+        return get_eye_angles();
+      }
+      angles = reinterpret_cast<eye_angles_fn>(vtable[slot])(this);
+    }
+    if (angles == nullptr || !std::isfinite(angles->x) || !std::isfinite(angles->y)) {
+      return get_eye_angles();
+    }
+    return {angles->x, angles->y, 0.0f};
+  }
+
   void set_eye_angles(const Vec3& angles) {
     const int pitch_offset = get_eye_pitch_offset();
     const int yaw_offset = get_eye_yaw_offset();
@@ -576,9 +625,17 @@ public:
   }
 
   Vec3& get_local_eye_angles(void) {
+    using eye_angles_fn = Vec3& (*)(void*);
+    if (auto* const direct = reinterpret_cast<eye_angles_fn>(tf2_combat::get().eye_angles_fn)) {
+      return direct(this);
+    }
     void** vtable = *(void***)this;
-    Vec3& (*get_local_eye_angles_fn)(void*) = (Vec3& (*)(void*))vtable[196];
-    return get_local_eye_angles_fn(this);
+    const std::size_t slot = tf2_combat::player::eye_angles();
+    if (vtable == nullptr || slot == 0 || vtable[slot] == nullptr) {
+      static Vec3 fallback{};
+      return fallback;
+    }
+    return reinterpret_cast<eye_angles_fn>(vtable[slot])(this);
   }
 
   void set_local_eye_angles(const Vec3& angles) {
@@ -648,6 +705,47 @@ public:
         }
         return true;
       }
+    }
+
+    Player* localplayer = entity_list != nullptr ? entity_list->get_localplayer() : nullptr;
+    if (this != localplayer) {
+      static const int array_offset = [] {
+        const auto* instruction = reinterpret_cast<const std::uint8_t*>(
+          sigscan_module("client.so", sigs::base_animating_bone_array));
+        if (instruction == nullptr) {
+          return 0;
+        }
+        const int value = puphook::core::memory::read_disp32(instruction, 3);
+        return (value > 0x400 && value < 0x2000) ? value : 0;
+      }();
+      if (array_offset <= 0) {
+        return false;
+      }
+      const auto* bones = *reinterpret_cast<const matrix_3x4* const*>(
+        reinterpret_cast<const std::uint8_t*>(this) + array_offset);
+      const int bone_count = *reinterpret_cast<const int*>(
+        reinterpret_cast<const std::uint8_t*>(this) + array_offset + 16);
+      if (bones == nullptr || bone_count <= 0 || bone_count > max_bones || bone_count > 128) {
+        return false;
+      }
+      for (int bone = 0; bone < bone_count; ++bone) {
+        if (!std::isfinite(bones[bone].mat[0][3]) ||
+            !std::isfinite(bones[bone].mat[1][3]) ||
+            !std::isfinite(bones[bone].mat[2][3])) {
+          return false;
+        }
+      }
+      std::memcpy(bone_to_world_out, bones, static_cast<std::size_t>(bone_count) * sizeof(matrix_3x4));
+      if (slot != nullptr) {
+        std::memcpy(slot->bones, bones, static_cast<std::size_t>(bone_count) * sizeof(matrix_3x4));
+        slot->frame = frame;
+        slot->count = bone_count;
+        slot->ok = true;
+      }
+      if (bone_count_out != nullptr) {
+        *bone_count_out = bone_count;
+      }
+      return true;
     }
 
     if (model_info == nullptr) {
@@ -855,7 +953,7 @@ public:
   }
 
   bool in_cond(tf_cond condition) {
-    if (cathook::core::is_detach_pending()) {
+    if (puphook::core::is_detach_pending()) {
       return false;
     }
 

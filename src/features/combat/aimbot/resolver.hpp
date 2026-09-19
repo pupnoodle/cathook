@@ -925,7 +925,7 @@ inline void sort_pitch_candidates(pitch_candidate_list* list)
                                              hitscan_pose_guard* guard)
 {
   if (guard == nullptr || player == nullptr || !config.aimbot.resolver ||
-      player->is_dormant() || !player->is_alive()) {
+      player->is_dormant() || !player->is_alive() || !aimbot_player_is_local(player)) {
     return false;
   }
 

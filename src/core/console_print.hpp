@@ -4,8 +4,8 @@ file: src/core/console_print.hpp
 author: HappyKuro
 */
 // Note: Original made by HappyKuro, modified by pupnoodle
-#ifndef CATHOOK_CONSOLE_PRINT_HPP
-#define CATHOOK_CONSOLE_PRINT_HPP
+#ifndef PUPHOOK_CONSOLE_PRINT_HPP
+#define PUPHOOK_CONSOLE_PRINT_HPP
 
 #include <cstdarg>
 #include <cstdio>
@@ -16,7 +16,7 @@ author: HappyKuro
 #include "core/print.hpp"
 #include "games/tf2/sdk/interfaces/steam_runtime.hpp"
 
-namespace cathook::core
+namespace puphook::core
 {
 
 namespace detail

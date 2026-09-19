@@ -188,7 +188,8 @@ inline void drive_player(Player* player)
   Vec3 original_eye_angles = player->get_eye_angles();
   Vec3 driven_eye_angles = original_eye_angles;
   const bool have_resolved = resolver::resolved_eye_angles(player, &driven_eye_angles);
-  if (have_resolved) {
+  const bool can_pose = aimbot_player_is_local(player);
+  if (have_resolved && can_pose) {
     player->set_eye_angles(driven_eye_angles);
   }
 
@@ -203,7 +204,7 @@ inline void drive_player(Player* player)
   pose.velocity = player->get_velocity();
   pose.bone_count = 0;
 
-  if (aimbot_update_client_side_animation(player)) {
+  if (can_pose && aimbot_update_client_side_animation(player)) {
     pose.valid = aimbot_setup_bones_at_time(player,
       pose.bones.data(),
       sim_time,
@@ -218,7 +219,9 @@ inline void drive_player(Player* player)
     }
   }
 
-  player->set_eye_angles(original_eye_angles);
+  if (can_pose) {
+    player->set_eye_angles(original_eye_angles);
+  }
 
   last_driven = sim_time;
   g_last_driven_origin[slot] = origin;

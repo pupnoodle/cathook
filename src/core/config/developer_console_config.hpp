@@ -4,8 +4,8 @@ file: src/core/developer_console_config.hpp
 author: HappyKuro
 */
 // Note: Original made by HappyKuro, modified by pupnoodle
-#ifndef CATHOOK_DEVELOPER_CONSOLE_CONFIG_HPP
-#define CATHOOK_DEVELOPER_CONSOLE_CONFIG_HPP
+#ifndef PUPHOOK_DEVELOPER_CONSOLE_CONFIG_HPP
+#define PUPHOOK_DEVELOPER_CONSOLE_CONFIG_HPP
 
 #include "core/config/config_store.hpp"
 #include "features/menu/config.hpp"
@@ -19,7 +19,7 @@ author: HappyKuro
 #include <utility>
 #include <vector>
 
-namespace cathook::core::developer_console_config
+namespace puphook::core::developer_console_config
 {
 
 enum class value_type

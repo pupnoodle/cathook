@@ -55,9 +55,9 @@ void initialize_tf_gc_client_api()
 
   g_tf_gc_client_api.initialized = true;
   g_tf_gc_client_api.get_matchmaking_client =
-    reinterpret_cast<get_matchmaking_client_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::get_matchmaking_client));
+    reinterpret_cast<get_matchmaking_client_fn>(sigscan_module(puphook::core::modules::tf_client, sigs::get_matchmaking_client));
   g_tf_gc_client_api.ping_think =
-    reinterpret_cast<tf_gc_client_system_ping_think_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::tf_gc_client_system_ping_think));
+    reinterpret_cast<tf_gc_client_system_ping_think_fn>(sigscan_module(puphook::core::modules::tf_client, sigs::tf_gc_client_system_ping_think));
 }
 
 bool refresh_tf_gc_ping_data()

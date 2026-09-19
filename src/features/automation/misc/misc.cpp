@@ -79,7 +79,7 @@ constexpr float noisemaker_interval = 0.2f;
 constexpr float voice_command_spam_interval = 6.5f;
 constexpr int micspam_min_interval_seconds = 1;
 constexpr int micspam_max_interval_seconds = 600;
-constexpr const char* micspam_source_directory = "/opt/cathook/micspam";
+constexpr const char* micspam_source_directory = "/opt/puphook/micspam";
 constexpr const char* micspam_voice_input_path = "voice_input.wav";
 
 namespace
@@ -260,11 +260,11 @@ struct voice_command_entry
 text_file_cache chatspam_file_cache{};
 text_file_cache killsay_file_cache{};
 
-const std::array<std::string_view, 5> builtin_chatspam_cathook = {
-  "Cathook on Linux",
+const std::array<std::string_view, 5> builtin_chatspam_puphook = {
+  "Puphook on Linux",
   "GNU/Linux is the best OS",
   "Open source TF2 tooling is fun",
-  "cathook.club",
+  "puphook.club",
   "Free software, free frags"
 };
 
@@ -274,7 +274,7 @@ const std::array<std::string_view, 3> builtin_chatspam_lmaobox = {
   "LMAOBOX - WAY TO THE TOP"
 };
 
-const std::array<std::string_view, 6> builtin_killsay_cathook = {
+const std::array<std::string_view, 6> builtin_killsay_puphook = {
   "%name% met the respawn timer.",
   "%name%, perhaps your strategy should include trying.",
   "That one was for %myteam%.",
@@ -424,7 +424,7 @@ std::filesystem::path resolve_announcer_sound_path(const char* sound_name)
     return {};
   }
 
-  return cathook::core::root_directory() / "assets" / "sound" / sound_name;
+  return puphook::core::root_directory() / "assets" / "sound" / sound_name;
 }
 
 void replace_all(std::string& text, std::string_view token, std::string_view replacement)
@@ -496,8 +496,8 @@ std::filesystem::path resolve_text_file_path(const std::string& filename)
   }
 
   const std::array<std::filesystem::path, 4> candidates{
-    cathook::core::root_directory() / requested_path,
-    cathook::core::config_directory() / requested_path,
+    puphook::core::root_directory() / requested_path,
+    puphook::core::config_directory() / requested_path,
     std::filesystem::current_path(error) / requested_path,
     std::filesystem::current_path(error) / "config_data" / requested_path
   };
@@ -511,7 +511,7 @@ std::filesystem::path resolve_text_file_path(const std::string& filename)
     }
   }
 
-  return cathook::core::root_directory() / requested_path;
+  return puphook::core::root_directory() / requested_path;
 }
 
 const std::vector<std::string>& load_text_lines(text_file_cache& cache, const std::string& filename)
@@ -670,12 +670,12 @@ void send_voice_command(int menu, int command)
 
 void log_queue_debug(const char* fmt, ...)
 {
-#ifdef CATHOOK_DEBUG_AUTO_QUEUE
+#ifdef PUPHOOK_DEBUG_AUTO_QUEUE
 
   va_list args{};
   va_start(args, fmt);
   print("[auto_queue] ");
-  cathook::core::vlog_raw(fmt, args);
+  puphook::core::vlog_raw(fmt, args);
   va_end(args);
 #else
 
@@ -702,7 +702,7 @@ bool should_emit_queue_debug(float& next_log_time)
 
 request_queue_for_match_fn get_shared_request_queue_for_match()
 {
-  if (cathook::core::is_detach_pending())
+  if (puphook::core::is_detach_pending())
   {
     return nullptr;
   }
@@ -747,7 +747,7 @@ void initialize_party_client_api()
   {
     case 0:
     {
-      void* get_party_client_match = sigscan_module(cathook::core::modules::tf_client, sigs::get_party_client);
+      void* get_party_client_match = sigscan_module(puphook::core::modules::tf_client, sigs::get_party_client);
       if (get_party_client_match != nullptr)
       {
         g_party_client_api.get_party_client = reinterpret_cast<get_party_client_fn>(
@@ -758,27 +758,27 @@ void initialize_party_client_api()
     }
     case 1:
       g_party_client_api.get_matchmaking_client =
-        reinterpret_cast<get_matchmaking_client_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::get_matchmaking_client));
+        reinterpret_cast<get_matchmaking_client_fn>(sigscan_module(puphook::core::modules::tf_client, sigs::get_matchmaking_client));
       ++g_party_client_api.scan_step;
       return;
     case 2:
       g_party_client_api.load_saved_casual_criteria =
-        reinterpret_cast<load_saved_casual_criteria_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::load_saved_casual_criteria));
+        reinterpret_cast<load_saved_casual_criteria_fn>(sigscan_module(puphook::core::modules::tf_client, sigs::load_saved_casual_criteria));
       ++g_party_client_api.scan_step;
       return;
     case 3:
       g_party_client_api.is_in_queue_for_match_group =
-        reinterpret_cast<is_in_queue_for_match_group_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::is_in_queue_for_match_group));
+        reinterpret_cast<is_in_queue_for_match_group_fn>(sigscan_module(puphook::core::modules::tf_client, sigs::is_in_queue_for_match_group));
       ++g_party_client_api.scan_step;
       return;
     case 4:
       g_party_client_api.is_in_standby_queue =
-        reinterpret_cast<is_in_standby_queue_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::is_in_standby_queue));
+        reinterpret_cast<is_in_standby_queue_fn>(sigscan_module(puphook::core::modules::tf_client, sigs::is_in_standby_queue));
       ++g_party_client_api.scan_step;
       return;
     case 5:
       g_party_client_api.abandon_current_match =
-        reinterpret_cast<abandon_current_match_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::abandon_current_match));
+        reinterpret_cast<abandon_current_match_fn>(sigscan_module(puphook::core::modules::tf_client, sigs::abandon_current_match));
       ++g_party_client_api.scan_step;
       return;
     case 6:
@@ -787,52 +787,52 @@ void initialize_party_client_api()
       return;
     case 7:
       g_party_client_api.request_leave_for_match =
-        reinterpret_cast<request_leave_for_match_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::request_leave_for_match));
+        reinterpret_cast<request_leave_for_match_fn>(sigscan_module(puphook::core::modules::tf_client, sigs::request_leave_for_match));
       ++g_party_client_api.scan_step;
       return;
     case 8:
       g_party_client_api.request_queue_for_standby =
-        reinterpret_cast<request_queue_for_standby_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::request_queue_for_standby));
+        reinterpret_cast<request_queue_for_standby_fn>(sigscan_module(puphook::core::modules::tf_client, sigs::request_queue_for_standby));
       ++g_party_client_api.scan_step;
       return;
     case 9:
       g_party_client_api.request_leave_standby =
-        reinterpret_cast<request_leave_standby_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::request_leave_standby));
+        reinterpret_cast<request_leave_standby_fn>(sigscan_module(puphook::core::modules::tf_client, sigs::request_leave_standby));
       ++g_party_client_api.scan_step;
       return;
     case 10:
       g_party_client_api.promote_to_leader =
-        reinterpret_cast<promote_to_leader_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::promote_to_leader));
+        reinterpret_cast<promote_to_leader_fn>(sigscan_module(puphook::core::modules::tf_client, sigs::promote_to_leader));
       ++g_party_client_api.scan_step;
       return;
     case 11:
       g_party_client_api.get_num_members =
-        reinterpret_cast<party_get_num_members_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::party_client_get_num_members));
+        reinterpret_cast<party_get_num_members_fn>(sigscan_module(puphook::core::modules::tf_client, sigs::party_client_get_num_members));
       ++g_party_client_api.scan_step;
       return;
     case 12:
       g_party_client_api.get_num_online_members =
-        reinterpret_cast<party_get_num_online_members_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::party_client_get_num_online_members));
+        reinterpret_cast<party_get_num_online_members_fn>(sigscan_module(puphook::core::modules::tf_client, sigs::party_client_get_num_online_members));
       ++g_party_client_api.scan_step;
       return;
     case 13:
       g_party_client_api.get_member_steamid =
-        reinterpret_cast<party_get_member_steamid_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::party_client_get_member_steamid));
+        reinterpret_cast<party_get_member_steamid_fn>(sigscan_module(puphook::core::modules::tf_client, sigs::party_client_get_member_steamid));
       ++g_party_client_api.scan_step;
       return;
     case 14:
       g_party_client_api.in_party_not_leader =
-        reinterpret_cast<party_in_party_not_leader_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::party_client_in_party_not_leader));
+        reinterpret_cast<party_in_party_not_leader_fn>(sigscan_module(puphook::core::modules::tf_client, sigs::party_client_in_party_not_leader));
       ++g_party_client_api.scan_step;
       return;
     case 15:
       g_party_client_api.send_party_chat =
-        reinterpret_cast<party_send_party_chat_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::party_client_send_party_chat));
+        reinterpret_cast<party_send_party_chat_fn>(sigscan_module(puphook::core::modules::tf_client, sigs::party_client_send_party_chat));
       ++g_party_client_api.scan_step;
       return;
     case 16:
       g_party_client_api.kick_player =
-        reinterpret_cast<party_kick_player_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::party_client_kick_player));
+        reinterpret_cast<party_kick_player_fn>(sigscan_module(puphook::core::modules::tf_client, sigs::party_client_kick_player));
       ++g_party_client_api.scan_step;
       return;
     default:
@@ -893,7 +893,7 @@ bool is_in_standby_queue(void* party_client)
 bool request_match_queue(void* party_client, unsigned int queue_mode)
 {
   initialize_party_client_api();
-  if (cathook::core::is_detach_pending() ||
+  if (puphook::core::is_detach_pending() ||
       party_client == nullptr ||
       g_party_client_api.request_queue_for_match == nullptr)
   {
@@ -912,7 +912,7 @@ bool request_match_queue(void* party_client, unsigned int queue_mode)
 bool cancel_match_queue(void* party_client, unsigned int queue_mode)
 {
   initialize_party_client_api();
-  if (cathook::core::is_detach_pending() ||
+  if (puphook::core::is_detach_pending() ||
       party_client == nullptr ||
       g_party_client_api.request_leave_for_match == nullptr)
   {
@@ -956,13 +956,13 @@ bool cancel_active_queues(void* party_client, unsigned int queue_mode, bool& in_
 
 Entity* get_player_resource_entity()
 {
-  return cathook::core::player_resource::get_player_resource_entity();
+  return puphook::core::player_resource::get_player_resource_entity();
 }
 
 template <typename value_type>
 value_type read_player_resource_value(Entity* player_resource, int array_offset, int player_index)
 {
-  return cathook::core::player_resource::read_value<value_type>(player_resource, array_offset, player_index);
+  return puphook::core::player_resource::read_value<value_type>(player_resource, array_offset, player_index);
 }
 
 int get_local_ping()
@@ -990,7 +990,7 @@ int count_requeue_players()
   }
 
   int human_players = 0;
-  const int max_clients = cathook::core::player_resource::max_client_index();
+  const int max_clients = puphook::core::player_resource::max_client_index();
   for (int index = 1; index <= max_clients; ++index)
   {
     auto* player = entity_list->player_from_index(index);
@@ -1006,14 +1006,14 @@ int count_requeue_players()
     }
 
     const auto account_id = static_cast<std::uint32_t>(info.friends_id);
-    if (account_id != 0 && cat_ipc::client::is_local_ipc_friend(account_id))
+    if (account_id != 0 && pup_ipc::client::is_local_ipc_friend(account_id))
     {
       continue;
     }
 
     if (config.misc.automation.rq_ignore_friends &&
         account_id != 0 &&
-        (player->is_friend() || player->is_ignored() || cathook::core::players::is_friendly(account_id)))
+        (player->is_friend() || player->is_ignored() || puphook::core::players::is_friendly(account_id)))
     {
       continue;
     }
@@ -1035,7 +1035,7 @@ bool should_trigger_player_threshold_requeue(int human_players)
 
 bool should_trigger_ipc_bot_threshold_requeue()
 {
-  return cat_ipc::client::is_excess_ipc_bot_on_current_server(config.misc.automation.rq_if_ipc_bots_gt);
+  return pup_ipc::client::is_excess_ipc_bot_on_current_server(config.misc.automation.rq_if_ipc_bots_gt);
 }
 
 bool should_trigger_no_navmesh_requeue()
@@ -1432,7 +1432,7 @@ void initialize_report_player_account()
 
   g_report_player_account_initialized = true;
   g_report_player_account = reinterpret_cast<report_player_account_fn>(sigscan_module("client.so", sigs::report_player_account));
-#ifdef CATHOOK_DEBUG_AUTO_REPORT
+#ifdef PUPHOOK_DEBUG_AUTO_REPORT
 
   print("[auto_report] report_player_account=%p\n", reinterpret_cast<void*>(g_report_player_account));
 #endif
@@ -1487,7 +1487,7 @@ bool reload_casual_criteria()
 {
   initialize_party_client_api();
 
-  if (cathook::core::is_detach_pending() ||
+  if (puphook::core::is_detach_pending() ||
       g_party_client_api.get_party_client == nullptr ||
       g_party_client_api.load_saved_casual_criteria == nullptr)
   {
@@ -1508,7 +1508,7 @@ bool request_casual_queue()
 {
   initialize_party_client_api();
 
-  if (cathook::core::is_detach_pending() ||
+  if (puphook::core::is_detach_pending() ||
       g_party_client_api.get_party_client == nullptr)
   {
     return false;
@@ -1527,7 +1527,7 @@ bool cancel_casual_queue()
 {
   initialize_party_client_api();
 
-  if (cathook::core::is_detach_pending() ||
+  if (puphook::core::is_detach_pending() ||
       g_party_client_api.get_party_client == nullptr ||
       g_party_client_api.request_leave_for_match == nullptr)
   {
@@ -1548,7 +1548,7 @@ bool abandon_current_match()
 {
   initialize_party_client_api();
 
-  if (cathook::core::is_detach_pending() ||
+  if (puphook::core::is_detach_pending() ||
       g_party_client_api.get_matchmaking_client == nullptr ||
       g_party_client_api.abandon_current_match == nullptr)
   {
@@ -1572,7 +1572,7 @@ bool party_has_account(void* party_client, std::uint32_t account_id)
   if (g_party_client_api.get_num_members == nullptr
     || g_party_client_api.get_member_steamid == nullptr)
   {
-    return cathook::core::players::has_role(account_id, cathook::core::players::party_role);
+    return puphook::core::players::has_role(account_id, puphook::core::players::party_role);
   }
 
   const int count = g_party_client_api.get_num_members(party_client);
@@ -1672,7 +1672,7 @@ void automation_controller::refresh_party_hosts()
   const auto& cfg = config.misc.automation;
   if (cfg.autoparty_ipc_mode)
   {
-    autoparty_hosts_ = cat_ipc::client::ipc_peer_friend_ids_by_injection_time(cfg.autoparty_ipc_count);
+    autoparty_hosts_ = pup_ipc::client::ipc_peer_friend_ids_by_injection_time(cfg.autoparty_ipc_count);
     autoparty_hosts_source_.clear();
     autoparty_from_ipc_ = true;
     return;
@@ -1690,7 +1690,7 @@ void automation_controller::run_autoparty()
 {
   const auto& cfg = config.misc.automation;
   if (!cfg.autoparty ||
-      cathook::core::is_detach_pending() ||
+      puphook::core::is_detach_pending() ||
       engine == nullptr ||
       global_vars == nullptr)
   {
@@ -1846,7 +1846,7 @@ void automation_controller::run_autoparty()
     for (const auto account : members)
     {
       if (account == local_account ||
-          !cathook::core::players::has_role(account, cathook::core::players::cheater_role))
+          !puphook::core::players::has_role(account, puphook::core::players::cheater_role))
       {
         continue;
       }
@@ -1921,7 +1921,7 @@ void mvm_quit()
 
 void automation_controller::on_create_move(user_cmd* user_cmd)
 {
-  if (cathook::core::is_detach_pending() ||
+  if (puphook::core::is_detach_pending() ||
       engine == nullptr ||
       global_vars == nullptr)
   {
@@ -1964,7 +1964,7 @@ void automation_controller::on_create_move(user_cmd* user_cmd)
 
 void automation_controller::on_frame_stage_notify()
 {
-  if (cathook::core::is_detach_pending() ||
+  if (puphook::core::is_detach_pending() ||
       engine == nullptr ||
       global_vars == nullptr)
   {
@@ -1983,7 +1983,7 @@ void automation_controller::on_frame_stage_notify()
 
 void automation_controller::on_paint()
 {
-  if (cathook::core::is_detach_pending())
+  if (puphook::core::is_detach_pending())
   {
     return;
   }
@@ -2017,7 +2017,7 @@ void automation_controller::run_startup_sound()
 
   startup_sound_played_ = true;
 
-  const auto list_path = cathook::core::root_directory() / "assets" / startup_sound_list_name;
+  const auto list_path = puphook::core::root_directory() / "assets" / startup_sound_list_name;
   std::ifstream sound_file{ list_path };
   if (!sound_file.is_open())
   {
@@ -2067,9 +2067,9 @@ void automation_controller::run_startup_sound()
 
 void automation_controller::on_menu_tick()
 {
-#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
+#if defined(PUPHOOK_TEXTMODE) && PUPHOOK_TEXTMODE
 
-  if (cathook::core::is_detach_pending() ||
+  if (puphook::core::is_detach_pending() ||
       engine == nullptr ||
       global_vars == nullptr)
   {
@@ -2087,7 +2087,7 @@ void automation_controller::on_menu_tick()
 
 void automation_controller::on_dispatch_user_message(int message_type, const bf_read* message_data)
 {
-  if (cathook::core::is_detach_pending() ||
+  if (puphook::core::is_detach_pending() ||
       engine == nullptr)
   {
     return;
@@ -2101,7 +2101,7 @@ void automation_controller::on_dispatch_user_message(int message_type, const bf_
     std::string text;
     if (parse_say_text2(message_data, entity_index, text))
     {
-      run_chat_commands(text, cathook::core::players::account_id_for_player_index(entity_index), false);
+      run_chat_commands(text, puphook::core::players::account_id_for_player_index(entity_index), false);
     }
     return;
   }
@@ -2147,7 +2147,7 @@ void automation_controller::on_dispatch_user_message(int message_type, const bf_
 
 void automation_controller::on_game_event(GameEvent* event)
 {
-  if (cathook::core::is_detach_pending())
+  if (puphook::core::is_detach_pending())
   {
     return;
   }
@@ -2513,7 +2513,7 @@ void automation_controller::run_auto_report()
   }
 
   const int local_index = engine->get_localplayer_index();
-  const int max_clients = cathook::core::player_resource::max_client_index();
+  const int max_clients = puphook::core::player_resource::max_client_index();
   for (int index = 1; index <= max_clients; ++index)
   {
     if (index == local_index)
@@ -2534,12 +2534,12 @@ void automation_controller::run_auto_report()
     }
 
     const auto account_id = static_cast<std::uint32_t>(info.friends_id);
-    if (cat_ipc::client::is_known_local_ipc_friend(account_id) ||
+    if (pup_ipc::client::is_known_local_ipc_friend(account_id) ||
         player->is_friend() ||
         player->is_party() ||
         player->is_ignored() ||
-        cathook::core::players::is_friendly(account_id) ||
-        cathook::core::players::is_ignored(account_id))
+        puphook::core::players::is_friendly(account_id) ||
+        puphook::core::players::is_ignored(account_id))
     {
       continue;
     }
@@ -2555,7 +2555,7 @@ void automation_controller::run_auto_report()
       report_reason_cheating);
     (void)report_sent;
     reported_account_ids_.push_back(account_id);
-#ifdef CATHOOK_DEBUG_AUTO_REPORT
+#ifdef PUPHOOK_DEBUG_AUTO_REPORT
 
     print("[auto_report] %s %s (%lu)\n", report_sent ? "reported" : "report rejected", info.name, info.friends_id);
 #endif
@@ -2590,36 +2590,36 @@ bool auto_vote_protected(std::uint32_t account_id)
   {
     return false;
   }
-  return cathook::core::players::is_friendly(account_id) ||
-         cathook::core::players::is_ignored(account_id) ||
-         cathook::core::players::has_role(account_id, cathook::core::players::party_role);
+  return puphook::core::players::is_friendly(account_id) ||
+         puphook::core::players::is_ignored(account_id) ||
+         puphook::core::players::has_role(account_id, puphook::core::players::party_role);
 }
 
 std::uint32_t vote_account_id(Entity* player_resource, int index)
 {
   static tf2_netvars::lazy_offset account_id_offset{"DT_TFPlayerResource", {"baseclass", "m_iAccountID"}};
-  return cathook::core::player_resource::read_value<std::uint32_t>(
+  return puphook::core::player_resource::read_value<std::uint32_t>(
       player_resource, account_id_offset, index);
 }
 
 bool vote_index_valid(Entity* player_resource, int index)
 {
   static tf2_netvars::lazy_offset valid_offset{"DT_TFPlayerResource", {"baseclass", "m_bValid"}};
-  return cathook::core::player_resource::read_value<std::uint8_t>(
+  return puphook::core::player_resource::read_value<std::uint8_t>(
              player_resource, valid_offset, index) != 0;
 }
 
 int vote_user_id(Entity* player_resource, int index)
 {
   static tf2_netvars::lazy_offset user_id_offset{"DT_TFPlayerResource", {"baseclass", "m_iUserID"}};
-  return cathook::core::player_resource::read_value<int>(
+  return puphook::core::player_resource::read_value<int>(
       player_resource, user_id_offset, index);
 }
 
 int vote_team(Entity* player_resource, int index)
 {
   static tf2_netvars::lazy_offset team_offset{"DT_TFPlayerResource", {"baseclass", "m_iTeam"}};
-  return cathook::core::player_resource::read_value<int>(
+  return puphook::core::player_resource::read_value<int>(
       player_resource, team_offset, index);
 }
 
@@ -2718,7 +2718,7 @@ void automation_controller::run_auto_vote()
 
   const int local_index = engine->get_localplayer_index();
   const int local_team = static_cast<int>(localplayer->get_team());
-  Entity* player_resource = cathook::core::player_resource::get_player_resource_entity();
+  Entity* player_resource = puphook::core::player_resource::get_player_resource_entity();
   const float curtime = global_vars->curtime;
 
   if (!pending_votes_.empty() && player_resource != nullptr)
@@ -2776,7 +2776,7 @@ void automation_controller::run_auto_vote()
       const std::uint32_t target_account = vote_account_id(player_resource, vote.target);
       const bool target_protected = auto_vote_protected(target_account);
       const bool target_marked =
-          cathook::core::players::has_role(target_account, cathook::core::players::cheater_role);
+          puphook::core::players::has_role(target_account, puphook::core::players::cheater_role);
       const bool defend_target =
           (settings.auto_vote & Misc::Automation::auto_vote_defend) != 0 && target_protected;
 
@@ -2852,7 +2852,7 @@ void automation_controller::run_auto_vote()
       continue;
     }
     const bool marked =
-        cathook::core::players::has_role(account_id, cathook::core::players::cheater_role);
+        puphook::core::players::has_role(account_id, puphook::core::players::cheater_role);
     if (!marked && (settings.auto_vote & Misc::Automation::auto_vote_kick_all) == 0)
     {
       continue;
@@ -3088,8 +3088,8 @@ void automation_controller::run_chatspam()
   std::string message{};
   switch (config.misc.automation.chatspam)
   {
-    case Misc::Automation::chatspam_source::CATHOOK:
-      message = choose_message(builtin_chatspam_cathook, config.misc.automation.chatspam_random, chatspam_index_, chatspam_last_index_);
+    case Misc::Automation::chatspam_source::PUPHOOK:
+      message = choose_message(builtin_chatspam_puphook, config.misc.automation.chatspam_random, chatspam_index_, chatspam_last_index_);
       break;
     case Misc::Automation::chatspam_source::LMAOBOX:
       message = choose_message(builtin_chatspam_lmaobox, config.misc.automation.chatspam_random, chatspam_index_, chatspam_last_index_);
@@ -3145,8 +3145,8 @@ void automation_controller::run_killsay(GameEvent* event)
   std::string message{};
   switch (config.misc.automation.killsay)
   {
-    case Misc::Automation::killsay_mode::CATHOOK:
-      message = choose_message(builtin_killsay_cathook, true, chatspam_index_, chatspam_last_index_);
+    case Misc::Automation::killsay_mode::PUPHOOK:
+      message = choose_message(builtin_killsay_puphook, true, chatspam_index_, chatspam_last_index_);
       break;
     case Misc::Automation::killsay_mode::MLG:
       message = choose_message(builtin_killsay_mlg, true, chatspam_index_, chatspam_last_index_);
@@ -3518,7 +3518,7 @@ void automation_controller::mvm_fix()
 {
   if (!is_mvm_context())
   {
-    print("[cat_mvm_fix] not in Mann vs. Machine\n");
+    print("[pup_mvm_fix] not in Mann vs. Machine\n");
     return;
   }
 
@@ -3531,7 +3531,7 @@ void automation_controller::mvm_fix()
   {
     engine->client_cmd_unrestricted("retry");
   }
-  print("[cat_mvm_fix] buybot marked as funded, reconnecting\n");
+  print("[pup_mvm_fix] buybot marked as funded, reconnecting\n");
 }
 
 void automation_controller::run_chat_commands(std::string_view message, std::uint32_t account_id, bool party_chat)
@@ -3585,15 +3585,15 @@ void automation_controller::run_chat_commands(std::string_view message, std::uin
   }
   const std::string& command = tokens[0];
   const bool allowed_command =
-    command == "cat_mvm_fix" || command == "cat_mvm_quit" || command == "cat_mvm_tele"
-    || command == "cat_mvm_rent" || command == "cat_party_givelead";
+    command == "pup_mvm_fix" || command == "pup_mvm_quit" || command == "pup_mvm_tele"
+    || command == "pup_mvm_rent" || command == "pup_party_givelead";
   if (!allowed_command)
   {
     return;
   }
 
   const std::uint32_t local_account = engine != nullptr
-    ? cathook::core::players::account_id_for_player_index(engine->get_localplayer_index())
+    ? puphook::core::players::account_id_for_player_index(engine->get_localplayer_index())
     : 0;
   bool allowed = local_account != 0 && account_id == local_account;
   if (!allowed)
@@ -3601,14 +3601,14 @@ void automation_controller::run_chat_commands(std::string_view message, std::uin
     switch (config.misc.automation.mvm_chat_commands)
     {
       case Misc::Automation::mvm_chat_command_mode::PARTY:
-        allowed = party_chat || cathook::core::players::has_role(account_id, cathook::core::players::party_role);
+        allowed = party_chat || puphook::core::players::has_role(account_id, puphook::core::players::party_role);
         break;
       case Misc::Automation::mvm_chat_command_mode::FRIENDS:
-        allowed = cathook::core::players::has_role(account_id, cathook::core::players::friend_role);
+        allowed = puphook::core::players::has_role(account_id, puphook::core::players::friend_role);
         break;
       case Misc::Automation::mvm_chat_command_mode::ROLE:
         allowed = account_id != 0
-          && cathook::core::players::has_role(account_id, config.misc.automation.mvm_chat_commands_role);
+          && puphook::core::players::has_role(account_id, config.misc.automation.mvm_chat_commands_role);
         break;
       default:
         break;
@@ -3619,33 +3619,33 @@ void automation_controller::run_chat_commands(std::string_view message, std::uin
     return;
   }
 
-  if (command == "cat_mvm_fix")
+  if (command == "pup_mvm_fix")
   {
     mvm_fix();
   }
-  else if (command == "cat_mvm_quit")
+  else if (command == "pup_mvm_quit")
   {
     mvm_quit();
   }
-  else if (command == "cat_mvm_tele")
+  else if (command == "pup_mvm_tele")
   {
     if (!navbot::controller().path_to_teleporter())
     {
-      print("[cat_mvm_tele] no reachable teleporter entrance found\n");
+      print("[pup_mvm_tele] no reachable teleporter entrance found\n");
     }
   }
-  else if (command == "cat_mvm_rent")
+  else if (command == "pup_mvm_rent")
   {
     autoitem::mvm_rent();
   }
-  else if (command == "cat_party_givelead")
+  else if (command == "pup_party_givelead")
   {
     if (!promote_party_leader(account_id))
     {
-      print("[cat_party_givelead] failed to promote %u\n", account_id);
+      print("[pup_party_givelead] failed to promote %u\n", account_id);
       return;
     }
-    print("[cat_party_givelead] gave party leadership to %u\n", account_id);
+    print("[pup_party_givelead] gave party leadership to %u\n", account_id);
   }
 }
 
@@ -4033,7 +4033,7 @@ void automation_controller::run_boost_queueing()
     boost_leave_requested_ = false;
     boost_match_start_time_ = 0.0f;
     queue_loading_start_time_ = 0.0f;
-    cat_ipc::client::set_in_casual_queue(false);
+    pup_ipc::client::set_in_casual_queue(false);
     return;
   }
 
@@ -4050,7 +4050,7 @@ void automation_controller::run_boost_queueing()
   bool in_match_queue = g_party_client_api.is_in_queue_for_match_group != nullptr &&
                         g_party_client_api.is_in_queue_for_match_group(party_client, casual_match_group_default);
   bool in_standby = is_in_standby_queue(party_client);
-  cat_ipc::client::set_in_casual_queue(in_match_queue || in_standby);
+  pup_ipc::client::set_in_casual_queue(in_match_queue || in_standby);
 
   const auto leave_current_match = [&](const char* reason) {
     if (boost_leave_requested_)
@@ -4100,7 +4100,7 @@ void automation_controller::run_boost_queueing()
     queue_loading_start_time_ = 0.0f;
     if (in_game)
     {
-      const int ipc_peer_count = cat_ipc::client::local_ipc_peer_count_on_current_server();
+      const int ipc_peer_count = pup_ipc::client::local_ipc_peer_count_on_current_server();
       if (ipc_peer_count <= 1)
       {
         if (boost_match_start_time_ <= 0.0f)
@@ -4121,7 +4121,7 @@ void automation_controller::run_boost_queueing()
       else
       {
         boost_match_start_time_ = 0.0f;
-        if (cat_ipc::client::is_first_local_ipc_peer_on_current_server())
+        if (pup_ipc::client::is_first_local_ipc_peer_on_current_server())
         {
           leave_current_match("first ipc peer");
         }
@@ -4208,7 +4208,7 @@ void automation_controller::run_queueing()
     cancel_queue_requested = false;
     was_disconnected = false;
     queue_loading_start_time_ = 0.0f;
-    cat_ipc::client::set_in_casual_queue(false);
+    pup_ipc::client::set_in_casual_queue(false);
     return;
   }
 
@@ -4243,7 +4243,7 @@ void automation_controller::run_queueing()
   bool in_match_queue = g_party_client_api.is_in_queue_for_match_group != nullptr &&
                         g_party_client_api.is_in_queue_for_match_group(party_client, queue_mode);
   bool in_standby = is_in_standby_queue(party_client);
-  cat_ipc::client::set_in_casual_queue(
+  pup_ipc::client::set_in_casual_queue(
     (in_match_queue || in_standby) && queue_mode == casual_match_group_default);
   if (!in_match_queue && !in_standby)
   {

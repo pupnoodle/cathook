@@ -13,7 +13,7 @@ V  o o  V  file: src/core/hooks/load_white_list.cpp
 void* (*load_white_list_original)(void*);
 
 void* load_white_list_hook(void* me) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (config.misc.exploits.bypasspure || config.misc.exploits.pure_bypass) {
     return nullptr;
   }

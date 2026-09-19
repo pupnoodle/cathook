@@ -4,15 +4,15 @@ set -u
 echo "Stopping... (this may take a while)"
 
 script_dir="$(CDPATH= cd -- "$(dirname -- "$BASH_SOURCE")" && pwd)"
-panel_dir="$script_dir/catbot-ipc-web-panel-main"
+panel_dir="$script_dir/pupbot-ipc-web-panel-main"
 instances_dir="$script_dir/user_instances"
-if [ -n "${CATHOOK_ROOT-}" ]; then install_root="$CATHOOK_ROOT"; else install_root="/opt/cathook"; fi
+if [ -n "${PUPHOOK_ROOT-}" ]; then install_root="$PUPHOOK_ROOT"; else install_root="/opt/puphook"; fi
 ipc_bin="$install_root/ipc/bin"
-ipc_state_path="$install_root/ipc/cathook_followbot_server"
-if [ -n "${CAT_DEFAULT_DISPLAY-}" ]; then default_headless_display="$CAT_DEFAULT_DISPLAY"; else default_headless_display=":699"; fi
-if [ -n "${CAT_XVFB_PID_FILE-}" ]; then xvfb_pid_file="$CAT_XVFB_PID_FILE"; else xvfb_pid_file="/tmp/cat-catbot-xvfb.pid"; fi
-if [ -n "${CAT_CHUNKED_X_DISPLAY_PID_DIR-}" ]; then xvfb_pool_pid_dir="$CAT_CHUNKED_X_DISPLAY_PID_DIR"; else xvfb_pool_pid_dir="/tmp/cat-catbot-xvfb-pool"; fi
-if [ -n "${CAT_IPC_PORT-}" ]; then port="$CAT_IPC_PORT"; else port="7655"; fi
+ipc_state_path="$install_root/ipc/puphook_followbot_server"
+if [ -n "${PUP_DEFAULT_DISPLAY-}" ]; then default_headless_display="$PUP_DEFAULT_DISPLAY"; else default_headless_display=":699"; fi
+if [ -n "${PUP_XVFB_PID_FILE-}" ]; then xvfb_pid_file="$PUP_XVFB_PID_FILE"; else xvfb_pid_file="/tmp/pupbot-xvfb.pid"; fi
+if [ -n "${PUP_CHUNKED_X_DISPLAY_PID_DIR-}" ]; then xvfb_pool_pid_dir="$PUP_CHUNKED_X_DISPLAY_PID_DIR"; else xvfb_pool_pid_dir="/tmp/pupbot-xvfb-pool"; fi
+if [ -n "${PUP_IPC_PORT-}" ]; then port="$PUP_IPC_PORT"; else port="7655"; fi
 
 if [ "$(id -u)" -eq 0 ]; then
     sudo_args=()
@@ -35,12 +35,12 @@ if command -v curl >/dev/null 2>&1; then
         "http://127.0.0.1:$port/api/quota/0" >/dev/null 2>&1 || true
 fi
 
-if [ "${CAT_VISIBLE_WINDOWS-0}" != "1" ] && command -v xpra >/dev/null 2>&1; then
-    if [ -n "${CAT_XPRA_DISPLAY-}" ]; then display="$CAT_XPRA_DISPLAY"
-    elif [ -n "${CAT_DISPLAY-}" ]; then display="$CAT_DISPLAY"
-    elif [ -n "${CAT_XVFB_DISPLAY-}" ]; then display="$CAT_XVFB_DISPLAY"
+if [ "${PUP_VISIBLE_WINDOWS-0}" != "1" ] && command -v xpra >/dev/null 2>&1; then
+    if [ -n "${PUP_XPRA_DISPLAY-}" ]; then display="$PUP_XPRA_DISPLAY"
+    elif [ -n "${PUP_DISPLAY-}" ]; then display="$PUP_DISPLAY"
+    elif [ -n "${PUP_XVFB_DISPLAY-}" ]; then display="$PUP_XVFB_DISPLAY"
     else display="$default_headless_display"; fi
-    xpra stop "$display" >/tmp/cat-catbot-xpra-stop.log 2>&1 || true
+    xpra stop "$display" >/tmp/pupbot-xpra-stop.log 2>&1 || true
 fi
 
 if [ -f /tmp/pulsemodule.id ] && command -v pactl >/dev/null 2>&1; then
@@ -49,7 +49,7 @@ fi
 
 as_root env PANEL_DIR="$panel_dir" INSTANCES_DIR="$instances_dir" IPC_BIN="$ipc_bin" IPC_STATE_PATH="$ipc_state_path" \
     XVFB_PID_FILE="$xvfb_pid_file" XVFB_POOL_PID_DIR="$xvfb_pool_pid_dir" \
-    PRESERVE_START_LOCK="${CAT_PRESERVE_START_LOCK-0}" START_PID="${CAT_START_PID-}" bash -s <<'ROOT_STOP_SCRIPT'
+    PRESERVE_START_LOCK="${PUP_PRESERVE_START_LOCK-0}" START_PID="${PUP_START_PID-}" bash -s <<'ROOT_STOP_SCRIPT'
 set -u
 kill_pids=()
 bot_roots=()
@@ -80,7 +80,7 @@ is_panel_process() {
     local cwd="$1"
     local cmd="$2"
     case "$cwd" in
-        */botpanel/catbot-ipc-web-panel-main)
+        */botpanel/pupbot-ipc-web-panel-main)
             [[ "$cmd" == bash\ ./run.sh* || "$cmd" == /bin/bash\ ./run.sh* ||
                "$cmd" == *"/node app.js "* || "$cmd" == *"/node app.js" ]]
             ;;
@@ -139,7 +139,7 @@ done
 for root in "${panel_roots[@]}"; do collect_tree "$root"; done
 for root in "${bot_roots[@]}"; do collect_tree "$root"; done
 
-if [ "${CAT_VISIBLE_WINDOWS-0}" != "1" ]; then
+if [ "${PUP_VISIBLE_WINDOWS-0}" != "1" ]; then
     for pid_file in "$XVFB_PID_FILE" "$XVFB_POOL_PID_DIR"/*.pid; do
         [ -f "$pid_file" ] || continue
         pid="$(tr -cd '0-9' <"$pid_file" 2>/dev/null || true)"
@@ -163,11 +163,11 @@ for _ in $(seq 1 50); do
 done
 for pid in "${kill_pids[@]}"; do kill -KILL "$pid" 2>/dev/null || true; done
 
-rm -f /tmp/ncat-cathook-webpanel.pid /tmp/cat-ipc-server.pid /tmp/cat-ipc-server.log \
-    /tmp/cat-catbot-xvfb.pid /tmp/pulsemodule.id \
+rm -f /tmp/ncat-puphook-webpanel.pid /tmp/pup-ipc-server.pid /tmp/pup-ipc-server.log \
+    /tmp/pupbot-xvfb.pid /tmp/pulsemodule.id \
     "$XVFB_POOL_PID_DIR"/*.pid /tmp/source_engine*.lock "$IPC_STATE_PATH" \
-    /dev/shm/cathook_followbot_server 2>/dev/null || true
-[ "${PRESERVE_START_LOCK-0}" = "1" ] || rm -f /tmp/catbot-panel-start.lock 2>/dev/null || true
+    /dev/shm/puphook_followbot_server 2>/dev/null || true
+[ "${PRESERVE_START_LOCK-0}" = "1" ] || rm -f /tmp/pupbot-panel-start.lock 2>/dev/null || true
 
 leftovers=0
 for proc in /proc/[0-9]*; do

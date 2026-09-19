@@ -236,7 +236,7 @@ static bool initialize_mono_runtime(SDL_Window *const window, mono::backend back
   configure_mono_input();
   const bool initialized = mono_runtime.initialize(std::move(backend), [](ImGuiIO &io) {
     io.ConfigWindowsMoveFromTitleBarOnly = true;
-    cat_menu::ensure_fonts();
+    pup_menu::ensure_fonts();
     return io.FontDefault != nullptr;
   });
   if (initialized) {
@@ -494,7 +494,7 @@ bool mono_ui_begin_frame() {
   }
 
   mono_ui_frame_lock_held = true;
-  const ImVec4 accent = cat_menu::menu_accent();
+  const ImVec4 accent = pup_menu::menu_accent();
   mono_runtime.begin_frame({accent.x, accent.y, accent.z, accent.w});
   return true;
 }
@@ -561,7 +561,7 @@ int SDLCALL event_filter(void* userdata, SDL_Event* event) {
 }
 
 bool poll_event_hook(SDL_Event* event) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (sdl_hooks_uninstalling.load(std::memory_order_acquire)) {
     return poll_event_original != nullptr ? poll_event_original(event) : false;
   }
@@ -593,12 +593,12 @@ bool mono_ui_build_frame() {
     return false;
   }
 
-  cat_menu::ensure_fonts();
+  pup_menu::ensure_fonts();
   warmup_bind_targets();
   if (ImGui::IsKeyPressed(ImGuiKey_Insert, false) || ImGui::IsKeyPressed(ImGuiKey_F11, false)) {
     menu_focused = !menu_focused;
     player_manager_window_open = menu_focused;
-    cat_bind::set_menu_open(menu_focused || player_manager_window_open);
+    pup_bind::set_menu_open(menu_focused || player_manager_window_open);
     if (surface != nullptr) {
       surface->set_cursor_visible(menu_focused || player_manager_window_open);
     }
@@ -606,7 +606,7 @@ bool mono_ui_build_frame() {
 
   if (ImGui::IsKeyPressed(ImGuiKey_F2, false)) {
     player_manager_window_open = !player_manager_window_open;
-    cat_bind::set_menu_open(menu_focused || player_manager_window_open);
+    pup_bind::set_menu_open(menu_focused || player_manager_window_open);
     if (surface != nullptr) {
       surface->set_cursor_visible(menu_focused || player_manager_window_open);
     }
@@ -620,7 +620,7 @@ bool mono_ui_build_frame() {
       ImGuiWindowFlags_NoInputs |
       ImGuiWindowFlags_NoSavedSettings |
       ImGuiWindowFlags_NoBringToFrontOnFocus;
-  ImGui::Begin("##cathook_overlay_canvas", nullptr, overlay_flags);
+  ImGui::Begin("##puphook_overlay_canvas", nullptr, overlay_flags);
   draw_aimbot_fov_imgui();
   draw_thirdperson_crosshair_imgui();
   draw_players_imgui();
@@ -644,7 +644,7 @@ bool mono_ui_build_frame() {
 }
 
 void swap_window_hook(SDL_Window* window) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   void (*original)(SDL_Window*) = swap_window_original;
 
   if (original == nullptr) {
@@ -704,11 +704,11 @@ void swap_window_hook(SDL_Window* window) {
     original(window);
   }
 
-  cathook::core::service_detach_request();
+  puphook::core::service_detach_request();
 }
 
 Uint32 get_window_flags_hook(SDL_Window* window) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (sdl_hooks_uninstalling.load(std::memory_order_acquire)) {
     return get_window_flags_original != nullptr ? get_window_flags_original(window) : 0;
   }
@@ -727,7 +727,7 @@ Uint32 get_window_flags_hook(SDL_Window* window) {
 }
 
 SDL_bool get_window_WM_info_hook(SDL_Window* window, SDL_SysWMinfo* info) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (sdl_hooks_uninstalling.load(std::memory_order_acquire)) {
     return get_window_WM_info_original != nullptr ? get_window_WM_info_original(window, info) : SDL_FALSE;
   }
@@ -746,7 +746,7 @@ SDL_bool get_window_WM_info_hook(SDL_Window* window, SDL_SysWMinfo* info) {
 }
 
 void get_window_size_hook(SDL_Window* window, int* w, int* h) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (sdl_hooks_uninstalling.load(std::memory_order_acquire)) {
     if (get_window_size_original != nullptr) {
       get_window_size_original(window, w, h);

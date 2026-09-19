@@ -63,11 +63,11 @@ constexpr float crumb_graph_connect_distance = 148.0f;
 
 void navbot_log(const char* fmt, ...)
 {
-  cathook::core::log_raw("[navbot] ");
+  puphook::core::log_raw("[navbot] ");
 
   va_list args{};
   va_start(args, fmt);
-  cathook::core::vlog_raw(fmt, args);
+  puphook::core::vlog_raw(fmt, args);
   va_end(args);
 }
 
@@ -280,17 +280,17 @@ std::filesystem::path resolve_nav_path(const std::string& map_name)
   };
 
   append_env_search_root("TF2_PATH", std::filesystem::path{});
-  append_env_search_root("CAT_TF2_PATH", std::filesystem::path{});
-  append_env_search_root("CAT_STEAMAPPS_PATH", std::filesystem::path("common/Team Fortress 2"));
-  append_env_search_root("CAT_STEAM_ROOT", std::filesystem::path("steamapps/common/Team Fortress 2"));
+  append_env_search_root("PUP_TF2_PATH", std::filesystem::path{});
+  append_env_search_root("PUP_STEAMAPPS_PATH", std::filesystem::path("common/Team Fortress 2"));
+  append_env_search_root("PUP_STEAM_ROOT", std::filesystem::path("steamapps/common/Team Fortress 2"));
 
-  if (const auto* cathook_root = std::getenv("CATHOOK_ROOT"); cathook_root != nullptr && cathook_root[0] != '\0')
+  if (const auto* puphook_root = std::getenv("PUPHOOK_ROOT"); puphook_root != nullptr && puphook_root[0] != '\0')
   {
-    append_search_root(search_roots, std::filesystem::path(cathook_root) / "navmeshes");
+    append_search_root(search_roots, std::filesystem::path(puphook_root) / "navmeshes");
   }
 
-  append_search_root(search_roots, cathook::core::root_directory() / "navmeshes");
-  append_search_root(search_roots, "/opt/cathook/navmeshes");
+  append_search_root(search_roots, puphook::core::root_directory() / "navmeshes");
+  append_search_root(search_roots, "/opt/puphook/navmeshes");
   append_search_root(search_roots, "/opt/steamapps/common/Team Fortress 2");
 
   if (const auto* home = std::getenv("HOME"); home != nullptr && home[0] != '\0')

@@ -2,14 +2,14 @@
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-source "$SCRIPT_DIR/cathook_mode.sh"
+source "$SCRIPT_DIR/puphook_mode.sh"
 
-LIB_NAME="${CATHOOK_BINARY:-}"
-if selected_mode="$(cathook_mode_from_env 0)"; then
-    LIB_NAME="$(cathook_binary_for_mode "$selected_mode")"
+LIB_NAME="${PUPHOOK_BINARY:-}"
+if selected_mode="$(puphook_mode_from_env 0)"; then
+    LIB_NAME="$(puphook_binary_for_mode "$selected_mode")"
 elif [ -z "$LIB_NAME" ]; then
-    selected_mode="$(cathook_select_mode 0)"
-    LIB_NAME="$(cathook_binary_for_mode "$selected_mode")"
+    selected_mode="$(puphook_select_mode 0)"
+    LIB_NAME="$(puphook_binary_for_mode "$selected_mode")"
 fi
 
 LIB_PATH="$SCRIPT_DIR/bin/$LIB_NAME"
@@ -29,8 +29,8 @@ if [ -z "$PROCID" ]; then
     exit 1
 fi
 
-if [ "${CATHOOK_USE_GDB:-1}" != "1" ]; then
-    echo "debug.sh uses a live gdb attach and was disabled by CATHOOK_USE_GDB=0."
+if [ "${PUPHOOK_USE_GDB:-1}" != "1" ]; then
+    echo "debug.sh uses a live gdb attach and was disabled by PUPHOOK_USE_GDB=0."
     exit 1
 fi
 

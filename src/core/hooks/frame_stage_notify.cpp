@@ -22,7 +22,6 @@ V  o o  V  file: src/core/hooks/frame_stage_notify.cpp
 #include "features/combat/aimbot/seed_prediction.hpp"
 #include "core/commands.hpp"
 #include "core/detach.hpp"
-#include "core/identify/identify.hpp"
 #include "core/ipc/ipc_client.hpp"
 #include "core/player_manager.hpp"
 #include "features/menu/config.hpp"
@@ -163,7 +162,7 @@ void run_match_exec_on_level_change()
   }
 
   last_match_exec_level = level_name;
-  cathook::core::execute_cfg_file("cat_matchexec", "cat_matchexec");
+  puphook::core::execute_cfg_file("pup_matchexec", "pup_matchexec");
 }
 
 void run_skybox_changer()
@@ -208,13 +207,13 @@ void restore_frame_stage_state()
 }
 
 void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
-  CATHOOK_HOOK_GUARD();
-  if (cathook::core::is_detach_pending()) {
+  PUPHOOK_HOOK_GUARD();
+  if (puphook::core::is_detach_pending()) {
     thirdperson::end_render_angles();
     if (frame_stage_notify_original != nullptr) {
       frame_stage_notify_original(me, current_stage);
     }
-    cathook::core::service_detach_request();
+    puphook::core::service_detach_request();
     return;
   }
 
@@ -243,7 +242,7 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
     entity_cache_clear_snapshot();
     dormancy::clear();
     seed_pred::reset();
-    cathook::core::player_resource::invalidate_player_resource_cache();
+    puphook::core::player_resource::invalidate_player_resource_cache();
     last_time = 0.0f;
     run_match_exec_on_level_change();
     run_skybox_changer();
@@ -255,13 +254,13 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
     restore_frame_stage_state();
     return;
   }
-  if (cathook::core::is_detach_pending() || engine == nullptr || entity_list == nullptr || global_vars == nullptr ||
+  if (puphook::core::is_detach_pending() || engine == nullptr || entity_list == nullptr || global_vars == nullptr ||
       !engine->is_connected() || !engine->is_in_game()) {
     entity_cache_clear_lists();
     entity_cache_clear_snapshot();
     dormancy::clear();
     seed_pred::reset();
-    cathook::core::player_resource::invalidate_player_resource_cache();
+    puphook::core::player_resource::invalidate_player_resource_cache();
     restore_frame_stage_state();
     return;
   }
@@ -346,10 +345,10 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
                 .alive = true,
                 .dormant = false,
                 .friendly = player_info_valid && pinfo.friends_id != 0 && pinfo.fakeplayer != true &&
-                    (cathook::core::players::is_friendly(static_cast<std::uint32_t>(pinfo.friends_id)) ||
+                    (puphook::core::players::is_friendly(static_cast<std::uint32_t>(pinfo.friends_id)) ||
                      friend_cache_lookup(pinfo.friends_id)),
                 .ignored = player_info_valid && pinfo.friends_id != 0 && pinfo.fakeplayer != true &&
-                    cathook::core::players::is_ignored(static_cast<std::uint32_t>(pinfo.friends_id)),
+                    puphook::core::players::is_ignored(static_cast<std::uint32_t>(pinfo.friends_id)),
                 .fakeplayer = player_info_valid && pinfo.fakeplayer,
                 .player_info_valid = player_info_valid
               });
@@ -368,10 +367,10 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
                 .alive = true,
                 .dormant = true,
                 .friendly = player_info_valid && pinfo.friends_id != 0 && pinfo.fakeplayer != true &&
-                    (cathook::core::players::is_friendly(static_cast<std::uint32_t>(pinfo.friends_id)) ||
+                    (puphook::core::players::is_friendly(static_cast<std::uint32_t>(pinfo.friends_id)) ||
                      friend_cache_lookup(pinfo.friends_id)),
                 .ignored = player_info_valid && pinfo.friends_id != 0 && pinfo.fakeplayer != true &&
-                    cathook::core::players::is_ignored(static_cast<std::uint32_t>(pinfo.friends_id)),
+                    puphook::core::players::is_ignored(static_cast<std::uint32_t>(pinfo.friends_id)),
                 .fakeplayer = player_info_valid && pinfo.fakeplayer,
                 .player_info_valid = player_info_valid
               });
@@ -392,7 +391,7 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
 	  }
 
 	case class_id::PLAYER_RESOURCE:
-	  cathook::core::player_resource::cache_player_resource_entity(entity, static_cast<int>(i));
+	  puphook::core::player_resource::cache_player_resource_entity(entity, static_cast<int>(i));
 	  classified = true;
 	  break;
 
@@ -515,9 +514,8 @@ void frame_stage_notify_hook(void* me, ClientFrameStage current_stage) {
   if (current_stage == FRAME_NET_UPDATE_END) {
     run_match_exec_on_level_change();
     run_skybox_changer();
-    cat_ipc::client::tick();
-    cathook::core::identify::tick();
-    cathook::core::players::tick();
+    pup_ipc::client::tick();
+    puphook::core::players::tick();
     killstreak::apply();
     spectate::on_net_update_end();
     cheat_detection::on_net_update_end();

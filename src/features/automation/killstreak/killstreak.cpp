@@ -21,7 +21,7 @@ int current_streak = 0;
 std::unordered_map<int, int> weapon_streaks{};
 
 void apply_streaks(int local_index) {
-  Entity* resource = cathook::core::player_resource::get_player_resource_entity();
+  Entity* resource = puphook::core::player_resource::get_player_resource_entity();
   Player* localplayer = entity_list != nullptr ? entity_list->get_localplayer() : nullptr;
 
   if (localplayer != nullptr) {
@@ -37,7 +37,7 @@ void apply_streaks(int local_index) {
   if (resource != nullptr && local_index > 0) {
     static tf2_netvars::lazy_offset resource_streaks_offset{"DT_TFPlayerResource", {"m_iStreaks"}};
     if (resource_streaks_offset > 0 &&
-        cathook::core::player_resource::index_in_range(local_index)) {
+        puphook::core::player_resource::index_in_range(local_index)) {
       auto* streaks = reinterpret_cast<int*>(
           reinterpret_cast<uintptr_t>(resource) + resource_streaks_offset +
           static_cast<uintptr_t>(local_index) * streak_slot_count * sizeof(int));

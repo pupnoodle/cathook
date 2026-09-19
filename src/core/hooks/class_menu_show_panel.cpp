@@ -15,7 +15,7 @@ V  o o  V  file: src/core/hooks/class_menu_show_panel.cpp
 void (*class_menu_show_panel_original)(void*, bool) = NULL;
 
 void class_menu_show_panel_hook(void* me, bool show) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   Player* localplayer = entity_list->get_localplayer();
   if (localplayer == nullptr) {
     class_menu_show_panel_original(me, show);

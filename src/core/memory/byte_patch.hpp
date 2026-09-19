@@ -131,7 +131,7 @@ private:
     const auto last = address + patch_bytes_.size() - 1;
     auto page = first;
     bool covered = false;
-    cathook::core::memory::for_each([&](const cathook::core::memory::entry& region) {
+    puphook::core::memory::for_each([&](const puphook::core::memory::entry& region) {
       while (page >= region.start && page < region.end) {
         if ((region.protection & PROT_READ) == 0) {
           page_protections_.clear();

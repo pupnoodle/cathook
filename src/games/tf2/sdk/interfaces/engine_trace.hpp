@@ -90,6 +90,11 @@ struct trace_t {
 
 };
 
+static_assert(offsetof(trace_t, fraction) == 44);
+static_assert(offsetof(trace_t, all_solid) == 54);
+static_assert(offsetof(trace_t, entity) == 88);
+static_assert(offsetof(trace_t, hitbox) == 96);
+
 #define	CONTENTS_EMPTY			0
 
 #define	CONTENTS_SOLID			0x1
@@ -169,10 +174,25 @@ struct trace_t {
 constexpr unsigned SURF_SKY = 0x0004u;
 constexpr unsigned SURF_NODRAW = 0x0080u;
 
+inline bool trace_is_static_prop(Entity* entity) {
+  return entity != nullptr && entity->is_engine_static_prop();
+}
+
 inline bool should_hit_entity(struct trace_filter* interface, Entity* entity, int contents_mask) {
-  if (entity == nullptr) return false;
-  if (entity->get_class_id() == class_id::RESPAWN_ROOM_VISUALIZER) return false;
-  return interface == nullptr || entity != interface->skip;
+  (void)contents_mask;
+  if (entity == nullptr) {
+    return false;
+  }
+  if (interface != nullptr && entity == interface->skip) {
+    return false;
+  }
+  if (trace_is_static_prop(entity) || !entity->is_listed_base_entity()) {
+    return true;
+  }
+  if (entity->get_class_id() == class_id::RESPAWN_ROOM_VISUALIZER) {
+    return false;
+  }
+  return true;
 }
 
 inline enum trace_type_t get_type(struct trace_filter* interface) {
@@ -189,7 +209,10 @@ inline bool trace_filter_same_entity(Entity* entity, void* other) {
     return true;
   }
 
-  Entity* other_entity = static_cast<Entity*>(other);
+  auto* other_entity = static_cast<Entity*>(other);
+  if (trace_is_static_prop(entity) || trace_is_static_prop(other_entity)) {
+    return false;
+  }
   return entity->get_index() == other_entity->get_index();
 }
 
@@ -197,6 +220,12 @@ inline bool hitscan_trace_should_hit_entity(struct trace_filter* interface, Enti
   (void)contents_mask;
   if (entity == nullptr) {
     return false;
+  }
+  if (trace_is_static_prop(entity) || !entity->is_listed_base_entity()) {
+    return true;
+  }
+  if (entity->get_index() == 0) {
+    return true;
   }
   if (interface != nullptr && trace_filter_same_entity(entity, interface->skip)) {
     return false;
@@ -242,18 +271,54 @@ inline enum trace_type_t world_trace_get_type(struct trace_filter*) {
 
 static void* trace_filter_world_vtable[2] = { (void*)world_trace_should_hit_entity, (void*)world_trace_get_type };
 
+inline bool world_and_props_should_hit_entity(struct trace_filter* interface, Entity* entity,
+  int contents_mask) {
+  (void)contents_mask;
+  if (entity == nullptr) {
+    return false;
+  }
+  if (interface != nullptr && entity == interface->skip) {
+    return false;
+  }
+  if (trace_is_static_prop(entity) || !entity->is_listed_base_entity()) {
+    return true;
+  }
+  const class_id cid = entity->get_class_id();
+  if (cid == class_id::PLAYER ||
+      cid == class_id::ROCKET ||
+      cid == class_id::FLARE ||
+      cid == class_id::CROSSBOW_BOLT ||
+      cid == class_id::ARROW ||
+      cid == class_id::PILL_OR_STICKY ||
+      cid == class_id::RESPAWN_ROOM_VISUALIZER ||
+      cid == class_id::AMMO_OR_HEALTH_PACK ||
+      cid == class_id::WEARABLE ||
+      cid == class_id::WEARABLE_ITEM ||
+      cid == class_id::WEARABLE_ECON ||
+      cid == class_id::WEARABLE_VM) {
+    return false;
+  }
+  return true;
+}
+
 inline enum trace_type_t world_and_props_trace_get_type(struct trace_filter*) {
   return TRACE_EVERYTHING_FILTER_PROPS;
 }
 
 static void* trace_filter_world_and_props_vtable[2] = {
-  (void*)world_trace_should_hit_entity,
+  (void*)world_and_props_should_hit_entity,
   (void*)world_and_props_trace_get_type
 };
 
 inline bool melee_trace_should_hit_entity(struct trace_filter* interface, Entity* entity, int contents_mask) {
   (void)contents_mask;
-  if (entity == nullptr || (interface != nullptr && trace_filter_same_entity(entity, interface->skip))) {
+  if (entity == nullptr) {
+    return false;
+  }
+  if (trace_is_static_prop(entity) || !entity->is_listed_base_entity()) {
+    return true;
+  }
+  if (interface != nullptr && trace_filter_same_entity(entity, interface->skip)) {
     return false;
   }
   if (interface != nullptr && trace_filter_same_entity(entity, interface->target)) {
@@ -278,11 +343,13 @@ static void* trace_filter_melee_vtable[2] = {
 
 inline bool projectile_trace_should_hit_entity(struct trace_filter* interface, Entity* entity, int contents_mask) {
   (void)contents_mask;
-  if (entity == nullptr || (interface != nullptr && trace_filter_same_entity(entity, interface->skip))) {
+  if (entity == nullptr) {
     return false;
   }
-  if (interface != nullptr && interface->ignore_target &&
-      entity->get_class_id() == class_id::PLAYER) {
+  if (trace_is_static_prop(entity) || !entity->is_listed_base_entity()) {
+    return true;
+  }
+  if (interface != nullptr && trace_filter_same_entity(entity, interface->skip)) {
     return false;
   }
   if (interface != nullptr && trace_filter_same_entity(entity, interface->target)) {

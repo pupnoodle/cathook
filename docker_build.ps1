@@ -8,11 +8,11 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw "docker is required"
 }
 
-$image = if ($env:CATHOOK_DOCKER_IMAGE) { $env:CATHOOK_DOCKER_IMAGE } else { "cathook-builder:ubuntu24.04" }
+$image = if ($env:PUPHOOK_DOCKER_IMAGE) { $env:PUPHOOK_DOCKER_IMAGE } else { "puphook-builder:ubuntu24.04" }
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot ".")).Path
 $dockerfilePath = Join-Path $repoRoot "docker\\builder.Dockerfile"
 
-function Normalize-CathookMode {
+function Normalize-PuphookMode {
     param(
         [string] $Value,
         [bool] $AllowBoth
@@ -22,7 +22,7 @@ function Normalize-CathookMode {
         { $_ -in @("default", "non-textmode", "non_textmode", "normal", "gui", "0", "1") } { return "default" }
         { $_ -in @("textmode", "text", "2") } { return "textmode" }
         { $_ -in @("both", "all", "3") -and $AllowBoth } { return "both" }
-        default { throw "Invalid Cathook mode: $Value" }
+        default { throw "Invalid Puphook mode: $Value" }
     }
 }
 
@@ -36,70 +36,70 @@ function Normalize-TextmodeMode {
     }
 }
 
-function Get-CathookModePreferenceFile {
-    if ($env:CATHOOK_MODE_FILE) {
-        return $env:CATHOOK_MODE_FILE
+function Get-PuphookModePreferenceFile {
+    if ($env:PUPHOOK_MODE_FILE) {
+        return $env:PUPHOOK_MODE_FILE
     }
 
-    if ($env:CATHOOK_CONFIG_DIR) {
-        return (Join-Path $env:CATHOOK_CONFIG_DIR "mode")
+    if ($env:PUPHOOK_CONFIG_DIR) {
+        return (Join-Path $env:PUPHOOK_CONFIG_DIR "mode")
     }
 
     if ($env:APPDATA) {
-        return (Join-Path $env:APPDATA "cathook\\mode")
+        return (Join-Path $env:APPDATA "puphook\\mode")
     }
 
-    return (Join-Path $HOME ".config\\cathook\\mode")
+    return (Join-Path $HOME ".config\\puphook\\mode")
 }
 
-function Read-CathookModePreference {
+function Read-PuphookModePreference {
     param([bool] $AllowBoth)
 
-    $modeFile = Get-CathookModePreferenceFile
+    $modeFile = Get-PuphookModePreferenceFile
     if (-not (Test-Path -LiteralPath $modeFile)) {
         return $null
     }
 
     $mode = (Get-Content -LiteralPath $modeFile -TotalCount 1)
-    return Normalize-CathookMode $mode $AllowBoth
+    return Normalize-PuphookMode $mode $AllowBoth
 }
 
-function Write-CathookModePreference {
+function Write-PuphookModePreference {
     param([string] $Mode)
 
-    $modeFile = Get-CathookModePreferenceFile
+    $modeFile = Get-PuphookModePreferenceFile
     $modeDir = Split-Path -Parent $modeFile
     New-Item -ItemType Directory -Force -Path $modeDir | Out-Null
     Set-Content -LiteralPath $modeFile -Value $Mode
 }
 
-function Select-CathookMode {
+function Select-PuphookMode {
     param([bool] $AllowBoth)
 
-    if ($env:CATHOOK_MODE) {
-        return Normalize-CathookMode $env:CATHOOK_MODE $AllowBoth
+    if ($env:PUPHOOK_MODE) {
+        return Normalize-PuphookMode $env:PUPHOOK_MODE $AllowBoth
     }
 
-    if ($env:CAT_BUILD_MODE) {
-        return Normalize-CathookMode $env:CAT_BUILD_MODE $AllowBoth
+    if ($env:PUP_BUILD_MODE) {
+        return Normalize-PuphookMode $env:PUP_BUILD_MODE $AllowBoth
     }
 
-    if ($null -ne [Environment]::GetEnvironmentVariable("CATHOOK_TEXTMODE")) {
-        return Normalize-TextmodeMode $env:CATHOOK_TEXTMODE
+    if ($null -ne [Environment]::GetEnvironmentVariable("PUPHOOK_TEXTMODE")) {
+        return Normalize-TextmodeMode $env:PUPHOOK_TEXTMODE
     }
 
     if ($null -ne [Environment]::GetEnvironmentVariable("TEXTMODE")) {
         return Normalize-TextmodeMode $env:TEXTMODE
     }
 
-    $savedMode = Read-CathookModePreference $AllowBoth
+    $savedMode = Read-PuphookModePreference $AllowBoth
     if ($savedMode) {
         return $savedMode
     }
 
     while ($true) {
         Write-Host ""
-        Write-Host "Cathook mode is not set yet."
+        Write-Host "Puphook mode is not set yet."
         Write-Host "1) default  - normal SDL/GUI mode"
         Write-Host "2) textmode - textmode binary"
         if ($AllowBoth) {
@@ -110,9 +110,9 @@ function Select-CathookMode {
         }
 
         try {
-            $mode = Normalize-CathookMode $answer $AllowBoth
-            Write-CathookModePreference $mode
-            Write-Host "Saved Cathook mode '$mode' to $(Get-CathookModePreferenceFile)."
+            $mode = Normalize-PuphookMode $answer $AllowBoth
+            Write-PuphookModePreference $mode
+            Write-Host "Saved Puphook mode '$mode' to $(Get-PuphookModePreferenceFile)."
             return $mode
         } catch {
             Write-Host "Please choose a valid mode."
@@ -120,10 +120,10 @@ function Select-CathookMode {
     }
 }
 
-$selectedMode = Select-CathookMode $true
+$selectedMode = Select-PuphookMode $true
 
-if (-not $env:CATHOOK_DOCKER_IMAGE) {
-    $needsRebuild = $env:CATHOOK_DOCKER_REBUILD -eq "1"
+if (-not $env:PUPHOOK_DOCKER_IMAGE) {
+    $needsRebuild = $env:PUPHOOK_DOCKER_REBUILD -eq "1"
     if (-not $needsRebuild) {
         $previousErrorActionPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
@@ -140,7 +140,7 @@ if (-not $env:CATHOOK_DOCKER_IMAGE) {
 $containerScript = @'
 set -euo pipefail
 chmod +x build.sh
-if [ "${CATHOOK_DOCKER_INSTALL_PACKAGES:-0}" = "1" ]; then
+if [ "${PUPHOOK_DOCKER_INSTALL_PACKAGES:-0}" = "1" ]; then
     chmod +x packages/packages.sh
     ./packages/packages.sh
 fi
@@ -149,9 +149,9 @@ fi
 $containerScript = $containerScript -replace "`r`n", "`n"
 
 docker run --rm `
-    -e CAT_BUILD_MODE="${selectedMode}" `
-    -e CATHOOK_TEXTMODE="${env:CATHOOK_TEXTMODE}" `
-    -e CATHOOK_DOCKER_INSTALL_PACKAGES="${env:CATHOOK_DOCKER_INSTALL_PACKAGES}" `
+    -e PUP_BUILD_MODE="${selectedMode}" `
+    -e PUPHOOK_TEXTMODE="${env:PUPHOOK_TEXTMODE}" `
+    -e PUPHOOK_DOCKER_INSTALL_PACKAGES="${env:PUPHOOK_DOCKER_INSTALL_PACKAGES}" `
     -v "${repoRoot}:/workspace" `
     -w /workspace `
     $image `

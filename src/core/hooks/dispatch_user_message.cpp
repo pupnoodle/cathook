@@ -54,7 +54,7 @@ void close_welcome_menu()
 }
 
 bool dispatch_user_message_hook(void* me, int message_type, bf_read* message_data) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   automation::controller().on_dispatch_user_message(message_type, message_data);
   if (message_type == text_msg_user_message_type && seed_pred::on_text_msg(message_data)) {
     return true;

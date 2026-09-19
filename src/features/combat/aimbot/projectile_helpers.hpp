@@ -6,6 +6,7 @@
 #include <cfloat>
 #include <climits>
 #include <cstdint>
+#include <cstring>
 #include "core/types.hpp"
 #include "core/math/math.hpp"
 #include "external/MD5/MD5.hpp"
@@ -63,6 +64,7 @@ struct projectile_info {
   bool direct_hit = true;
   bool secondary_attack = false;
   bool no_flip_offset = false;
+  bool centerfire = false;
   bool owner_velocity_projection = false;
   bool air_splash = false;
   bool spin_drag_key = false;
@@ -70,6 +72,13 @@ struct projectile_info {
 
 inline float interval() {
   return tick_interval();
+}
+
+inline float snap_grenade_life(float life) {
+  if (!(life > 0.0f) || !std::isfinite(life)) {
+    return life;
+  }
+  return std::ceil(life / grenade_check_interval) * grenade_check_interval;
 }
 
 inline bool finite(const Vec3& value) {
@@ -126,16 +135,6 @@ inline int weapon_id(Weapon* weapon) {
   if (weapon == nullptr) {
     return TF_WEAPON_NONE;
   }
-  const int id = weapon->get_weapon_id();
-  if (id == TF_WEAPON_GRENADE_THROWABLE) {
-    return TF_WEAPON_THROWABLE;
-  }
-  if (id == TF_WEAPON_GRENADE_JAR_GAS) {
-    return TF_WEAPON_JAR_GAS;
-  }
-  if (id != TF_WEAPON_NONE) {
-    return id;
-  }
 
   switch (weapon->get_def_id()) {
   case Soldier_m_RocketLauncher:
@@ -161,6 +160,14 @@ inline int weapon_id(Weapon* weapon) {
   case Demoman_m_TheLooseCannon:
   case Demoman_m_FestiveGrenadeLauncher:
   case Demoman_m_TheIronBomber:
+  case Demoman_m_Autumn:
+  case Demoman_m_MacabreWeb:
+  case Demoman_m_Rainbow:
+  case Demoman_m_SweetDreams:
+  case Demoman_m_CoffinNail:
+  case Demoman_m_TopShelf:
+  case Demoman_m_Warhawk:
+  case Demoman_m_ButcherBird:
     return weapon->get_def_id() == Demoman_m_TheLooseCannon ? TF_WEAPON_CANNON
                                                             : TF_WEAPON_GRENADELAUNCHER;
   case Demoman_s_StickybombLauncher:
@@ -168,6 +175,20 @@ inline int weapon_id(Weapon* weapon) {
   case Demoman_s_FestiveStickybombLauncher:
   case Demoman_s_TheScottishResistance:
   case Demoman_s_TheQuickiebombLauncher:
+  case Demoman_s_StickyJumper:
+  case Demoman_s_SuddenFlurry:
+  case Demoman_s_CarpetBomber:
+  case Demoman_s_BlastedBombardier:
+  case Demoman_s_RooftopWrangler:
+  case Demoman_s_LiquidAsset:
+  case Demoman_s_PinkElephant:
+  case Demoman_s_Autumn:
+  case Demoman_s_PumpkinPatch:
+  case Demoman_s_MacabreWeb:
+  case Demoman_s_SweetDreams:
+  case Demoman_s_CoffinNail:
+  case Demoman_s_DressedtoKill:
+  case Demoman_s_Blitzkrieg:
     return TF_WEAPON_PIPEBOMBLAUNCHER;
   case Medic_m_CrusadersCrossbow:
   case Medic_m_FestiveCrusadersCrossbow:
@@ -207,8 +228,17 @@ inline int weapon_id(Weapon* weapon) {
   case Pyro_s_GasPasser:
     return TF_WEAPON_GRENADE_GAS;
   default:
-    return id;
+    break;
   }
+
+  const int id = weapon->get_weapon_id();
+  if (id == TF_WEAPON_GRENADE_THROWABLE) {
+    return TF_WEAPON_THROWABLE;
+  }
+  if (id == TF_WEAPON_GRENADE_JAR_GAS) {
+    return TF_WEAPON_JAR_GAS;
+  }
+  return id;
 }
 
 inline bool is_grenade_launcher(int weapon_id) {
@@ -313,6 +343,8 @@ inline std::uint32_t projectile_seed_file_line_hash(int seed, const char* name,
 
 struct projectile_randomness {
   bool valid = false;
+  float spread_pitch = 0.0f;
+  float spread_yaw = 0.0f;
   float syringe_pitch = 0.0f;
   float syringe_yaw = 0.0f;
   float arrow_pitch = 0.0f;
@@ -320,6 +352,11 @@ struct projectile_randomness {
   float grenade_up = 0.0f;
   float grenade_right = 0.0f;
 };
+
+inline float projectile_random_angle_offset(projectile_random_stream& stream, float spread) {
+  constexpr float valve_rand_scale = 0.000061037019f;
+  return static_cast<float>(stream.random_int(0, 32767)) * (valve_rand_scale * spread) - spread;
+}
 
 inline projectile_randomness projectile_randomness_for(Weapon* weapon, user_cmd* cmd) {
   projectile_randomness result{};
@@ -337,6 +374,35 @@ inline projectile_randomness projectile_randomness_for(Weapon* weapon, user_cmd*
     (void)stream.random_float(0.0f, 1.0f);
   }
 
+  const float spread_angle = attribute(0.0f, "projectile_spread_angle", weapon->to_entity());
+  if (std::isfinite(spread_angle) && spread_angle != 0.0f) {
+    result.spread_pitch = projectile_random_angle_offset(stream, spread_angle);
+    result.spread_yaw = projectile_random_angle_offset(stream, spread_angle);
+    (void)stream.random_int(0, 32767);
+
+    const char* level_name = engine != nullptr ? engine->get_level_name() : nullptr;
+    const bool mvm = level_name != nullptr && std::strstr(level_name, "mvm_") != nullptr;
+    if (mvm && attribute(0.0f, "can_overload", weapon->to_entity()) != 0.0f &&
+        attribute(0.0f, "auto_fires_full_clip", weapon->to_entity()) != 0.0f &&
+        weapon->get_clip1() == 1 && weapon->get_reload_mode() == 0) {
+      const float now = global_vars != nullptr ? global_vars->curtime : 0.0f;
+      const float since_fire = now - weapon->get_last_attack();
+      if (std::isfinite(since_fire) && since_fire < 0.9f) {
+        constexpr int valve_rand_max = 0x7FFF;
+        constexpr float valve_unit = 0.000030518509f;
+        const float scale = std::clamp((since_fire - 0.4f) * 2.0000002f, 0.0f, 1.0f) * -5.0f;
+        const float span = (scale + 6.0f) * 2.0f;
+        const float extra_yaw =
+          static_cast<float>(stream.random_int(0, valve_rand_max)) * valve_unit * span;
+        const float extra_pitch =
+          static_cast<float>(stream.random_int(0, valve_rand_max)) * valve_unit * span;
+        (void)stream.random_int(0, valve_rand_max);
+        result.spread_pitch = extra_pitch + (result.spread_pitch - (scale + 6.0f));
+        result.spread_yaw = (result.spread_yaw - (scale + 6.0f)) + extra_yaw;
+      }
+    }
+  }
+
   const int id = weapon_id(weapon);
   if (id == TF_WEAPON_SYRINGEGUN_MEDIC) {
     result.syringe_pitch = stream.random_float(-1.5f, 1.5f);
@@ -345,11 +411,12 @@ inline projectile_randomness projectile_randomness_for(Weapon* weapon, user_cmd*
     const float charge_begin = weapon->get_charge_begin_time();
     const float now = global_vars != nullptr ? global_vars->curtime : 0.0f;
     if (charge_begin > 0.0f && now - charge_begin >= 5.0f) {
+      constexpr int valve_rand_max = 0x7FFF;
       result.arrow_pitch =
-        (static_cast<float>(stream.random_int(0, INT_MAX)) / static_cast<float>(INT_MAX)) * 12.0f -
+        (static_cast<float>(stream.random_int(0, valve_rand_max)) / static_cast<float>(valve_rand_max)) * 12.0f -
         6.0f;
       result.arrow_yaw =
-        (static_cast<float>(stream.random_int(0, INT_MAX)) / static_cast<float>(INT_MAX)) * 12.0f -
+        (static_cast<float>(stream.random_int(0, valve_rand_max)) / static_cast<float>(valve_rand_max)) * 12.0f -
         6.0f;
     }
   } else if (id == TF_WEAPON_GRENADELAUNCHER || id == TF_WEAPON_PIPEBOMBLAUNCHER ||
@@ -379,173 +446,6 @@ inline bool has_ammo_for_shot(Player* local, Weapon* weapon) {
   return ammo_type < 0 || local->get_ammo_count(ammo_type) > 0;
 }
 
-inline bool fill_from_projectile_type(Player* local, Weapon* weapon, int type, projectile_info& out) {
-  if (local == nullptr || weapon == nullptr || type <= 1) {
-    return false;
-  }
-  const float weapon_z = local->is_ducking() ? 8.0f : -3.0f;
-  switch (type) {
-  case 2:
-  case 9:
-  case 27:
-    out.speed = projectile_speed(weapon, 1100.0f);
-    out.splash_radius = rocket_radius_default;
-    out.offset = {23.5f, 12.0f, weapon_z};
-    out.forward_redirect = 2000.0f;
-    out.life_time = 10.0f;
-    out.hull = {0.0f, 0.0f, 0.0f};
-    return true;
-  case 12:
-    out.speed = projectile_speed(weapon, 1100.0f);
-    out.offset = {23.5f, 8.0f, weapon_z};
-    out.forward_redirect = 2000.0f;
-    out.life_time = 10.0f;
-    out.hull = {0.0f, 0.0f, 0.0f};
-    return true;
-  case 13:
-    out.speed = 1200.0f;
-    out.hull = {1.0f, 1.0f, 1.0f};
-    out.offset = {23.5f, 12.0f, weapon_z};
-    out.forward_redirect = 2000.0f;
-    out.life_time = 10.0f;
-    return true;
-  case 3:
-  case 14:
-    out.speed = std::min(projectile_speed(weapon, 1200.0f), 3500.0f);
-    out.gravity_mod = 1.0f;
-    out.life_time = 2.0f;
-    out.splash_radius = rocket_radius_default;
-    out.offset = {16.0f, 8.0f, -6.0f};
-    out.hull = {5.0f, 5.0f, 5.0f};
-    out.initial_up_velocity = 200.0f;
-    out.spin_drag_key = true;
-    return true;
-  case 4:
-  case 16:
-    out.speed = std::min(projectile_speed(weapon, 900.0f), 3500.0f);
-    out.gravity_mod = 1.0f;
-    out.life_time = 8.0f;
-    out.splash_radius = rocket_radius_default;
-    out.offset = {16.0f, 8.0f, -6.0f};
-    out.hull = {5.0f, 5.0f, 5.0f};
-    out.initial_up_velocity = 200.0f;
-    out.spin_drag_key = true;
-    out.arm_time = game_convar_float("tf_grenadelauncher_livetime", 0.8f);
-    return true;
-  case 17:
-    out.speed = 1454.0f;
-    out.gravity_mod = 1.0f;
-    out.life_time = 0.95f;
-    out.splash_radius = rocket_radius_default;
-    out.offset = {16.0f, 8.0f, -6.0f};
-    out.hull = {6.0f, 6.0f, 6.0f};
-    out.initial_up_velocity = 200.0f;
-    out.spin_drag_key = true;
-    return true;
-  case 5:
-    out.speed = 1000.0f;
-    out.gravity_mod = 0.3f;
-    out.hull = {1.0f, 1.0f, 1.0f};
-    out.offset = {16.0f, 6.0f, -8.0f};
-    out.forward_redirect = 2000.0f;
-    out.life_time = 3.5f;
-    return true;
-  case 6:
-    out.speed = projectile_speed(weapon, 2000.0f);
-    out.gravity_mod = 0.3f;
-    out.offset = {23.5f, 12.0f, weapon_z};
-    out.forward_redirect = 2000.0f;
-    out.life_time = 10.0f;
-    out.hull = {0.0f, 0.0f, 0.0f};
-    return true;
-  case 7:
-  case 10:
-  case 22:
-  case 24:
-  case 25:
-    out.speed = 1000.0f;
-    out.gravity_mod = 1.0f;
-    out.life_time = 2.2f;
-    out.splash_radius = 200.0f;
-    out.offset = {16.0f, 8.0f, -6.0f};
-    out.hull = {3.0f, 3.0f, 3.0f};
-    out.initial_up_velocity = 200.0f;
-    out.launch = launch_type::hand;
-    out.spin_drag_key = true;
-    return true;
-  case 29:
-    out.speed = 2000.0f;
-    out.gravity_mod = 1.0f;
-    out.life_time = 2.2f;
-    out.splash_radius = 250.0f;
-    out.offset = {16.0f, 8.0f, -6.0f};
-    out.hull = {3.0f, 3.0f, 3.0f};
-    out.initial_up_velocity = 200.0f;
-    out.spin_drag_key = true;
-    return true;
-  case 8:
-  case 19:
-    out.speed = 1800.0f;
-    out.gravity_mod = 0.5f;
-    out.life_time = 10.0f;
-    out.offset = {23.5f, 8.0f, -3.0f};
-    out.hull = {1.0f, 1.0f, 1.0f};
-    out.forward_redirect = 2000.0f;
-    return true;
-  case 11:
-  case 18:
-  case 23:
-    out.speed = 2400.0f;
-    out.gravity_mod = 0.2f;
-    out.life_time = 10.0f;
-    out.hull = {3.0f, 3.0f, 3.0f};
-    out.offset = {23.5f, 8.0f, -3.0f};
-    out.forward_redirect = 2000.0f;
-    return true;
-  case 15:
-    out.speed = 3000.0f;
-    out.gravity_mod = 1.0f;
-    out.life_time = 2.2f;
-    out.offset = {16.0f, 8.0f, -6.0f};
-    out.initial_up_velocity = out.speed * 0.1f;
-    out.hull = {1.0f, 1.0f, 10.0f};
-    out.launch = launch_type::hand;
-    return true;
-  case 20:
-  case 28:
-    out.speed = 1000.0f;
-    out.gravity_mod = 1.0f;
-    out.life_time = 5.0f;
-    out.splash_radius = 250.0f;
-    out.offset = {16.0f, 8.0f, -6.0f};
-    out.hull = {3.0f, 3.0f, 3.0f};
-    out.initial_up_velocity = 200.0f;
-    out.launch = launch_type::hand;
-    return true;
-  case 26:
-    out.speed = game_convar_float("tf_grapplinghook_projectile_speed", 2600.0f);
-    out.life_time = out.speed > 1.0f
-      ? game_convar_float("tf_grapplinghook_max_distance", 1450.0f) / out.speed
-      : 0.5f;
-    out.offset = {23.5f, -8.0f, -3.0f};
-    out.hull = {1.2f, 1.2f, 1.2f};
-    out.forward_redirect = 2000.0f;
-    return true;
-  case 30:
-    out.speed = game_convar_float("tf_fireball_speed", 1500.0f);
-    out.life_time = std::min(game_convar_float("tf_fireball_distance", 686.0f) / std::max(out.speed, 1.0f),
-                             game_convar_float("tf_fireball_max_lifetime", 3.5f));
-    out.hull = {1.0f, 1.0f, 1.0f};
-    out.offset = {3.0f, 7.0f, -9.0f};
-    out.no_flip_offset = true;
-    out.forward_redirect = game_convar_float("tf_fireball_distance", 686.0f);
-    out.redirect_cutoff = 1.0f;
-    return true;
-  default:
-    return false;
-  }
-}
-
 inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
   out = {};
   if (local == nullptr || weapon == nullptr) {
@@ -558,7 +458,7 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
   out.weapon_id_value = id;
   out.def_id = weapon->get_def_id();
   out.collision_mask = projectile_collision_mask;
-  out.trace_launch = true;
+  out.centerfire = attribute(0.0f, "centerfire_projectile", weapon->to_entity()) != 0.0f;
 
   if (weapon->get_def_id() == Pyro_m_DragonsFury || id == TF_WEAPON_FLAME_BALL) {
     const float fireball_speed = std::max(game_convar_float("tf_fireball_speed", 1500.0f), 1.0f);
@@ -617,12 +517,12 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     const bool iron_bomber = weapon->get_def_id() == Demoman_m_TheIronBomber;
     out.speed = local->in_cond(TF_COND_RUNE_PRECISION)
       ? 3000.0f
-      : std::min(projectile_speed(weapon, 1200.0f), 3500.0f);
+      : attribute(1200.0f, "mult_projectile_speed", weapon->to_entity());
     out.speed = std::min(attribute(out.speed, "mult_projectile_range", weapon->to_entity()),
                          3500.0f);
     out.gravity_mod = 1.0f;
-    out.life_time =
-      iron_bomber ? 1.4f : attribute(2.0f, "fuse_mult", weapon->to_entity());
+    out.life_time = snap_grenade_life(
+      iron_bomber ? 1.4f : attribute(2.0f, "fuse_mult", weapon->to_entity()));
     out.splash_radius = attribute(rocket_radius_default, "mult_explosion_radius",
                                  weapon->to_entity());
     out.offset = {16.0f, 8.0f, -6.0f};
@@ -665,7 +565,7 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
   case TF_WEAPON_CANNON:
     out.speed = 1454.0f;
     out.gravity_mod = 1.0f;
-    out.life_time = 0.95f;
+    out.life_time = snap_grenade_life(0.95f);
     out.splash_radius =
       attribute(rocket_radius_default, "mult_explosion_radius", weapon->to_entity());
     out.offset = {16.0f, 8.0f, -6.0f};
@@ -869,23 +769,8 @@ inline bool get_info(Player* local, Weapon* weapon, projectile_info& out) {
     return true;
 
   default:
-    break;
+    return false;
   }
-
-  if (fill_from_projectile_type(local, weapon, weapon->get_projectile_type(), out)) {
-    return true;
-  }
-
-  const float data_speed = weapon->get_projectile_speed_from_data();
-  if (data_speed > 1.0f) {
-    out.speed = projectile_speed(weapon, data_speed);
-    out.life_time = 10.0f;
-    out.offset = {23.5f, 12.0f, weapon_z};
-    out.hull = {1.0f, 1.0f, 1.0f};
-    return true;
-  }
-
-  return false;
 }
 
 
@@ -908,7 +793,7 @@ inline float latency_seconds() {
 
 inline bool launch_position(Player* local, const projectile_info& info, const Vec3& angles,
                             bool ignore_friendly_players, Vec3& out,
-                            Vec3* launch_angles_out = nullptr) {
+                            Vec3* launch_angles_out = nullptr, bool init_check = false) {
   if (local == nullptr || !finite(angles)) {
     return false;
   }
@@ -941,6 +826,9 @@ inline bool launch_position(Player* local, const projectile_info& info, const Ve
       fire_offset.y *= -1.0f;
     }
   }
+  if (info.centerfire) {
+    fire_offset.y = 0.0f;
+  }
 
   if (info.launch == launch_type::grenade) {
     out = eye + forward * 16.0f - right * 8.0f - up * 20.0f;
@@ -972,7 +860,7 @@ inline bool launch_position(Player* local, const projectile_info& info, const Ve
     launch_angles = aimbot_calculate_angles_to_position(out, fire_end);
   }
 
-  if (info.trace_launch && engine_trace != nullptr) {
+  if ((init_check || info.trace_launch) && engine_trace != nullptr) {
     Vec3 mins = info.hull * -1.0f;
     Vec3 maxs = info.hull;
     Vec3 trace_start = eye;
@@ -1030,10 +918,12 @@ inline bool solve_ballistic(const projectile_info& info, const Vec3& from, const
   }
 
   const float gravity = 800.0f * info.gravity_mod;
-  const bool toss = is_toss_projectile(info.weapon_id_value) || info.launch == launch_type::bat;
-  const float v0 = toss ? info.speed : std::hypot(info.speed, info.initial_up_velocity);
-  const float launch_pitch = toss ? std::atan2(1.0f, 10.0f)
-                                  : std::atan2(info.initial_up_velocity, info.speed);
+  const Vec3 reference_velocity = launch_velocity(info, {}, nullptr);
+  const float v0 = length(reference_velocity);
+  if (!std::isfinite(v0) || v0 <= 0.001f) {
+    return false;
+  }
+  const Vec3 ang_fix = direction_to_angles(reference_velocity);
   float velocity = v0;
   float pitch = 0.0f;
 
@@ -1071,8 +961,8 @@ inline bool solve_ballistic(const projectile_info& info, const Vec3& from, const
     }
   }
 
-  pitch_out = -((pitch - launch_pitch) * radpi);
-  yaw_out = std::atan2(delta.y, delta.x) * radpi;
+  pitch_out = -(pitch * radpi) - ang_fix.x;
+  yaw_out = std::atan2(delta.y, delta.x) * radpi - ang_fix.y;
   time_out = horizontal / std::max(std::cos(pitch) * velocity, 1.0f);
   return std::isfinite(pitch_out) && std::isfinite(yaw_out) && std::isfinite(time_out) &&
     time_out >= 0.0f && (info.life_time <= 0.0f || time_out <= info.life_time);
@@ -1091,6 +981,9 @@ inline Vec3 compensate_projectile_spread(Player* local, Weapon* weapon, user_cmd
   }
 
   Vec3 compensated = desired_angles;
+  compensated.x -= random.spread_pitch;
+  compensated.y -= random.spread_yaw;
+
   const int id = info.weapon_id_value;
   if (id == TF_WEAPON_SYRINGEGUN_MEDIC) {
     compensated.x -= random.syringe_pitch;

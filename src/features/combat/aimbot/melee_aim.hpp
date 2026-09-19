@@ -298,57 +298,42 @@ inline Vec3 backstab_approach_position(Player* localplayer, Player* target) {
   return target_origin - target_forward * 68.0f + target_side * (side_sign * 28.0f);
 }
 
-struct origin_guard {
-  Player* target = nullptr;
-  Vec3 network_origin{};
-  Vec3 abs_origin{};
-  bool active = false;
-
-  origin_guard(Player* value, const Vec3& predicted_origin)
-    : target(value),
-      network_origin(value != nullptr ? value->get_network_origin() : Vec3{}),
-      abs_origin(value != nullptr ? value->get_abs_origin() : Vec3{}),
-      active(value != nullptr) {
-    if (active) {
-      target->set_network_origin(predicted_origin);
-      target->set_abs_origin(predicted_origin);
-    }
-  }
-
-  ~origin_guard() {
-    if (active) {
-      target->set_network_origin(network_origin);
-      target->set_abs_origin(abs_origin);
-    }
-  }
-
-  origin_guard(const origin_guard&) = delete;
-  origin_guard& operator=(const origin_guard&) = delete;
-};
-
-inline bool run_melee_trace(Player* local, Entity* target, const Vec3& start,
-                            const Vec3& end, bool swept_hull, float hull, trace_t* out) {
-  if (local == nullptr || target == nullptr || engine_trace == nullptr) {
+inline bool melee_predicted_hull_hit(Player* target, const Vec3& predicted_origin,
+                                     const Vec3& start, const Vec3& end, float hull) {
+  if (target == nullptr || !aimbot_vec3_is_finite(predicted_origin) ||
+      !aimbot_vec3_is_finite(start) || !aimbot_vec3_is_finite(end)) {
     return false;
+  }
+  const float pad = std::max(hull, 0.0f);
+  const Vec3 mins = predicted_origin + target->get_collideable_mins() - Vec3{pad, pad, pad};
+  const Vec3 maxs = predicted_origin + target->get_collideable_maxs() + Vec3{pad, pad, pad};
+  return aimbot_segment_intersects_aabb(start, end, mins, maxs);
+}
+
+inline bool melee_world_blocks_before_target(const Vec3& start, const Vec3& end,
+                                             Player* target, const Vec3& predicted_origin,
+                                             float hull) {
+  if (engine_trace == nullptr) {
+    return true;
   }
   Vec3 trace_start = start;
   Vec3 trace_end = end;
-  Vec3 mins{-hull, -hull, -hull};
-  Vec3 maxs{hull, hull, hull};
-  ray_t ray = swept_hull
-    ? engine_trace->init_ray(&trace_start, &trace_end, &mins, &maxs)
-    : engine_trace->init_ray(&trace_start, &trace_end);
-  trace_filter filter{};
-  engine_trace->init_melee_trace_filter(&filter, local->to_entity(), target);
-  if (aimbot_is_friendlyfire_enabled()) {
-    filter.skip_team = -1;
+  ray_t ray = engine_trace->init_ray(&trace_start, &trace_end);
+  trace_filter world{};
+  engine_trace->init_world_and_props_trace_filter(&world);
+  trace_t trace{};
+  engine_trace->trace_ray(&ray, MASK_SOLID, &world, &trace);
+  if (!trace.start_solid && !trace.all_solid && trace.fraction >= 0.999f) {
+    return false;
   }
-  trace_t result{};
-  engine_trace->trace_ray(&ray, MASK_SOLID, &filter, &result);
-  if (out != nullptr) {
-    *out = result;
+  float enter = 1.0f;
+  const float pad = std::max(hull, 0.0f);
+  const Vec3 mins = predicted_origin + target->get_collideable_mins() - Vec3{pad, pad, pad};
+  const Vec3 maxs = predicted_origin + target->get_collideable_maxs() + Vec3{pad, pad, pad};
+  if (!aimbot_segment_aabb_enter_fraction(start, end, mins, maxs, &enter)) {
+    return true;
   }
-  return true;
+  return enter >= trace.fraction;
 }
 
 inline bool melee_reach_hit(Player* local, Weapon* weapon, Player* target,
@@ -363,24 +348,10 @@ inline bool melee_reach_hit(Player* local, Weapon* weapon, Player* target,
     return false;
   }
   const Vec3 end = swing_start + forward * geometry.range;
-  origin_guard guard{target, predicted_origin};
-  trace_t line{};
-  if (!run_melee_trace(local, target->to_entity(), swing_start, end, false, geometry.hull,
-                       &line)) {
+  if (melee_world_blocks_before_target(swing_start, end, target, predicted_origin, geometry.hull)) {
     return false;
   }
-  if (!line.all_solid && !line.start_solid && line.entity == target->to_entity()) {
-    return true;
-  }
-  if (line.all_solid || line.start_solid || line.fraction < 1.0f) {
-    return false;
-  }
-  trace_t swept{};
-  if (!run_melee_trace(local, target->to_entity(), swing_start, end, true, geometry.hull,
-                       &swept)) {
-    return false;
-  }
-  return !swept.all_solid && !swept.start_solid && swept.entity == target->to_entity();
+  return melee_predicted_hull_hit(target, predicted_origin, swing_start, end, geometry.hull);
 }
 
 inline bool melee_reach_hit_relaxed(Player* local, Weapon* weapon, Player* target,
@@ -395,13 +366,10 @@ inline bool melee_reach_hit_relaxed(Player* local, Weapon* weapon, Player* targe
     return false;
   }
   const Vec3 end = swing_start + forward * geometry.range;
-  origin_guard guard{target, predicted_origin};
-  trace_t swept{};
-  if (!run_melee_trace(local, target->to_entity(), swing_start, end, true, geometry.hull,
-                       &swept)) {
+  if (melee_world_blocks_before_target(swing_start, end, target, predicted_origin, geometry.hull)) {
     return false;
   }
-  return !swept.all_solid && !swept.start_solid && swept.entity == target->to_entity();
+  return melee_predicted_hull_hit(target, predicted_origin, swing_start, end, geometry.hull);
 }
 
 struct target_frame {

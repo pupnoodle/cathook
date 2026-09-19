@@ -19,7 +19,7 @@ V  o o  V  file: src/core/print.hpp
 static void print(const char* fmt, ...) {
   va_list args;
   va_start(args, fmt);
-  cathook::core::vlog_raw(fmt, args);
+  puphook::core::vlog_raw(fmt, args);
   va_end(args);
 }
 

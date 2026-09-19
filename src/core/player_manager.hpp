@@ -16,7 +16,7 @@ V  o o  V  file: src/core/player_manager.hpp
 #include <string_view>
 #include <vector>
 
-namespace cathook::core::players
+namespace puphook::core::players
 {
 
 enum class player_state
@@ -86,8 +86,8 @@ bool clear_state(std::uint32_t account_id, bool save_changes = true);
 [[nodiscard]] bool is_party(std::uint32_t account_id);
 [[nodiscard]] bool is_ignored(std::uint32_t account_id);
 [[nodiscard]] bool is_prioritized(std::uint32_t account_id);
-[[nodiscard]] bool is_cat(std::uint32_t account_id);
-[[nodiscard]] bool state_is_cat(player_state state);
+[[nodiscard]] bool is_pup(std::uint32_t account_id);
+[[nodiscard]] bool state_is_pup(player_state state);
 [[nodiscard]] const char* state_name(player_state state);
 [[nodiscard]] std::optional<player_state> parse_state(std::string_view state_name);
 [[nodiscard]] std::vector<player_entry> entries(bool include_runtime);

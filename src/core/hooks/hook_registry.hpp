@@ -229,7 +229,7 @@ bool install_group_unlocked(group hook_group)
     }
     if (!detail::arm(e)) {
       if (e.arm_required) {
-        print("Required hook %s failed; aborting cathook startup\n", e.name);
+        print("Required hook %s failed; aborting puphook startup\n", e.name);
         ok = false;
       } else {
         print("%s hook failed\n", e.name);

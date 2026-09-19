@@ -253,7 +253,7 @@ std::vector<std::string> material_manager::selectable_names() const {
 }
 
 std::filesystem::path material_manager::directory() const {
-  return cathook::core::root_directory() / "materials";
+  return puphook::core::root_directory() / "materials";
 }
 
 bool material_manager::add(const std::string& name) {

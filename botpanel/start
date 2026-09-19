@@ -4,16 +4,16 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 setup_root="$script_dir"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
-start_lock="/tmp/catbot-panel-start.lock"
-ipc_server_root="$setup_root/catbot-ipc-server-main"
-web_panel_root="$setup_root/catbot-ipc-web-panel-main"
+start_lock="/tmp/pupbot-panel-start.lock"
+ipc_server_root="$setup_root/pupbot-ipc-server-main"
+web_panel_root="$setup_root/pupbot-ipc-web-panel-main"
 accounts_file="$setup_root/accounts.txt"
 user_instances_dir="$setup_root/user_instances"
-install_root="${CATHOOK_ROOT:-/opt/cathook}"
-requested_visible_windows="${CAT_VISIBLE_WINDOWS:-0}"
-requested_display_backend="${CAT_DISPLAY_BACKEND:-}"
-requested_chunked_x_display="${CAT_CHUNKED_X_DISPLAY:-1}"
-default_headless_display="${CAT_DEFAULT_DISPLAY:-:699}"
+install_root="${PUPHOOK_ROOT:-/opt/puphook}"
+requested_visible_windows="${PUP_VISIBLE_WINDOWS:-0}"
+requested_display_backend="${PUP_DISPLAY_BACKEND:-}"
+requested_chunked_x_display="${PUP_CHUNKED_X_DISPLAY:-1}"
+default_headless_display="${PUP_DEFAULT_DISPLAY:-:699}"
 for system_path_entry in /usr/local/sbin /usr/sbin /sbin; do
     case ":$PATH:" in
         *":$system_path_entry:"*) ;;
@@ -41,54 +41,54 @@ if ! flock -n 9; then
 fi
 printf '%s\n' "$$" >&9
 
-if [ "${CAT_START_CLEANUP:-1}" != "0" ]; then
-    echo "Cleaning stale Cathook panel, bot, IPC, and display processes..."
-    CAT_PRESERVE_START_LOCK=1 CAT_START_PID="$$" "$script_dir/stop"
+if [ "${PUP_START_CLEANUP:-1}" != "0" ]; then
+    echo "Cleaning stale Puphook panel, bot, IPC, and display processes..."
+    PUP_PRESERVE_START_LOCK=1 PUP_START_PID="$$" "$script_dir/stop"
 fi
 
 if [ "$requested_visible_windows" = "1" ]; then
     visible_windows=1
-    display="${CAT_DISPLAY:-${DISPLAY:-:0}}"
+    display="${PUP_DISPLAY:-${DISPLAY:-:0}}"
     use_xpra=0
     use_xvfb=0
 else
     visible_windows=0
-    display="${CAT_XPRA_DISPLAY:-${CAT_DISPLAY:-${CAT_XVFB_DISPLAY:-$default_headless_display}}}"
+    display="${PUP_XPRA_DISPLAY:-${PUP_DISPLAY:-${PUP_XVFB_DISPLAY:-$default_headless_display}}}"
     use_xpra=1
     use_xvfb=0
 fi
-port="${CAT_IPC_PORT:-7655}"
-textmode_game="${CAT_TEXTMODE_GAME:-1}"
-if [ -n "${CAT_STEAM_TXTMODE:-}" ]; then
-    steam_txtmode="$CAT_STEAM_TXTMODE"
+port="${PUP_IPC_PORT:-7655}"
+textmode_game="${PUP_TEXTMODE_GAME:-1}"
+if [ -n "${PUP_STEAM_TXTMODE:-}" ]; then
+    steam_txtmode="$PUP_STEAM_TXTMODE"
 elif [ "$textmode_game" = "1" ] && [ "$visible_windows" != "1" ]; then
     steam_txtmode=1
 else
     steam_txtmode=0
 fi
-steam_txtmode_hide_windows="${CAT_STEAM_TXTMODE_HIDE_WINDOWS:-1}"
-steam_txtmode_drop_draws="${CAT_STEAM_TXTMODE_DROP_DRAWS:-1}"
-steam_txtmode_trim_webhelper="${CAT_STEAM_TXTMODE_TRIM_WEBHELPER:-0}"
-steam_txtmode_frame_interval_us="${CAT_STEAM_TXTMODE_FRAME_INTERVAL_US:-100000}"
-if [ -n "${CAT_STEAM_TXTMODE_SYNTHETIC_HARDWARE:-}" ]; then
-    steam_txtmode_synthetic_hardware="$CAT_STEAM_TXTMODE_SYNTHETIC_HARDWARE"
+steam_txtmode_hide_windows="${PUP_STEAM_TXTMODE_HIDE_WINDOWS:-1}"
+steam_txtmode_drop_draws="${PUP_STEAM_TXTMODE_DROP_DRAWS:-1}"
+steam_txtmode_trim_webhelper="${PUP_STEAM_TXTMODE_TRIM_WEBHELPER:-0}"
+steam_txtmode_frame_interval_us="${PUP_STEAM_TXTMODE_FRAME_INTERVAL_US:-100000}"
+if [ -n "${PUP_STEAM_TXTMODE_SYNTHETIC_HARDWARE:-}" ]; then
+    steam_txtmode_synthetic_hardware="$PUP_STEAM_TXTMODE_SYNTHETIC_HARDWARE"
 elif [ "$steam_txtmode" = "1" ]; then
     steam_txtmode_synthetic_hardware=1
 else
     steam_txtmode_synthetic_hardware=0
 fi
-steam_txtmode_hardware_seed="${CAT_STEAM_TXTMODE_HARDWARE_SEED:-}"
-steam_txtmode_hardware_randomize="${CAT_STEAM_TXTMODE_HARDWARE_RANDOMIZE:-}"
-steam_loop_sleep="${CAT_STM_LOOP_SLEEP:-1}"
-steam_loop_sleep_us="${CAT_STM_LOOP_SLEEP_US:-5000}"
-skip_dbus_run_session="${CAT_SKIP_DBUS_RUN_SESSION:-1}"
+steam_txtmode_hardware_seed="${PUP_STEAM_TXTMODE_HARDWARE_SEED:-}"
+steam_txtmode_hardware_randomize="${PUP_STEAM_TXTMODE_HARDWARE_RANDOMIZE:-}"
+steam_loop_sleep="${PUP_STM_LOOP_SLEEP:-1}"
+steam_loop_sleep_us="${PUP_STM_LOOP_SLEEP_US:-5000}"
+skip_dbus_run_session="${PUP_SKIP_DBUS_RUN_SESSION:-1}"
 launcher_version="legacy_style_runtime_bundle_xpra"
-xpra_log="${CAT_XPRA_LOG:-/tmp/cat-catbot-xpra.log}"
-xvfb_log="${CAT_XVFB_LOG:-/tmp/cat-catbot-xvfb.log}"
-xvfb_pid_file="${CAT_XVFB_PID_FILE:-/tmp/cat-catbot-xvfb.pid}"
-xvfb_max_clients="${CAT_XVFB_MAX_CLIENTS:-512}"
-xpra_screen_size="${CAT_XPRA_SCREEN:-${CAT_X_SCREEN:-1x1x24}}"
-xvfb_screen_size="${CAT_XVFB_SCREEN:-${CAT_X_SCREEN:-1x1x24}}"
+xpra_log="${PUP_XPRA_LOG:-/tmp/pupbot-xpra.log}"
+xvfb_log="${PUP_XVFB_LOG:-/tmp/pupbot-xvfb.log}"
+xvfb_pid_file="${PUP_XVFB_PID_FILE:-/tmp/pupbot-xvfb.pid}"
+xvfb_max_clients="${PUP_XVFB_MAX_CLIENTS:-512}"
+xpra_screen_size="${PUP_XPRA_SCREEN:-${PUP_X_SCREEN:-1x1x24}}"
+xvfb_screen_size="${PUP_XVFB_SCREEN:-${PUP_X_SCREEN:-1x1x24}}"
 
 run_as_root() {
     if [ "$(id -u)" -eq 0 ]; then
@@ -105,12 +105,12 @@ run_workspace_permission_find() {
     run_as_root find "$repo_root" \( \
         -path "$repo_root/externalprojects" -o \
         -path "$repo_root/opt" -o \
-        -path "$repo_root/botpanel/cathook-location" -o \
-        -path "$repo_root/botpanel/catbot-ipc-server" -o \
-        -path "$repo_root/botpanel/catbot-ipc-web-panel" -o \
+        -path "$repo_root/botpanel/puphook-location" -o \
+        -path "$repo_root/botpanel/pupbot-ipc-server" -o \
+        -path "$repo_root/botpanel/pupbot-ipc-web-panel" -o \
         -path "$repo_root/botpanel/account-generator" -o \
-        -path "$repo_root/botpanel/catbot-database" -o \
-        -path "$repo_root/botpanel/catbot" -o \
+        -path "$repo_root/botpanel/pupbot-database" -o \
+        -path "$repo_root/botpanel/pupbot" -o \
         -path "$repo_root/botpanel/just-disable-vac" -o \
         -path "$repo_root/botpanel/kisak" -o \
         -path "$repo_root/botpanel/users" -o \
@@ -147,7 +147,7 @@ fix_workspace_permissions() {
         -name "fix-oldshi" -o \
         -name "fix-all" -o \
         -name "fix_permissions" -o \
-        -name "install-catbots" -o \
+        -name "install-pupbots" -o \
         -name "remove-legacy" -o \
         -name "uninstall" -o \
         -path "*/scripts/ns-*" \
@@ -160,8 +160,8 @@ workspace_permissions_need_fix() {
     for path in \
         "$repo_root/obj" \
         "$repo_root/bin" \
-        "$repo_root/botpanel/catbot-ipc-server-main/bin" \
-        "$repo_root/botpanel/cat-steamtxtmode/bin"; do
+        "$repo_root/botpanel/pupbot-ipc-server-main/bin" \
+        "$repo_root/botpanel/pup-steamtxtmode/bin"; do
         if [ -e "$path" ] && [ ! -w "$path" ]; then
             return 0
         fi
@@ -217,7 +217,7 @@ source_os_release() {
 }
 
 xpra_repo_file() {
-    case "${CAT_XPRA_REPO_CHANNEL:-stable}" in
+    case "${PUP_XPRA_REPO_CHANNEL:-stable}" in
         stable)
             printf '%s\n' "xpra.sources"
             ;;
@@ -228,7 +228,7 @@ xpra_repo_file() {
             printf '%s\n' "xpra-beta.sources"
             ;;
         *)
-            echo "Unsupported CAT_XPRA_REPO_CHANNEL=${CAT_XPRA_REPO_CHANNEL}. Use stable, lts, or beta." >&2
+            echo "Unsupported PUP_XPRA_REPO_CHANNEL=${PUP_XPRA_REPO_CHANNEL}. Use stable, lts, or beta." >&2
             return 1
             ;;
     esac
@@ -240,7 +240,7 @@ configure_xpra_repo() {
     local repo_file=""
     local repo_url=""
 
-    if [ "${CAT_INSTALL_XPRA_REPO:-1}" = "0" ]; then
+    if [ "${PUP_INSTALL_XPRA_REPO:-1}" = "0" ]; then
         return 1
     fi
 
@@ -461,7 +461,7 @@ select_display_backend() {
     case "$selected_backend" in
         xpra|XPRA)
             if [ "$has_xpra" != "1" ]; then
-                echo "CAT_DISPLAY_BACKEND=xpra was requested, but xpra is not installed." >&2
+                echo "PUP_DISPLAY_BACKEND=xpra was requested, but xpra is not installed." >&2
                 exit 1
             fi
             use_xpra=1
@@ -472,7 +472,7 @@ select_display_backend() {
             ;;
         xvfb|Xvfb|XVFB)
             if [ "$has_xvfb" != "1" ]; then
-                echo "CAT_DISPLAY_BACKEND=xvfb was requested, but Xvfb is not installed." >&2
+                echo "PUP_DISPLAY_BACKEND=xvfb was requested, but Xvfb is not installed." >&2
                 exit 1
             fi
             use_xpra=0
@@ -493,7 +493,7 @@ prompt_display_backend() {
 
     if [ ! -t 0 ]; then
         echo "Both xpra and Xvfb are installed, but stdin is not interactive." >&2
-        echo "Set CAT_DISPLAY_BACKEND=xpra or CAT_DISPLAY_BACKEND=xvfb, then run ./botpanel/start again." >&2
+        echo "Set PUP_DISPLAY_BACKEND=xpra or PUP_DISPLAY_BACKEND=xvfb, then run ./botpanel/start again." >&2
         exit 1
     fi
 
@@ -523,7 +523,7 @@ prompt_display_backend() {
 stop_xpra_display() {
     if command -v xpra >/dev/null 2>&1 && xpra_display_running; then
         echo "Stopping xpra display $display before starting Xvfb..."
-        xpra stop "$display" >/tmp/cat-catbot-xpra-stop.log 2>&1 || true
+        xpra stop "$display" >/tmp/pupbot-xpra-stop.log 2>&1 || true
     fi
 }
 
@@ -569,8 +569,8 @@ ensure_utmp_file() {
 have_prebuilt_runtime() {
     local source_root="$1"
 
-    [ -f "$source_root/bin/libcathook.so" ] &&
-        [ -f "$source_root/bin/libcathooktextmode.so" ] &&
+    [ -f "$source_root/bin/libpuphook.so" ] &&
+        [ -f "$source_root/bin/libpuphooktextmode.so" ] &&
         [ -x "$ipc_server_root/bin/server" ] &&
         [ -x "$ipc_server_root/bin/console" ] &&
         [ -x "$ipc_server_root/bin/exec" ] &&
@@ -579,15 +579,15 @@ have_prebuilt_runtime() {
 }
 
 runtime_source_root() {
-    if [ -f "$repo_root/bin/libcathook.so" ] &&
-       [ -f "$repo_root/bin/libcathooktextmode.so" ] &&
+    if [ -f "$repo_root/bin/libpuphook.so" ] &&
+       [ -f "$repo_root/bin/libpuphooktextmode.so" ] &&
        [ -x "$ipc_server_root/bin/server" ]; then
         printf '%s\n' "$repo_root"
         return 0
     fi
 
-    if have_prebuilt_runtime "$repo_root/opt/cathook"; then
-        printf '%s\n' "$repo_root/opt/cathook"
+    if have_prebuilt_runtime "$repo_root/opt/puphook"; then
+        printf '%s\n' "$repo_root/opt/puphook"
         return 0
     fi
 
@@ -621,8 +621,8 @@ ensure_binaries() {
             echo "No Makefile at $repo_root; using bundled prebuilt runtime."
             return
         fi
-        echo "Missing prebuilt Cat binaries and no source Makefile was found at $repo_root." >&2
-        echo "Copy vm_dist/opt/cathook next to vm_dist/botpanel, or copy it to /opt/cathook." >&2
+        echo "Missing prebuilt Pup binaries and no source Makefile was found at $repo_root." >&2
+        echo "Copy vm_dist/opt/puphook next to vm_dist/botpanel, or copy it to /opt/puphook." >&2
         exit 1
     fi
 
@@ -634,13 +634,13 @@ ensure_binaries() {
         }
     fi
 
-    echo "Rebuilding cathook from source under $repo_root (incremental)..."
+    echo "Rebuilding puphook from source under $repo_root (incremental)..."
     run_make -C "$repo_root"
     run_make -C "$repo_root" TEXTMODE=1
-    run_make -C "$repo_root" catbot_ipc
+    run_make -C "$repo_root" pupbot_ipc
 
-    if [ ! -f "$repo_root/bin/libcathook.so" ] ||
-       [ ! -f "$repo_root/bin/libcathooktextmode.so" ] ||
+    if [ ! -f "$repo_root/bin/libpuphook.so" ] ||
+       [ ! -f "$repo_root/bin/libpuphooktextmode.so" ] ||
        [ ! -x "$ipc_server_root/bin/server" ]; then
         if runtime_source_root >/dev/null 2>&1; then
             echo "Warning: build did not produce all artifacts; falling back to existing runtime." >&2
@@ -710,7 +710,7 @@ install_glew_dependency_for_binary() {
 
     if ! source_path="$(find_shared_library "$required_library")"; then
         echo "Warning: $binary_path needs $required_library, but it was not found on this system." >&2
-        echo "Provide $required_library in $install_root/bin or rebuild Cat on this machine." >&2
+        echo "Provide $required_library in $install_root/bin or rebuild Pup on this machine." >&2
         return
     fi
 
@@ -721,13 +721,13 @@ install_runtime_dependencies() {
     local source_root="$1"
 
     install_bundled_glew_libraries "$source_root"
-    install_glew_dependency_for_binary "$source_root/bin/libcathook.so"
-    install_glew_dependency_for_binary "$source_root/bin/libcathooktextmode.so"
-    install_glew_dependency_for_binary "$source_root/bin/libcathook-textmode.so"
+    install_glew_dependency_for_binary "$source_root/bin/libpuphook.so"
+    install_glew_dependency_for_binary "$source_root/bin/libpuphooktextmode.so"
+    install_glew_dependency_for_binary "$source_root/bin/libpuphook-textmode.so"
 }
 
 install_runtime_configs() {
-    local source_configs="$repo_root/opt/cathook/configs"
+    local source_configs="$repo_root/opt/puphook/configs"
     local target_configs="$install_root/configs"
     local target_logs="$install_root/logs"
     local target_uid
@@ -746,7 +746,7 @@ install_runtime_configs() {
             if [ ! -e "$target_file" ]; then
                 run_as_root install -m 0644 "$file" "$target_file"
             fi
-        done < <(find "$source_configs" -maxdepth 1 -type f -name '*.cat' -print0)
+        done < <(find "$source_configs" -maxdepth 1 -type f -name '*.pup' -print0)
     fi
 
     run_as_root chown -R "$target_uid:$target_gid" "$target_configs" "$target_logs" 2>/dev/null || true
@@ -775,14 +775,14 @@ install_runtime() {
 
     run_as_root install -d -m 0750 "$install_root/bin" "$install_root/ipc/bin" "$install_root/run"
     run_as_root chown "$(id -u):$(id -g)" "$install_root/run"
-    if [ -f "$source_root/bin/libcathooktextmode.so" ]; then
-        run_as_root install -m 0755 "$source_root/bin/libcathook.so" "$install_root/bin/libcathook.so"
-        run_as_root install -m 0755 "$source_root/bin/libcathooktextmode.so" "$install_root/bin/libcathooktextmode.so"
-        run_as_root install -m 0755 "$source_root/bin/libcathooktextmode.so" "$install_root/bin/libcathook-textmode.so"
+    if [ -f "$source_root/bin/libpuphooktextmode.so" ]; then
+        run_as_root install -m 0755 "$source_root/bin/libpuphook.so" "$install_root/bin/libpuphook.so"
+        run_as_root install -m 0755 "$source_root/bin/libpuphooktextmode.so" "$install_root/bin/libpuphooktextmode.so"
+        run_as_root install -m 0755 "$source_root/bin/libpuphooktextmode.so" "$install_root/bin/libpuphook-textmode.so"
     else
-        run_as_root install -m 0755 "$source_root/bin/libcathook.so" "$install_root/bin/libcathook.so"
-        run_as_root install -m 0755 "$source_root/bin/libcathook-textmode.so" "$install_root/bin/libcathooktextmode.so"
-        run_as_root install -m 0755 "$source_root/bin/libcathook-textmode.so" "$install_root/bin/libcathook-textmode.so"
+        run_as_root install -m 0755 "$source_root/bin/libpuphook.so" "$install_root/bin/libpuphook.so"
+        run_as_root install -m 0755 "$source_root/bin/libpuphook-textmode.so" "$install_root/bin/libpuphooktextmode.so"
+        run_as_root install -m 0755 "$source_root/bin/libpuphook-textmode.so" "$install_root/bin/libpuphook-textmode.so"
     fi
 
     install_runtime_dependencies "$source_root"
@@ -855,7 +855,7 @@ ensure_firejail_config() {
         return
     fi
 
-    run_as_root cp -n "$config_path" "$config_path.CATHOOK.bak" 2>/dev/null || true
+    run_as_root cp -n "$config_path" "$config_path.PUPHOOK.bak" 2>/dev/null || true
 
     if run_as_root grep -Eq '^[[:space:]]*#?[[:space:]]*network[[:space:]]+(yes|no)' "$config_path"; then
         run_as_root sed -i -E 's/^[[:space:]]*#?[[:space:]]*network[[:space:]]+(yes|no).*/network yes/' "$config_path"
@@ -867,7 +867,7 @@ ensure_firejail_config() {
 }
 
 ensure_user_namespaces() {
-    local conf_path="/etc/sysctl.d/99-cathook-userns.conf"
+    local conf_path="/etc/sysctl.d/99-puphook-userns.conf"
     local -a settings=()
     local setting=""
 
@@ -894,7 +894,7 @@ ensure_user_namespaces() {
 }
 
 ensure_kernel_limits() {
-    local conf_path="/etc/sysctl.d/99-cathook-limits.conf"
+    local conf_path="/etc/sysctl.d/99-puphook-limits.conf"
     local -a wanted=(
         "fs.inotify.max_user_instances:8192"
         "fs.inotify.max_user_watches:524288"
@@ -956,11 +956,11 @@ xpra_display_running() {
 }
 
 ensure_xpra_config() {
-    if [ "$use_xpra" != "1" ] || [ "${CAT_SKIP_XPRA_CONFIG:-0}" = "1" ]; then
+    if [ "$use_xpra" != "1" ] || [ "${PUP_SKIP_XPRA_CONFIG:-0}" = "1" ]; then
         return
     fi
 
-    local config_path="${CAT_XPRA_XORG_CONF:-/etc/xpra/xorg.conf}"
+    local config_path="${PUP_XPRA_XORG_CONF:-/etc/xpra/xorg.conf}"
     local config_dir
     local tmp_path
 
@@ -1010,7 +1010,7 @@ ensure_xpra_config() {
         }
     }' "$config_path" >"$tmp_path"
 
-    run_as_root cp -n "$config_path" "$config_path.CATHOOK.bak" 2>/dev/null || true
+    run_as_root cp -n "$config_path" "$config_path.PUPHOOK.bak" 2>/dev/null || true
     run_as_root install -m 0644 "$tmp_path" "$config_path"
     rm -f "$tmp_path"
 }
@@ -1089,7 +1089,7 @@ xvfb_display_running() {
     if [ -f "$lock_path" ]; then
         lock_pid="$(tr -d '[:space:]' <"$lock_path" 2>/dev/null || true)"
         if is_pid_running "$lock_pid"; then
-            echo "Display $display is already in use by pid $lock_pid. Stop that display or set CAT_DISPLAY to another display number." >&2
+            echo "Display $display is already in use by pid $lock_pid. Stop that display or set PUP_DISPLAY to another display number." >&2
             exit 1
         fi
     fi
@@ -1105,7 +1105,7 @@ start_xvfb() {
     case "$xvfb_max_clients" in
         64|128|256|512) ;;
         *)
-            echo "Unsupported CAT_XVFB_MAX_CLIENTS=$xvfb_max_clients. Use 64, 128, 256, or 512." >&2
+            echo "Unsupported PUP_XVFB_MAX_CLIENTS=$xvfb_max_clients. Use 64, 128, 256, or 512." >&2
             exit 1
             ;;
     esac
@@ -1133,11 +1133,11 @@ start_xvfb() {
 }
 
 start_ipc_server() {
-    if [ -f /tmp/cat-ipc-server.pid ] && ps -p "$(cat /tmp/cat-ipc-server.pid)" >/dev/null 2>&1; then
-        kill "$(cat /tmp/cat-ipc-server.pid)" 2>/dev/null || true
+    if [ -f /tmp/pup-ipc-server.pid ] && ps -p "$(cat /tmp/pup-ipc-server.pid)" >/dev/null 2>&1; then
+        kill "$(cat /tmp/pup-ipc-server.pid)" 2>/dev/null || true
         sleep 1
-        if ps -p "$(cat /tmp/cat-ipc-server.pid)" >/dev/null 2>&1; then
-            kill -KILL "$(cat /tmp/cat-ipc-server.pid)" 2>/dev/null || true
+        if ps -p "$(cat /tmp/pup-ipc-server.pid)" >/dev/null 2>&1; then
+            kill -KILL "$(cat /tmp/pup-ipc-server.pid)" 2>/dev/null || true
         fi
     fi
 
@@ -1145,8 +1145,8 @@ start_ipc_server() {
     sleep 1
     pkill -KILL -f "$install_root/ipc/bin/server -s" 2>/dev/null || true
 
-    rm -f /tmp/cat-ipc-server.pid /tmp/cat-ipc-server.log \
-        "$install_root/ipc/cathook_followbot_server" /dev/shm/cathook_followbot_server 2>/dev/null || true
+    rm -f /tmp/pup-ipc-server.pid /tmp/pup-ipc-server.log \
+        "$install_root/ipc/puphook_followbot_server" /dev/shm/puphook_followbot_server 2>/dev/null || true
 
     if [ -f "$repo_root/Makefile" ] && {
         [ ! -x "$ipc_server_root/bin/server" ] ||
@@ -1155,7 +1155,7 @@ start_ipc_server() {
         [ "$ipc_server_root/bin/server" -ot "$ipc_server_root/src/server.cpp" ];
     }; then
         echo "Rebuilding IPC server..."
-        run_make -C "$repo_root" catbot_ipc
+        run_make -C "$repo_root" pupbot_ipc
         run_as_root install -m 0755 "$ipc_server_root/bin/server" "$install_root/ipc/bin/server"
     fi
 
@@ -1165,12 +1165,12 @@ start_ipc_server() {
     fi
 
     if command -v setsid >/dev/null 2>&1; then
-        nohup setsid "$install_root/ipc/bin/server" -s --reset >/tmp/cat-ipc-server.log 2>&1 </dev/null 9>&- &
+        nohup setsid "$install_root/ipc/bin/server" -s --reset >/tmp/pup-ipc-server.log 2>&1 </dev/null 9>&- &
     else
-        nohup "$install_root/ipc/bin/server" -s --reset >/tmp/cat-ipc-server.log 2>&1 </dev/null 9>&- &
+        nohup "$install_root/ipc/bin/server" -s --reset >/tmp/pup-ipc-server.log 2>&1 </dev/null 9>&- &
     fi
     ipc_server_pid=$!
-    echo "$ipc_server_pid" >/tmp/cat-ipc-server.pid
+    echo "$ipc_server_pid" >/tmp/pup-ipc-server.pid
     disown "$ipc_server_pid" 2>/dev/null || true
 
     for _ in 1 2 3 4 5; do
@@ -1181,7 +1181,7 @@ start_ipc_server() {
     done
 
     echo "IPC server failed to start. Log:" >&2
-    cat /tmp/cat-ipc-server.log >&2 || true
+    cat /tmp/pup-ipc-server.log >&2 || true
     exit 1
 }
 
@@ -1204,7 +1204,7 @@ warn_if_steam_missing() {
 
 print_ready() {
     echo
-    echo "Starting Cat catbot panel"
+    echo "Starting Pup pupbot panel"
     echo "Launcher: $launcher_version"
     echo "URL: http://127.0.0.1:$port"
     echo "Accounts: $accounts_file"
@@ -1221,32 +1221,32 @@ print_ready() {
         echo "Xvfb screen: $xvfb_screen_size"
     fi
     if [ "$visible_windows" != "1" ]; then
-        echo "Chunked bot X displays: ${CAT_CHUNKED_X_DISPLAY:-1}"
-        echo "Chunked bot X base: ${CAT_CHUNKED_X_DISPLAY_BASE:-${display#:}}"
-        echo "Chunked bot X bots per display: ${CAT_CHUNKED_X_DISPLAY_BOTS_PER_DISPLAY:-25}"
-        echo "Chunked bot X max displays: ${CAT_CHUNKED_X_DISPLAY_MAX_DISPLAYS:-12}"
+        echo "Chunked bot X displays: ${PUP_CHUNKED_X_DISPLAY:-1}"
+        echo "Chunked bot X base: ${PUP_CHUNKED_X_DISPLAY_BASE:-${display#:}}"
+        echo "Chunked bot X bots per display: ${PUP_CHUNKED_X_DISPLAY_BOTS_PER_DISPLAY:-25}"
+        echo "Chunked bot X max displays: ${PUP_CHUNKED_X_DISPLAY_MAX_DISPLAYS:-12}"
     fi
     echo
 }
 
 panel_running() {
-    [ -e "/tmp/ncat-cathook-webpanel.pid" ] && ps -p "$(cat "/tmp/ncat-cathook-webpanel.pid")" >/dev/null 2>&1
+    [ -e "/tmp/ncat-puphook-webpanel.pid" ] && ps -p "$(cat "/tmp/ncat-puphook-webpanel.pid")" >/dev/null 2>&1
 }
 
 restart_panel_if_running() {
     if ! panel_running; then
-        rm -f /tmp/ncat-cathook-webpanel.pid 2>/dev/null || true
+        rm -f /tmp/ncat-puphook-webpanel.pid 2>/dev/null || true
         return
     fi
 
     local pid
-    pid="$(cat /tmp/ncat-cathook-webpanel.pid)"
+    pid="$(cat /tmp/ncat-puphook-webpanel.pid)"
     echo "Restarting existing IPC panel pid=$pid so updated botpanel code is loaded."
     run_as_root kill -SIGINT "$pid" 2>/dev/null || true
 
     for _ in 1 2 3 4 5 6 7 8 9 10; do
         if ! ps -p "$pid" >/dev/null 2>&1; then
-            rm -f /tmp/ncat-cathook-webpanel.pid 2>/dev/null || true
+            rm -f /tmp/ncat-puphook-webpanel.pid 2>/dev/null || true
             return
         fi
         sleep 1
@@ -1254,11 +1254,11 @@ restart_panel_if_running() {
 
     echo "Panel did not stop after SIGINT; terminating pid=$pid."
     run_as_root kill -TERM "$pid" 2>/dev/null || true
-    rm -f /tmp/ncat-cathook-webpanel.pid 2>/dev/null || true
+    rm -f /tmp/ncat-puphook-webpanel.pid 2>/dev/null || true
 }
 
 configure_steam_txtmode_preload() {
-    local enabled="${CAT_STEAM_TXTMODE:-}"
+    local enabled="${PUP_STEAM_TXTMODE:-}"
     if [ -z "$enabled" ]; then
         if [ "$textmode_game" = "1" ] && [ "$visible_windows" != "1" ]; then
             enabled=1
@@ -1271,13 +1271,13 @@ configure_steam_txtmode_preload() {
         return
     fi
 
-    local soname="libcatsteamtxtmode.so"
+    local soname="libpupsteamtxtmode.so"
     local library_path
     library_path="$(ldconfig -p 2>/dev/null | awk -v soname="$soname" '$1 == soname { print $NF; exit }')"
     if [ -z "$library_path" ]; then
         for candidate in \
-            "$install_root/botpanel/cat-steamtxtmode/bin/lib64/$soname" \
-            "$repo_root/botpanel/cat-steamtxtmode/bin/lib64/$soname" \
+            "$install_root/botpanel/pup-steamtxtmode/bin/lib64/$soname" \
+            "$repo_root/botpanel/pup-steamtxtmode/bin/lib64/$soname" \
             "/usr/local/lib/$soname" \
             "/usr/lib/$soname" \
             "/usr/lib64/$soname" \
@@ -1305,9 +1305,9 @@ configure_steam_txtmode_preload() {
         done
     fi
     STEAM_LD_PRELOAD="$rebuilt_preload"
-    CAT_STEAM_TXTMODE=1
+    PUP_STEAM_TXTMODE=1
     export STEAM_LD_PRELOAD
-    export CAT_STEAM_TXTMODE
+    export PUP_STEAM_TXTMODE
     echo "Steam headless shim enabled: STEAM_LD_PRELOAD=$STEAM_LD_PRELOAD"
 }
 
@@ -1325,7 +1325,7 @@ start_panel() {
     restart_panel_if_running
 
     cd "$web_panel_root"
-    run_as_root rm -f "$install_root/run/cat-webpanel-password"
+    run_as_root rm -f "$install_root/run/pup-webpanel-password"
     run_panel_permission_fix
 
     if [ "$(id -u)" -eq 0 ]; then
@@ -1334,44 +1334,44 @@ start_panel() {
             SUDO_USER="${SUDO_USER:-$USER}" \
             DISPLAY="$display" \
             XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}" \
-            CAT_IPC_PORT="$port" \
-            CAT_RUNTIME_DIR="$install_root/run" \
-            CAT_VISIBLE_WINDOWS="$visible_windows" \
-            CAT_TEXTMODE_GAME="$textmode_game" \
-            CAT_TF2_LAUNCH_MODE="${CAT_TF2_LAUNCH_MODE:-direct}" \
-            CAT_STEAM_HEADLESS_GRAPHICS="${CAT_STEAM_HEADLESS_GRAPHICS:-1}" \
-            CAT_STEAM_TXTMODE="$steam_txtmode" \
-            CAT_STEAM_TXTMODE_HIDE_WINDOWS="$steam_txtmode_hide_windows" \
-            CAT_STEAM_TXTMODE_DROP_DRAWS="$steam_txtmode_drop_draws" \
-            CAT_STEAM_TXTMODE_TRIM_WEBHELPER="$steam_txtmode_trim_webhelper" \
-            CAT_STEAM_TXTMODE_FRAME_INTERVAL_US="$steam_txtmode_frame_interval_us" \
-            CAT_STEAM_TXTMODE_SYNTHETIC_HARDWARE="$steam_txtmode_synthetic_hardware" \
-            CAT_STEAM_TXTMODE_HARDWARE_SEED="$steam_txtmode_hardware_seed" \
-            CAT_STEAM_TXTMODE_HARDWARE_RANDOMIZE="$steam_txtmode_hardware_randomize" \
-            CAT_STM_LOOP_SLEEP="$steam_loop_sleep" \
-            CAT_STM_LOOP_SLEEP_US="$steam_loop_sleep_us" \
-            CAT_SKIP_DBUS_RUN_SESSION="$skip_dbus_run_session" \
-            CAT_STEAM_WINDOW_OPTIONS="${CAT_STEAM_WINDOW_OPTIONS:-}" \
-            CAT_GAME_WINDOW_OPTIONS="${CAT_GAME_WINDOW_OPTIONS:-}" \
-            CAT_X_SCREEN="${CAT_X_SCREEN:-}" \
-            CAT_PER_BOT_X_SCREEN="${CAT_PER_BOT_X_SCREEN:-}" \
-            CAT_XVFB_MAX_CLIENTS="$xvfb_max_clients" \
-            CAT_CHUNKED_X_DISPLAY="${CAT_CHUNKED_X_DISPLAY:-}" \
-            CAT_CHUNKED_X_DISPLAY_BASE="${CAT_CHUNKED_X_DISPLAY_BASE:-}" \
-            CAT_CHUNKED_X_DISPLAY_BOTS_PER_DISPLAY="${CAT_CHUNKED_X_DISPLAY_BOTS_PER_DISPLAY:-}" \
-            CAT_CHUNKED_X_DISPLAY_MAX_DISPLAYS="${CAT_CHUNKED_X_DISPLAY_MAX_DISPLAYS:-}" \
-            CAT_CHUNKED_X_DISPLAY_MAX_CLIENTS="${CAT_CHUNKED_X_DISPLAY_MAX_CLIENTS:-$xvfb_max_clients}" \
-            CAT_CHUNKED_X_DISPLAY_PID_DIR="${CAT_CHUNKED_X_DISPLAY_PID_DIR:-}" \
-            CAT_STEAMWEBHELPER_CLEANUP="${CAT_STEAMWEBHELPER_CLEANUP:-0}" \
-            CAT_STEAMWEBHELPER_CLEANUP_SECONDS="${CAT_STEAMWEBHELPER_CLEANUP_SECONDS:-10}" \
-            CAT_STEAM_OVERLAY="${CAT_STEAM_OVERLAY:-1}" \
-            CAT_STEAM_OVERLAY_DIR="${CAT_STEAM_OVERLAY_DIR:-}" \
-            CAT_XPRA_LOG="$xpra_log" \
-            CAT_STEAM_WEB_API_KEY="${CAT_STEAM_WEB_API_KEY:-}" \
-            CAT_GDB_CRASH_REPORTS="${CAT_GDB_CRASH_REPORTS:-0}" \
+            PUP_IPC_PORT="$port" \
+            PUP_RUNTIME_DIR="$install_root/run" \
+            PUP_VISIBLE_WINDOWS="$visible_windows" \
+            PUP_TEXTMODE_GAME="$textmode_game" \
+            PUP_TF2_LAUNCH_MODE="${PUP_TF2_LAUNCH_MODE:-direct}" \
+            PUP_STEAM_HEADLESS_GRAPHICS="${PUP_STEAM_HEADLESS_GRAPHICS:-1}" \
+            PUP_STEAM_TXTMODE="$steam_txtmode" \
+            PUP_STEAM_TXTMODE_HIDE_WINDOWS="$steam_txtmode_hide_windows" \
+            PUP_STEAM_TXTMODE_DROP_DRAWS="$steam_txtmode_drop_draws" \
+            PUP_STEAM_TXTMODE_TRIM_WEBHELPER="$steam_txtmode_trim_webhelper" \
+            PUP_STEAM_TXTMODE_FRAME_INTERVAL_US="$steam_txtmode_frame_interval_us" \
+            PUP_STEAM_TXTMODE_SYNTHETIC_HARDWARE="$steam_txtmode_synthetic_hardware" \
+            PUP_STEAM_TXTMODE_HARDWARE_SEED="$steam_txtmode_hardware_seed" \
+            PUP_STEAM_TXTMODE_HARDWARE_RANDOMIZE="$steam_txtmode_hardware_randomize" \
+            PUP_STM_LOOP_SLEEP="$steam_loop_sleep" \
+            PUP_STM_LOOP_SLEEP_US="$steam_loop_sleep_us" \
+            PUP_SKIP_DBUS_RUN_SESSION="$skip_dbus_run_session" \
+            PUP_STEAM_WINDOW_OPTIONS="${PUP_STEAM_WINDOW_OPTIONS:-}" \
+            PUP_GAME_WINDOW_OPTIONS="${PUP_GAME_WINDOW_OPTIONS:-}" \
+            PUP_X_SCREEN="${PUP_X_SCREEN:-}" \
+            PUP_PER_BOT_X_SCREEN="${PUP_PER_BOT_X_SCREEN:-}" \
+            PUP_XVFB_MAX_CLIENTS="$xvfb_max_clients" \
+            PUP_CHUNKED_X_DISPLAY="${PUP_CHUNKED_X_DISPLAY:-}" \
+            PUP_CHUNKED_X_DISPLAY_BASE="${PUP_CHUNKED_X_DISPLAY_BASE:-}" \
+            PUP_CHUNKED_X_DISPLAY_BOTS_PER_DISPLAY="${PUP_CHUNKED_X_DISPLAY_BOTS_PER_DISPLAY:-}" \
+            PUP_CHUNKED_X_DISPLAY_MAX_DISPLAYS="${PUP_CHUNKED_X_DISPLAY_MAX_DISPLAYS:-}" \
+            PUP_CHUNKED_X_DISPLAY_MAX_CLIENTS="${PUP_CHUNKED_X_DISPLAY_MAX_CLIENTS:-$xvfb_max_clients}" \
+            PUP_CHUNKED_X_DISPLAY_PID_DIR="${PUP_CHUNKED_X_DISPLAY_PID_DIR:-}" \
+            PUP_STEAMWEBHELPER_CLEANUP="${PUP_STEAMWEBHELPER_CLEANUP:-0}" \
+            PUP_STEAMWEBHELPER_CLEANUP_SECONDS="${PUP_STEAMWEBHELPER_CLEANUP_SECONDS:-10}" \
+            PUP_STEAM_OVERLAY="${PUP_STEAM_OVERLAY:-1}" \
+            PUP_STEAM_OVERLAY_DIR="${PUP_STEAM_OVERLAY_DIR:-}" \
+            PUP_XPRA_LOG="$xpra_log" \
+            PUP_STEAM_WEB_API_KEY="${PUP_STEAM_WEB_API_KEY:-}" \
+            PUP_GDB_CRASH_REPORTS="${PUP_GDB_CRASH_REPORTS:-0}" \
             STEAM_LD_PRELOAD="${STEAM_LD_PRELOAD:-}" \
-            CATHOOK_ROOT="$install_root" \
-            CATHOOK_ROOT_DIR="$install_root" \
+            PUPHOOK_ROOT="$install_root" \
+            PUPHOOK_ROOT_DIR="$install_root" \
             bash ./run.sh
         return
     fi
@@ -1381,51 +1381,51 @@ start_panel() {
         SUDO_USER="${SUDO_USER:-$USER}" \
         DISPLAY="$display" \
         XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}" \
-        CAT_IPC_PORT="$port" \
-        CAT_RUNTIME_DIR="$install_root/run" \
-        CAT_VISIBLE_WINDOWS="$visible_windows" \
-        CAT_TEXTMODE_GAME="$textmode_game" \
-        CAT_TF2_LAUNCH_MODE="${CAT_TF2_LAUNCH_MODE:-direct}" \
-        CAT_STEAM_HEADLESS_GRAPHICS="${CAT_STEAM_HEADLESS_GRAPHICS:-1}" \
-        CAT_STEAM_TXTMODE="$steam_txtmode" \
-        CAT_STEAM_TXTMODE_HIDE_WINDOWS="$steam_txtmode_hide_windows" \
-        CAT_STEAM_TXTMODE_DROP_DRAWS="$steam_txtmode_drop_draws" \
-        CAT_STEAM_TXTMODE_TRIM_WEBHELPER="$steam_txtmode_trim_webhelper" \
-        CAT_STEAM_TXTMODE_FRAME_INTERVAL_US="$steam_txtmode_frame_interval_us" \
-        CAT_STEAM_TXTMODE_SYNTHETIC_HARDWARE="$steam_txtmode_synthetic_hardware" \
-        CAT_STEAM_TXTMODE_HARDWARE_SEED="$steam_txtmode_hardware_seed" \
-        CAT_STEAM_TXTMODE_HARDWARE_RANDOMIZE="$steam_txtmode_hardware_randomize" \
-        CAT_STM_LOOP_SLEEP="$steam_loop_sleep" \
-        CAT_STM_LOOP_SLEEP_US="$steam_loop_sleep_us" \
-        CAT_SKIP_DBUS_RUN_SESSION="$skip_dbus_run_session" \
-        CAT_STEAM_WINDOW_OPTIONS="${CAT_STEAM_WINDOW_OPTIONS:-}" \
-        CAT_GAME_WINDOW_OPTIONS="${CAT_GAME_WINDOW_OPTIONS:-}" \
-        CAT_X_SCREEN="${CAT_X_SCREEN:-}" \
-        CAT_PER_BOT_X_SCREEN="${CAT_PER_BOT_X_SCREEN:-}" \
-        CAT_XVFB_MAX_CLIENTS="$xvfb_max_clients" \
-        CAT_CHUNKED_X_DISPLAY="${CAT_CHUNKED_X_DISPLAY:-}" \
-        CAT_CHUNKED_X_DISPLAY_BASE="${CAT_CHUNKED_X_DISPLAY_BASE:-}" \
-        CAT_CHUNKED_X_DISPLAY_BOTS_PER_DISPLAY="${CAT_CHUNKED_X_DISPLAY_BOTS_PER_DISPLAY:-}" \
-        CAT_CHUNKED_X_DISPLAY_MAX_DISPLAYS="${CAT_CHUNKED_X_DISPLAY_MAX_DISPLAYS:-}" \
-        CAT_CHUNKED_X_DISPLAY_MAX_CLIENTS="${CAT_CHUNKED_X_DISPLAY_MAX_CLIENTS:-$xvfb_max_clients}" \
-        CAT_CHUNKED_X_DISPLAY_PID_DIR="${CAT_CHUNKED_X_DISPLAY_PID_DIR:-}" \
-        CAT_STEAMWEBHELPER_CLEANUP="${CAT_STEAMWEBHELPER_CLEANUP:-0}" \
-        CAT_STEAMWEBHELPER_CLEANUP_SECONDS="${CAT_STEAMWEBHELPER_CLEANUP_SECONDS:-10}" \
-        CAT_STEAM_OVERLAY="${CAT_STEAM_OVERLAY:-1}" \
-        CAT_STEAM_OVERLAY_DIR="${CAT_STEAM_OVERLAY_DIR:-}" \
-        CAT_XPRA_LOG="$xpra_log" \
-        CAT_STEAM_WEB_API_KEY="${CAT_STEAM_WEB_API_KEY:-}" \
-        CAT_GDB_CRASH_REPORTS="${CAT_GDB_CRASH_REPORTS:-0}" \
+        PUP_IPC_PORT="$port" \
+        PUP_RUNTIME_DIR="$install_root/run" \
+        PUP_VISIBLE_WINDOWS="$visible_windows" \
+        PUP_TEXTMODE_GAME="$textmode_game" \
+        PUP_TF2_LAUNCH_MODE="${PUP_TF2_LAUNCH_MODE:-direct}" \
+        PUP_STEAM_HEADLESS_GRAPHICS="${PUP_STEAM_HEADLESS_GRAPHICS:-1}" \
+        PUP_STEAM_TXTMODE="$steam_txtmode" \
+        PUP_STEAM_TXTMODE_HIDE_WINDOWS="$steam_txtmode_hide_windows" \
+        PUP_STEAM_TXTMODE_DROP_DRAWS="$steam_txtmode_drop_draws" \
+        PUP_STEAM_TXTMODE_TRIM_WEBHELPER="$steam_txtmode_trim_webhelper" \
+        PUP_STEAM_TXTMODE_FRAME_INTERVAL_US="$steam_txtmode_frame_interval_us" \
+        PUP_STEAM_TXTMODE_SYNTHETIC_HARDWARE="$steam_txtmode_synthetic_hardware" \
+        PUP_STEAM_TXTMODE_HARDWARE_SEED="$steam_txtmode_hardware_seed" \
+        PUP_STEAM_TXTMODE_HARDWARE_RANDOMIZE="$steam_txtmode_hardware_randomize" \
+        PUP_STM_LOOP_SLEEP="$steam_loop_sleep" \
+        PUP_STM_LOOP_SLEEP_US="$steam_loop_sleep_us" \
+        PUP_SKIP_DBUS_RUN_SESSION="$skip_dbus_run_session" \
+        PUP_STEAM_WINDOW_OPTIONS="${PUP_STEAM_WINDOW_OPTIONS:-}" \
+        PUP_GAME_WINDOW_OPTIONS="${PUP_GAME_WINDOW_OPTIONS:-}" \
+        PUP_X_SCREEN="${PUP_X_SCREEN:-}" \
+        PUP_PER_BOT_X_SCREEN="${PUP_PER_BOT_X_SCREEN:-}" \
+        PUP_XVFB_MAX_CLIENTS="$xvfb_max_clients" \
+        PUP_CHUNKED_X_DISPLAY="${PUP_CHUNKED_X_DISPLAY:-}" \
+        PUP_CHUNKED_X_DISPLAY_BASE="${PUP_CHUNKED_X_DISPLAY_BASE:-}" \
+        PUP_CHUNKED_X_DISPLAY_BOTS_PER_DISPLAY="${PUP_CHUNKED_X_DISPLAY_BOTS_PER_DISPLAY:-}" \
+        PUP_CHUNKED_X_DISPLAY_MAX_DISPLAYS="${PUP_CHUNKED_X_DISPLAY_MAX_DISPLAYS:-}" \
+        PUP_CHUNKED_X_DISPLAY_MAX_CLIENTS="${PUP_CHUNKED_X_DISPLAY_MAX_CLIENTS:-$xvfb_max_clients}" \
+        PUP_CHUNKED_X_DISPLAY_PID_DIR="${PUP_CHUNKED_X_DISPLAY_PID_DIR:-}" \
+        PUP_STEAMWEBHELPER_CLEANUP="${PUP_STEAMWEBHELPER_CLEANUP:-0}" \
+        PUP_STEAMWEBHELPER_CLEANUP_SECONDS="${PUP_STEAMWEBHELPER_CLEANUP_SECONDS:-10}" \
+        PUP_STEAM_OVERLAY="${PUP_STEAM_OVERLAY:-1}" \
+        PUP_STEAM_OVERLAY_DIR="${PUP_STEAM_OVERLAY_DIR:-}" \
+        PUP_XPRA_LOG="$xpra_log" \
+        PUP_STEAM_WEB_API_KEY="${PUP_STEAM_WEB_API_KEY:-}" \
+        PUP_GDB_CRASH_REPORTS="${PUP_GDB_CRASH_REPORTS:-0}" \
         STEAM_LD_PRELOAD="${STEAM_LD_PRELOAD:-}" \
-        CATHOOK_ROOT="$install_root" \
-        CATHOOK_ROOT_DIR="$install_root" \
+        PUPHOOK_ROOT="$install_root" \
+        PUPHOOK_ROOT_DIR="$install_root" \
         bash -c 'if command -v setsid >/dev/null 2>&1; then nohup setsid bash ./run.sh >/dev/null 2>&1 & else nohup bash ./run.sh >/dev/null 2>&1 & fi'
 }
 
 print_panel_password() {
     for _ in 1 2 3 4 5; do
-        if [ -s "$install_root/run/cat-webpanel-password" ]; then
-            echo "IPC Web Panel password: $(cat "$install_root/run/cat-webpanel-password")"
+        if [ -s "$install_root/run/pup-webpanel-password" ]; then
+            echo "IPC Web Panel password: $(cat "$install_root/run/pup-webpanel-password")"
             return
         fi
         sleep 1
@@ -1467,4 +1467,4 @@ configure_steam_txtmode_preload
 print_ready
 start_panel
 print_panel_password
-echo "Open a web browser and go to http://127.0.0.1:$port to see your catbot IPC panel web panel."
+echo "Open a web browser and go to http://127.0.0.1:$port to see your pupbot IPC panel web panel."

@@ -256,7 +256,7 @@ inline int proxy_store_disp(const void* fn)
     if (mod == 1) {
       return code[j + 2];
     }
-    return cathook::core::memory::read_disp32(code + j, 2);
+    return puphook::core::memory::read_disp32(code + j, 2);
   }
   return 0;
 }
@@ -270,7 +270,7 @@ inline void** pointer_datatable_slot(const char* table_name, const char* prop_na
   const auto* code = static_cast<const std::uint8_t*>(prop->data_table_proxy_fn);
   for (std::size_t i = 0; i + 7 <= 32; ++i) {
     if (code[i] == 0x48 && code[i + 1] == 0x8D && (code[i + 2] & 0xC7) == 0x05) {
-      return reinterpret_cast<void**>(cathook::core::memory::resolve_rip_relative(code + i, 3, 7));
+      return reinterpret_cast<void**>(puphook::core::memory::resolve_rip_relative(code + i, 3, 7));
     }
   }
   return nullptr;

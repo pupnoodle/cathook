@@ -9,46 +9,46 @@ TMP_RUNTIME_HOST_DIR=""
 TMP_PROC_SELF_LIB=""
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-source "$SCRIPT_DIR/cathook_mode.sh"
+source "$SCRIPT_DIR/puphook_mode.sh"
 
-CATHOOK_ROOT=${CATHOOK_ROOT:-/opt/cathook}
-CATHOOK_BIN_DIR=$CATHOOK_ROOT/bin
-CATHOOK_LOG_DIR=$CATHOOK_ROOT/logs
-CATHOOK_ASSET_DIR=$CATHOOK_ROOT/assets
-CATHOOK_SOURCE_ASSET_DIR="$SCRIPT_DIR/assets"
-CATHOOK_BINARY=${CATHOOK_BINARY:-}
-CATHOOK_CONFIG_DIR=${CATHOOK_CONFIG_DIR:-$CATHOOK_ROOT/config}
-CATHOOK_AUTO_UPDATE_FILE=${CATHOOK_AUTO_UPDATE_FILE:-$CATHOOK_CONFIG_DIR/auto_update}
-CATHOOK_ATTACH_DELAY_SECONDS=${CATHOOK_ATTACH_DELAY_SECONDS:-0}
-CATHOOK_USE_GDB=${CATHOOK_USE_GDB:-1}
-CATHOOK_GDB_CRASH_REPORTS=${CATHOOK_GDB_CRASH_REPORTS:-0}
-CATHOOK_GDB_KEEP_CORE=${CATHOOK_GDB_KEEP_CORE:-0}
-CATHOOK_TARGET_PID=${CATHOOK_TARGET_PID:-}
-CATHOOK_INCLUDE_BOTS=${CATHOOK_INCLUDE_BOTS:-0}
-CATHOOK_DETACH_TIMEOUT_SECONDS=${CATHOOK_DETACH_TIMEOUT_SECONDS:-15}
+PUPHOOK_ROOT=${PUPHOOK_ROOT:-/opt/puphook}
+PUPHOOK_BIN_DIR=$PUPHOOK_ROOT/bin
+PUPHOOK_LOG_DIR=$PUPHOOK_ROOT/logs
+PUPHOOK_ASSET_DIR=$PUPHOOK_ROOT/assets
+PUPHOOK_SOURCE_ASSET_DIR="$SCRIPT_DIR/assets"
+PUPHOOK_BINARY=${PUPHOOK_BINARY:-}
+PUPHOOK_CONFIG_DIR=${PUPHOOK_CONFIG_DIR:-$PUPHOOK_ROOT/config}
+PUPHOOK_AUTO_UPDATE_FILE=${PUPHOOK_AUTO_UPDATE_FILE:-$PUPHOOK_CONFIG_DIR/auto_update}
+PUPHOOK_ATTACH_DELAY_SECONDS=${PUPHOOK_ATTACH_DELAY_SECONDS:-0}
+PUPHOOK_USE_GDB=${PUPHOOK_USE_GDB:-1}
+PUPHOOK_GDB_CRASH_REPORTS=${PUPHOOK_GDB_CRASH_REPORTS:-0}
+PUPHOOK_GDB_KEEP_CORE=${PUPHOOK_GDB_KEEP_CORE:-0}
+PUPHOOK_TARGET_PID=${PUPHOOK_TARGET_PID:-}
+PUPHOOK_INCLUDE_BOTS=${PUPHOOK_INCLUDE_BOTS:-0}
+PUPHOOK_DETACH_TIMEOUT_SECONDS=${PUPHOOK_DETACH_TIMEOUT_SECONDS:-15}
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --gdb)
-            CATHOOK_USE_GDB=1
+            PUPHOOK_USE_GDB=1
             ;;
         --no-gdb)
-            CATHOOK_USE_GDB=0
+            PUPHOOK_USE_GDB=0
             ;;
         --gdb-crash-reports)
-            CATHOOK_GDB_CRASH_REPORTS=1
+            PUPHOOK_GDB_CRASH_REPORTS=1
             ;;
         --no-gdb-crash-reports)
-            CATHOOK_GDB_CRASH_REPORTS=0
+            PUPHOOK_GDB_CRASH_REPORTS=0
             ;;
         --dev | --no-update)
-            export CATHOOK_DEV_MODE=1
+            export PUPHOOK_DEV_MODE=1
             ;;
         -h | --help)
             echo "Usage: sudo ./attach.sh [PID] [--gdb|--no-gdb|--gdb-crash-reports|--no-gdb-crash-reports|--dev|--no-update]"
-            echo "Mode: CATHOOK_MODE=default|textmode, CATHOOK_TEXTMODE=1, TEXTMODE=1, or saved first-run choice."
+            echo "Mode: PUPHOOK_MODE=default|textmode, PUPHOOK_TEXTMODE=1, TEXTMODE=1, or saved first-run choice."
             echo "GDB injection is enabled by default. Use ./preload for a no-gdb launch or --no-gdb to block attach injection."
-            echo "By default, bot TF2 processes with CAT_BOT_ID or CAT_BOT_NAME are skipped. Set CATHOOK_INCLUDE_BOTS=1 to include them."
+            echo "By default, bot TF2 processes with PUP_BOT_ID or PUP_BOT_NAME are skipped. Set PUPHOOK_INCLUDE_BOTS=1 to include them."
             exit 0
             ;;
         ''|*[!0-9]*)
@@ -57,34 +57,34 @@ while [ "$#" -gt 0 ]; do
             exit 1
             ;;
         *)
-            if [ -n "$CATHOOK_TARGET_PID" ]; then
+            if [ -n "$PUPHOOK_TARGET_PID" ]; then
                 echo "Only one target PID can be specified." >&2
                 exit 1
             fi
-            CATHOOK_TARGET_PID="$1"
+            PUPHOOK_TARGET_PID="$1"
             ;;
     esac
     shift
 done
 
-if [[ ! "$CATHOOK_ATTACH_DELAY_SECONDS" =~ ^[0-9]+$ ]]; then
-    CATHOOK_ATTACH_DELAY_SECONDS=0
+if [[ ! "$PUPHOOK_ATTACH_DELAY_SECONDS" =~ ^[0-9]+$ ]]; then
+    PUPHOOK_ATTACH_DELAY_SECONDS=0
 fi
 
-if [[ ! "$CATHOOK_DETACH_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]] || [ "$CATHOOK_DETACH_TIMEOUT_SECONDS" -lt 1 ]; then
-    CATHOOK_DETACH_TIMEOUT_SECONDS=15
+if [[ ! "$PUPHOOK_DETACH_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]] || [ "$PUPHOOK_DETACH_TIMEOUT_SECONDS" -lt 1 ]; then
+    PUPHOOK_DETACH_TIMEOUT_SECONDS=15
 fi
 
-if selected_mode="$(cathook_mode_from_env 0)"; then
-    CATHOOK_BINARY="$(cathook_binary_for_mode "$selected_mode")"
-elif [ -z "$CATHOOK_BINARY" ]; then
-    selected_mode="$(cathook_select_mode 0)"
-    CATHOOK_BINARY="$(cathook_binary_for_mode "$selected_mode")"
+if selected_mode="$(puphook_mode_from_env 0)"; then
+    PUPHOOK_BINARY="$(puphook_binary_for_mode "$selected_mode")"
+elif [ -z "$PUPHOOK_BINARY" ]; then
+    selected_mode="$(puphook_select_mode 0)"
+    PUPHOOK_BINARY="$(puphook_binary_for_mode "$selected_mode")"
 fi
 
-LIB_PATH="$CATHOOK_BIN_DIR/$CATHOOK_BINARY"
-if [ ! -f "$LIB_PATH" ] && [ -f "$(pwd)/bin/$CATHOOK_BINARY" ]; then
-    LIB_PATH="$(pwd)/bin/$CATHOOK_BINARY"
+LIB_PATH="$PUPHOOK_BIN_DIR/$PUPHOOK_BINARY"
+if [ ! -f "$LIB_PATH" ] && [ -f "$(pwd)/bin/$PUPHOOK_BINARY" ]; then
+    LIB_PATH="$(pwd)/bin/$PUPHOOK_BINARY"
 fi
 
 if [ "$EUID" -ne 0 ]; then
@@ -115,7 +115,7 @@ run_gdb_batch() {
 }
 
 is_dev_mode() {
-    is_enabled "${CATHOOK_DEV_MODE:-${CAT_DEV_MODE:-0}}"
+    is_enabled "${PUPHOOK_DEV_MODE:-${PUP_DEV_MODE:-0}}"
 }
 
 proc_environ_has_key() {
@@ -129,7 +129,7 @@ proc_environ_has_key() {
 is_bot_game_process() {
     local pid="$1"
 
-    proc_environ_has_key "$pid" "CAT_BOT_ID" || proc_environ_has_key "$pid" "CAT_BOT_NAME"
+    proc_environ_has_key "$pid" "PUP_BOT_ID" || proc_environ_has_key "$pid" "PUP_BOT_NAME"
 }
 
 is_tf2_process() {
@@ -159,11 +159,11 @@ is_tf2_process() {
 }
 
 require_gdb_injection_enabled() {
-    if is_enabled "$CATHOOK_USE_GDB"; then
+    if is_enabled "$PUPHOOK_USE_GDB"; then
         return
     fi
 
-    echo "gdb injection is disabled by CATHOOK_USE_GDB=0 or --no-gdb."
+    echo "gdb injection is disabled by PUPHOOK_USE_GDB=0 or --no-gdb."
     echo "Use ./preload to launch TF2 without gdb, or run sudo ./attach.sh to attach with gdb."
     exit 1
 }
@@ -188,26 +188,26 @@ save_auto_update_preference() {
     local owner_group=""
     local preference_dir=""
 
-    preference_dir="$(dirname -- "$CATHOOK_AUTO_UPDATE_FILE")"
+    preference_dir="$(dirname -- "$PUPHOOK_AUTO_UPDATE_FILE")"
     mkdir -p "$preference_dir"
-    printf '%s\n' "$preference" > "$CATHOOK_AUTO_UPDATE_FILE"
+    printf '%s\n' "$preference" > "$PUPHOOK_AUTO_UPDATE_FILE"
 
     if [ -n "$owner_user" ]; then
         owner_group=$(id -gn "$owner_user")
-        chown "$owner_user:$owner_group" "$preference_dir" "$CATHOOK_AUTO_UPDATE_FILE"
+        chown "$owner_user:$owner_group" "$preference_dir" "$PUPHOOK_AUTO_UPDATE_FILE"
     fi
 }
 
 load_auto_update_preference() {
     local preference=""
 
-    if [ -n "${CATHOOK_AUTO_UPDATE:-}" ]; then
-        normalize_yes_no "$CATHOOK_AUTO_UPDATE"
+    if [ -n "${PUPHOOK_AUTO_UPDATE:-}" ]; then
+        normalize_yes_no "$PUPHOOK_AUTO_UPDATE"
         return
     fi
 
-    if [ -f "$CATHOOK_AUTO_UPDATE_FILE" ]; then
-        IFS= read -r preference < "$CATHOOK_AUTO_UPDATE_FILE" || true
+    if [ -f "$PUPHOOK_AUTO_UPDATE_FILE" ]; then
+        IFS= read -r preference < "$PUPHOOK_AUTO_UPDATE_FILE" || true
         normalize_yes_no "$preference"
         return
     fi
@@ -244,7 +244,7 @@ choose_auto_update_preference() {
         return 0
     fi
 
-    echo "Auto update disabled. Remove $CATHOOK_AUTO_UPDATE_FILE to choose again."
+    echo "Auto update disabled. Remove $PUPHOOK_AUTO_UPDATE_FILE to choose again."
     return 1
 }
 
@@ -272,7 +272,7 @@ run_repo_git() {
 }
 
 allow_discard_enabled() {
-    case "${CATHOOK_ALLOW_DISCARD:-${CAT_ALLOW_DISCARD:-0}}" in
+    case "${PUPHOOK_ALLOW_DISCARD:-${PUP_ALLOW_DISCARD:-0}}" in
         1|true|TRUE|yes|YES|on|ON|force|FORCE)
             return 0
             ;;
@@ -287,13 +287,13 @@ discard_local_tracked_changes() {
     fi
 
     if allow_discard_enabled; then
-        echo "Discarding local tracked changes before updating (CATHOOK_ALLOW_DISCARD is set)..."
+        echo "Discarding local tracked changes before updating (PUPHOOK_ALLOW_DISCARD is set)..."
         run_repo_git reset --hard
         return
     fi
 
     echo "Local tracked changes found; refusing to discard them. Skipping auto update." >&2
-    echo "Commit, stash, or set CATHOOK_ALLOW_DISCARD=1 to allow discarding." >&2
+    echo "Commit, stash, or set PUPHOOK_ALLOW_DISCARD=1 to allow discarding." >&2
     return 1
 }
 
@@ -301,12 +301,12 @@ rebuild_after_update() {
     local build_arg="--default"
     local build_script="$SCRIPT_DIR/build.sh"
 
-    if [ "$CATHOOK_BINARY" = "libcathooktextmode.so" ]; then
+    if [ "$PUPHOOK_BINARY" = "libpuphooktextmode.so" ]; then
         build_arg="--textmode"
     fi
 
-    echo "Rebuilding Cat with ./build.sh $build_arg..."
-    CATHOOK_ROOT="$CATHOOK_ROOT" bash "$build_script" "$build_arg"
+    echo "Rebuilding Pup with ./build.sh $build_arg..."
+    PUPHOOK_ROOT="$PUPHOOK_ROOT" bash "$build_script" "$build_arg"
 }
 
 check_for_updates() {
@@ -342,7 +342,7 @@ check_for_updates() {
     upstream_rev=$(run_repo_git rev-parse "$upstream")
 
     if [ "$local_rev" = "$upstream_rev" ]; then
-        echo "Cat is already up to date."
+        echo "Pup is already up to date."
         return 0
     fi
 
@@ -372,12 +372,12 @@ check_for_updates() {
     fi
 
     echo "Local checkout has diverged from $upstream; refusing to reset."
-    echo "Rebase or merge manually, or set CATHOOK_ALLOW_DISCARD=1 to reset to upstream."
+    echo "Rebase or merge manually, or set PUPHOOK_ALLOW_DISCARD=1 to reset to upstream."
     if ! allow_discard_enabled; then
         echo "Auto update skipped to preserve local commits."
         return 0
     fi
-    echo "Resetting to $upstream (CATHOOK_ALLOW_DISCARD is set)."
+    echo "Resetting to $upstream (PUPHOOK_ALLOW_DISCARD is set)."
     if ! run_repo_git reset --hard "$upstream"; then
         echo "Auto update failed: could not reset to $upstream."
         return 1
@@ -405,59 +405,59 @@ maybe_auto_update() {
     check_for_updates
 }
 
-setup_cathook_root() {
+setup_puphook_root() {
     local owner_user="${SUDO_USER:-}"
     local owner_group=""
     local log_user="${SUDO_USER:-$USER}"
 
-    mkdir -p "$CATHOOK_LOG_DIR" "$CATHOOK_ASSET_DIR"
+    mkdir -p "$PUPHOOK_LOG_DIR" "$PUPHOOK_ASSET_DIR"
 
     rm -f \
-        "$CATHOOK_LOG_DIR/cathook.log" \
-        "$CATHOOK_LOG_DIR"/crash*.log \
-        "$CATHOOK_LOG_DIR"/gdb-crash*.log \
-        "$CATHOOK_ROOT"/cathook.log \
-        "$CATHOOK_ROOT"/crash*.log \
-        /tmp/cathook-"$log_user"-*-segfault.log
+        "$PUPHOOK_LOG_DIR/puphook.log" \
+        "$PUPHOOK_LOG_DIR"/crash*.log \
+        "$PUPHOOK_LOG_DIR"/gdb-crash*.log \
+        "$PUPHOOK_ROOT"/puphook.log \
+        "$PUPHOOK_ROOT"/crash*.log \
+        /tmp/puphook-"$log_user"-*-segfault.log
 
-    if [ -d "$CATHOOK_SOURCE_ASSET_DIR" ]; then
-        cp -a "$CATHOOK_SOURCE_ASSET_DIR"/. "$CATHOOK_ASSET_DIR"/
+    if [ -d "$PUPHOOK_SOURCE_ASSET_DIR" ]; then
+        cp -a "$PUPHOOK_SOURCE_ASSET_DIR"/. "$PUPHOOK_ASSET_DIR"/
     else
-        echo "Warning: missing local assets directory at $CATHOOK_SOURCE_ASSET_DIR"
+        echo "Warning: missing local assets directory at $PUPHOOK_SOURCE_ASSET_DIR"
     fi
 
     if [ -n "$owner_user" ]; then
         owner_group=$(id -gn "$owner_user")
-        chown -R "$owner_user:$owner_group" "$CATHOOK_ROOT"
+        chown -R "$owner_user:$owner_group" "$PUPHOOK_ROOT"
     fi
 
-    chmod 0755 "$CATHOOK_ROOT"
-    chmod 0775 "$CATHOOK_LOG_DIR"
-    touch "$CATHOOK_LOG_DIR/cathook.log"
+    chmod 0755 "$PUPHOOK_ROOT"
+    chmod 0775 "$PUPHOOK_LOG_DIR"
+    touch "$PUPHOOK_LOG_DIR/puphook.log"
 
     if [ -n "$owner_user" ]; then
-        chown "$owner_user:$owner_group" "$CATHOOK_LOG_DIR/cathook.log"
+        chown "$owner_user:$owner_group" "$PUPHOOK_LOG_DIR/puphook.log"
     fi
 
-    chmod 0664 "$CATHOOK_LOG_DIR/cathook.log"
+    chmod 0664 "$PUPHOOK_LOG_DIR/puphook.log"
 }
 
 wait_for_game_process() {
     echo "Waiting for tf_linux64..."
 
-    if [ -n "$CATHOOK_TARGET_PID" ]; then
-        if ! is_tf2_process "$CATHOOK_TARGET_PID"; then
-            echo "PID $CATHOOK_TARGET_PID is not a running tf_linux64 process." >&2
+    if [ -n "$PUPHOOK_TARGET_PID" ]; then
+        if ! is_tf2_process "$PUPHOOK_TARGET_PID"; then
+            echo "PID $PUPHOOK_TARGET_PID is not a running tf_linux64 process." >&2
             exit 1
         fi
 
-        if ! is_enabled "$CATHOOK_INCLUDE_BOTS" && is_bot_game_process "$CATHOOK_TARGET_PID"; then
-            echo "PID $CATHOOK_TARGET_PID is a bot tf_linux64 process; refusing to attach by default." >&2
-            echo "Set CATHOOK_INCLUDE_BOTS=1 if you really want to inject into bot processes." >&2
+        if ! is_enabled "$PUPHOOK_INCLUDE_BOTS" && is_bot_game_process "$PUPHOOK_TARGET_PID"; then
+            echo "PID $PUPHOOK_TARGET_PID is a bot tf_linux64 process; refusing to attach by default." >&2
+            echo "Set PUPHOOK_INCLUDE_BOTS=1 if you really want to inject into bot processes." >&2
             exit 1
         fi
 
-        PROCID="$CATHOOK_TARGET_PID"
+        PROCID="$PUPHOOK_TARGET_PID"
         echo "Using requested tf_linux64 PID $PROCID"
         GAME_BINARY_PATH=$(readlink -f "/proc/$PROCID/exe" 2>/dev/null || true)
         return
@@ -476,7 +476,7 @@ wait_for_game_process() {
                 continue
             fi
 
-            if ! is_enabled "$CATHOOK_INCLUDE_BOTS" && is_bot_game_process "$pid"; then
+            if ! is_enabled "$PUPHOOK_INCLUDE_BOTS" && is_bot_game_process "$pid"; then
                 skipped_bot_pids+=("$pid")
                 continue
             fi
@@ -499,9 +499,9 @@ wait_for_game_process() {
     GAME_BINARY_PATH=$(readlink -f "/proc/$PROCID/exe" 2>/dev/null || true)
 }
 
-target_has_cathook_mapping() {
+target_has_puphook_mapping() {
     [ -r "/proc/$PROCID/maps" ] || return 1
-    grep -Eq '/cathook-runtime-[^/]+/libcathook[^/]*\.so|/libcathook(textmode)?\.so' "/proc/$PROCID/maps"
+    grep -Eq '/puphook-runtime-[^/]+/libpuphook[^/]*\.so|/libpuphook(textmode)?\.so' "/proc/$PROCID/maps"
 }
 
 run_gdb_crash_report() {
@@ -513,8 +513,8 @@ run_gdb_crash_report() {
     local has_core=0
 
     timestamp=$(date +%Y%m%d-%H%M%S)
-    log_path="$CATHOOK_LOG_DIR/gdb-crash-$pid-$timestamp.log"
-    core_path="/tmp/cathook-$pid-$timestamp.core"
+    log_path="$PUPHOOK_LOG_DIR/gdb-crash-$pid-$timestamp.log"
+    core_path="/tmp/puphook-$pid-$timestamp.core"
 
     {
         echo "========== $(date --iso-8601=seconds) crash pid=$pid =========="
@@ -544,7 +544,7 @@ run_gdb_crash_report() {
                     -ex "thread apply all bt full" 2>&1 || true
             fi
 
-            if is_enabled "$CATHOOK_GDB_KEEP_CORE"; then
+            if is_enabled "$PUPHOOK_GDB_KEEP_CORE"; then
                 echo
                 echo "kept core=$core_path"
             else
@@ -560,7 +560,7 @@ run_gdb_crash_report() {
 }
 
 start_gdb_crash_watcher() {
-    if ! is_enabled "$CATHOOK_GDB_CRASH_REPORTS"; then
+    if ! is_enabled "$PUPHOOK_GDB_CRASH_REPORTS"; then
         return
     fi
 
@@ -689,19 +689,19 @@ install_glew_fallback_for_binary() {
     fi
 
     required_library="$(readelf -d "$binary_path" 2>/dev/null | awk -F'[][]' '/NEEDED/ && $2 ~ /^libGLEW\.so\./ { print $2; exit }')"
-    if [ -z "$required_library" ] || [ -f "$CATHOOK_BIN_DIR/$required_library" ]; then
+    if [ -z "$required_library" ] || [ -f "$PUPHOOK_BIN_DIR/$required_library" ]; then
         return
     fi
 
     if ! source_path="$(find_shared_library "$required_library")"; then
         echo "Warning: $binary_path needs $required_library, but it was not found on this system." >&2
-        echo "Run ./install-deps and sudo ./build.sh, or put $required_library in $CATHOOK_BIN_DIR." >&2
+        echo "Run ./install-deps and sudo ./build.sh, or put $required_library in $PUPHOOK_BIN_DIR." >&2
         return
     fi
 
-    install -d -m 0755 "$CATHOOK_BIN_DIR"
-    install -m 0755 "$source_path" "$CATHOOK_BIN_DIR/$required_library"
-    echo "Installed missing fallback $required_library to $CATHOOK_BIN_DIR"
+    install -d -m 0755 "$PUPHOOK_BIN_DIR"
+    install -m 0755 "$source_path" "$PUPHOOK_BIN_DIR/$required_library"
+    echo "Installed missing fallback $required_library to $PUPHOOK_BIN_DIR"
 }
 
 report_missing_shared_dependencies() {
@@ -721,7 +721,7 @@ report_missing_shared_dependencies() {
     fi
 
     binary_dir="$(dirname -- "$binary_path")"
-    ldd_output="$(LD_LIBRARY_PATH="$binary_dir:$CATHOOK_BIN_DIR:${LD_LIBRARY_PATH:-}" ldd "$binary_path" 2>&1 || true)"
+    ldd_output="$(LD_LIBRARY_PATH="$binary_dir:$PUPHOOK_BIN_DIR:${LD_LIBRARY_PATH:-}" ldd "$binary_path" 2>&1 || true)"
     missing_libraries="$(printf "%s\n" "$ldd_output" | awk '/=>[[:space:]]+not found/ { print $1 }' | sort -u)"
 
     if [ -z "$missing_libraries" ]; then
@@ -740,10 +740,10 @@ report_dlopen_failure_context() {
     local dlerror_line="$1"
     local missing_library=""
 
-    report_missing_shared_dependencies "$LIB_PATH" "$CATHOOK_BINARY" || true
+    report_missing_shared_dependencies "$LIB_PATH" "$PUPHOOK_BINARY" || true
 
     if [ -n "$TMP_RUNTIME_HOST_DIR" ]; then
-        report_missing_shared_dependencies "$TMP_RUNTIME_HOST_DIR/$CATHOOK_BINARY" "staged $CATHOOK_BINARY" || true
+        report_missing_shared_dependencies "$TMP_RUNTIME_HOST_DIR/$PUPHOOK_BINARY" "staged $PUPHOOK_BINARY" || true
     fi
 
     missing_library="$(printf "%s\n" "$dlerror_line" | sed -n 's/.*"\([^"]*\): cannot open shared object file: No such file or directory".*/\1/p' | tail -n 1)"
@@ -751,7 +751,7 @@ report_dlopen_failure_context() {
         case "$missing_library" in
             /*)
                 if [ "$missing_library" = "$TMP_LIB" ] || [ "$missing_library" = "$TMP_PROC_SELF_LIB" ]; then
-                    echo "The target process could not see the staged cathook library path." >&2
+                    echo "The target process could not see the staged puphook library path." >&2
                     echo "This usually means the game is in a different mount namespace or runtime sandbox; the injector already tried alternate target-visible directories." >&2
                 else
                     echo "dlopen could not open an absolute dependency path: $missing_library" >&2
@@ -794,7 +794,7 @@ stage_temp_runtime_at() {
     local tmp_base=""
 
     if [ ! -d "$host_parent_dir" ]; then
-        if [ "$target_parent_dir" = "$CATHOOK_ROOT/run" ] && [ -d "/proc/$PROCID/root$CATHOOK_ROOT" ]; then
+        if [ "$target_parent_dir" = "$PUPHOOK_ROOT/run" ] && [ -d "/proc/$PROCID/root$PUPHOOK_ROOT" ]; then
             mkdir -p "$host_parent_dir" || return 1
             chmod 0755 "$host_parent_dir" || return 1
         fi
@@ -804,28 +804,28 @@ stage_temp_runtime_at() {
         return 1
     fi
 
-    TMP_RUNTIME_HOST_DIR=$(mktemp -d "$host_parent_dir/cathook-runtime-XXXXXX") || return 1
+    TMP_RUNTIME_HOST_DIR=$(mktemp -d "$host_parent_dir/puphook-runtime-XXXXXX") || return 1
     tmp_base="$(basename -- "$TMP_RUNTIME_HOST_DIR")"
     TMP_RUNTIME_DIR="$target_parent_dir/$tmp_base"
-    TMP_LIB="$TMP_RUNTIME_DIR/$CATHOOK_BINARY"
+    TMP_LIB="$TMP_RUNTIME_DIR/$PUPHOOK_BINARY"
 
     if ! chmod 0755 "$TMP_RUNTIME_HOST_DIR"; then
         cleanup_temp_runtime
         return 1
     fi
 
-    if ! install -m 0755 "$LIB_PATH" "$TMP_RUNTIME_HOST_DIR/$CATHOOK_BINARY"; then
+    if ! install -m 0755 "$LIB_PATH" "$TMP_RUNTIME_HOST_DIR/$PUPHOOK_BINARY"; then
         cleanup_temp_runtime
         return 1
     fi
 
     copy_bundled_runtime_dependencies "$(dirname -- "$LIB_PATH")" "$TMP_RUNTIME_HOST_DIR"
-    if [ "$(dirname -- "$LIB_PATH")" != "$CATHOOK_BIN_DIR" ]; then
-        copy_bundled_runtime_dependencies "$CATHOOK_BIN_DIR" "$TMP_RUNTIME_HOST_DIR"
+    if [ "$(dirname -- "$LIB_PATH")" != "$PUPHOOK_BIN_DIR" ]; then
+        copy_bundled_runtime_dependencies "$PUPHOOK_BIN_DIR" "$TMP_RUNTIME_HOST_DIR"
     fi
 
-    if [ ! -r "$TMP_RUNTIME_HOST_DIR/$CATHOOK_BINARY" ]; then
-        echo "Failed to stage $CATHOOK_BINARY in target-visible runtime dir $TMP_RUNTIME_HOST_DIR." >&2
+    if [ ! -r "$TMP_RUNTIME_HOST_DIR/$PUPHOOK_BINARY" ]; then
+        echo "Failed to stage $PUPHOOK_BINARY in target-visible runtime dir $TMP_RUNTIME_HOST_DIR." >&2
         cleanup_temp_runtime
         return 1
     fi
@@ -876,7 +876,7 @@ stage_and_load_runtime() {
     local target_dirs=()
 
     target_uid="$(get_process_uid)"
-    target_dirs=("$CATHOOK_ROOT/run" "/tmp" "/var/tmp")
+    target_dirs=("$PUPHOOK_ROOT/run" "/tmp" "/var/tmp")
     if [ -n "$target_uid" ]; then
         target_dirs+=("/run/user/$target_uid")
     fi
@@ -902,7 +902,7 @@ stage_and_load_runtime() {
         return 1
     done
 
-    echo "Failed to stage and load $CATHOOK_BINARY from a target-visible runtime directory." >&2
+    echo "Failed to stage and load $PUPHOOK_BINARY from a target-visible runtime directory." >&2
     echo "Tried: ${target_dirs[*]}" >&2
     return 1
 }
@@ -911,8 +911,8 @@ gdb_dlopen_path() {
     local library_path="$1"
 
     sudo gdb -n --batch -ex "attach $PROCID" \
-        -ex "call ((int (*) (const char *, const char *, int)) setenv)(\"CATHOOK_ATTACH_DELAY_SECONDS\", \"$CATHOOK_ATTACH_DELAY_SECONDS\", 1)" \
-        -ex "call ((int (*) (const char *, const char *, int)) setenv)(\"CATHOOK_DISABLE_SDL_HOOKS\", \"${CATHOOK_DISABLE_SDL_HOOKS:-}\", 1)" \
+        -ex "call ((int (*) (const char *, const char *, int)) setenv)(\"PUPHOOK_ATTACH_DELAY_SECONDS\", \"$PUPHOOK_ATTACH_DELAY_SECONDS\", 1)" \
+        -ex "call ((int (*) (const char *, const char *, int)) setenv)(\"PUPHOOK_DISABLE_SDL_HOOKS\", \"${PUPHOOK_DISABLE_SDL_HOOKS:-}\", 1)" \
         -ex "call ((void * (*) (const char*, int)) dlopen)(\"$library_path\", 1)" \
         -ex "call ((char * (*) (void)) dlerror)()" \
         -ex "detach" 2>&1
@@ -928,15 +928,15 @@ unload() {
     local detached_result=""
     local close_result=""
 
-    # cathook_detach performs cleanup synchronously in this debugger call. It
+    # puphook_detach performs cleanup synchronously in this debugger call. It
     # restores hooks, drains guarded callbacks, and returns only when the
     # module is safe for the following dlclose. Do not issue dlclose unless
     # both native lifecycle checks succeeded; a failed cleanup must leave the
     # mapping in place so it can be diagnosed or retried safely.
-    unload_output=$(run_gdb_batch "$CATHOOK_DETACH_TIMEOUT_SECONDS" \
+    unload_output=$(run_gdb_batch "$PUPHOOK_DETACH_TIMEOUT_SECONDS" \
         -ex "attach $PROCID" \
-        -ex "call ((int (*)()) dlsym((void *) $LIB_HANDLE, \"cathook_detach\"))()" \
-        -ex "call ((int (*)()) dlsym((void *) $LIB_HANDLE, \"cathook_is_detached\"))()" \
+        -ex "call ((int (*)()) dlsym((void *) $LIB_HANDLE, \"puphook_detach\"))()" \
+        -ex "call ((int (*)()) dlsym((void *) $LIB_HANDLE, \"puphook_is_detached\"))()" \
         -ex "detach" 2>&1)
     echo "$unload_output"
 
@@ -982,21 +982,21 @@ if [ ! -r "/proc/$PROCID/maps" ]; then
     exit 1
 fi
 
-if target_has_cathook_mapping; then
-    echo "Refusing to inject: TF2 PID $PROCID already has a cathook library mapped." >&2
-    echo "Detach and unload the existing cathook instance, or restart TF2 before injecting again." >&2
+if target_has_puphook_mapping; then
+    echo "Refusing to inject: TF2 PID $PROCID already has a puphook library mapped." >&2
+    echo "Detach and unload the existing puphook instance, or restart TF2 before injecting again." >&2
     exit 1
 fi
 
-setup_cathook_root
+setup_puphook_root
 
 if [ ! -f "$LIB_PATH" ]; then
-    echo "Missing $CATHOOK_BINARY. Run ./build.sh first."
+    echo "Missing $PUPHOOK_BINARY. Run ./build.sh first."
     exit 1
 fi
 
 install_glew_fallback_for_binary "$LIB_PATH"
-report_missing_shared_dependencies "$LIB_PATH" "$CATHOOK_BINARY" || exit 1
+report_missing_shared_dependencies "$LIB_PATH" "$PUPHOOK_BINARY" || exit 1
 
 echo "Using $LIB_PATH"
 if command -v sha256sum >/dev/null 2>&1; then
@@ -1025,7 +1025,7 @@ fi
 cleanup_temp_runtime
 
 ATTACH_OUTPUT=$(sudo gdb -n --batch -ex "attach $PROCID" \
-                     -ex "call ((int (*)()) dlsym((void *) $LIB_HANDLE, \"cathook_attach\"))()" \
+                     -ex "call ((int (*)()) dlsym((void *) $LIB_HANDLE, \"puphook_attach\"))()" \
                      -ex "detach" 2>&1)
 ATTACH_RESULT=$(printf "%s\n" "$ATTACH_OUTPUT" | grep -oP '\$[0-9]+ = (true|false|0|1)' | tail -n 1 | awk '{print $3}')
 
@@ -1035,10 +1035,10 @@ if [[ "$ATTACH_RESULT" != "true" && "$ATTACH_RESULT" != "1" ]]; then
     exit 1
 fi
 
-echo "$CATHOOK_BINARY loaded successfully at $LIB_HANDLE. Use Ctrl+C to unload."
-echo "Cathook log: $CATHOOK_LOG_DIR/cathook.log"
-echo "Exception log: $CATHOOK_LOG_DIR/exception.log"
-tail -f "$CATHOOK_LOG_DIR/cathook.log" &
+echo "$PUPHOOK_BINARY loaded successfully at $LIB_HANDLE. Use Ctrl+C to unload."
+echo "Puphook log: $PUPHOOK_LOG_DIR/puphook.log"
+echo "Exception log: $PUPHOOK_LOG_DIR/exception.log"
+tail -f "$PUPHOOK_LOG_DIR/puphook.log" &
 TAIL_PID=$!
 start_gdb_crash_watcher
 

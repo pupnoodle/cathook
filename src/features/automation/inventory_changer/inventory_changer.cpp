@@ -114,10 +114,10 @@ void refresh_schema_options(const std::uintptr_t schema)
     const auto definition = item_definition_lookup_original(schema, definition_index);
     if (definition == 0) continue;
     found_definition = true;
-    static const int item_name_offset = cathook::core::memory::keyed_store_offset("client.so", "item_name");
-    static const int item_type_offset = cathook::core::memory::keyed_store_offset("client.so", "item_type_name");
-    static const int acts_as_wearable_offset = cathook::core::memory::keyed_store_offset("client.so", "act_as_wearable");
-    static const int acts_as_weapon_offset = cathook::core::memory::keyed_store_offset("client.so", "act_as_weapon");
+    static const int item_name_offset = puphook::core::memory::keyed_store_offset("client.so", "item_name");
+    static const int item_type_offset = puphook::core::memory::keyed_store_offset("client.so", "item_type_name");
+    static const int acts_as_wearable_offset = puphook::core::memory::keyed_store_offset("client.so", "act_as_wearable");
+    static const int acts_as_weapon_offset = puphook::core::memory::keyed_store_offset("client.so", "act_as_weapon");
     if (item_name_offset <= 0 || item_type_offset <= 0 ||
         acts_as_wearable_offset <= 0 || acts_as_weapon_offset <= 0) break;
     const auto* item_name = *reinterpret_cast<const char* const*>(definition + item_name_offset);

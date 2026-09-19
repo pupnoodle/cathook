@@ -38,8 +38,16 @@ struct fire_readiness {
   bool settled = true;
   bool primary = true;
 
+  bool should_fire() const {
+    return attack && headshot && charge;
+  }
+
+  bool aim_ready() const {
+    return should_fire();
+  }
+
   bool ready() const {
-    return attack && headshot && charge && trace && settled && primary;
+    return should_fire() && primary;
   }
 };
 
@@ -96,7 +104,7 @@ struct pending_shot_diagnostic {
 };
 
 struct shot_log_state {
-  std::unique_ptr<cathook::core::logger> file{};
+  std::unique_ptr<puphook::core::logger> file{};
   std::array<pending_shot_diagnostic, 16> pending{};
   std::uint64_t next_id = 1;
 };
@@ -109,8 +117,8 @@ shot_log_state& get_shot_log_state() {
 void write_shot_log(const char* event, const pending_shot_diagnostic& shot, int damage = 0) {
   shot_log_state& state = get_shot_log_state();
   if (!state.file) {
-    state.file = std::make_unique<cathook::core::logger>(
-      cathook::core::log_directory() / "shots.log");
+    state.file = std::make_unique<puphook::core::logger>(
+      puphook::core::log_directory() / "shots.log");
   }
   if (!state.file->is_open()) {
     return;
@@ -517,15 +525,16 @@ void compute_hitscan_fire(aimbot_run_context& ctx) {
 
 void compute_readiness(aimbot_run_context& ctx) {
   ctx.readiness.headshot = !ctx.hitscan ||
-    (hitscan_aim_candidate_matches_configured_hitbox(ctx.target, ctx.local, ctx.weapon) &&
-      hitscan_aim_head_only_fire_ready(ctx.local, ctx.weapon, ctx.target) &&
-      hitscan_aim_headshot_ready(ctx.local, ctx.weapon, ctx.target));
+    hitscan_aim_headshot_ready(ctx.local, ctx.weapon, ctx.target);
   ctx.readiness.charge = !ctx.hitscan || hitscan_aim_charge_ready(ctx.local, ctx.weapon, ctx.target);
   const bool simple_visible = !ctx.hitscan || ctx.hitscan_fire.ready;
   ctx.readiness.trace = simple_visible && melee_ready(ctx);
   ctx.readiness.settled = hitscan_settled(ctx);
+  const bool secondary_blocks_primary =
+    (ctx.cmd->buttons & IN_ATTACK2) != 0 &&
+    (ctx.weapon == nullptr || !ctx.weapon->is_minigun());
   ctx.readiness.primary = weapon_allows_primary_fire(ctx.local, ctx.weapon) &&
-    (ctx.cmd->buttons & IN_ATTACK2) == 0 &&
+    !secondary_blocks_primary &&
     (ctx.weapon == nullptr || ctx.weapon->can_primary_attack() || (global_vars != nullptr && global_vars->curtime + 0.02f >= ctx.weapon->get_next_primary_attack()));
   ctx.readiness.attack = ctx.target.entity != nullptr &&
     aim_auto_shoot::weapon_has_primary_ammo(ctx.weapon);
@@ -546,17 +555,23 @@ void compute_readiness(aimbot_run_context& ctx) {
     ctx.cmd->buttons |= IN_ATTACK;
   }
 
-  if (!ctx.readiness.ready() && (ctx.hitscan || ctx.melee) && !hold_sniper_charge && !ctx.manual_attack) {
+  const bool melee_can_hit = !ctx.melee || ctx.readiness.trace;
+  const bool hitscan_can_hit = !ctx.hitscan || ctx.hitscan_fire.ready;
+  if ((!ctx.readiness.should_fire() || !melee_can_hit || !hitscan_can_hit) &&
+      (ctx.hitscan || ctx.melee) && !hold_sniper_charge && !ctx.manual_attack) {
     ctx.cmd->buttons &= ~IN_ATTACK;
   }
 
   ctx.debug.headshot_ready = ctx.readiness.headshot;
-  ctx.debug.attack_ready = ctx.readiness.ready();
+  ctx.debug.attack_ready = ctx.readiness.aim_ready();
 }
 
 void apply_auto_shoot(aimbot_run_context& ctx) {
-  if (config.aimbot.auto_shoot && ctx.readiness.ready() && !ctx.manual_attack) {
-    ctx.auto_shoot = aim_auto_shoot::apply(ctx.cmd, ctx.weapon, ctx.target, ctx.hitscan, ctx.melee);
+  if (config.aimbot.auto_shoot && ctx.readiness.should_fire() &&
+      (!ctx.hitscan || ctx.hitscan_fire.ready) &&
+      (!ctx.melee || ctx.readiness.trace) && !ctx.manual_attack) {
+    ctx.auto_shoot = aim_auto_shoot::apply(
+      ctx.cmd, ctx.weapon, ctx.target, ctx.hitscan && ctx.hitscan_fire.ready, ctx.melee);
     set_requested_shot(ctx.auto_shoot.requested);
     aim_state::requested_shot = ctx.auto_shoot.requested;
   }
@@ -587,23 +602,14 @@ void apply_fire_state(aimbot_run_context& ctx) {
   if (firing && ctx.hitscan && ctx.hitscan_fire.ready && ctx.target.player != nullptr) {
     resolver::note_shot(ctx.target.player, ctx.target.hitbox, ctx.target.simulation_time, ctx.target.backtrack);
   }
-  if (ctx.target.tick_count > 0 && ctx.target.player != nullptr &&
-      ((firing && ctx.hitscan && ctx.hitscan_fire.ready) ||
-       (ctx.melee && (firing || melee_swing_pending)))) {
-    ctx.cmd->tick_count = ctx.target.tick_count;
+  int command_tick = ctx.target.tick_count;
+  if (command_tick <= 0 && ctx.target.player != nullptr && ctx.target.simulation_time > 0.0f) {
+    command_tick = time_to_ticks(ctx.target.simulation_time + backtrack::interpolation_time());
   }
-#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
-  if (firing && ctx.hitscan && !ctx.target.backtrack && ctx.target.player != nullptr && global_vars != nullptr &&
-      ctx.target.tick_count == 0) {
-    Convar* interp = convar_system->find_var("cl_interp");
-    if (interp) {
-      float interp_val = interp->get_float();
-      if (std::isfinite(interp_val) && interp_val > 0.0f) {
-        ctx.cmd->tick_count += static_cast<int>(0.5f + interp_val / tick_interval());
-      }
-    }
+  if (command_tick > 0 && ctx.target.player != nullptr &&
+      ((firing && ctx.hitscan) || (ctx.melee && (firing || melee_swing_pending)))) {
+    ctx.cmd->tick_count = command_tick;
   }
-#endif
   const bool diagnostic_attempt = ctx.auto_shoot.requested || ctx.auto_shoot.release_attack ||
     (firing && ctx.readiness.ready());
   if (diagnostic_attempt && ctx.hitscan && ctx.hitscan_fire.ready && ctx.target.player != nullptr) {
@@ -706,7 +712,7 @@ void capture_latest_network_pose(Player* player, bool animation_already_updated)
 }
 
 void update_local_client_side_animation() {
-  if (!nographics::is_enabled() || entity_list == nullptr) {
+  if (entity_list == nullptr) {
     return;
   }
 
@@ -715,16 +721,20 @@ void update_local_client_side_animation() {
     return;
   }
 
-  void** vtable = *reinterpret_cast<void***>(localplayer);
-  constexpr std::size_t update_client_side_animation_index = 256;
-  if (vtable == nullptr || vtable[update_client_side_animation_index] == nullptr) {
-    return;
+  using update_client_side_animation_fn = void (*)(void*);
+  update_client_side_animation_fn fn =
+    reinterpret_cast<update_client_side_animation_fn>(tf2_combat::get().update_client_side_animation_fn);
+  if (fn == nullptr) {
+    void** vtable = *reinterpret_cast<void***>(localplayer);
+    const std::size_t slot = tf2_combat::player::update_client_side_animation();
+    if (vtable == nullptr || slot == 0 || vtable[slot] == nullptr) {
+      return;
+    }
+    fn = reinterpret_cast<update_client_side_animation_fn>(vtable[slot]);
   }
 
-  using update_client_side_animation_fn = void (*)(void*);
   aimbot_anim_detail::manual_update_active = true;
-  reinterpret_cast<update_client_side_animation_fn>(
-    vtable[update_client_side_animation_index])(localplayer);
+  fn(localplayer);
   aimbot_anim_detail::manual_update_active = false;
 }
 
@@ -799,6 +809,7 @@ void on_player_hurt(Player* attacker, Player* victim, int damage) {
 }
 
 aimbot_run_result run(user_cmd* cmd, const Vec3& original_view_angles, bool manual_attack) {
+  aim_spread::begin_command();
   aim_state::requested_shot = false;
   clear_frame_target();
 
@@ -856,10 +867,10 @@ aimbot_run_result run(user_cmd* cmd, const Vec3& original_view_angles, bool manu
   ctx.cmd->buttons &= ~IN_RELOAD;
   if (!ctx.manual_attack && aimbot_should_auto_rev(ctx.local, ctx.weapon, ctx.target)) {
     ctx.cmd->buttons |= IN_ATTACK2;
-    if (!ctx.manual_attack) {
+    if (ctx.local == nullptr || !ctx.local->is_heavy_revved()) {
       ctx.cmd->buttons &= ~IN_ATTACK;
+      return ctx.finish(aimbot_debug_reason::auto_rev);
     }
-    return ctx.finish(aimbot_debug_reason::auto_rev);
   }
 
   if (!aim_scope::fire_ready(ctx.local, ctx.weapon)) {

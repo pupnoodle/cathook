@@ -12,7 +12,7 @@ view_render_screen_overlay_fn view_render_perform_screen_overlay_original = null
 
 void view_render_perform_screen_space_effects_hook(void* me, int x, int y, int w, int h)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (config.visuals.removals.post_processing || config.visuals.effects.remove_screen_effects) {
     return;
   }
@@ -23,7 +23,7 @@ void view_render_perform_screen_space_effects_hook(void* me, int x, int y, int w
 
 void view_render_perform_screen_overlay_hook(void* me, int x, int y, int w, int h)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (config.visuals.effects.remove_screen_overlays) {
     return;
   }

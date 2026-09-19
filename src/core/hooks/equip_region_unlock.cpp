@@ -31,7 +31,7 @@ auto should_unlock_equip_regions(std::uintptr_t lookup_map) -> bool
 
 std::uintptr_t item_definition_lookup_hook(std::uintptr_t lookup_map, unsigned int item_index)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (item_definition_lookup_original == nullptr)
   {
     return 0;
@@ -45,7 +45,7 @@ std::uintptr_t item_definition_lookup_hook(std::uintptr_t lookup_map, unsigned i
   }
 
   static const int masks_offset =
-    cathook::core::memory::keyed_movq_store_offset("client.so", "equip_regions");
+    puphook::core::memory::keyed_movq_store_offset("client.so", "equip_regions");
   if (masks_offset <= 0) {
     return item_definition;
   }

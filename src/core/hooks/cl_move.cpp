@@ -31,9 +31,9 @@ namespace
 bool lea_consumed_by(const std::uint8_t* p, const std::uint8_t* end, int reg,
                      std::uint8_t prefix, std::uint8_t opcode2, int span)
 {
-  for (const std::uint8_t* q = p; q < p + span && q < end; q += cathook::core::memory::insn_length(q, end)) {
-    cathook::core::memory::mem_insn insn{};
-    if (!cathook::core::memory::decode_mem_insn(q, end, insn)) {
+  for (const std::uint8_t* q = p; q < p + span && q < end; q += puphook::core::memory::insn_length(q, end)) {
+    puphook::core::memory::mem_insn insn{};
+    if (!puphook::core::memory::decode_mem_insn(q, end, insn)) {
       continue;
     }
     if (insn.opcode == 0x0F && insn.opcode2 == opcode2 && insn.prefix == prefix &&
@@ -59,12 +59,12 @@ bool resolve_cl_move_globals(void* cl_move, double** net_time, float** unbounded
   };
   std::vector<movss_global> movss_globals;
 
-  for (const std::uint8_t* p = begin; p < end; p += cathook::core::memory::insn_length(p, end)) {
-    cathook::core::memory::mem_insn insn{};
-    if (!cathook::core::memory::decode_mem_insn(p, end, insn)) {
+  for (const std::uint8_t* p = begin; p < end; p += puphook::core::memory::insn_length(p, end)) {
+    puphook::core::memory::mem_insn insn{};
+    if (!puphook::core::memory::decode_mem_insn(p, end, insn)) {
       continue;
     }
-    if (insn.opcode == 0x8D && cathook::core::memory::is_rip_relative(insn)) {
+    if (insn.opcode == 0x8D && puphook::core::memory::is_rip_relative(insn)) {
       if (lea_consumed_by(p + insn.size, end, insn.reg, 0xF2, 0x58, 0x30)) {
         *net_time = reinterpret_cast<double*>(insn.rip_target);
       } else if (lea_consumed_by(p + insn.size, end, insn.reg, 0xF3, 0x10, 0x30)) {
@@ -91,14 +91,14 @@ bool resolve_cl_move_globals(void* cl_move, double** net_time, float** unbounded
 
 void cl_move_hook(bool final_tick, float accumulated_extra_samples)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   tickbase::move(final_tick, accumulated_extra_samples, cl_move_original);
 }
 
 void prediction_run_simulation_hook(void* prediction_instance, int current_command, user_cmd* cmd, Player* localplayer,
   float curtime)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (prediction_run_simulation_original == nullptr) {
     return;
   }

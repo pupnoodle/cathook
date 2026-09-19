@@ -19,7 +19,7 @@ V  o o  V  file: src/core/hooks/override_view.cpp
 void (*override_view_original)(void*, view_setup*);
 
 void override_view_hook(void* me, view_setup* setup) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   thirdperson::update_taunt_camera();
 
   if (setup == nullptr) {

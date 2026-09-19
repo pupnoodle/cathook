@@ -4,13 +4,13 @@ set -uo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
-web_panel_root="$script_dir/catbot-ipc-web-panel-main"
-textmode_root="$script_dir/cat-steamtxtmode"
-install_root="${CATHOOK_ROOT:-/opt/cathook}"
-shared_steam_root="${CAT_SHARED_STEAM_ROOT:-/opt/catbot-shared-steam}"
-target_version="${CAT_STEAM_TARGET_VERSION:-1689034492}"
-target_steamui_build="${CAT_STEAMUI_BUILD_ID:-aac6c9f07c9755b26c100165b3e7d5f84904acc0}"
-archive_url="${CAT_STEAM_ARCHIVE_URL:-http://web.archive.org/web/20230711164652if_/media.steampowered.com/client}"
+web_panel_root="$script_dir/pupbot-ipc-web-panel-main"
+textmode_root="$script_dir/pup-steamtxtmode"
+install_root="${PUPHOOK_ROOT:-/opt/puphook}"
+shared_steam_root="${PUP_SHARED_STEAM_ROOT:-/opt/pupbot-shared-steam}"
+target_version="${PUP_STEAM_TARGET_VERSION:-1689034492}"
+target_steamui_build="${PUP_STEAMUI_BUILD_ID:-aac6c9f07c9755b26c100165b3e7d5f84904acc0}"
+archive_url="${PUP_STEAM_ARCHIVE_URL:-http://web.archive.org/web/20230711164652if_/media.steampowered.com/client}"
 
 yes_mode=0
 check_only=0
@@ -43,10 +43,10 @@ downgrades and dependency installs may stop/reconfigure Steam, so they are
 deferred while the botpanel is live.
 
 Environment:
-  CATHOOK_ROOT=/opt/cathook
-  CAT_STEAM_ROOT=/path/to/steam
-  CAT_STEAM_TARGET_VERSION=1689034492
-  CAT_STEAMUI_BUILD_ID=<pinned steamui Build ID>
+  PUPHOOK_ROOT=/opt/puphook
+  PUP_STEAM_ROOT=/path/to/steam
+  PUP_STEAM_TARGET_VERSION=1689034492
+  PUP_STEAMUI_BUILD_ID=<pinned steamui Build ID>
 EOF
 }
 
@@ -125,7 +125,7 @@ collect_steam_candidates() {
     local user_home
     user_home="$(user_home_path)"
     local -a candidates=(
-        "${CAT_STEAM_ROOT:-}"
+        "${PUP_STEAM_ROOT:-}"
         "$shared_steam_root"
         "${user_home:-}/.steam/debian-installation"
         "${user_home:-}/.steam/steam"
@@ -274,7 +274,7 @@ check_steam_downgrade() {
 check_steam_shell_patch() {
     local candidate
     for candidate in "$shared_steam_root/steam.sh" "$steam_root/steam.sh"; do
-        if [ -f "$candidate" ] && grep -Fq 'CAT_STEAM_TXTMODE_PRELOAD' "$candidate"; then
+        if [ -f "$candidate" ] && grep -Fq 'PUP_STEAM_TXTMODE_PRELOAD' "$candidate"; then
             return 0
         fi
     done
@@ -284,7 +284,7 @@ check_steam_shell_patch() {
 check_webhelper_wrapper() {
     local wrapper="$shared_steam_root/ubuntu12_64/steamwebhelper.sh"
     [ -f "$wrapper" ] || return 1
-    grep -Fq 'libx64/libcatsteamtxtmode.so' "$wrapper" || return 1
+    grep -Fq 'libx64/libpupsteamtxtmode.so' "$wrapper" || return 1
     bash -n "$wrapper" >/dev/null 2>&1
 }
 
@@ -298,8 +298,8 @@ find_tf2_steamapps() {
     local user_home candidate
     user_home="$(user_home_path)"
     local -a candidates=(
-        "${CAT_STEAMAPPS_PATH:-}"
-        "${CAT_STEAM_ROOT:+$CAT_STEAM_ROOT/steamapps}"
+        "${PUP_STEAMAPPS_PATH:-}"
+        "${PUP_STEAM_ROOT:+$PUP_STEAM_ROOT/steamapps}"
         "$shared_steam_root/steamapps"
         "$steam_root/steamapps"
         "${user_home:-}/.steam/steam/steamapps"
@@ -331,21 +331,21 @@ elf_matches() {
 }
 
 check_textmode_source() {
-    elf_matches "$textmode_root/bin/lib64/libcatsteamtxtmode.so" 'ELF 32-bit' || return 1
-    elf_matches "$textmode_root/bin/libx64/libcatsteamtxtmode.so" 'ELF 64-bit' || return 1
+    elf_matches "$textmode_root/bin/lib64/libpupsteamtxtmode.so" 'ELF 32-bit' || return 1
+    elf_matches "$textmode_root/bin/libx64/libpupsteamtxtmode.so" 'ELF 64-bit' || return 1
 }
 
 check_textmode_deployed() {
-    elf_matches "$install_root/botpanel/cat-steamtxtmode/bin/lib64/libcatsteamtxtmode.so" 'ELF 32-bit' || return 1
-    elf_matches "$install_root/botpanel/cat-steamtxtmode/bin/libx64/libcatsteamtxtmode.so" 'ELF 64-bit' || return 1
+    elf_matches "$install_root/botpanel/pup-steamtxtmode/bin/lib64/libpupsteamtxtmode.so" 'ELF 32-bit' || return 1
+    elf_matches "$install_root/botpanel/pup-steamtxtmode/bin/libx64/libpupsteamtxtmode.so" 'ELF 64-bit' || return 1
 }
 
-check_cat_runtime() {
-    [ -x "$install_root/bin/libcathooktextmode.so" ] || return 1
+check_pup_runtime() {
+    [ -x "$install_root/bin/libpuphooktextmode.so" ] || return 1
     [ -x "$install_root/ipc/bin/server" ] || return 1
     if command -v ldd >/dev/null 2>&1; then
-        if ldd "$install_root/bin/libcathooktextmode.so" 2>&1 | grep -Fq 'not found'; then
-            log "unresolved shared dependency in $install_root/bin/libcathooktextmode.so"
+        if ldd "$install_root/bin/libpuphooktextmode.so" 2>&1 | grep -Fq 'not found'; then
+            log "unresolved shared dependency in $install_root/bin/libpuphooktextmode.so"
             return 1
         fi
         if ldd "$install_root/ipc/bin/server" 2>&1 | grep -Fq 'not found'; then
@@ -358,8 +358,8 @@ check_cat_runtime() {
 check_textmode_dependencies() {
     local image
     for image in \
-        "$textmode_root/bin/lib64/libcatsteamtxtmode.so" \
-        "$textmode_root/bin/libx64/libcatsteamtxtmode.so"; do
+        "$textmode_root/bin/lib64/libpupsteamtxtmode.so" \
+        "$textmode_root/bin/libx64/libpupsteamtxtmode.so"; do
         [ -f "$image" ] || return 1
         if command -v ldd >/dev/null 2>&1 && ldd "$image" 2>&1 | grep -Fq 'not found'; then
             log "unresolved shared dependency in $image"
@@ -372,14 +372,14 @@ check_textmode_dependencies() {
 check_permissions() {
     local path
     for path in "$script_dir/fix-all" "$script_dir/start" "$script_dir/stop" "$script_dir/update" \
-        "$script_dir/install-catbots" "$script_dir/install-instances" "$script_dir/fix-oldshi"; do
+        "$script_dir/install-pupbots" "$script_dir/install-instances" "$script_dir/fix-oldshi"; do
         [ -x "$path" ] || return 1
     done
     return 0
 }
 
 check_active_runtime() {
-    if pgrep -u "$(id -u)" -f 'catbot-ipc-web-panel-main|firejail .*--name=b[0-9]+|tf_linux64' >/dev/null 2>&1; then
+    if pgrep -u "$(id -u)" -f 'pupbot-ipc-web-panel-main|firejail .*--name=b[0-9]+|tf_linux64' >/dev/null 2>&1; then
         active_runtime=1
     else
         active_runtime=0
@@ -405,7 +405,7 @@ run_checks() {
     check_item textmode_source 'Paired local Steam text-mode libraries' check_textmode_source 1
     check_item textmode_deployed 'Paired installed Steam text-mode libraries' check_textmode_deployed 1
     check_item textmode_deps 'Steam text-mode shared dependencies' check_textmode_dependencies 1
-    check_item cat_runtime 'Installed Cat textmode runtime and IPC server' check_cat_runtime 1
+    check_item pup_runtime 'Installed Pup textmode runtime and IPC server' check_pup_runtime 1
     check_item permissions 'Botpanel executable permissions' check_permissions 1
     check_active_runtime
     if [ "$active_runtime" -eq 1 ]; then
@@ -436,14 +436,14 @@ repair_steam_downgrade() {
         return 1
     fi
     log "Downgrading Steam to pinned VGUI build $target_version..."
-    CAT_STEAM_ROOT="$steam_root" CAT_SHARED_STEAM_ROOT="$shared_steam_root" \
-        CAT_STEAM_ARCHIVE_URL="$archive_url" \
+    PUP_STEAM_ROOT="$steam_root" PUP_SHARED_STEAM_ROOT="$shared_steam_root" \
+        PUP_STEAM_ARCHIVE_URL="$archive_url" \
         bash "$repo_root/scripts/downgrade_steam_vgui.sh" --force
 }
 
-repair_cat_runtime() {
-    log 'Building/installing Cat textmode runtime...'
-    run_as_root env CATHOOK_ROOT="$install_root" CATHOOK_DEV_MODE=1 bash "$repo_root/build.sh" --textmode
+repair_pup_runtime() {
+    log 'Building/installing Pup textmode runtime...'
+    run_as_root env PUPHOOK_ROOT="$install_root" PUPHOOK_DEV_MODE=1 bash "$repo_root/build.sh" --textmode
 }
 
 repair_textmode_libraries() {
@@ -451,25 +451,25 @@ repair_textmode_libraries() {
     make -C "$textmode_root" all verify
     make -C "$textmode_root" ARCH=64 all verify
     run_as_root install -d -m 0755 \
-        "$install_root/botpanel/cat-steamtxtmode/bin/lib64" \
-        "$install_root/botpanel/cat-steamtxtmode/bin/libx64"
-    run_as_root install -m 0755 "$textmode_root/bin/lib64/libcatsteamtxtmode.so" \
-        "$install_root/botpanel/cat-steamtxtmode/bin/lib64/libcatsteamtxtmode.so"
-    run_as_root install -m 0755 "$textmode_root/bin/libx64/libcatsteamtxtmode.so" \
-        "$install_root/botpanel/cat-steamtxtmode/bin/libx64/libcatsteamtxtmode.so"
+        "$install_root/botpanel/pup-steamtxtmode/bin/lib64" \
+        "$install_root/botpanel/pup-steamtxtmode/bin/libx64"
+    run_as_root install -m 0755 "$textmode_root/bin/lib64/libpupsteamtxtmode.so" \
+        "$install_root/botpanel/pup-steamtxtmode/bin/lib64/libpupsteamtxtmode.so"
+    run_as_root install -m 0755 "$textmode_root/bin/libx64/libpupsteamtxtmode.so" \
+        "$install_root/botpanel/pup-steamtxtmode/bin/libx64/libpupsteamtxtmode.so"
 }
 
 patch_steam_script() {
     local target="$1"
     local expression
     [ -f "$target" ] || return 1
-    grep -Fq 'CAT_STEAM_TXTMODE_PRELOAD' "$target" && return 0
+    grep -Fq 'PUP_STEAM_TXTMODE_PRELOAD' "$target" && return 0
     grep -Fq 'elif [ -z "$STEAM_DEBUGGER" ]; then' "$target" || return 1
     grep -Fq '"$STEAMROOT/$STEAMEXEPATH" "$@"' "$target" || return 1
     run_as_root cp -an "$target" "$target.fix-all.original" 2>/dev/null || true
-    expression='s{elif \[ -z "\$STEAM_DEBUGGER" \]; then\n\t"\$STEAMROOT/\$STEAMEXEPATH" "\$@"}{elif [ -z "\$STEAM_DEBUGGER" ]; then\n\tif [ -n "\${CAT_STEAM_TXTMODE_PRELOAD-}" ]; then\n\t\tLD_PRELOAD="\$CAT_STEAM_TXTMODE_PRELOAD" "\$STEAMROOT/\$STEAMEXEPATH" "\$@"\n\telse\n\t\t"\$STEAMROOT/\$STEAMEXEPATH" "\$@"\n\tfi}'
+    expression='s{elif \[ -z "\$STEAM_DEBUGGER" \]; then\n\t"\$STEAMROOT/\$STEAMEXEPATH" "\$@"}{elif [ -z "\$STEAM_DEBUGGER" ]; then\n\tif [ -n "\${PUP_STEAM_TXTMODE_PRELOAD-}" ]; then\n\t\tLD_PRELOAD="\$PUP_STEAM_TXTMODE_PRELOAD" "\$STEAMROOT/\$STEAMEXEPATH" "\$@"\n\telse\n\t\t"\$STEAMROOT/\$STEAMEXEPATH" "\$@"\n\tfi}'
     run_as_root perl -0pi -e "$expression" "$target"
-    grep -Fq 'CAT_STEAM_TXTMODE_PRELOAD' "$target"
+    grep -Fq 'PUP_STEAM_TXTMODE_PRELOAD' "$target"
 }
 
 repair_steam_shell() {
@@ -485,7 +485,7 @@ repair_steam_shell() {
 repair_webhelper_wrapper() {
     local target="$shared_steam_root/ubuntu12_64/steamwebhelper.sh"
     [ -d "$shared_steam_root/ubuntu12_64" ] || return 1
-    if [ -f "$target" ] && ! grep -Fq 'libx64/libcatsteamtxtmode.so' "$target"; then
+    if [ -f "$target" ] && ! grep -Fq 'libx64/libpupsteamtxtmode.so' "$target"; then
         run_as_root cp -an "$target" "$target.fix-all.original" 2>/dev/null || true
     fi
     run_as_root install -m 0755 "$textmode_root/steamwebhelper.sh" "$target"
@@ -494,9 +494,9 @@ repair_webhelper_wrapper() {
 
 repair_permissions() {
     chmod 0755 "$script_dir/fix-all" "$script_dir/start" "$script_dir/stop" "$script_dir/update" \
-        "$script_dir/install-catbots" "$script_dir/install-instances" "$script_dir/fix-oldshi" 2>/dev/null || true
+        "$script_dir/install-pupbots" "$script_dir/install-instances" "$script_dir/fix-oldshi" 2>/dev/null || true
     chmod 0755 "$textmode_root/steamwebhelper.sh" 2>/dev/null || true
-    chmod 0755 "$textmode_root/bin"/lib64/libcatsteamtxtmode.so "$textmode_root/bin"/libx64/libcatsteamtxtmode.so 2>/dev/null || true
+    chmod 0755 "$textmode_root/bin"/lib64/libpupsteamtxtmode.so "$textmode_root/bin"/libx64/libpupsteamtxtmode.so 2>/dev/null || true
 }
 
 repair_all() {
@@ -535,8 +535,8 @@ repair_all() {
     done
     for key in "${failure_keys[@]}"; do
         case "$key" in
-            cat_runtime)
-                repair_cat_runtime || manual_notes+=("Cat runtime build/install failed; inspect the compiler output.")
+            pup_runtime)
+                repair_pup_runtime || manual_notes+=("Pup runtime build/install failed; inspect the compiler output.")
                 break
                 ;;
         esac

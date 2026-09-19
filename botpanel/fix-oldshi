@@ -2,28 +2,28 @@
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-database_root="$script_dir/catbot-database"
+database_root="$script_dir/pupbot-database"
 user_instances_dir="$script_dir/user_instances"
-install_root="${CATHOOK_ROOT:-/opt/cathook}"
+install_root="${PUPHOOK_ROOT:-/opt/puphook}"
 shared_steamapps="/opt/steamapps"
-steamapps_detect_log="${CAT_STEAMAPPS_DETECT_LOG:-/tmp/cat-steamapps-detect.log}"
+steamapps_detect_log="${PUP_STEAMAPPS_DETECT_LOG:-/tmp/pup-steamapps-detect.log}"
 
 usage() {
     cat <<'EOF'
 Usage: ./fix-oldshi
 
 Repairs old botpanel Steam/navmesh path layouts:
-  - preserves any .nav files from old partial Steam paths into /opt/cathook/navmeshes
+  - preserves any .nav files from old partial Steam paths into /opt/puphook/navmeshes
   - replaces broken /opt/steamapps mounts/directories with a symlink to the real host steamapps
   - removes stale generated /opt/steamapps data instead of creating large backups
   - points bot user instance steamapps directories at /opt/steamapps
   - copies preserved navmeshes back into the real TF2 maps directory
 
 Environment:
-  CATHOOK_ROOT=/opt/cathook
-  CAT_STEAMAPPS_PATH=/path/to/steamapps
-  CAT_STEAM_ROOT=/path/to/steam
-  CAT_FIX_OLD_PANEL_FORCE=1     Run even if botpanel/Steam/TF2 is active.
+  PUPHOOK_ROOT=/opt/puphook
+  PUP_STEAMAPPS_PATH=/path/to/steamapps
+  PUP_STEAM_ROOT=/path/to/steam
+  PUP_FIX_OLD_PANEL_FORCE=1     Run even if botpanel/Steam/TF2 is active.
 EOF
 }
 
@@ -89,13 +89,13 @@ same_resolved_path() {
 }
 
 active_bot_processes() {
-    pgrep -f 'catbot-ipc-web-panel-main|firejail .*--name=b[0-9]+|tf_linux64' 2>/dev/null || true
+    pgrep -f 'pupbot-ipc-web-panel-main|firejail .*--name=b[0-9]+|tf_linux64' 2>/dev/null || true
 }
 
 refuse_if_panel_is_active() {
     local active_pids
 
-    if [ "${CAT_FIX_OLD_PANEL_FORCE:-0}" = "1" ]; then
+    if [ "${PUP_FIX_OLD_PANEL_FORCE:-0}" = "1" ]; then
         return
     fi
 
@@ -107,7 +107,7 @@ refuse_if_panel_is_active() {
     echo "Botpanel, Steam, or TF2 appears to be running." >&2
     echo "Stop the panel with ./botpanel/stop before repairing old paths." >&2
     echo "Active pids: $active_pids" >&2
-    echo "Set CAT_FIX_OLD_PANEL_FORCE=1 only if you intentionally want to repair live paths." >&2
+    echo "Set PUP_FIX_OLD_PANEL_FORCE=1 only if you intentionally want to repair live paths." >&2
     return 1
 }
 
@@ -120,8 +120,8 @@ write_steamapps_detect_log() {
         echo "user=$(main_user_name)"
         echo "user_home=$user_home"
         echo "HOME=$HOME"
-        echo "CAT_STEAM_ROOT=${CAT_STEAM_ROOT:-}"
-        echo "CAT_STEAMAPPS_PATH=${CAT_STEAMAPPS_PATH:-}"
+        echo "PUP_STEAM_ROOT=${PUP_STEAM_ROOT:-}"
+        echo "PUP_STEAMAPPS_PATH=${PUP_STEAMAPPS_PATH:-}"
         echo
         echo "Checked paths:"
         for candidate in "$@"; do
@@ -144,12 +144,12 @@ find_host_steamapps() {
     local -a candidates=()
 
     user_home="$(user_home_path)"
-    if [ -n "${CAT_STEAMAPPS_PATH:-}" ]; then
-        candidates+=("$CAT_STEAMAPPS_PATH")
+    if [ -n "${PUP_STEAMAPPS_PATH:-}" ]; then
+        candidates+=("$PUP_STEAMAPPS_PATH")
     fi
 
-    if [ -n "${CAT_STEAM_ROOT:-}" ]; then
-        candidates+=("$CAT_STEAM_ROOT/steamapps")
+    if [ -n "${PUP_STEAM_ROOT:-}" ]; then
+        candidates+=("$PUP_STEAM_ROOT/steamapps")
     fi
 
     candidates+=(
@@ -359,17 +359,17 @@ sync_navmeshes_to_tf2() {
 }
 
 print_summary() {
-    local cathook_navs=0
+    local puphook_navs=0
     local tf2_navs=0
 
     if [ -d "$install_root/navmeshes" ]; then
-        cathook_navs="$(find "$install_root/navmeshes" -maxdepth 1 -type f -name '*.nav' 2>/dev/null | wc -l)"
+        puphook_navs="$(find "$install_root/navmeshes" -maxdepth 1 -type f -name '*.nav' 2>/dev/null | wc -l)"
     fi
     if [ -d "$shared_steamapps/common/Team Fortress 2/tf/maps" ]; then
         tf2_navs="$(find "$shared_steamapps/common/Team Fortress 2/tf/maps" -maxdepth 1 -type f -name '*.nav' 2>/dev/null | wc -l)"
     fi
 
-    log "done: cathook_navmeshes=$cathook_navs tf2_map_navmeshes=$tf2_navs"
+    log "done: puphook_navmeshes=$puphook_navs tf2_map_navmeshes=$tf2_navs"
 }
 
 main() {

@@ -13,6 +13,7 @@ V  o o  V  file: src/games/tf2/sdk/entities/entity.hpp
 #include <string>
 #include <string.h>
 #include <cstring>
+#include <cmath>
 #include <cstdint>
 #include <sys/mman.h>
 #include "core/memory/resolve.hpp"
@@ -22,6 +23,7 @@ V  o o  V  file: src/games/tf2/sdk/entities/entity.hpp
 #include "games/tf2/sdk/interfaces/entity_list.hpp"
 #include "games/tf2/sdk/interfaces/model_info.hpp"
 #include "games/tf2/sdk/netvars.hpp"
+#include "games/tf2/sdk/combat_offsets.hpp"
 
 enum class_id {
   AMMO_OR_HEALTH_PACK = 1,
@@ -154,12 +156,21 @@ public:
     return entity_list->entity_from_handle(this->get_owner_entity_handle());
   }
 
+  static bool origin_usable(const Vec3& origin) {
+    return std::isfinite(origin.x) && std::isfinite(origin.y) && std::isfinite(origin.z);
+  }
+
+  static bool origin_is_world_zero(const Vec3& origin) {
+    return origin.x == 0.0f && origin.y == 0.0f && origin.z == 0.0f;
+  }
+
   Vec3 get_network_origin(void) {
     static tf2_netvars::lazy_offset offset{"DT_BaseEntity", {"m_vecOrigin"}};
-    return offset > 0
-      ? *reinterpret_cast<Vec3*>(reinterpret_cast<std::uintptr_t>(this) +
-                                 static_cast<std::uintptr_t>(offset))
-      : get_abs_origin();
+    if (offset <= 0) {
+      return {};
+    }
+    return *reinterpret_cast<Vec3*>(reinterpret_cast<std::uintptr_t>(this) +
+                                    static_cast<std::uintptr_t>(offset));
   }
 
   void set_network_origin(const Vec3& origin) {
@@ -171,6 +182,10 @@ public:
   }
 
   Vec3 get_origin(void) {
+    const Vec3 network = get_network_origin();
+    if (origin_usable(network) && !origin_is_world_zero(network)) {
+      return network;
+    }
     return get_abs_origin();
   }
 
@@ -223,19 +238,90 @@ public:
       return {};
     }
 
-    void** vtable = *(void***)this;
-    if (vtable == nullptr || vtable[11] == nullptr) {
-      return {};
+    Vec3 abs{};
+    using get_abs_origin_fn = const Vec3& (*)(void*);
+    if (auto* const direct = reinterpret_cast<get_abs_origin_fn>(tf2_combat::get().get_abs_origin_fn)) {
+      abs = direct(this);
+    } else {
+      void** vtable = *(void***)this;
+      const std::size_t slot = tf2_combat::player::get_abs_origin();
+      if (vtable != nullptr && slot != 0 && vtable[slot] != nullptr) {
+        abs = reinterpret_cast<get_abs_origin_fn>(vtable[slot])(this);
+      }
     }
 
-    const Vec3& (*get_abs_origin_fn)(void*) = (const Vec3& (*)(void*))vtable[11];
-    return get_abs_origin_fn(this);
+    const Vec3 network = get_network_origin();
+    if (origin_usable(abs) &&
+        !(origin_is_world_zero(abs) && origin_usable(network) && !origin_is_world_zero(network))) {
+      return abs;
+    }
+    if (origin_usable(network) && !origin_is_world_zero(network)) {
+      return network;
+    }
+    return origin_usable(abs) ? abs : network;
   }
 
   void set_abs_origin(const Vec3& origin) {
+    if (this == nullptr || !origin_usable(origin)) {
+      return;
+    }
+    const Vec3 network = get_network_origin();
+    if (origin_is_world_zero(origin) && origin_usable(network) && !origin_is_world_zero(network)) {
+      return;
+    }
+    using set_abs_origin_fn = void (*)(void*, const Vec3*);
+    if (auto* const direct = reinterpret_cast<set_abs_origin_fn>(tf2_combat::get().set_abs_origin_fn)) {
+      direct(this, &origin);
+      return;
+    }
+    const int offset = tf2_combat::entity::abs_origin();
+    if (offset <= 0) {
+      return;
+    }
+    *reinterpret_cast<Vec3*>(reinterpret_cast<std::uintptr_t>(this) + static_cast<std::uintptr_t>(offset)) =
+      origin;
+  }
+
+  void mark_abs_transform_dirty() {
+    const int offset = tf2_combat::entity::eflags();
+    if (this == nullptr || offset <= 0) {
+      return;
+    }
+    *reinterpret_cast<int*>(reinterpret_cast<std::uintptr_t>(this) + static_cast<std::uintptr_t>(offset)) |=
+      (1 << 11);
+  }
+
+  Vec3 get_abs_angles(void) {
+    if (this == nullptr) {
+      return {};
+    }
+    using get_abs_angles_fn = const Vec3& (*)(void*);
+    if (auto* const direct = reinterpret_cast<get_abs_angles_fn>(tf2_combat::get().get_abs_angles_fn)) {
+      return direct(this);
+    }
     void** vtable = *(void***)this;
-    const Vec3& (*get_abs_origin_fn)(void*) = (const Vec3& (*)(void*))vtable[11];
-    const_cast<Vec3&>(get_abs_origin_fn(this)) = origin;
+    const std::size_t slot = tf2_combat::player::get_abs_angles();
+    if (vtable == nullptr || slot == 0 || vtable[slot] == nullptr) {
+      return {};
+    }
+    return reinterpret_cast<get_abs_angles_fn>(vtable[slot])(this);
+  }
+
+  void set_abs_angles(const Vec3& angles) {
+    if (this == nullptr || !origin_usable(angles)) {
+      return;
+    }
+    using set_abs_angles_fn = void (*)(void*, const Vec3*);
+    if (auto* const direct = reinterpret_cast<set_abs_angles_fn>(tf2_combat::get().set_abs_angles_fn)) {
+      direct(this, &angles);
+      return;
+    }
+    const int offset = tf2_combat::entity::abs_angles();
+    if (offset <= 0) {
+      return;
+    }
+    *reinterpret_cast<Vec3*>(reinterpret_cast<std::uintptr_t>(this) + static_cast<std::uintptr_t>(offset)) =
+      angles;
   }
 
   Vec3 get_render_origin(void) {
@@ -245,6 +331,9 @@ public:
     }
 
     void** vtable = *(void***)renderable;
+    if (vtable == nullptr || vtable[1] == nullptr) {
+      return get_abs_origin();
+    }
     const Vec3& (*get_render_origin_fn)(void*) = (const Vec3& (*)(void*))vtable[1];
     return get_render_origin_fn(renderable);
   }
@@ -254,12 +343,30 @@ public:
     return offset > 0 ? *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(this) + static_cast<uintptr_t>(offset)) : 0;
   }
 
+  bool is_engine_static_prop() {
+    return this != nullptr && get_ref_ehandle().GetSerialNumber() == (1 << 15);
+  }
+
+  bool is_listed_base_entity() {
+    if (this == nullptr || entity_list == nullptr || is_engine_static_prop()) {
+      return false;
+    }
+    const int entry = get_ref_ehandle().GetEntryIndex();
+    if (entry <= 0 || entry >= 8192) {
+      return false;
+    }
+    return entity_list->entity_from_index(static_cast<unsigned int>(entry)) == this;
+  }
+
   void* get_networkable(void) {
-    return this == nullptr ? nullptr : reinterpret_cast<void*>(reinterpret_cast<std::uintptr_t>(this) + 0x10);
+    if (this == nullptr || is_engine_static_prop()) {
+      return nullptr;
+    }
+    return reinterpret_cast<void*>(reinterpret_cast<std::uintptr_t>(this) + 16);
   }
 
   void* get_renderable(void) {
-    return (void*)(this + 0x8);
+    return this == nullptr ? nullptr : reinterpret_cast<void*>(reinterpret_cast<std::uintptr_t>(this) + 8);
   }
 
   bool setup_bones(matrix_3x4* bone_to_world, int max_bones, int bone_mask, float current_time) {
@@ -267,20 +374,18 @@ public:
       return false;
     }
 
-    void* renderable = get_renderable();
-    if (renderable == nullptr) {
-      return false;
-    }
-
-    void** vtable = *reinterpret_cast<void***>(renderable);
-    constexpr std::size_t setup_bones_index = 16;
-    if (vtable == nullptr || vtable[setup_bones_index] == nullptr) {
-      return false;
-    }
-
     using setup_bones_fn = bool (*)(void*, matrix_3x4*, int, int, float);
-    auto setup_bones_call = reinterpret_cast<setup_bones_fn>(vtable[setup_bones_index]);
-    return setup_bones_call(renderable, bone_to_world, max_bones, bone_mask, current_time);
+    if (auto* const direct = reinterpret_cast<setup_bones_fn>(tf2_combat::get().setup_bones_fn)) {
+      return direct(this, bone_to_world, max_bones, bone_mask, current_time);
+    }
+
+    void** vtable = *reinterpret_cast<void***>(this);
+    const std::size_t slot = tf2_combat::player::setup_bones();
+    if (vtable == nullptr || slot == 0 || vtable[slot] == nullptr) {
+      return false;
+    }
+    return reinterpret_cast<setup_bones_fn>(vtable[slot])(
+      this, bone_to_world, max_bones, bone_mask, current_time);
   }
 
   void* get_client_unknown() {
@@ -293,57 +398,54 @@ public:
     return get_client_unknown_fn(networkable);
   }
 
-  void* get_collideable() {
-    void* unknown = get_client_unknown();
-    if (!unknown) return nullptr;
-    void** vtable = *(void***)unknown;
-    if (vtable == nullptr || vtable[4] == nullptr) return nullptr;
+  int collision_property_offset() const {
+    static tf2_netvars::lazy_offset offset{"DT_BaseEntity", {"m_Collision"}};
+    return offset;
+  }
 
-    void* (*get_collideable_fn)(void*) = (void* (*)(void*))vtable[4];
-    return get_collideable_fn(unknown);
+  int collision_mins_offset() const {
+    static tf2_netvars::lazy_offset offset{"DT_BaseEntity", {"m_Collision", "m_vecMins"}};
+    return offset;
+  }
+
+  int collision_maxs_offset() const {
+    static tf2_netvars::lazy_offset offset{"DT_BaseEntity", {"m_Collision", "m_vecMaxs"}};
+    return offset;
+  }
+
+  void* get_collideable() {
+    const int offset = collision_property_offset();
+    return offset > 0
+      ? reinterpret_cast<void*>(reinterpret_cast<std::uintptr_t>(this) + static_cast<std::uintptr_t>(offset))
+      : nullptr;
+  }
+
+  Vec3& collideable_mins() {
+    const int offset = collision_mins_offset();
+    static Vec3 fallback{};
+    return offset > 0
+      ? *reinterpret_cast<Vec3*>(reinterpret_cast<std::uintptr_t>(this) + static_cast<std::uintptr_t>(offset))
+      : fallback;
+  }
+
+  Vec3& collideable_maxs() {
+    const int offset = collision_maxs_offset();
+    static Vec3 fallback{};
+    return offset > 0
+      ? *reinterpret_cast<Vec3*>(reinterpret_cast<std::uintptr_t>(this) + static_cast<std::uintptr_t>(offset))
+      : fallback;
   }
 
   Vec3 get_collideable_mins() {
-    void* collideable = get_collideable();
-    if (!collideable) return Vec3{0, 0, 0};
-    void** vtable = *(void***)collideable;
-    if (vtable == nullptr || vtable[3] == nullptr) return Vec3{0, 0, 0};
-
-    Vec3& (*get_obb_mins_fn)(void*) = (Vec3& (*)(void*))vtable[3];
-    return get_obb_mins_fn(collideable);
+    return collideable_mins();
   }
 
   Vec3 get_collideable_maxs() {
-    void* collideable = get_collideable();
-    if (!collideable) return Vec3{0, 0, 0};
-    void** vtable = *(void***)collideable;
-    if (vtable == nullptr || vtable[4] == nullptr) return Vec3{0, 0, 0};
-
-    Vec3& (*get_obb_maxs_fn)(void*) = (Vec3& (*)(void*))vtable[4];
-    return get_obb_maxs_fn(collideable);
+    return collideable_maxs();
   }
 
   Vec3 get_collision_origin() {
-    void* collideable = get_collideable();
-    if (!collideable) return get_abs_origin();
-    void** vtable = *(void***)collideable;
-    if (vtable == nullptr || vtable[0] == nullptr || vtable[10] == nullptr) {
-      return get_abs_origin();
-    }
-
-    void* (*get_entity_handle_fn)(void*) = (void* (*)(void*))vtable[0];
-    void* outer = get_entity_handle_fn(collideable);
-    if (outer == nullptr) {
-      return get_abs_origin();
-    }
-
-    void** outer_vtable = *reinterpret_cast<void***>(outer);
-    if (outer_vtable == nullptr || outer_vtable[11] == nullptr) {
-      return get_abs_origin();
-    }
-
-    const Vec3& (*get_collision_origin_fn)(void*) = (const Vec3& (*)(void*))vtable[10];
-    return get_collision_origin_fn(collideable);
+    return get_origin();
   }
 
   enum tf_team get_team(void)  {
@@ -587,7 +689,7 @@ public:
 
   datamap_t* get_pred_desc_map() {
     void** vtable = *reinterpret_cast<void***>(this);
-    if (vtable == nullptr) {
+    if (vtable == nullptr || vtable[18] == nullptr) {
       return nullptr;
     }
 
@@ -595,7 +697,7 @@ public:
       if (address == nullptr) {
         return false;
       }
-      const int protection = cathook::core::memory::protection_at(address);
+      const int protection = puphook::core::memory::protection_at(address);
       if (protection < 0 || (protection & PROT_READ) == 0) {
         return false;
       }
@@ -603,11 +705,12 @@ public:
         return true;
       }
       const auto* start = static_cast<const std::uint8_t*>(address);
-      return cathook::core::memory::protection_at(start + bytes - 1) >= 0;
+      return puphook::core::memory::protection_at(start + bytes - 1) >= 0;
     };
 
-    const auto looks_like_datamap = [&](const datamap_t* map) -> bool {
-      if (!readable(map, sizeof(datamap_t))) {
+    const auto looks_like_pred_map = [&](const datamap_t* map) -> bool {
+      if (!readable(map, sizeof(datamap_t)) || map->dataDesc == nullptr ||
+          !readable(map->dataDesc, 16)) {
         return false;
       }
       if (map->dataNumFields <= 0 || map->dataNumFields > 1024) {
@@ -624,74 +727,12 @@ public:
       while (length < 64 && name[length] != '\0') {
         ++length;
       }
-      if (length < 3 || length >= 64) {
-        return false;
-      }
-      return std::strstr(name, "Player") != nullptr || std::strstr(name, "Entity") != nullptr ||
-        std::strstr(name, "Animating") != nullptr;
+      return length >= 3 && length < 64 && std::strstr(name, "Player") != nullptr;
     };
 
-    const auto decode_map = [&](void* function) -> datamap_t* {
-      if (!readable(function, 16)) {
-        return nullptr;
-      }
-      auto* code = static_cast<std::uint8_t*>(function);
-      if (code[0] == 0xF3 && code[1] == 0x0F && code[2] == 0x1E && code[3] == 0xFA) {
-        code += 4;
-      }
-      if (code[0] == 0x55) {
-        code += (code[1] == 0x48 && code[2] == 0x89 && code[3] == 0xE5) ? 4 : 1;
-      }
-      if (code[0] == 0x48 && code[1] == 0x8D && code[2] == 0x05) {
-        void* address = cathook::core::memory::resolve_rip_relative(code, 3, 7);
-        auto* map = static_cast<datamap_t*>(address);
-        return looks_like_datamap(map) ? map : nullptr;
-      }
-      if (code[0] == 0x48 && code[1] == 0x8B && code[2] == 0x05) {
-        void** slot = static_cast<void**>(cathook::core::memory::resolve_rip_relative(code, 3, 7));
-        if (!readable(slot, sizeof(void*))) {
-          return nullptr;
-        }
-        auto* map = static_cast<datamap_t*>(*slot);
-        return looks_like_datamap(map) ? map : nullptr;
-      }
-      return nullptr;
-    };
-
-    static int cached_index = -1;
-    if (cached_index >= 0 && vtable[cached_index] != nullptr) {
-      if (datamap_t* map = decode_map(vtable[cached_index])) {
-        return map;
-      }
-    }
-
-    int best_index = -1;
-    datamap_t* best_map = nullptr;
-    int best_score = -1;
-    for (int index = 12; index <= 22; ++index) {
-      if (vtable[index] == nullptr) {
-        continue;
-      }
-      datamap_t* map = decode_map(vtable[index]);
-      if (map == nullptr || map->dataClassName == nullptr) {
-        continue;
-      }
-      int score = index;
-      if (std::strstr(map->dataClassName, "Player") != nullptr) {
-        score += 100;
-      } else if (std::strstr(map->dataClassName, "Animating") != nullptr) {
-        score += 10;
-      }
-      if (score >= best_score) {
-        best_score = score;
-        best_index = index;
-        best_map = map;
-      }
-    }
-    if (best_map != nullptr) {
-      cached_index = best_index;
-    }
-    return best_map;
+    using get_map_fn = datamap_t* (*)(void*);
+    datamap_t* map = reinterpret_cast<get_map_fn>(vtable[18])(this);
+    return looks_like_pred_map(map) ? map : nullptr;
   }
 
 };

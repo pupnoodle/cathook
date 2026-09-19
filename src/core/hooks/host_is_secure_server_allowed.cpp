@@ -41,13 +41,13 @@ bool* get_allow_secure_servers_flag()
     return nullptr;
   }
 
-  allow_secure_servers = static_cast<bool*>(cathook::core::memory::resolve_lea_rip(match));
+  allow_secure_servers = static_cast<bool*>(puphook::core::memory::resolve_lea_rip(match));
   return allow_secure_servers;
 }
 
 bool host_is_secure_server_allowed_hook()
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (config.misc.exploits.vac_bypass)
   {
     if (auto* allow_secure_servers = get_allow_secure_servers_flag(); allow_secure_servers != nullptr)

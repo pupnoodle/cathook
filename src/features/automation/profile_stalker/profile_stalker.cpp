@@ -183,8 +183,8 @@ std::filesystem::path resolve_stalk_path(const std::string& filename)
   }
 
   const std::array<std::filesystem::path, 4> candidates{
-    cathook::core::root_directory() / requested_path,
-    cathook::core::config_directory() / requested_path,
+    puphook::core::root_directory() / requested_path,
+    puphook::core::config_directory() / requested_path,
     std::filesystem::current_path(error) / requested_path,
     std::filesystem::current_path(error) / "config_data" / requested_path
   };

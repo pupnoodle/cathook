@@ -35,7 +35,7 @@ source_os_release() {
 }
 
 xpra_repo_file() {
-    case "${CAT_XPRA_REPO_CHANNEL:-stable}" in
+    case "${PUP_XPRA_REPO_CHANNEL:-stable}" in
         stable)
             printf '%s\n' "xpra.sources"
             ;;
@@ -46,7 +46,7 @@ xpra_repo_file() {
             printf '%s\n' "xpra-beta.sources"
             ;;
         *)
-            echo "Unsupported CAT_XPRA_REPO_CHANNEL=${CAT_XPRA_REPO_CHANNEL}. Use stable, lts, or beta." >&2
+            echo "Unsupported PUP_XPRA_REPO_CHANNEL=${PUP_XPRA_REPO_CHANNEL}. Use stable, lts, or beta." >&2
             return 1
             ;;
     esac
@@ -58,7 +58,7 @@ configure_xpra_repo() {
     local repo_file=""
     local repo_url=""
 
-    if [ "${CAT_INSTALL_XPRA_REPO:-1}" = "0" ]; then
+    if [ "${PUP_INSTALL_XPRA_REPO:-1}" = "0" ]; then
         return 1
     fi
 

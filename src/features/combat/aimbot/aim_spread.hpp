@@ -5,9 +5,12 @@
 #include <cmath>
 #include <climits>
 #include <cstdint>
+#include <limits>
 #include <vector>
 #include "aim_utils.hpp"
 #include "hitscan_aim.hpp"
+#include "projectile_helpers.hpp"
+#include "games/tf2/sdk/combat_offsets.hpp"
 #include "games/tf2/sdk/interfaces/convar_system.hpp"
 #include "seed_prediction.hpp"
 
@@ -38,7 +41,11 @@ inline int hitscan_weapon_data_bullets(Weapon* weapon) {
     return 1;
   }
 
-  const int bullets = *reinterpret_cast<const int*>(data + Weapon::weapon_data_bullets_per_shot_offset);
+  const int bullets_offset = Weapon::weapon_data_bullets_per_shot_offset();
+  if (bullets_offset < 0) {
+    return 1;
+  }
+  const int bullets = *reinterpret_cast<const int*>(data + bullets_offset);
   return bullets > 0 ? bullets : 1;
 }
 
@@ -47,14 +54,17 @@ inline int hitscan_weapon_damage_type(Weapon* weapon) {
     return 0;
   }
 
-  void** vtable = *reinterpret_cast<void***>(weapon);
-  constexpr std::size_t get_damage_type_index = 452;
-  if (vtable == nullptr || vtable[get_damage_type_index] == nullptr) {
-    return 0;
+  using get_damage_type_fn = int (*)(void*);
+  if (auto* const direct = reinterpret_cast<get_damage_type_fn>(tf2_combat::get().get_damage_type_fn)) {
+    return direct(weapon);
   }
 
-  using get_damage_type_fn = int (*)(void*);
-  return reinterpret_cast<get_damage_type_fn>(vtable[get_damage_type_index])(weapon);
+  void** vtable = *reinterpret_cast<void***>(weapon);
+  const std::size_t slot = tf2_combat::weapon::get_damage_type();
+  if (vtable == nullptr || slot == 0 || vtable[slot] == nullptr) {
+    return 0;
+  }
+  return reinterpret_cast<get_damage_type_fn>(vtable[slot])(weapon);
 }
 
 inline bool fixed_weapon_spread_active(Weapon* weapon, int pellet_count) {
@@ -212,6 +222,99 @@ inline Vec3 compensate_hitscan_spread(Player* localplayer, const Vec3& desired_c
   return aimbot_clamp_angles(hitscan_aim_command_angles(localplayer, adjusted_bullet_angles));
 }
 
+inline bool& compensated_this_command = nospread::compensated_this_command;
+
+inline void begin_command() {
+  nospread::begin_command();
+}
+
+inline bool apply_command_projectile_nospread(Player* localplayer, Weapon* weapon, user_cmd* user_cmd) {
+  projectile_aim::detail::projectile_info info{};
+  if (!projectile_aim::detail::get_info(localplayer, weapon, info)) {
+    return false;
+  }
+  user_cmd->view_angles = projectile_aim::detail::compensate_projectile_spread(
+    localplayer, weapon, user_cmd, info, user_cmd->view_angles);
+  nospread::compensated_this_command = true;
+  return true;
+}
+
+inline bool apply_command_nospread(Player* localplayer, Weapon* weapon, user_cmd* user_cmd) {
+  if (nospread::compensated_this_command ||
+      localplayer == nullptr ||
+      weapon == nullptr ||
+      user_cmd == nullptr ||
+      (user_cmd->buttons & IN_ATTACK) == 0 ||
+      !config.aimbot.spread_compensation ||
+      aimbot_is_melee_weapon(weapon)) {
+    return false;
+  }
+  if (aimbot_is_projectile_weapon(weapon)) {
+    return apply_command_projectile_nospread(localplayer, weapon, user_cmd);
+  }
+
+  const float spread = weapon_hitscan_spread(weapon);
+  if (spread <= 0.00001f) {
+    return false;
+  }
+  if (seed_pred::custom_random_seed() && !seed_pred::synced) {
+    return false;
+  }
+
+  const int pellet_count = std::max(1, weapon->get_bullets_per_shot());
+  if (hitscan_perfect_first_shot(weapon, pellet_count) &&
+      hitscan_first_shot_attrib_scale(weapon) == 0.0f) {
+    return false;
+  }
+
+  const bool use_fixed_spread = fixed_weapon_spread_active(weapon, pellet_count);
+  Vec3 average_direction{};
+  std::vector<Vec3> offsets(static_cast<std::size_t>(pellet_count));
+  Vec3 base_forward{};
+  Vec3 base_right{};
+  Vec3 base_up{};
+  angle_vectors(hitscan_aim_bullet_angles(localplayer, user_cmd->view_angles),
+    &base_forward, &base_right, &base_up);
+
+  for (int pellet_index = 0; pellet_index < pellet_count; ++pellet_index) {
+    if (!hitscan_spread_offset(user_cmd, weapon, pellet_index, pellet_count, spread, use_fixed_spread,
+          &offsets[static_cast<std::size_t>(pellet_index)])) {
+      return false;
+    }
+    const Vec3 direction = aimbot_normalize_vector(
+      base_forward + base_right * offsets[static_cast<std::size_t>(pellet_index)].x +
+      base_up * offsets[static_cast<std::size_t>(pellet_index)].y);
+    if (!aimbot_vec3_is_finite(direction)) {
+      return false;
+    }
+    average_direction += direction;
+  }
+
+  average_direction = aimbot_normalize_vector(average_direction);
+  if (!aimbot_vec3_is_finite(average_direction)) {
+    return false;
+  }
+
+  int best_index = 0;
+  float best_distance = std::numeric_limits<float>::max();
+  for (int pellet_index = 0; pellet_index < pellet_count; ++pellet_index) {
+    const Vec3 direction = aimbot_normalize_vector(
+      base_forward + base_right * offsets[static_cast<std::size_t>(pellet_index)].x +
+      base_up * offsets[static_cast<std::size_t>(pellet_index)].y);
+    const Vec3 delta = direction - average_direction;
+    const float distance = (delta.x * delta.x) + (delta.y * delta.y) + (delta.z * delta.z);
+    if (distance < best_distance) {
+      best_distance = distance;
+      best_index = pellet_index;
+    }
+  }
+
+  user_cmd->view_angles = compensate_hitscan_spread(
+    localplayer, user_cmd->view_angles, offsets[static_cast<std::size_t>(best_index)]);
+  compensated_this_command = true;
+  return true;
+}
+
 struct hitscan_fire_solution {
   bool ready = false;
   bool spread_compensated = false;
@@ -241,9 +344,6 @@ inline hitscan_fire_solution prepare_hitscan_fire_solution(Player* localplayer,
   if (localplayer == nullptr || weapon == nullptr || user_cmd == nullptr || candidate.entity == nullptr) {
     return solution;
   }
-  if (candidate.player != nullptr && !candidate.backtrack && !candidate.pose_timing_valid) {
-    return solution;
-  }
 
   const float spread = weapon_hitscan_spread(weapon);
   const bool want_spread = config.aimbot.spread_compensation && spread > 0.00001f;
@@ -261,7 +361,6 @@ inline hitscan_fire_solution prepare_hitscan_fire_solution(Player* localplayer,
 
   if (want_spread && !seed_ready && !deterministic_first) {
     solution.seed_missing = true;
-    return solution;
   }
 
   const bool use_spread = want_spread && (seed_ready || deterministic_first);
@@ -351,7 +450,7 @@ inline hitscan_fire_solution prepare_hitscan_fire_solution(Player* localplayer,
     }
 
     solution.ready = true;
-    solution.command_angles = trace_angles;
+    solution.command_angles = command_view_angles;
     solution.spread_compensated = compensate;
     solution.pellet_index = compensate ? pellet_index : (use_spread ? 0 : -1);
     solution.trace_hitbox = trace_result.hitbox;

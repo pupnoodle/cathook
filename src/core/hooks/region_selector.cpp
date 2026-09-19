@@ -18,7 +18,7 @@ int steam_networking_utils_get_ping_to_data_center_hook(
   const steam_networking_pop_id pop_id,
   steam_networking_pop_id* via_relay_pop)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (steam_networking_utils_get_ping_to_data_center_original == nullptr)
   {
     return -1;
@@ -30,7 +30,7 @@ int steam_networking_utils_get_ping_to_data_center_hook(
 
 int steam_networking_utils_get_direct_ping_to_pop_hook(void* self, const steam_networking_pop_id pop_id)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (steam_networking_utils_get_direct_ping_to_pop_original == nullptr)
   {
     return -1;
@@ -43,12 +43,12 @@ int steam_networking_utils_get_direct_ping_to_pop_hook(void* self, const steam_n
 bool region_selector_request_queue_for_match_available()
 {
   return region_selector_request_queue_for_match_original != nullptr &&
-         !cathook::core::is_detach_pending();
+         !puphook::core::is_detach_pending();
 }
 
 void request_queue_for_match_with_region_selector(void* self, const unsigned int match_group)
 {
-  if (cathook::core::is_detach_pending())
+  if (puphook::core::is_detach_pending())
   {
     return;
   }
@@ -58,8 +58,8 @@ void request_queue_for_match_with_region_selector(void* self, const unsigned int
 
 void region_selector_request_queue_for_match_hook(void* self, const unsigned int match_group)
 {
-  CATHOOK_HOOK_GUARD();
-  if (cathook::core::is_detach_pending())
+  PUPHOOK_HOOK_GUARD();
+  if (puphook::core::is_detach_pending())
   {
     return;
   }

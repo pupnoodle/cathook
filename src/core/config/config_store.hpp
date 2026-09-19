@@ -20,7 +20,7 @@ V  o o  V  file: src/core/config/config_store.hpp
 #include <unordered_map>
 #include <vector>
 
-namespace cathook::core
+namespace puphook::core
 {
 
 class config_store

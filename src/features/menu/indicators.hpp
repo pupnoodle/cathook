@@ -23,7 +23,7 @@
 #include <utility>
 #include <vector>
 
-namespace cat_indicator
+namespace pup_indicator
 {
 
 enum class section_kind
@@ -62,10 +62,10 @@ inline bool has_indicator(const uint32_t flag)
   return (config.visuals.indicators.enabled_mask & flag) != 0;
 }
 
-inline auto collect_keybind_rows() -> std::vector<cat_bind::indicator_row>
+inline auto collect_keybind_rows() -> std::vector<pup_bind::indicator_row>
 {
 
-  return cat_bind::collect_indicator_rows();
+  return pup_bind::collect_indicator_rows();
 }
 
 inline auto collect_spectator_rows(Player** target_player_out) -> std::vector<spectator_list::spectator_entry>
@@ -260,7 +260,7 @@ inline auto build_aimbot_debug_rows() -> owned_indicator_rows
 
 struct keybind_panel_rows final
 {
-  std::vector<cat_bind::indicator_row> source{};
+  std::vector<pup_bind::indicator_row> source{};
   std::vector<mono::indicator_row> rows{};
 };
 
@@ -269,7 +269,7 @@ inline auto build_keybind_rows() -> keybind_panel_rows
   keybind_panel_rows result{};
   result.source = collect_keybind_rows();
   result.rows.reserve(result.source.size());
-  for (const cat_bind::indicator_row& row : result.source) {
+  for (const pup_bind::indicator_row& row : result.source) {
     result.rows.push_back({ row.label, row.key, row.state, row.active });
   }
   return result;
@@ -477,7 +477,8 @@ inline void draw_nospread_indicator()
     return;
   }
 
-  const bool ready = !weapon->is_melee() && weapon->get_hitscan_spread() > 0.00001f;
+  const bool ready = !weapon->is_melee() &&
+    (aimbot_is_projectile_weapon(weapon) || weapon->get_hitscan_spread() > 0.00001f);
   const char* status = !ready ? "NONE" : seed_pred::status_text();
   const float progress = !ready ? 0.0f : seed_pred::status_progress();
   const bool synced = ready && (std::strcmp(status, "SYNC") == 0 || std::strcmp(status, "MD5") == 0);
@@ -492,7 +493,7 @@ inline void draw_nospread_indicator()
 inline void draw_spectator_indicator()
 {
 
-  if (ImGui::IsPopupOpen("bind_popup_context") || cat_bind::popup_open_requested()) return;
+  if (ImGui::IsPopupOpen("bind_popup_context") || pup_bind::popup_open_requested()) return;
 
   Player* target_player = nullptr;
   const std::vector<spectator_list::spectator_entry> spectators = collect_spectator_rows(&target_player);
@@ -579,7 +580,7 @@ inline void draw_spectator_indicator()
 
 static void draw_game_indicators()
 {
-  using namespace cat_indicator;
+  using namespace pup_indicator;
   if (config.misc.automation.stalker_enabled && ImGui::GetCurrentContext() != nullptr) {
     const int tracked = automation::profile_stalker::status_count();
     if (tracked > 0) {
@@ -603,7 +604,7 @@ static void draw_game_indicators()
         "presence",
         rows,
         { config.misc.automation.stalker_overlay_x, config.misc.automation.stalker_overlay_y },
-        cat_menu::font_regular(),
+        pup_menu::font_regular(),
         menu_focused);
       config.misc.automation.stalker_overlay_x = position.x;
       config.misc.automation.stalker_overlay_y = position.y;
@@ -618,11 +619,11 @@ static void draw_game_indicators()
       keybind_panel_rows panel = build_keybind_rows();
       mono::indicator_row_callback on_row = [source = std::move(panel.source)](const size_t index, const mono::indicator_row&) {
         if (index < source.size() && !source[index].target_key.empty()) {
-          cat_bind::request_popup(source[index].target_key, source[index].popup_type);
+          pup_bind::request_popup(source[index].target_key, source[index].popup_type);
         }
       };
       const ImVec2 position = mono::indicator_panel(
-        section_id(section.kind), config.misc.menu.bind_window_title ? "keybinds" : "", panel.rows, section.position, cat_menu::font_regular(), menu_focused,
+        section_id(section.kind), config.misc.menu.bind_window_title ? "keybinds" : "", panel.rows, section.position, pup_menu::font_regular(), menu_focused,
         menu_focused ? std::move(on_row) : mono::indicator_row_callback{});
       if (refs.x != nullptr && refs.y != nullptr) { *refs.x = position.x; *refs.y = position.y; }
       continue;
@@ -646,7 +647,7 @@ static void draw_game_indicators()
     }
 
     owned_indicator_rows panel = build_aimbot_debug_rows();
-    const ImVec2 position = mono::indicator_panel(section_id(section.kind), "aimbot debug", panel.rows, section.position, cat_menu::font_regular(), menu_focused);
+    const ImVec2 position = mono::indicator_panel(section_id(section.kind), "aimbot debug", panel.rows, section.position, pup_menu::font_regular(), menu_focused);
     if (refs.x != nullptr && refs.y != nullptr) { *refs.x = position.x; *refs.y = position.y; }
   }
 }

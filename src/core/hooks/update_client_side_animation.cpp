@@ -16,8 +16,8 @@ V  o o  V  file: src/core/hooks/update_client_side_animation.cpp
 void (*update_client_side_animation_original)(void* me) = nullptr;
 
 void update_client_side_animation_hook(void* me) {
-  CATHOOK_HOOK_GUARD();
-  if (cathook::core::is_detach_pending() ||
+  PUPHOOK_HOOK_GUARD();
+  if (puphook::core::is_detach_pending() ||
       aimbot_anim_detail::manual_update_active ||
       !aimbot_suppress_engine_anim_update(static_cast<Player*>(me))) {
     if (update_client_side_animation_original != nullptr) {

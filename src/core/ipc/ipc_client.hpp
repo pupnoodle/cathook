@@ -9,15 +9,15 @@ V  o o  V  file: src/core/ipc/ipc_client.hpp
   || (___\====
 */
 
-#ifndef CAT_IPC_CLIENT_HPP
-#define CAT_IPC_CLIENT_HPP
+#ifndef PUP_IPC_CLIENT_HPP
+#define PUP_IPC_CLIENT_HPP
 
 #include <cstdint>
 #include <vector>
 
 class GameEvent;
 
-namespace cat_ipc::client
+namespace pup_ipc::client
 {
 
 void set_enabled(bool enabled);

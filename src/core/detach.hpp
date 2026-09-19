@@ -14,7 +14,7 @@ V  o o  V  file: src/core/detach.hpp
 #include <atomic>
 #include <cstdint>
 
-namespace cathook::core
+namespace puphook::core
 {
 
 inline std::atomic_bool detach_requested = false;
@@ -42,7 +42,7 @@ struct hook_call_guard
   }
 };
 
-#define CATHOOK_HOOK_GUARD() ::cathook::core::hook_call_guard cathook_hook_guard{}
+#define PUPHOOK_HOOK_GUARD() ::puphook::core::hook_call_guard puphook_hook_guard{}
 
 inline void request_detach()
 {

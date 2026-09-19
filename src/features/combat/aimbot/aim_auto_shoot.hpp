@@ -21,8 +21,20 @@ inline bool weapon_has_primary_ammo(Weapon* weapon) {
   if (aimbot_is_projectile_weapon(weapon)) {
     return false;
   }
+  if (weapon->is_melee()) {
+    return true;
+  }
 
-  return weapon->is_melee() || weapon->get_clip1() != 0;
+  const int clip = weapon->get_clip1();
+  if (clip > 0) {
+    return true;
+  }
+  if (clip != -1) {
+    return false;
+  }
+
+  Player* player = entity_list != nullptr ? entity_list->get_localplayer() : nullptr;
+  return player != nullptr && player->get_ammo_count(weapon->get_primary_ammo_type()) > 0;
 }
 
 inline bool weapon_has_release_shot_ready(Weapon* weapon, bool hitscan_solution) {

@@ -66,7 +66,7 @@ read_packet_state g_read_packets_state{};
 std::int64_t g_read_packets_result = 0;
 bool g_has_read_packets_state = false;
 constexpr int signon_state_full = 6;
-#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
+#if defined(PUPHOOK_TEXTMODE) && PUPHOOK_TEXTMODE
 
 constexpr bool textmode_build = true;
 #else
@@ -118,7 +118,7 @@ void run_network_fix_before_move(bool final_tick)
 
 std::int64_t cl_read_packets_hook(char final_tick)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (should_run_network_fix() && g_has_read_packets_state)
   {
     g_read_packets_state.restore();

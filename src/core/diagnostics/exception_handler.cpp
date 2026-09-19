@@ -20,7 +20,7 @@ V  o o  V  file: src/core/diagnostics/exception_handler.cpp
 #include <ucontext.h>
 #include <unistd.h>
 
-namespace cathook::core
+namespace puphook::core
 {
 
 namespace
@@ -254,7 +254,7 @@ void exception_handler::install(const std::filesystem::path& log_file_path)
     std::filesystem::create_directories(log_file_path.parent_path(), error);
 
     s_log_file_path = log_file_path.string();
-    s_fallback_log_file_path = "/tmp/cathook-exception.log";
+    s_fallback_log_file_path = "/tmp/puphook-exception.log";
     s_log_fd = -1;
     s_in_handler = 0;
     open_exception_log();

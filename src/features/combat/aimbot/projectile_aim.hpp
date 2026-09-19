@@ -89,58 +89,6 @@ struct point_solution {
   Vec3 launch_angles{};
 };
 
-inline Vec3& entity_obb_mins(Entity* entity) {
-  void* collideable = entity->get_collideable();
-  void** vtable = *(void***)collideable;
-  Vec3& (*obb_mins_fn)(void*) = (Vec3 & (*)(void*))vtable[3];
-  return obb_mins_fn(collideable);
-}
-
-inline Vec3& entity_obb_maxs(Entity* entity) {
-  void* collideable = entity->get_collideable();
-  void** vtable = *(void***)collideable;
-  Vec3& (*obb_maxs_fn)(void*) = (Vec3 & (*)(void*))vtable[4];
-  return obb_maxs_fn(collideable);
-}
-
-class target_bounds_guard {
-public:
-  target_bounds_guard(Entity* entity, const Vec3& predicted_origin)
-    : entity_(entity),
-      mins_(entity != nullptr ? entity->get_collideable_mins() : Vec3{}),
-      maxs_(entity != nullptr ? entity->get_collideable_maxs() : Vec3{}),
-      origin_(entity != nullptr ? entity->get_abs_origin() : Vec3{}) {
-    if (entity_ == nullptr || entity_->get_collideable() == nullptr) {
-      return;
-    }
-    Vec3& mins = entity_obb_mins(entity_);
-    Vec3& maxs = entity_obb_maxs(entity_);
-    mins = {std::clamp(mins.x, -24.0f, 0.0f), std::clamp(mins.y, -24.0f, 0.0f), mins.z};
-    maxs = {std::clamp(maxs.x, 0.0f, 24.0f), std::clamp(maxs.y, 0.0f, 24.0f), maxs.z};
-    entity_->set_abs_origin(predicted_origin);
-    active_ = true;
-  }
-
-  ~target_bounds_guard() {
-    if (!active_) {
-      return;
-    }
-    entity_obb_mins(entity_) = mins_;
-    entity_obb_maxs(entity_) = maxs_;
-    entity_->set_abs_origin(origin_);
-  }
-
-  target_bounds_guard(const target_bounds_guard&) = delete;
-  target_bounds_guard& operator=(const target_bounds_guard&) = delete;
-
-private:
-  Entity* entity_ = nullptr;
-  Vec3 mins_{};
-  Vec3 maxs_{};
-  Vec3 origin_{};
-  bool active_ = false;
-};
-
 inline Vec3 path_origin(const movement_path& path, const target_seed& seed, float seconds) {
   const std::vector<Vec3>& origins = path.simulation.path;
   if (!origins.empty()) {
@@ -231,6 +179,32 @@ inline float aabb_distance(const Vec3& point, const Vec3& mins, const Vec3& maxs
   return distance_3d(point, nearest);
 }
 
+inline bool hull_segment_hits_bounds(const Vec3& start, const Vec3& end, const Vec3& mins,
+  const Vec3& maxs, const Vec3& hull, float world_fraction, float* enter_out = nullptr) {
+  const Vec3 expanded_mins{mins.x - hull.x, mins.y - hull.y, mins.z - hull.z};
+  const Vec3 expanded_maxs{maxs.x + hull.x, maxs.y + hull.y, maxs.z + hull.z};
+  float enter = 1.0f;
+  if (!aimbot_segment_aabb_enter_fraction(start, end, expanded_mins, expanded_maxs, &enter)) {
+    return false;
+  }
+  if (enter_out != nullptr) {
+    *enter_out = enter;
+  }
+  return enter <= std::clamp(world_fraction, 0.0f, 1.0f) + 0.02f;
+}
+
+inline bool world_hit_at_target_support(const trace_t& segment, const Vec3& mins, const Vec3& maxs,
+  const Vec3& hull) {
+  if (!segment.start_solid && !segment.all_solid && segment.fraction >= 0.999f) {
+    return false;
+  }
+  if (segment.plane.normal.z < 0.7f) {
+    return false;
+  }
+  const float pad = std::max({std::fabs(hull.x), std::fabs(hull.y), std::fabs(hull.z), 4.0f}) * 2.0f;
+  return std::fabs(segment.endpos.z - mins.z) <= pad && aabb_distance(segment.endpos, mins, maxs) <= pad;
+}
+
 inline Vec3 closest_on_aabb(const Vec3& point, const Vec3& mins, const Vec3& maxs) {
   return {
     std::clamp(point.x, mins.x, maxs.x),
@@ -307,8 +281,8 @@ inline bool validate_shot(Player* local, const projectile_info& info, const shot
   }
 
   int kind = test.kind;
-  const bool direct = kind == 0;
-  Entity* ignored_target = direct ? nullptr : test.target;
+  const float pad = std::max({info.hull.x, info.hull.y, info.hull.z, 2.0f});
+  Entity* ignored_target = test.target;
 
   projsim::params params{};
   params.origin = test.launch;
@@ -324,20 +298,15 @@ inline bool validate_shot(Player* local, const projectile_info& info, const shot
   projsim::simulation simulation{};
   simulation.reset(params);
 
-  const target_bounds_guard bounds_guard(test.target, test.predicted_origin);
-
-  if (direct && info.gravity_mod <= 0.001f) {
+  if (kind == 0 && info.gravity_mod <= 0.001f) {
     trace_t blocked{};
-    if (!trace_hull_segment(local, info, nullptr, test.launch, test.aim_point, blocked)) {
+    if (!trace_hull_segment(local, info, ignored_target, test.launch, test.aim_point, blocked)) {
       return false;
     }
     const bool blocked_hit =
       blocked.start_solid || blocked.all_solid || blocked.fraction < 0.999f;
-    Entity* hit_entity = static_cast<Entity*>(blocked.entity);
-    const bool target_hit = hit_entity == test.target ||
-      (hit_entity != nullptr && test.target != nullptr &&
-       hit_entity->get_ref_handle() == test.target->get_ref_handle());
-    if (blocked_hit && !target_hit) {
+    if (blocked_hit &&
+        aabb_distance(blocked.endpos, test.state.mins, test.state.maxs) > pad) {
       return false;
     }
   }
@@ -360,29 +329,41 @@ inline bool validate_shot(Player* local, const projectile_info& info, const shot
     }
 
     trace_t segment{};
-    if (!trace_hull_segment(local, info, ignored_target, traced, current, segment)) {
+    const Vec3 previous = traced;
+    if (!trace_hull_segment(local, info, ignored_target, previous, current, segment)) {
       return false;
     }
     simulation.last_trace = segment;
     traced = current;
 
     const bool solid_hit = segment.start_solid || segment.all_solid || segment.fraction < 1.0f;
+    const Vec3 endpos = solid_hit ? segment.endpos : current;
+    const float hull_distance = aabb_distance(endpos, test.state.mins, test.state.maxs);
+    const Vec3 probe_hull = info.hull.x > 0.0f || info.hull.y > 0.0f || info.hull.z > 0.0f
+      ? info.hull
+      : Vec3{2.0f, 2.0f, 2.0f};
+    const bool volume_hit = hull_segment_hits_bounds(
+      previous, current, test.state.mins, test.state.maxs, probe_hull, segment.fraction);
+    const bool support_hit =
+      solid_hit && world_hit_at_target_support(segment, test.state.mins, test.state.maxs, probe_hull);
+    const bool predicted_hit = hull_distance <= pad || volume_hit || support_hit;
     bool candidate_hit = false;
     switch (kind) {
     case 0:
+      candidate_hit = predicted_hit || solid_hit;
+      break;
     case 1:
-      candidate_hit = solid_hit;
+      candidate_hit = solid_hit || hull_distance <= std::sqrt(std::max(test.radius_sqr, 0.0f));
       break;
     default:
-      candidate_hit = length_squared(current - test.aim_point) < test.radius_sqr || solid_hit;
+      candidate_hit = length_squared(current - test.aim_point) < test.radius_sqr ||
+        predicted_hit || solid_hit;
       break;
     }
     if (!candidate_hit) {
       continue;
     }
 
-    const Vec3 endpos = solid_hit ? segment.endpos : current;
-    const float hull_distance = aabb_distance(endpos, test.state.mins, test.state.maxs);
     const float splash_radius =
       test.kind != 0 && test.radius_sqr > 0.0f && std::isfinite(test.radius_sqr) &&
       test.radius_sqr < 1.0e10f
@@ -391,15 +372,17 @@ inline bool validate_shot(Player* local, const projectile_info& info, const shot
     bool valid = false;
     switch (kind) {
     case 0: {
-      Entity* hit_entity = static_cast<Entity*>(segment.entity);
-      const bool target_hit = hit_entity == test.target ||
-        (hit_entity != nullptr && test.target != nullptr &&
-         hit_entity->get_ref_handle() == test.target->get_ref_handle());
-      valid = target_hit && (test.sim_ticks - tick) <= tolerance_ticks;
-      if (!valid) {
-        if (target_hit && info.arm_time > 0.0f && info.splash_radius > 0.0f) {
+      if (solid_hit && !predicted_hit) {
+        if (info.arm_time > 0.0f && info.splash_radius > 0.0f) {
           kind = 1;
-          ignored_target = test.target;
+          continue;
+        }
+        return false;
+      }
+      valid = predicted_hit && (test.sim_ticks - tick) <= tolerance_ticks;
+      if (!valid && predicted_hit) {
+        if (info.arm_time > 0.0f && info.splash_radius > 0.0f) {
+          kind = 1;
           continue;
         }
         return false;
@@ -444,7 +427,7 @@ inline point_solution solve_point(Player* local, const projectile_info& info, co
     return result;
   }
 
-  const float offset_speed = std::max(std::hypot(info.speed, info.initial_up_velocity), 1.0f);
+  const float offset_speed = std::max(info.speed, 1.0f);
   time = std::max(time - length(info.offset) / offset_speed, 0.0f);
 
   const auto accept_first_pass = [&]() {
@@ -693,8 +676,8 @@ inline seed_outcome evaluate_seed(Player* local, Weapon* weapon, const projectil
     (config.aimbot.projectile_modifiers & Aim::projectile_mod_lob_angles) != 0 &&
     info.gravity_mod > 0.0f;
   const bool underpredict = cfg.lob_underpredict && radius > 0.0f;
-  const bool account_drag = projsim::drag_for_weapon(weapon_id_value).coefficient > 0.0f &&
-    projsim::physics_drag_ready();
+  const bool account_drag = effective_drag(info, std::hypot(info.speed, info.initial_up_velocity),
+                                           lob_enabled) > 0.0f;
   const auto shot_drag = [&](float velocity) {
     return account_drag ? effective_drag(info, velocity, lob_enabled) : 0.0f;
   };
@@ -896,7 +879,7 @@ inline seed_outcome evaluate_seed(Player* local, Weapon* weapon, const projectil
       Vec3 launch_angles{};
       const bool ignore_friendlies = !is_rocket_weapon(weapon_id_value);
       if (!launch_position(local, info, {entry.solution.pitch, entry.solution.yaw, 0.0f},
-                           ignore_friendlies, launch, &launch_angles)) {
+                           ignore_friendlies, launch, &launch_angles, true)) {
         continue;
       }
       const Vec3 velocity = launch_velocity(info, launch_angles, local);
@@ -975,7 +958,7 @@ inline seed_outcome evaluate_seed(Player* local, Weapon* weapon, const projectil
         Vec3 launch_angles{};
         const bool ignore_friendlies = !is_rocket_weapon(weapon_id_value);
         if (!launch_position(local, info, {solution.pitch, solution.yaw, 0.0f},
-                             ignore_friendlies, launch, &launch_angles)) {
+                             ignore_friendlies, launch, &launch_angles, true)) {
           continue;
         }
         const Vec3 velocity = launch_velocity(info, launch_angles, local);
@@ -1433,10 +1416,6 @@ inline apply_result apply(user_cmd* cmd, Player* local, Weapon* weapon,
   result.psilent = aim_mode == Aim::AimMode::PSILENT && shot_command && !manual_attack &&
     !weapon->is_flamethrower();
 
-  if (config.aimbot.spread_compensation && shot_command) {
-    target_angles = detail::compensate_projectile_spread(local, weapon, cmd, info,
-                                                         target_angles);
-  }
   cmd->view_angles = aimbot_clamp_angles(target_angles);
 
   if (aim_mode == Aim::AimMode::PSILENT && !shot_command && !manual_attack) {

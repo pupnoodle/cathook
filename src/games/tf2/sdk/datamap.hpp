@@ -87,6 +87,12 @@ struct datamap_t {
   int packed_size;
 };
 
+static_assert(offsetof(datamap_t, dataNumFields) == 8);
+static_assert(offsetof(datamap_t, dataClassName) == 16);
+static_assert(offsetof(datamap_t, baseMap) == 24);
+static_assert(offsetof(datamap_t, chains_validated) == 32);
+static_assert(offsetof(datamap_t, packed_size) == 36);
+
 static_assert(sizeof(typedescription_t) == 96, "Linux TF2 typedescription_t is 96 bytes (16-byte PMF)");
 static_assert(offsetof(typedescription_t, fieldSizeInBytes) == 72);
 static_assert(offsetof(typedescription_t, fieldTolerance) == 92);

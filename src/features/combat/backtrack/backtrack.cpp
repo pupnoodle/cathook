@@ -873,7 +873,7 @@ void send_interp_settings(net_channel* channel, float interp)
 
 int send_datagram_hook(net_channel* channel, bf_write* data)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (g_send_datagram_original == nullptr || channel == nullptr || !should_run_fake_latency_network()) {
     return g_send_datagram_original != nullptr ? g_send_datagram_original(channel, data) : 0;
   }

@@ -353,7 +353,7 @@ struct visual_group {
     condition_priority = 1u << 7,
     condition_target = 1u << 8,
     condition_dormant = 1u << 9,
-    condition_cat = 1u << 10,
+    condition_pup = 1u << 10,
     condition_ignored = 1u << 11
   };
 
@@ -758,7 +758,7 @@ struct Misc {
     bool ping_reducer = false;
     int ping_target = 60;
     bool no_engine_sleep = false;
-#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
+#if defined(PUPHOOK_TEXTMODE) && PUPHOOK_TEXTMODE
 
     bool null_graphics = true;
 #else
@@ -784,14 +784,14 @@ struct Misc {
 
     enum class chatspam_source {
       OFF = 0,
-      CATHOOK,
+      PUPHOOK,
       LMAOBOX,
       CUSTOM
     };
 
     enum class killsay_mode {
       OFF = 0,
-      CATHOOK,
+      PUPHOOK,
       MLG,
       CUSTOM
     };
@@ -928,7 +928,7 @@ struct Misc {
     std::string auto_item_hat1 = "940";
     std::string auto_item_hat2 = "941";
     std::string auto_item_hat3 = "302";
-#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
+#if defined(PUPHOOK_TEXTMODE) && PUPHOOK_TEXTMODE
 
     bool auto_item_noisemaker = true;
 #else
@@ -983,7 +983,7 @@ struct Misc {
     queueing_mode queue_mode = queueing_mode::NORMAL;
     bool boost_queue_enabled = false;
     boost_queue_mode boost_queue = boost_queue_mode::WAIT;
-#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
+#if defined(PUPHOOK_TEXTMODE) && PUPHOOK_TEXTMODE
 
     bool auto_casual_join = true;
 #else
@@ -1127,13 +1127,13 @@ struct Config {
   auto_reflect_config auto_reflect;
 };
 #if defined(__GNUC__) || defined(__clang__)
-#define cathook_EARLY_INIT __attribute__((init_priority(101)))
+#define puphook_EARLY_INIT __attribute__((init_priority(101)))
 #else
-#define cathook_EARLY_INIT
+#define puphook_EARLY_INIT
 #endif
 
-inline static Config config cathook_EARLY_INIT;
-#undef cathook_EARLY_INIT
+inline static Config config puphook_EARLY_INIT;
+#undef puphook_EARLY_INIT
 
 inline void enforce_insider_settings_lock(Config& cfg)
 {
@@ -1176,7 +1176,7 @@ static std::string get_button_name(const int button_code) {
 }
 
 static constexpr bool textmode_binds_disabled() {
-#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
+#if defined(PUPHOOK_TEXTMODE) && PUPHOOK_TEXTMODE
 
   return true;
 #else

@@ -1,5 +1,5 @@
-#ifndef CATHOOK_WORLD_VISUALS_HPP
-#define CATHOOK_WORLD_VISUALS_HPP
+#ifndef PUPHOOK_WORLD_VISUALS_HPP
+#define PUPHOOK_WORLD_VISUALS_HPP
 
 struct funchook;
 using funchook_t = struct funchook;

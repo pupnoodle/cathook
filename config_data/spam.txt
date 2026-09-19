@@ -1,3 +1,3 @@
-Cathook on Linux
+Puphook on Linux
 GNU/Linux is the best OS
-cathook
+puphook

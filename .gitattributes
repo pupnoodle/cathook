@@ -11,7 +11,7 @@
 *.xcf binary
 /install-deps text eol=lf
 preload text eol=lf
-/botpanel/install-catbots text eol=lf
+/botpanel/install-pupbots text eol=lf
 /botpanel/start text eol=lf
 /botpanel/start.legacy text eol=lf
 /botpanel/stop text eol=lf

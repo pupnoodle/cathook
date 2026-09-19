@@ -13,7 +13,7 @@ V  o o  V  file: src/core/diagnostics/exception_handler.hpp
 
 #include <filesystem>
 
-namespace cathook::core
+namespace puphook::core
 {
 
 class exception_handler

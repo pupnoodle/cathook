@@ -12,6 +12,8 @@ V  o o  V  file: src/games/tf2/sdk/interfaces/prediction.hpp
 #ifndef PREDICTION_HPP
 #define PREDICTION_HPP
 
+#include <cstddef>
+#include <cstdint>
 #include "core/types.hpp"
 #include "games/tf2/sdk/interfaces/engine.hpp"
 
@@ -73,6 +75,8 @@ public:
   int commands_predicted;
   int server_commands_acknowledged;
   int previous_ack_had_errors;
+  int previous_ack_error_triggers_full_latch_reset;
+  std::uint8_t ents_with_prediction_errors[36];
   int incoming_packet_number;
   float ideal_pitch;
 };

@@ -9,8 +9,8 @@ V  o o  V  file: src/core/ipc/ipc_protocol.hpp
   || (___\====
 */
 
-#ifndef CAT_IPC_PROTOCOL_HPP
-#define CAT_IPC_PROTOCOL_HPP
+#ifndef PUP_IPC_PROTOCOL_HPP
+#define PUP_IPC_PROTOCOL_HPP
 
 #include <cstdint>
 #include <ctime>
@@ -19,11 +19,11 @@ V  o o  V  file: src/core/ipc/ipc_protocol.hpp
 #include <cstddef>
 #include <type_traits>
 
-namespace cat_ipc
+namespace pup_ipc
 {
 
-constexpr const char* ipc_socket_path = "/opt/cathook/ipc/cathook_followbot_server";
-constexpr std::uint32_t cathook_magic_number = 0x0deadca7u;
+constexpr const char* ipc_socket_path = "/opt/puphook/ipc/puphook_followbot_server";
+constexpr std::uint32_t puphook_magic_number = 0x0deadca7u;
 constexpr std::uint32_t ipc_protocol_version = 2;
 constexpr std::uint32_t ipc_abi_version = 2;
 constexpr std::uint32_t max_peers = 255;

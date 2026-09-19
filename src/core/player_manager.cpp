@@ -9,7 +9,6 @@ V  o o  V  file: src/core/player_manager.cpp
   || (___\====
 */
 #include "core/player_manager.hpp"
-#include "core/identify/identify.hpp"
 #include "core/ipc/ipc_client.hpp"
 #include "core/logger.hpp"
 #include "core/player_resource.hpp"
@@ -27,7 +26,7 @@ V  o o  V  file: src/core/player_manager.cpp
 #include <string>
 #include <unordered_map>
 
-namespace cathook::core::players
+namespace puphook::core::players
 {
 namespace
 {
@@ -45,7 +44,7 @@ std::unordered_map<std::uint32_t, stored_player> runtime_players{};
 
 [[nodiscard]] std::filesystem::path player_list_path()
 {
-  return config_directory() / "players.cat";
+  return config_directory() / "players.pup";
 }
 
 [[nodiscard]] std::string trim(std::string value)
@@ -96,7 +95,7 @@ const std::vector<role_definition> g_role_definitions{
   {f2p_role, "F2P", true, true, false},
   {ipc_role, "IPC", true, false, true},
   {textmode_role, "Textmode", true, false, true},
-  {identified_role, "CAT", true, true, true},
+  {identified_role, "PUP", true, true, true},
 };
 
 [[nodiscard]] std::optional<role_id> role_for_state(player_state state)
@@ -199,7 +198,7 @@ namespace {
 {
   return state == player_state::friend_state ||
          state == player_state::party ||
-         state_is_cat(state);
+         state_is_pup(state);
 }
 
 [[nodiscard]] bool state_is_ignored(player_state state)
@@ -231,14 +230,14 @@ void set_runtime_state(std::uint32_t account_id, player_state state, std::string
 
 [[nodiscard]] Entity* get_player_resource_entity()
 {
-  return cathook::core::player_resource::get_player_resource_entity();
+  return puphook::core::player_resource::get_player_resource_entity();
 }
 
-using cathook::core::player_resource::read_value;
+using puphook::core::player_resource::read_value;
 
 }
 
-bool state_is_cat(player_state state)
+bool state_is_pup(player_state state)
 {
   return state == player_state::ipc ||
          state == player_state::textmode ||
@@ -289,7 +288,7 @@ void tick()
   const int max_clients = global_vars->max_clients;
   for (int index = 1; index <= max_clients; ++index)
   {
-    const bool is_connected = cathook::core::player_resource::read_value<bool>(player_resource, connected_offset, index);
+    const bool is_connected = puphook::core::player_resource::read_value<bool>(player_resource, connected_offset, index);
     if (!is_connected)
     {
       continue;
@@ -301,17 +300,13 @@ void tick()
       continue;
     }
 
-    const char* name_ptr = cathook::core::player_resource::name_pointer(player_resource, ping_offset, index);
+    const char* name_ptr = puphook::core::player_resource::name_pointer(player_resource, ping_offset, index);
     const std::string_view name = (name_ptr != nullptr && name_ptr[0] != '\0') ? name_ptr : info.name;
 
     const auto account_id = static_cast<std::uint32_t>(info.friends_id);
-    if (cat_ipc::client::is_local_ipc_friend(account_id))
+    if (pup_ipc::client::is_local_ipc_friend(account_id))
     {
       set_runtime_state(account_id, player_state::ipc, name);
-    }
-    else if (cathook::core::identify::is_peer(account_id, name))
-    {
-      set_runtime_state(account_id, player_state::identified, name);
     }
   }
 }
@@ -324,7 +319,11 @@ bool load()
   std::ifstream input{player_list_path()};
   if (!input.is_open())
   {
-    return false;
+    input.open(config_directory() / "players.cat");
+    if (!input.is_open())
+    {
+      return false;
+    }
   }
 
   std::string line{};
@@ -479,7 +478,7 @@ std::optional<role_id> parse_role(std::string_view value)
   if (normalized == "f2p" || normalized == "free2play") return f2p_role;
   if (normalized == "ipc") return ipc_role;
   if (normalized == "textmode") return textmode_role;
-  if (normalized == "cat" || normalized == "identified" || normalized == "identify") return identified_role;
+  if (normalized == "pup" || normalized == "cat" || normalized == "identified" || normalized == "identify") return identified_role;
   return std::nullopt;
 }
 
@@ -626,7 +625,7 @@ bool is_prioritized(std::uint32_t account_id)
   return has_role(account_id, cheater_role);
 }
 
-bool is_cat(std::uint32_t account_id)
+bool is_pup(std::uint32_t account_id)
 {
   return has_role(account_id, ipc_role) || has_role(account_id, textmode_role) || has_role(account_id, identified_role);
 }

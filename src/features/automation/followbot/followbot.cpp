@@ -60,7 +60,7 @@ Vec3 calculate_angles(const Vec3& source, const Vec3& target)
 
 int role_priority(std::uint32_t account_id)
 {
-  using namespace cathook::core::players;
+  using namespace puphook::core::players;
   if (has_role(account_id, ipc_role)) return 10;
   if (has_role(account_id, identified_role)) return 9;
   if (has_role(account_id, party_role)) return 8;
@@ -173,14 +173,14 @@ struct controller_t::impl
     result.serial = player->get_ref_ehandle().GetSerialNumber();
     result.account_id = static_cast<std::uint32_t>(info.friends_id);
     result.exact = exact_account != 0 && result.account_id == exact_account;
-    if (!allowed_team(localplayer, player, result.exact) || cathook::core::players::is_ignored(result.account_id)) return {};
+    if (!allowed_team(localplayer, player, result.exact) || puphook::core::players::is_ignored(result.account_id)) return {};
     if (config.misc.automation.followbot_ignore_afk && !result.exact && is_afk(player, current_time)) return {};
 
     result.priority = result.exact ? std::numeric_limits<int>::max() : role_priority(result.account_id);
     if (!result.exact && result.priority < config.misc.automation.followbot_min_priority) return {};
     const auto prefer = config.misc.automation.followbot_preference;
-    result.preference = prefer == Misc::Automation::followbot_prefer::FRIENDS && cathook::core::players::has_role(result.account_id, cathook::core::players::friend_role)
-      ? 1 : prefer == Misc::Automation::followbot_prefer::PARTY && cathook::core::players::has_role(result.account_id, cathook::core::players::party_role) ? 1 : 0;
+    result.preference = prefer == Misc::Automation::followbot_prefer::FRIENDS && puphook::core::players::has_role(result.account_id, puphook::core::players::friend_role)
+      ? 1 : prefer == Misc::Automation::followbot_prefer::PARTY && puphook::core::players::has_role(result.account_id, puphook::core::players::party_role) ? 1 : 0;
     result.class_preference = class_preference(localplayer, player, result.priority, result.preference);
     result.distance = distance_2d(localplayer->get_origin(), player->get_origin());
     const auto max_distance = config.misc.automation.followbot_use_nav != Misc::Automation::followbot_nav_mode::OFF

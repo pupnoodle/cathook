@@ -3,10 +3,10 @@ set -euo pipefail
 
 project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 asset_source_dir="$project_root/assets"
-install_root="${CATHOOK_ROOT:-/opt/cathook}"
+install_root="${PUPHOOK_ROOT:-/opt/puphook}"
 build_mode=""
 
-source "$project_root/cathook_mode.sh"
+source "$project_root/puphook_mode.sh"
 
 usage() {
     cat <<'EOF'
@@ -14,18 +14,18 @@ Usage: sudo ./build.sh [default|textmode|both|--default|--textmode|--both|--no-i
 
 Without a mode argument or saved preference, asks which mode to build.
 
-Install mode writes to /opt/cathook by default and MUST RUN AS SUDO.
+Install mode writes to /opt/puphook by default and MUST RUN AS SUDO.
 Use --no-install for a local user build without sudo.
 Use --dev or --no-update to skip repository update checks and never reset local changes.
 
 Environment:
-  CATHOOK_MODE=default|textmode|both
-  CAT_BUILD_MODE=default|textmode|both
-  CATHOOK_TEXTMODE=1
+  PUPHOOK_MODE=default|textmode|both
+  PUP_BUILD_MODE=default|textmode|both
+  PUPHOOK_TEXTMODE=1
   TEXTMODE=1
-  CATHOOK_MODE_FILE=~/.config/cathook/mode
-  CATHOOK_ROOT=/opt/cathook
-  CATHOOK_DEV_MODE=1
+  PUPHOOK_MODE_FILE=~/.config/puphook/mode
+  PUPHOOK_ROOT=/opt/puphook
+  PUPHOOK_DEV_MODE=1
 EOF
 }
 
@@ -40,7 +40,7 @@ is_enabled() {
 }
 
 is_dev_mode() {
-    is_enabled "${CATHOOK_DEV_MODE:-${CAT_DEV_MODE:-0}}"
+    is_enabled "${PUPHOOK_DEV_MODE:-${PUP_DEV_MODE:-0}}"
 }
 
 require_root_for_install() {
@@ -123,7 +123,7 @@ restore_workspace_permissions() {
         return
     fi
 
-    for path in "$project_root/bin" "$project_root/obj" "$project_root/libs/funchook" "$project_root/botpanel/catbot-ipc-server-main/bin" "$project_root/botpanel/cat-steamtxtmode/bin"; do
+    for path in "$project_root/bin" "$project_root/obj" "$project_root/libs/funchook" "$project_root/botpanel/pupbot-ipc-server-main/bin" "$project_root/botpanel/pup-steamtxtmode/bin"; do
         if [ -e "$path" ]; then
             chown -R "$SUDO_UID:$SUDO_GID" "$path" 2>/dev/null || true
         fi
@@ -152,8 +152,8 @@ workspace_permissions_need_fix() {
         "$project_root/obj" \
         "$project_root/bin" \
         "$project_root/libs/funchook" \
-        "$project_root/botpanel/catbot-ipc-server-main/bin" \
-        "$project_root/botpanel/cat-steamtxtmode/bin"; do
+        "$project_root/botpanel/pupbot-ipc-server-main/bin" \
+        "$project_root/botpanel/pup-steamtxtmode/bin"; do
         if [ -e "$path" ] && [ ! -w "$path" ]; then
             return 0
         fi
@@ -173,8 +173,8 @@ fix_workspace_permissions() {
         "$project_root/obj" \
         "$project_root/bin" \
         "$project_root/libs/funchook" \
-        "$project_root/botpanel/catbot-ipc-server-main/bin" \
-        "$project_root/botpanel/cat-steamtxtmode/bin" 2>/dev/null || true
+        "$project_root/botpanel/pupbot-ipc-server-main/bin" \
+        "$project_root/botpanel/pup-steamtxtmode/bin" 2>/dev/null || true
 }
 
 run_git() {
@@ -316,16 +316,16 @@ install_runtime_dependencies() {
     local install_bin_dir="$2"
 
     if [ "$mode" = "default" ] || [ "$mode" = "both" ]; then
-        install_glew_dependency_for_binary "$project_root/bin/libcathook.so" "$install_bin_dir"
+        install_glew_dependency_for_binary "$project_root/bin/libpuphook.so" "$install_bin_dir"
     fi
 
     if [ "$mode" = "textmode" ] || [ "$mode" = "both" ]; then
-        install_glew_dependency_for_binary "$project_root/bin/libcathooktextmode.so" "$install_bin_dir"
+        install_glew_dependency_for_binary "$project_root/bin/libpuphooktextmode.so" "$install_bin_dir"
     fi
 }
 
 normalize_mode() {
-    cathook_normalize_mode "$1" 1
+    puphook_normalize_mode "$1" 1
 }
 
 choose_build_mode() {
@@ -334,7 +334,7 @@ choose_build_mode() {
         return
     fi
 
-    cathook_select_mode 1
+    puphook_select_mode 1
 }
 
 clear_execstack_if_needed() {
@@ -354,18 +354,18 @@ build_cat() {
 
     case "$mode" in
         default)
-            run_make -C "$project_root" CATHOOK_DEBUG_SYMBOLS=1
+            run_make -C "$project_root" PUPHOOK_DEBUG_SYMBOLS=1
             ;;
         textmode)
             run_make -C "$project_root" TEXTMODE=1
             ;;
         both)
-            run_make -C "$project_root" CATHOOK_DEBUG_SYMBOLS=1
+            run_make -C "$project_root" PUPHOOK_DEBUG_SYMBOLS=1
             run_make -C "$project_root" TEXTMODE=1
             ;;
     esac
 
-    run_make -C "$project_root" catbot_ipc
+    run_make -C "$project_root" pupbot_ipc
 }
 
 install_outputs() {
@@ -375,19 +375,19 @@ install_outputs() {
     local install_ipc_dir="$install_root/ipc"
     local install_config_dir="$install_root/configs"
     local install_log_dir="$install_root/logs"
-    local source_config_dir="$project_root/opt/cathook/configs"
+    local source_config_dir="$project_root/opt/puphook/configs"
     local file
     local target_file
 
     run_as_root install -d -m 0755 "$install_root" "$install_bin_dir" "$install_ipc_dir/bin" "$install_config_dir" "$install_log_dir"
 
     if [ "$mode" = "default" ] || [ "$mode" = "both" ]; then
-        run_as_root install -m 0755 "$project_root/bin/libcathook.so" "$install_bin_dir/libcathook.so"
+        run_as_root install -m 0755 "$project_root/bin/libpuphook.so" "$install_bin_dir/libpuphook.so"
     fi
 
     if [ "$mode" = "textmode" ] || [ "$mode" = "both" ]; then
-        run_as_root install -m 0755 "$project_root/bin/libcathooktextmode.so" "$install_bin_dir/libcathooktextmode.so"
-        run_as_root install -m 0755 "$project_root/bin/libcathooktextmode.so" "$install_bin_dir/libcathook-textmode.so"
+        run_as_root install -m 0755 "$project_root/bin/libpuphooktextmode.so" "$install_bin_dir/libpuphooktextmode.so"
+        run_as_root install -m 0755 "$project_root/bin/libpuphooktextmode.so" "$install_bin_dir/libpuphook-textmode.so"
     fi
 
     install_runtime_dependencies "$mode" "$install_bin_dir"
@@ -397,16 +397,16 @@ install_outputs() {
             if [ ! -e "$target_file" ]; then
                 run_as_root install -m 0644 "$file" "$target_file"
             fi
-        done < <(find "$source_config_dir" -maxdepth 1 -type f -name '*.cat' -print0)
+        done < <(find "$source_config_dir" -maxdepth 1 -type f -name '*.pup' -print0)
     fi
-    run_as_root make SHELL="$(make_shell_path)" -C "$project_root/botpanel/catbot-ipc-server-main" REPO_ROOT="$project_root" INSTALL_DIR="$install_ipc_dir" install
-    if [ -x "$project_root/botpanel/cat-steamtxtmode/install.sh" ]; then
-        run_as_root env CATHOOK_ROOT="$install_root" bash "$project_root/botpanel/cat-steamtxtmode/install.sh" || \
-            echo "cat-steamtxtmode build/install failed; bots will run without the Steam shim." >&2
+    run_as_root make SHELL="$(make_shell_path)" -C "$project_root/botpanel/pupbot-ipc-server-main" REPO_ROOT="$project_root" INSTALL_DIR="$install_ipc_dir" install
+    if [ -x "$project_root/botpanel/pup-steamtxtmode/install.sh" ]; then
+        run_as_root env PUPHOOK_ROOT="$install_root" bash "$project_root/botpanel/pup-steamtxtmode/install.sh" || \
+            echo "pup-steamtxtmode build/install failed; bots will run without the Steam shim." >&2
     fi
     copy_assets "$install_assets_dir"
     fix_install_permissions
-    echo "Installed Cat runtime to $install_root"
+    echo "Installed Pup runtime to $install_root"
 }
 
 install_enabled=1
@@ -426,7 +426,7 @@ while [ "$#" -gt 0 ]; do
             install_enabled=0
             ;;
         --dev | --no-update)
-            export CATHOOK_DEV_MODE=1
+            export PUPHOOK_DEV_MODE=1
             ;;
         -h | --help)
             usage
@@ -457,8 +457,8 @@ if workspace_permissions_need_fix; then
 fi
 build_cat "$selected_mode"
 
-clear_execstack_if_needed "$project_root/bin/libcathook.so"
-clear_execstack_if_needed "$project_root/bin/libcathooktextmode.so"
+clear_execstack_if_needed "$project_root/bin/libpuphook.so"
+clear_execstack_if_needed "$project_root/bin/libpuphooktextmode.so"
 
 if [ "$install_enabled" = "1" ]; then
     install_outputs "$selected_mode"

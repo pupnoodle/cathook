@@ -20,6 +20,8 @@ constexpr const char* move_helper =
   "48 8D 05 ? ? ? ? 48 89 85 ? ? ? ? 74 ? 48 8B 38";
 constexpr const char* client_state =
   "48 8D 05 ? ? ? ? 4C 8B 40";
+constexpr const char* client_state_send_string_cmd =
+  "48 8B 7F 20 48 85 FF 0F 84 83 00 00 00 55 66 0F EF C0 31 C9 31 D2 48 89 E5";
 constexpr const char* client_state_force_full_update =
   "83 BF B8 01 00 00 FF 74 ? 55 48 89 E5 53 48 89 FB 48 83 EC 08 E8";
 constexpr const char* client_mode_shared =
@@ -76,10 +78,48 @@ constexpr const char* inventory_find_item_by_def =
   "55 48 89 E5 41 57 41 56 41 55 41 54 53 48 83 EC ? 4C 63 67 ? 45 85 E4 7E ? 4D 69 E4 ? ? ? ? 49 89 FD 41 89 F6";
 constexpr const char* tf_weapon_base_gun_get_bullet_spread =
   "55 31 D2 48 89 FE B9 ? ? ? ? 48 89 E5 41 54 53 48 89 FB 48 83 EC ? 48 63 87 ? ? ? ? 48 C1 E0 ?";
+constexpr const char* ctf_weapon_base_gun_get_weapon_spread =
+  "55 31 D2 48 89 FE B9 01 00 00 00 48 89 E5 41 54 53 48 89 FB 48 83 EC 10 48 63 87 ? ? ? ? 48 C1 E0 06 48 03 87 ? ? ? ?";
+constexpr const char* ctf_weapon_base_get_range =
+  "48 63 87 ? ? ? ? 48 C1 E0 06 48 03 87 ? ? ? ? F3 0F 10 80 ? ? ? ? C3";
+constexpr const char* base_combat_weapon_get_slot =
+  "55 0F B7 BF ? ? ? ? 48 89 E5 E8 ? ? ? ? 5D 0F B6 80 7C 01 00 00 C3";
+constexpr const char* ctf_weapon_base_get_spread_angles =
+  "55 48 89 E5 41 54 53 48 89 FB 48 83 EC 50 E8 ? ? ? ? 48 85 C0 0F 84 ? ? ? ? 48 8D 15 ? ? ? ? 31 C9 48 89 C7 48 8D 35 ? ? ? ?";
+constexpr const char* base_combat_weapon_get_damage_type =
+  "48 8B 07 55 48 89 E5 FF 90 ? ? ? ? 48 8D 15 ? ? ? ? 48 98 5D 8B 04 82 C3";
+constexpr const char* tf_player_eye_position =
+  "55 48 89 E5 41 54 49 89 FC 48 83 EC 28 8B 97 ? ? ? ? 48 8D 05 ? ? ? ? 85 D2 48 8B 08 74 ? 83 FA FF 0F B7 C2 BE FF 1F 00 00 48 0F 44 C6";
+constexpr const char* tf_player_eye_angles =
+  "55 48 89 E5 41 54 49 89 FC 48 83 EC 08 E8 ? ? ? ? 84 C0 74 ? 48 8D 05 ? ? ? ? 8B 00 85 C0 74 ? 49 8D 84 24 ? ? ? ? 4C 8B 65 F8 C9";
+constexpr const char* base_entity_get_abs_origin =
+  "55 48 89 E5 53 48 89 FB 48 83 EC 08 E8 ? ? ? ? 48 8D 83 ? ? ? ? 48 8B 5D F8 C9 C3 66 90 55 48 89 E5 53";
+constexpr const char* base_entity_get_abs_angles =
+  "55 48 89 E5 53 48 89 FB 48 83 EC 08 E8 ? ? ? ? 48 8D 83 ? ? ? ? 48 8B 5D F8 C9 C3 66 90 55 48 89 E5 41 55";
+constexpr const char* base_entity_set_abs_origin =
+  "55 48 89 E5 41 55 41 54 49 89 F4 53 48 89 FB 48 83 EC 08 E8 ? ? ? ? F3 0F 10 83 ? ? ? ? 41 0F 2F 04 24 75 ? F3 41 0F 10 44 24 04 0F 2F 83 ? ? ? ? 0F 84 ? ? ? ? BE 01 00 00 00";
+constexpr const char* base_entity_set_abs_angles =
+  "55 48 89 E5 41 57 41 56 41 55 41 54 49 89 F4 53 48 89 FB 48 83 EC 68 E8 ? ? ? ? F3 0F 10 83 ? ? ? ? 41 0F 2F 04 24 75 ? F3 41 0F 10 44 24 04 0F 2F 83 ? ? ? ? 0F 84 ? ? ? ?";
+constexpr const char* prediction_copy_ctor =
+  "55 66 48 0F 6E C2 31 C0 66 49 0F 6E C8 48 89 E5 0F B6 C9 45 0F B6 C9 66 0F 6C C1 8A 45 10 0F 11 47 08 66 0F 6E C1 66 41 0F 6E D1 0F B7 55 18 66 0F 62 C2 89 37 66 0F D6 47 18 66 0F EF C0 48 C7 47 38 00 00 00 00 0F 11 47 28 88 D4";
+constexpr const char* prediction_copy_transfer =
+  "55 48 89 E5 41 55 41 54 49 89 FC 53 48 89 CB 48 83 EC 18 83 05 ? ? ? ? ? 80 79 20 00 74 ? 48 89 D9 4C 89 E7 E8 ? ? ? ? 44 8B 2D ? ? ? ? 66 0F 1F 44 00 00 44 8B 43 08 48 89 DA 44 89 EE 4C 89 E7 48 8B 0B E8 ? ? ? ?";
+constexpr const char* base_animating_setup_bones =
+  "55 48 89 E5 41 57 41 56 41 55 41 54 41 89 CC 53 48 89 FB 48 81 EC C8 0E 00 00 48 8B 05 ? ? ? ?";
+constexpr const char* base_animating_standard_blending_rules =
+  "55 31 C0 48 89 E5 41 57 49 89 D7 41 56 49 89 CE 41 55 49 89 F5 41 54 49 89 FC 53 48 81 EC D8 11 00 00";
+constexpr const char* tf_player_build_transformations =
+  "55 48 89 E5 41 57 49 89 FF 41 56 4D 89 C6 41 55 49 89 CD 41 54 49 89 F4 53 44 89 CB 48 83 C4 80";
+constexpr const char* tf_game_rules_get_view_vectors =
+  "48 8D 05 ? ? ? ? C3 0F 1F 84 00 ? ? ? ? 55 48 8D 35 ? ? ? ? 48 89 E5 53 48 83 EC 08 8B 47 08";
+constexpr const char* tf_game_movement_check_stuck =
+  "55 48 89 E5 41 57 41 56 41 55 41 54 49 89 FC 53 48 81 EC 98 00 00 00 48 8B 05 ? ? ? ? C6 87 ? ? ? ? 00 8B 40 58";
 constexpr const char* ctf_weapon_base_calc_is_attack_critical =
-  "55 48 89 E5 41 57 41 56 41 55 41 54 49 89 FC 53 48 83 EC ? E8 ? ? ? ? 48 85 C0 0F 84 ? ? ? ? 48 8D 15 ? ? ? ? 31 C9 48 89 C7 48 8D 35 ? ? ? ? E8 ? ? ? ? 48 85 C0 49 89 C5 0F 84 ? ? ? ? 48 8B 00 4C 89 EF FF 90 ? ? ? ? 84 C0";
+  "55 48 89 E5 41 57 41 56 41 55 41 54 49 89 FC 53 48 83 EC 18 E8 ? ? ? ? 48 85 C0 0F 84 A6 01 00 00";
 constexpr const char* ctf_weapon_base_melee_calc_is_attack_critical =
-  "55 48 89 E5 41 57 41 56 41 55 41 54 49 89 FC 53 48 83 EC ? E8 ? ? ? ? 48 85 C0 74 ? 48 89 C3 48 8B 00 48 89 DF FF 90 ? ? ? ? 84 C0 74 ? 49 8B 04 24 31 D2 31 F6 4C 89 E7 FF 90 ? ? ? ? 84 C0";
+  "55 48 89 E5 41 57 41 56 41 55 41 54 49 89 FC 53 48 83 EC 18 E8 ? ? ? ? 48 85 C0 74 2B 48 89 C3 48 8B 00 48 89 DF FF 90 C8 05 00 00";
+constexpr const char* ctf_weapon_base_melee_do_swing =
+  "55 48 89 E5 41 57 41 56 49 89 F6 41 55 49 89 FD 41 54 49 89 CC 53 48 81 EC 58 09 00 00";
 constexpr const char* ctf_player_anim_state_store =
   "E8 ? ? ? ? 48 8B 7D ? 49 89 84 24 ? ? ? ? 4C 89 E6 E8 ? ? ? ? 49 8D B4 24 ? ? ? ?";
 

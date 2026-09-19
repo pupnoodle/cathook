@@ -10,7 +10,7 @@ if ! [ -f "./kisak" ]; then
 	exit
 fi
 
-read -p "We will convert your existing legacy catbot-setup installation into a catbot-setup v2 installation. This will delete all steam instances and bot linux user accounts. Press enter to continue"
+read -p "We will convert your existing legacy pupbot-setup installation into a pupbot-setup v2 installation. This will delete all steam instances and bot linux user accounts. Press enter to continue"
 
 kisak=`cat kisak`
 

@@ -38,7 +38,7 @@ check_bundled_glew_soname() {
     script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
     repo_root="$(cd -- "$script_dir/../.." && pwd)"
 
-    for binary_path in "$repo_root/bin/libcathook.so" "$repo_root/bin/libcathooktextmode.so"; do
+    for binary_path in "$repo_root/bin/libpuphook.so" "$repo_root/bin/libpuphooktextmode.so"; do
         if [ ! -f "$binary_path" ]; then
             continue
         fi
@@ -50,7 +50,7 @@ check_bundled_glew_soname() {
 
         echo "Warning: $binary_path needs $required_library, but pacman did not install that SONAME." >&2
         echo "On Manjaro this usually means the checked-in/prebuilt binary was built against a newer Arch GLEW." >&2
-        echo "Run sudo ./build.sh after ./install-deps so the matching libGLEW fallback is installed to /opt/cathook/bin." >&2
+        echo "Run sudo ./build.sh after ./install-deps so the matching libGLEW fallback is installed to /opt/puphook/bin." >&2
     done
 }
 

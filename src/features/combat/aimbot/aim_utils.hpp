@@ -28,7 +28,7 @@ V  o o  V  file: src/features/combat/aimbot/aim_utils.hpp
 #include "core/shared/sigs.hpp"
 #include "libsigscan/libsigscan.h"
 #include "features/menu/config.hpp"
-#include "features/automation/nographics/nographics.hpp"
+#include "games/tf2/sdk/combat_offsets.hpp"
 #include "games/tf2/sdk/entities/player.hpp"
 #include "games/tf2/sdk/entities/building.hpp"
 #include "games/tf2/sdk/aim_hitboxes.hpp"
@@ -52,7 +52,7 @@ inline const uint8_t* scan(const char* pat) {
 inline int bone_cache_handle() {
   static const int v = [] {
     if (auto* p = detail::scan(sigs::base_animating_bone_handle)) {
-      int d = cathook::core::memory::read_disp32(p, 24);
+      int d = puphook::core::memory::read_disp32(p, 24);
       if (d > 0x500 && d < 0x2000) return d;
     }
     return 0;
@@ -63,33 +63,25 @@ inline int bone_cache_handle() {
 inline int ik_context() {
   static const int offset = [] {
     const std::uint8_t* instruction = detail::scan("F3 0F 10 83 ? ? ? ? 0F 2F 05 ? ? ? ? 4C 8B 83 ? ? ? ? 72");
-    return instruction != nullptr ? cathook::core::memory::read_disp32(instruction, 18) : 0;
+    return instruction != nullptr ? puphook::core::memory::read_disp32(instruction, 18) : 0;
   }();
   return offset;
 }
 
 inline int eflags() {
-  static const int offset = [] {
-    if (auto* instruction = detail::scan(sigs::base_animating_add_eflags)) {
-      const int value = cathook::core::memory::read_disp32(instruction, 2);
-      if (value > 0x80 && value < 0x2000) {
-        return value;
-      }
-    }
-    return 0x460;
-  }();
-  return offset;
+  const int resolved = tf2_combat::entity::eflags();
+  return resolved > 0 ? resolved : 0;
 }
 
 inline int studio_hdr() {
   static const int offset = [] {
     if (auto* instruction = detail::scan(sigs::base_animating_studio_hdr)) {
-      const int value = cathook::core::memory::read_disp32(instruction, 3);
+      const int value = puphook::core::memory::read_disp32(instruction, 3);
       if (value > 0x400 && value < 0x2000) {
         return value;
       }
     }
-    return 0xBE8;
+    return 0;
   }();
   return offset;
 }
@@ -97,12 +89,12 @@ inline int studio_hdr() {
 inline int bone_array() {
   static const int offset = [] {
     if (auto* instruction = detail::scan(sigs::base_animating_bone_array)) {
-      const int value = cathook::core::memory::read_disp32(instruction, 3);
+      const int value = puphook::core::memory::read_disp32(instruction, 3);
       if (value > 0x400 && value < 0x2000) {
         return value;
       }
     }
-    return 0xB78;
+    return 0;
   }();
   return offset;
 }
@@ -182,12 +174,8 @@ constexpr int aimbot_bone_used_by_anything = 0x7FF00;
 constexpr int aimbot_bone_mask = aimbot_bone_used_by_anything;
 constexpr int aimbot_efl_setting_up_bones = 1 << 3;
 constexpr int aimbot_efl_dirty_abstransform = 1 << 11;
-constexpr std::size_t aimbot_iclient_abs_origin_index = 11;
-constexpr std::size_t aimbot_iclient_abs_angles_index = 12;
-constexpr std::size_t aimbot_setupbones_origin_index = 46;
-constexpr std::size_t aimbot_setupbones_angles_index = 47;
-constexpr std::size_t aimbot_standard_blending_rules_index = 241;
-constexpr std::size_t aimbot_build_transformations_index = 227;
+inline std::size_t aimbot_standard_blending_rules_index() { return tf2_combat::player::standard_blending_rules(); }
+inline std::size_t aimbot_build_transformations_index() { return tf2_combat::player::build_transformations(); }
 inline thread_local aimbot_reject_reason aimbot_bone_failure = aimbot_reject_reason::none;
 
 struct aimbot_current_pose {
@@ -338,6 +326,22 @@ inline bool aimbot_bones_look_posed(const matrix_3x4* bone_to_world, int bone_co
   return posed >= 3;
 }
 
+inline bool aimbot_entity_is_local(Entity* entity) {
+  if (entity == nullptr) {
+    return false;
+  }
+  if (entity_list != nullptr) {
+    Player* local = entity_list->get_localplayer();
+    return local != nullptr &&
+      (entity == local->to_entity() || entity->get_index() == local->get_index());
+  }
+  return engine != nullptr && entity->get_index() == engine->get_localplayer_index();
+}
+
+inline bool aimbot_player_is_local(Player* player) {
+  return player != nullptr && aimbot_entity_is_local(player->to_entity());
+}
+
 inline Vec3 aimbot_target_setup_origin(Player* target) {
   if (target == nullptr) {
     return {};
@@ -356,7 +360,7 @@ inline bool aimbot_copy_cached_bones(Player* target, matrix_3x4* bone_to_world, 
 }
 
 inline bool aimbot_invalidate_bone_cache(Player* target) {
-  if (target == nullptr) {
+  if (target == nullptr || !aimbot_player_is_local(target)) {
     return false;
   }
 
@@ -379,7 +383,8 @@ inline bool aimbot_update_engine_bone_cache(Player* target,
   aimbot_bone_cache_debug.cache_time = setup_time;
   aimbot_bone_cache_debug.cache_handle = 0;
   if (target == nullptr || bone_to_world == nullptr || bone_count <= 0 ||
-      bone_count > aimbot_max_bones || !std::isfinite(setup_time)) {
+      bone_count > aimbot_max_bones || !std::isfinite(setup_time) ||
+      !aimbot_player_is_local(target)) {
     return false;
   }
 
@@ -434,7 +439,8 @@ inline void reset(Player* target) {
 }
 
 inline bool aimbot_update_client_side_animation(Player* target) {
-  if (target == nullptr || global_vars == nullptr || target->is_dormant() || !target->is_alive()) {
+  if (target == nullptr || global_vars == nullptr || target->is_dormant() || !target->is_alive() ||
+      !aimbot_player_is_local(target)) {
     return false;
   }
 
@@ -447,10 +453,15 @@ inline bool aimbot_update_client_side_animation(Player* target) {
   }
 
   using update_client_side_animation_fn = void (*)(void*);
-  constexpr std::size_t update_client_side_animation_index = 256;
-  void** vtable = *reinterpret_cast<void***>(target);
-  if (vtable == nullptr || vtable[update_client_side_animation_index] == nullptr) {
-    return false;
+  update_client_side_animation_fn fn =
+    reinterpret_cast<update_client_side_animation_fn>(tf2_combat::get().update_client_side_animation_fn);
+  if (fn == nullptr) {
+    void** vtable = *reinterpret_cast<void***>(target);
+    const std::size_t slot = tf2_combat::player::update_client_side_animation();
+    if (vtable == nullptr || slot == 0 || vtable[slot] == nullptr) {
+      return false;
+    }
+    fn = reinterpret_cast<update_client_side_animation_fn>(vtable[slot]);
   }
 
   const bool same_identity = aimbot_anim_detail::slot_player[index] == target &&
@@ -466,7 +477,7 @@ inline bool aimbot_update_client_side_animation(Player* target) {
   global_vars->frametime = interval;
   *anim_time = sim_time - interval;
   aimbot_anim_detail::manual_update_active = true;
-  reinterpret_cast<update_client_side_animation_fn>(vtable[update_client_side_animation_index])(target);
+  fn(target);
   aimbot_anim_detail::manual_update_active = false;
   *anim_time = saved_anim_time;
   global_vars->frametime = saved_frametime;
@@ -562,24 +573,30 @@ inline void aimbot_angle_matrix(const Vec3& angles, const Vec3& origin, matrix_3
   out->mat[2][3] = origin.z;
 }
 
-inline Vec3* aimbot_vtable_vec3_ptr(Entity* entity, std::size_t index) {
+inline Vec3* aimbot_abs_origin_ptr(Entity* entity) {
   if (entity == nullptr) {
     return nullptr;
   }
-  void** vtable = *reinterpret_cast<void***>(entity);
-  if (vtable == nullptr || vtable[index] == nullptr) {
+  const int offset = tf2_combat::entity::abs_origin();
+  if (offset <= 0) {
     return nullptr;
   }
-  using getter_fn = const Vec3& (*)(void*);
-  return const_cast<Vec3*>(&reinterpret_cast<getter_fn>(vtable[index])(entity));
-}
-
-inline Vec3* aimbot_abs_origin_ptr(Entity* entity) {
-  return aimbot_vtable_vec3_ptr(entity, aimbot_iclient_abs_origin_index);
+  (void)entity->get_abs_origin();
+  return reinterpret_cast<Vec3*>(reinterpret_cast<std::uintptr_t>(entity) +
+    static_cast<std::uintptr_t>(offset));
 }
 
 inline Vec3* aimbot_abs_angles_ptr(Entity* entity) {
-  return aimbot_vtable_vec3_ptr(entity, aimbot_iclient_abs_angles_index);
+  if (entity == nullptr) {
+    return nullptr;
+  }
+  const int offset = tf2_combat::entity::abs_angles();
+  if (offset <= 0) {
+    return nullptr;
+  }
+  (void)entity->get_abs_angles();
+  return reinterpret_cast<Vec3*>(reinterpret_cast<std::uintptr_t>(entity) +
+    static_cast<std::uintptr_t>(offset));
 }
 
 inline void aimbot_add_unique_vec3_ptr(Vec3** slots, Vec3* saved, int* count, int max_count, Vec3* ptr) {
@@ -618,35 +635,38 @@ struct aimbot_abs_pose_guard {
   Vec3 saved_network_origin{};
   int origin_count = 0;
   int angle_count = 0;
+  int saved_eflags = 0;
   bool saved_network = false;
+  bool saved_flags = false;
   bool active = false;
 
   aimbot_abs_pose_guard(Entity* value, const Vec3& origin, const Vec3& angles)
     : entity(value) {
-    if (entity == nullptr || !aimbot_vec3_is_finite(origin) || !aimbot_vec3_is_finite(angles)) {
+    if (entity == nullptr || !aimbot_entity_is_local(entity) ||
+        !aimbot_vec3_is_finite(origin) || !aimbot_vec3_is_finite(angles)) {
       return;
     }
 
     aimbot_add_unique_vec3_ptr(origin_slots, saved_origins, &origin_count, 2,
-      aimbot_vtable_vec3_ptr(entity, aimbot_iclient_abs_origin_index));
-    aimbot_add_unique_vec3_ptr(origin_slots, saved_origins, &origin_count, 2,
-      aimbot_vtable_vec3_ptr(entity, aimbot_setupbones_origin_index));
+      aimbot_abs_origin_ptr(entity));
     aimbot_add_unique_vec3_ptr(angle_slots, saved_angles, &angle_count, 2,
-      aimbot_vtable_vec3_ptr(entity, aimbot_iclient_abs_angles_index));
-    aimbot_add_unique_vec3_ptr(angle_slots, saved_angles, &angle_count, 2,
-      aimbot_vtable_vec3_ptr(entity, aimbot_setupbones_angles_index));
+      aimbot_abs_angles_ptr(entity));
 
     saved_network_origin = entity->get_network_origin();
     saved_network = aimbot_vec3_is_finite(saved_network_origin);
+    const int eflags_offset = aimbot_offsets::eflags();
+    if (eflags_offset > 0) {
+      saved_eflags = *reinterpret_cast<int*>(reinterpret_cast<std::uint8_t*>(entity) + eflags_offset);
+      saved_flags = true;
+    }
     entity->set_network_origin(origin);
-    aimbot_set_entity_flags(entity, aimbot_efl_dirty_abstransform, false);
     for (int index = 0; index < origin_count; ++index) {
       *origin_slots[index] = origin;
     }
     for (int index = 0; index < angle_count; ++index) {
       *angle_slots[index] = angles;
     }
-    entity->set_abs_origin(origin);
+    entity->mark_abs_transform_dirty();
     active = true;
   }
 
@@ -664,12 +684,16 @@ struct aimbot_abs_pose_guard {
         *angle_slots[index] = saved_angles[index];
       }
     }
-    if (origin_count > 0) {
-      entity->set_abs_origin(saved_origins[0]);
-    }
     if (saved_network) {
       entity->set_network_origin(saved_network_origin);
     }
+    if (saved_flags) {
+      const int eflags_offset = aimbot_offsets::eflags();
+      if (eflags_offset > 0) {
+        *reinterpret_cast<int*>(reinterpret_cast<std::uint8_t*>(entity) + eflags_offset) = saved_eflags;
+      }
+    }
+    aimbot_set_entity_flags(entity, aimbot_efl_dirty_abstransform, true);
   }
 
   aimbot_abs_pose_guard(const aimbot_abs_pose_guard&) = delete;
@@ -716,9 +740,19 @@ inline bool aimbot_reconstruct_bones(Player* target,
 
   void** vtable = *reinterpret_cast<void***>(target);
   const int hdr_offset = aimbot_offsets::studio_hdr();
-  if (vtable == nullptr || hdr_offset <= 0 ||
-      vtable[aimbot_standard_blending_rules_index] == nullptr ||
-      vtable[aimbot_build_transformations_index] == nullptr) {
+  using blend_fn = void (*)(void*, void*, Vec3*, float*, int, float);
+  using build_fn = void (*)(void*, void*, Vec3*, float*, matrix_3x4*, int, void*);
+  blend_fn blend = reinterpret_cast<blend_fn>(tf2_combat::get().standard_blending_rules_fn);
+  build_fn build = reinterpret_cast<build_fn>(tf2_combat::get().build_transformations_fn);
+  const std::size_t blend_slot = aimbot_standard_blending_rules_index();
+  const std::size_t build_slot = aimbot_build_transformations_index();
+  if (blend == nullptr && vtable != nullptr && blend_slot != 0) {
+    blend = reinterpret_cast<blend_fn>(vtable[blend_slot]);
+  }
+  if (build == nullptr && vtable != nullptr && build_slot != 0) {
+    build = reinterpret_cast<build_fn>(vtable[build_slot]);
+  }
+  if (hdr_offset <= 0 || blend == nullptr || build == nullptr) {
     return false;
   }
 
@@ -729,8 +763,7 @@ inline bool aimbot_reconstruct_bones(Player* target,
 
   alignas(16) Vec3 positions[aimbot_max_bones]{};
   alignas(16) float quaternions[aimbot_max_bones][4]{};
-  using blend_fn = void (*)(void*, void*, Vec3*, float*, int, float);
-  reinterpret_cast<blend_fn>(vtable[aimbot_standard_blending_rules_index])(
+  blend(
     target,
     studio,
     positions,
@@ -738,14 +771,8 @@ inline bool aimbot_reconstruct_bones(Player* target,
     aimbot_bone_mask,
     setup_time);
 
-  Vec3* origin = aimbot_vtable_vec3_ptr(target, aimbot_setupbones_origin_index);
-  if (origin == nullptr) {
-    origin = aimbot_abs_origin_ptr(target);
-  }
-  Vec3* angles = aimbot_vtable_vec3_ptr(target, aimbot_setupbones_angles_index);
-  if (angles == nullptr) {
-    angles = aimbot_abs_angles_ptr(target);
-  }
+  Vec3* origin = aimbot_abs_origin_ptr(target);
+  Vec3* angles = aimbot_abs_angles_ptr(target);
   if (origin == nullptr || angles == nullptr) {
     return false;
   }
@@ -753,8 +780,7 @@ inline bool aimbot_reconstruct_bones(Player* target,
   matrix_3x4 camera{};
   aimbot_angle_matrix(Vec3{0.0f, angles->y, 0.0f}, *origin, &camera);
   std::uint64_t computed[2]{};
-  using build_fn = void (*)(void*, void*, Vec3*, float*, matrix_3x4*, int, void*);
-  reinterpret_cast<build_fn>(vtable[aimbot_build_transformations_index])(
+  build(
     target,
     studio,
     positions,
@@ -798,14 +824,29 @@ inline bool aimbot_setup_bones_at_time(Player* target,
     return false;
   }
 
-  if (!animation_already_updated) {
-    aimbot_update_client_side_animation(target);
-  }
-
   const int setup_bone_count = std::min(hdr->num_bones, aimbot_max_bones);
   if (setup_bone_count <= 0 || global_vars == nullptr || !aimbot_vec3_is_finite(network_origin)) {
     aimbot_bone_failure = aimbot_reject_reason::bone_cache;
     return false;
+  }
+
+  if (!aimbot_player_is_local(target)) {
+    int copied_count = 0;
+    if (aimbot_copy_cached_bones(target, bone_to_world, &copied_count) ||
+        aimbot_copy_internal_bones(target, bone_to_world, aimbot_max_bones, &copied_count)) {
+      if (copied_count > 0 && aimbot_bones_look_posed(bone_to_world, copied_count)) {
+        if (bone_count_out != nullptr) {
+          *bone_count_out = copied_count;
+        }
+        return true;
+      }
+    }
+    aimbot_bone_failure = aimbot_reject_reason::bone_cache;
+    return false;
+  }
+
+  if (!animation_already_updated) {
+    aimbot_update_client_side_animation(target);
   }
 
   aimbot_bone_access_guard access;
@@ -1600,6 +1641,40 @@ inline unsigned int aimbot_hitscan_trace_mask() {
   return aimbot_visibility_trace_mask();
 }
 
+inline float aimbot_world_shot_fraction(const Vec3& start_pos, const Vec3& end_pos,
+  unsigned int trace_mask = aimbot_visibility_trace_mask()) {
+  if (engine_trace == nullptr || !aimbot_vec3_is_finite(start_pos) || !aimbot_vec3_is_finite(end_pos)) {
+    return 0.0f;
+  }
+
+  Vec3 start = start_pos;
+  Vec3 end = end_pos;
+  ray_t ray = engine_trace->init_ray(&start, &end);
+
+  trace_filter world_only{};
+  engine_trace->init_world_trace_filter(&world_only);
+  trace_t world_trace{};
+  engine_trace->trace_ray(&ray, trace_mask, &world_only, &world_trace);
+  if (world_trace.start_solid || world_trace.all_solid) {
+    return 0.0f;
+  }
+
+  trace_filter world_and_props{};
+  engine_trace->init_world_and_props_trace_filter(&world_and_props);
+  trace_t prop_trace{};
+  engine_trace->trace_ray(&ray, trace_mask, &world_and_props, &prop_trace);
+  if (prop_trace.start_solid || prop_trace.all_solid) {
+    return 0.0f;
+  }
+
+  return std::min(world_trace.fraction, prop_trace.fraction);
+}
+
+inline bool aimbot_world_blocks_shot(const Vec3& start_pos, const Vec3& end_pos,
+  unsigned int trace_mask = aimbot_visibility_trace_mask()) {
+  return aimbot_world_shot_fraction(start_pos, end_pos, trace_mask) < 0.999f;
+}
+
 inline bool aimbot_trace_visible_to_position(Player* localplayer,
   Entity* target,
   const Vec3& target_pos,
@@ -1615,7 +1690,10 @@ inline bool aimbot_trace_visible_to_position(Player* localplayer,
 
   struct trace_t trace_world{};
   engine_trace->trace_ray(&ray, trace_mask, &filter, &trace_world);
-  return trace_world.entity == target || (!trace_world.all_solid && !trace_world.start_solid && trace_world.fraction >= 0.999f);
+  if (trace_world.entity == target) {
+    return true;
+  }
+  return false;
 }
 
 inline Vec3 aimbot_calculate_angles_to_position(const Vec3& start, const Vec3& target) {
@@ -2476,6 +2554,25 @@ inline bool aimbot_segment_aabb_enter_fraction(const Vec3& start,
   return aimbot_segment_aabb_clip(start, end, mins, maxs, enter_fraction_out, nullptr);
 }
 
+inline bool aimbot_world_hits_before_bounds(const Vec3& start_pos, const Vec3& end_pos,
+  const Vec3& mins, const Vec3& maxs,
+  unsigned int trace_mask = aimbot_visibility_trace_mask()) {
+  if (!aimbot_vec3_is_finite(mins) || !aimbot_vec3_is_finite(maxs)) {
+    return true;
+  }
+
+  const float world_fraction = aimbot_world_shot_fraction(start_pos, end_pos, trace_mask);
+  if (world_fraction >= 0.999f) {
+    return false;
+  }
+
+  float enter = 1.0f;
+  if (!aimbot_segment_aabb_enter_fraction(start_pos, end_pos, mins, maxs, &enter)) {
+    return true;
+  }
+  return world_fraction + 0.002f < enter;
+}
+
 inline bool aimbot_segment_intersects_aabb(const Vec3& start,
   const Vec3& end,
   const Vec3& mins,
@@ -2772,7 +2869,7 @@ inline bool aimbot_player_is_preferred(Player* player) {
 
   player_info info{};
   if (engine != nullptr && engine->get_player_info(player->get_index(), &info) &&
-      info.friends_id != 0 && cathook::core::players::is_prioritized(static_cast<std::uint32_t>(info.friends_id))) {
+      info.friends_id != 0 && puphook::core::players::is_prioritized(static_cast<std::uint32_t>(info.friends_id))) {
     return true;
   }
 
@@ -2934,7 +3031,7 @@ inline aimbot_player_skip_reason aimbot_player_skip_reason_for(
   }
   if (aimbot_ignore_enabled(Aim::ignore_ipc_bots)) {
     if (entry.player_info_valid && entry.friends_id != 0 && !entry.fakeplayer) {
-      if (cat_ipc::client::is_local_ipc_friend(static_cast<std::uint32_t>(entry.friends_id))) {
+      if (pup_ipc::client::is_local_ipc_friend(static_cast<std::uint32_t>(entry.friends_id))) {
         return aimbot_player_skip_reason::ipc_bot;
       }
     } else {
@@ -2943,7 +3040,7 @@ inline aimbot_player_skip_reason aimbot_player_skip_reason_for(
           engine->get_player_info(player->get_index(), &pinfo) &&
           pinfo.friends_id != 0 &&
           pinfo.fakeplayer != true &&
-          cat_ipc::client::is_local_ipc_friend(static_cast<std::uint32_t>(pinfo.friends_id))) {
+          pup_ipc::client::is_local_ipc_friend(static_cast<std::uint32_t>(pinfo.friends_id))) {
         return aimbot_player_skip_reason::ipc_bot;
       }
     }
@@ -3260,46 +3357,7 @@ inline bool aimbot_wait_for_charge_ready(Player* localplayer,
 }
 
 inline bool aimbot_is_projectile_weapon(Weapon* weapon) {
-  if (weapon == nullptr) return false;
-  if (weapon->is_flamethrower()) return true;
-
-  switch (weapon->get_weapon_id()) {
-  case TF_WEAPON_CLEAVER:
-  case TF_WEAPON_GRENADE_CLEAVER:
-  case TF_WEAPON_ROCKETLAUNCHER:
-  case TF_WEAPON_ROCKETLAUNCHER_DIRECTHIT:
-  case TF_WEAPON_PARTICLE_CANNON:
-  case TF_WEAPON_RAYGUN:
-  case TF_WEAPON_FLAMETHROWER:
-  case TF_WEAPON_FLAMETHROWER_ROCKET:
-  case TF_WEAPON_FLAME_BALL:
-  case TF_WEAPON_FLAREGUN:
-  case TF_WEAPON_FLAREGUN_REVENGE:
-  case TF_WEAPON_GRENADELAUNCHER:
-  case TF_WEAPON_CANNON:
-  case TF_WEAPON_PIPEBOMBLAUNCHER:
-  case TF_WEAPON_STICKY_BALL_LAUNCHER:
-  case TF_WEAPON_SHOTGUN_BUILDING_RESCUE:
-  case TF_WEAPON_DRG_POMSON:
-  case TF_WEAPON_CROSSBOW:
-  case TF_WEAPON_SYRINGEGUN_MEDIC:
-  case TF_WEAPON_COMPOUND_BOW:
-  case TF_WEAPON_JAR:
-  case TF_WEAPON_JAR_MILK:
-  case TF_WEAPON_JAR_GAS:
-  case TF_WEAPON_GRENADE_JAR_GAS:
-  case TF_WEAPON_GRENADE_GAS:
-  case TF_WEAPON_PASSTIME_GUN:
-  case TF_WEAPON_LUNCHBOX:
-  case TF_WEAPON_GRAPPLINGHOOK:
-  case TF_WEAPON_THROWABLE:
-  case TF_WEAPON_GRENADE_THROWABLE:
-  case TF_WEAPON_BAT_WOOD:
-  case TF_WEAPON_BAT_GIFTWRAP:
-    return true;
-  default:
-    return weapon->get_projectile_type() > 1;
-  }
+  return weapon != nullptr && weapon->is_projectile_weapon();
 }
 
 inline bool aimbot_is_melee_weapon(Weapon* weapon) {

@@ -4,10 +4,10 @@ BUILD_MAKEFILE := $(lastword $(MAKEFILE_LIST))
 
 TEXTMODE ?= 0
 OUTPUT_DIR ?= bin
-INSTALL_PREFIX ?= /opt/cathook
+INSTALL_PREFIX ?= /opt/puphook
 INSTALL_BIN_DIR ?= $(INSTALL_PREFIX)/bin
 INSTALL_IPC_DIR ?= $(INSTALL_PREFIX)/ipc
-CATBOT_IPC_DIR = botpanel/catbot-ipc-server-main
+PUPBOT_IPC_DIR = botpanel/pupbot-ipc-server-main
 
 FUNCHOOK_DIR = libs/funchook
 FUNCHOOK_BUILD_DIR = $(FUNCHOOK_DIR)/build
@@ -19,20 +19,20 @@ CPPFLAGS += -DGIT_COMMIT_HASH=\"$(shell git rev-parse --short HEAD 2>/dev/null |
 CPPFLAGS += -DGIT_COMMITTER_DATE=\"$(shell git log -1 --format=%cd --date=short 2>/dev/null || date +%Y-%m-%d)\"
 CXXFLAGS ?= -std=c++23 -O3 -g --no-gnu-unique -pthread -fPIC
 DEPFLAGS = -MMD -MP
-CATHOOK_DEBUG_SYMBOLS ?= 0
+PUPHOOK_DEBUG_SYMBOLS ?= 0
 
-ifeq ($(CATHOOK_DEBUG_SYMBOLS),1)
+ifeq ($(PUPHOOK_DEBUG_SYMBOLS),1)
 CXXFLAGS += -g3 -ggdb3 -fno-omit-frame-pointer -fno-optimize-sibling-calls
 LDFLAGS += -Wl,--build-id=sha1
 endif
 
 ifeq ($(TEXTMODE),1)
-CPPFLAGS += -DCATHOOK_TEXTMODE=1
+CPPFLAGS += -DPUPHOOK_TEXTMODE=1
 BUILD_MODE = textmode
-BIN_NAME = libcathooktextmode.so
+BIN_NAME = libpuphooktextmode.so
 else
 BUILD_MODE = default
-BIN_NAME = libcathook.so
+BIN_NAME = libpuphook.so
 endif
 
 BIN = $(OUTPUT_DIR)/$(BIN_NAME)
@@ -42,7 +42,7 @@ LDFLAGS += -shared -Wl,-z,noexecstack -g -pthread
 LDFLAGS += -Wl,-rpath,'$$ORIGIN' -Wl,-rpath,/usr/lib -Wl,-rpath,/usr/lib64 -Wl,-rpath,/run/host/usr/lib -Wl,-rpath,/run/host/usr/lib64
 LDLIBS += -lGLEW -lGL -lSDL2 -lvulkan libs/funchook/libfunchook.a libs/funchook/libdistorm.a
 
-OBJ_FILES =  src/cathook.cpp.o # Unity build
+OBJ_FILES =  src/puphook.cpp.o # Unity build
 OBJ_FILES += src/core/logger.cpp.o src/core/config/config_store.cpp.o src/core/diagnostics/exception_handler.cpp.o # Core systems
 OBJ_FILES += src/external/MD5/MD5.cpp.o # MD5 helpers
 OBJ_FILES += src/external/libsigscan/libsigscan.c.o # Sigscan library
@@ -52,11 +52,11 @@ OBJ_FILES += src/external/mono/bindings.cpp.o src/external/mono/entity_esp.cpp.o
 OBJS = $(addprefix $(OBJ_DIR)/, $(OBJ_FILES))
 DEPS = $(OBJS:.o=.d)
 
-.PHONY: all both catbot_ipc clean debug install textmode funchook-libs prepare-permissions
+.PHONY: all both pupbot_ipc clean debug install textmode funchook-libs prepare-permissions
 
 #-------------------------------------------------------------------------------
 
-all: $(BIN) catbot_ipc
+all: $(BIN) pupbot_ipc
 
 textmode:
 	$(MAKE) TEXTMODE=1
@@ -65,21 +65,21 @@ both:
 	$(MAKE)
 	$(MAKE) TEXTMODE=1
 
-catbot_ipc:
-	$(MAKE) -C "$(CATBOT_IPC_DIR)" REPO_ROOT="$(abspath .)"
+pupbot_ipc:
+	$(MAKE) -C "$(PUPBOT_IPC_DIR)" REPO_ROOT="$(abspath .)"
 
 clean:
 	rm -rf obj
-	rm -f $(OUTPUT_DIR)/libcathook.so $(OUTPUT_DIR)/libcathooktextmode.so
+	rm -f $(OUTPUT_DIR)/libpuphook.so $(OUTPUT_DIR)/libpuphooktextmode.so
 	rm -f tf2.so tf2_textmode.so
-	$(MAKE) -C "$(CATBOT_IPC_DIR)" clean
+	$(MAKE) -C "$(PUPBOT_IPC_DIR)" clean
 
-install: $(BIN) catbot_ipc
+install: $(BIN) pupbot_ipc
 	install -d -m 0755 "$(INSTALL_BIN_DIR)" "$(INSTALL_IPC_DIR)/bin"
 	install -m 0755 "$(BIN)" "$(INSTALL_BIN_DIR)/$(BIN_NAME)"
-	if [ -f "$(OUTPUT_DIR)/libcathooktextmode.so" ]; then install -m 0755 "$(OUTPUT_DIR)/libcathooktextmode.so" "$(INSTALL_BIN_DIR)/libcathook-textmode.so"; fi
-	if [ -f "$(OUTPUT_DIR)/libcathook.so" ]; then install -m 0755 "$(OUTPUT_DIR)/libcathook.so" "$(INSTALL_BIN_DIR)/libcathook.so"; fi
-	@for binary_path in "$(OUTPUT_DIR)/libcathook.so" "$(OUTPUT_DIR)/libcathooktextmode.so"; do \
+	if [ -f "$(OUTPUT_DIR)/libpuphooktextmode.so" ]; then install -m 0755 "$(OUTPUT_DIR)/libpuphooktextmode.so" "$(INSTALL_BIN_DIR)/libpuphook-textmode.so"; fi
+	if [ -f "$(OUTPUT_DIR)/libpuphook.so" ]; then install -m 0755 "$(OUTPUT_DIR)/libpuphook.so" "$(INSTALL_BIN_DIR)/libpuphook.so"; fi
+	@for binary_path in "$(OUTPUT_DIR)/libpuphook.so" "$(OUTPUT_DIR)/libpuphooktextmode.so"; do \
 		[ -f "$$binary_path" ] || continue; \
 		if ! command -v readelf >/dev/null 2>&1; then \
 			echo "Warning: readelf is missing; cannot bundle libGLEW fallback for $$binary_path." >&2; \
@@ -100,7 +100,7 @@ install: $(BIN) catbot_ipc
 		install -m 0755 "$$source_path" "$(INSTALL_BIN_DIR)/$$required_library"; \
 		echo "Installed bundled fallback $$required_library to $(INSTALL_BIN_DIR)"; \
 	done
-	$(MAKE) -C "$(CATBOT_IPC_DIR)" REPO_ROOT="$(abspath .)" INSTALL_DIR="$(INSTALL_IPC_DIR)" install
+	$(MAKE) -C "$(PUPBOT_IPC_DIR)" REPO_ROOT="$(abspath .)" INSTALL_DIR="$(INSTALL_IPC_DIR)" install
 
 #-------------------------------------------------------------------------------
 

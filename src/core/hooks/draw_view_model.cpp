@@ -14,7 +14,7 @@ V  o o  V  file: src/core/hooks/draw_view_model.cpp
 bool (*draw_view_model_original)(void*);
 
 bool draw_view_model_hook(void* me) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (thirdperson::should_draw_local_player()) {
     return false;
   }

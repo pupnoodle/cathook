@@ -1,0 +1,10 @@
+--- steam.sh.pinned
++++ steam.sh.patched
+@@
+ elif [ -z "$STEAM_DEBUGGER" ]; then
+-	"$STEAMROOT/$STEAMEXEPATH" "$@"
++	if [ -n "${PUP_STEAM_TXTMODE_PRELOAD-}" ]; then
++		LD_PRELOAD="$PUP_STEAM_TXTMODE_PRELOAD" "$STEAMROOT/$STEAMEXEPATH" "$@"
++	else
++		"$STEAMROOT/$STEAMEXEPATH" "$@"
++	fi

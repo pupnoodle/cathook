@@ -31,7 +31,7 @@ auto allow_mvm_inspect() -> bool
 
 std::int64_t inspect_target_check_hook(void* me, void* target)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (allow_mvm_inspect())
   {
     return 1;

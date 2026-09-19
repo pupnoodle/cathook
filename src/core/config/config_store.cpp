@@ -29,7 +29,7 @@ V  o o  V  file: src/core/config/config_store.cpp
 #include <unistd.h>
 #include <sys/stat.h>
 
-namespace cathook::core
+namespace puphook::core
 {
 
 namespace
@@ -109,7 +109,11 @@ bool config_store::load_file(const std::string_view name)
     std::ifstream input{ path };
     if (!input.is_open())
     {
-        return false;
+        input.open(config_directory() / (std::string{ name } + ".cat"));
+        if (!input.is_open())
+        {
+            return false;
+        }
     }
 
     m_values.clear();
@@ -197,7 +201,9 @@ bool config_store::delete_file(const std::string_view name)
 {
     const auto path = config_path(name);
     if (path.empty()) return false;
-    const bool removed{ std::filesystem::remove(path) };
+    const bool removed_current{ std::filesystem::remove(path) };
+    const bool removed_legacy{ std::filesystem::remove(config_directory() / (std::string{ name } + ".cat")) };
+    const bool removed = removed_current || removed_legacy;
     if (removed && m_current_name == name)
     {
         m_current_name = "default";
@@ -217,7 +223,13 @@ std::vector<std::string> config_store::list_files() const
 
     for (const auto& entry : std::filesystem::directory_iterator{ config_directory() })
     {
-        if (!entry.is_regular_file() || entry.path().extension() != ".cat")
+        if (!entry.is_regular_file())
+        {
+            continue;
+        }
+
+        const auto extension = entry.path().extension();
+        if (extension != ".pup" && extension != ".cat")
         {
             continue;
         }
@@ -226,6 +238,7 @@ std::vector<std::string> config_store::list_files() const
     }
 
     std::ranges::sort(names);
+    names.erase(std::ranges::unique(names).begin(), names.end());
     return names;
 }
 
@@ -356,7 +369,7 @@ void config_store::import_config(const Config& config)
     set_bool("backtrack.visualizer", config.backtrack.visualizer);
     set_int("backtrack.visualizer_ticks", config.backtrack.visualizer_ticks);
     set_int("backtrack.visualizer_mode", static_cast<int>(config.backtrack.visualizer_mode));
-#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
+#if defined(PUPHOOK_TEXTMODE) && PUPHOOK_TEXTMODE
 
     set_bool("ipc.enabled", true);
     set_bool("ipc.auto_connect", true);
@@ -1032,7 +1045,7 @@ void config_store::export_config(Config& config) const
     config.ipc.enabled = get_bool("ipc.enabled", config.ipc.enabled);
     config.ipc.auto_connect = get_bool("ipc.auto_connect", config.ipc.auto_connect);
     config.ipc.auto_ignore_local_bots = get_bool("ipc.auto_ignore_local_bots", config.ipc.auto_ignore_local_bots);
-#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
+#if defined(PUPHOOK_TEXTMODE) && PUPHOOK_TEXTMODE
 
     config.ipc.enabled = true;
     config.ipc.auto_connect = true;
@@ -1422,7 +1435,7 @@ void config_store::export_config(Config& config) const
     config.misc.inventory_changer.key = get_int(
         "misc.inventory_changer.key", config.misc.inventory_changer.key);
 #endif
-#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
+#if defined(PUPHOOK_TEXTMODE) && PUPHOOK_TEXTMODE
 
     config.misc.exploits.null_graphics = true;
     config.misc.exploits.no_engine_sleep = true;
@@ -1495,17 +1508,19 @@ void config_store::export_config(Config& config) const
         21));
     config.misc.automation.micspam = get_bool(
         "misc.automation.micspam",
-        get_bool("cat-bot.micspam.enable", config.misc.automation.micspam));
+        get_bool("pup-bot.micspam.enable", get_bool("cat-bot.micspam.enable", config.misc.automation.micspam)));
     config.misc.automation.micspam_interval_on_seconds = std::clamp(
         get_int(
             "misc.automation.micspam_interval_on_seconds",
-            get_int("cat-bot.micspam.interval-on", config.misc.automation.micspam_interval_on_seconds)),
+            get_int("pup-bot.micspam.interval-on",
+                    get_int("cat-bot.micspam.interval-on", config.misc.automation.micspam_interval_on_seconds))),
         1,
         600);
     config.misc.automation.micspam_interval_off_seconds = std::clamp(
         get_int(
             "misc.automation.micspam_interval_off_seconds",
-            get_int("cat-bot.micspam.interval-off", config.misc.automation.micspam_interval_off_seconds)),
+            get_int("pup-bot.micspam.interval-off",
+                    get_int("cat-bot.micspam.interval-off", config.misc.automation.micspam_interval_off_seconds))),
         1,
         600);
     config.misc.automation.micspam_from_file = get_bool(
@@ -2028,7 +2043,7 @@ std::filesystem::path config_store::config_path(const std::string_view name) con
         }
     }
 
-    return config_directory() / (std::string{ name } + ".cat");
+    return config_directory() / (std::string{ name } + ".pup");
 }
 
 std::string config_store::trim(std::string value)

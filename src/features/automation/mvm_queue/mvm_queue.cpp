@@ -107,12 +107,12 @@ bool resolve_api()
 
   g_api.attempted = true;
   g_api.reserve = reinterpret_cast<repeated_field_reserve_fn>(
-    sigscan_module(cathook::core::modules::tf_client, sigs::protobuf_repeated_field_reserve));
+    sigscan_module(puphook::core::modules::tf_client, sigs::protobuf_repeated_field_reserve));
   g_api.new_element = reinterpret_cast<string_new_element_fn>(
-    sigscan_module(cathook::core::modules::tf_client, sigs::protobuf_string_new_element));
+    sigscan_module(puphook::core::modules::tf_client, sigs::protobuf_string_new_element));
   g_api.completed_mask =
-    reinterpret_cast<mvm_completed_mask_fn>(sigscan_module(cathook::core::modules::tf_client, sigs::mvm_completed_tour_mask));
-  const auto get_party_client_match = sigscan_module(cathook::core::modules::tf_client, sigs::get_party_client);
+    reinterpret_cast<mvm_completed_mask_fn>(sigscan_module(puphook::core::modules::tf_client, sigs::mvm_completed_tour_mask));
+  const auto get_party_client_match = sigscan_module(puphook::core::modules::tf_client, sigs::get_party_client);
   g_api.get_party_client = get_party_client_match != nullptr
     ? reinterpret_cast<get_party_client_fn>(
         reinterpret_cast<std::uintptr_t>(get_party_client_match) + sigs::get_party_client_offset)

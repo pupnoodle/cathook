@@ -100,7 +100,7 @@ void run_top_panel_work() {
   if (last_ipc_tick.time_since_epoch().count() == 0 ||
       now - last_ipc_tick >= std::chrono::seconds(1)) {
     last_ipc_tick = now;
-    cat_ipc::client::tick();
+    pup_ipc::client::tick();
   }
 }
 
@@ -116,7 +116,7 @@ const char* get_panel_name(void* panel) {
 }
 
 void paint_traverse_hook(void* me, void* panel, bool force_repaint, bool allow_force) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (paint_traverse_original_active) {
     if (paint_traverse_original != nullptr) {
       paint_traverse_original(me, panel, force_repaint, allow_force);
@@ -124,9 +124,9 @@ void paint_traverse_hook(void* me, void* panel, bool force_repaint, bool allow_f
     return;
   }
 
-  if (cathook::core::is_detach_pending()) {
+  if (puphook::core::is_detach_pending()) {
     call_paint_traverse_original(me, panel, force_repaint, allow_force);
-    cathook::core::service_detach_request();
+    puphook::core::service_detach_request();
     return;
   }
 

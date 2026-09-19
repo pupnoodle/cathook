@@ -9,8 +9,8 @@ V  o o  V  file: src/core/ipc/ipc_shared.hpp
   || (___\====
 */
 
-#ifndef CAT_IPC_SHARED_HPP
-#define CAT_IPC_SHARED_HPP
+#ifndef PUP_IPC_SHARED_HPP
+#define PUP_IPC_SHARED_HPP
 
 #include "core/ipc/ipc_protocol.hpp"
 
@@ -33,7 +33,7 @@ V  o o  V  file: src/core/ipc/ipc_shared.hpp
 #include <unistd.h>
 #include <filesystem>
 
-namespace cat_ipc
+namespace pup_ipc
 {
 
 inline auto read_host_pid() -> pid_t;
@@ -175,7 +175,7 @@ public:
     memory.map();
     if (!valid_state(memory.state_))
     {
-      throw std::runtime_error("catbot ipc protocol mismatch");
+      throw std::runtime_error("pupbot ipc protocol mismatch");
     }
 
     return memory;
@@ -250,8 +250,8 @@ public:
 private:
   static void ensure_ipc_directory()
   {
-    constexpr std::string_view directory = "/opt/cathook/ipc";
-    constexpr std::string_view root = "/opt/cathook";
+    constexpr std::string_view directory = "/opt/puphook/ipc";
+    constexpr std::string_view root = "/opt/puphook";
     if (::mkdir(root.data(), 0750) != 0 && errno != EEXIST)
     {
       throw std::runtime_error(std::string{"mkdir IPC root failed: "} + std::strerror(errno));
@@ -265,7 +265,7 @@ private:
   static bool valid_state(const shared_state* state)
   {
     return state != nullptr &&
-      state->global_data.magic_number == cathook_magic_number &&
+      state->global_data.magic_number == puphook_magic_number &&
       state->global_data.protocol_version == ipc_protocol_version &&
       state->global_data.abi_version == ipc_abi_version &&
       state->global_data.state_version != 0 &&
@@ -286,7 +286,7 @@ private:
     {
       peer.free = true;
     }
-    state->global_data.magic_number = cathook_magic_number;
+    state->global_data.magic_number = puphook_magic_number;
     state->global_data.protocol_version = ipc_protocol_version;
     state->global_data.abi_version = ipc_abi_version;
     state->global_data.state_version = state_version;
@@ -348,7 +348,7 @@ private:
 
     pthread_mutexattr_destroy(&attributes);
 
-    state_->global_data.magic_number = cathook_magic_number;
+    state_->global_data.magic_number = puphook_magic_number;
     state_->global_data.protocol_version = ipc_protocol_version;
     state_->global_data.abi_version = ipc_abi_version;
     state_->global_data.state_version = 1;
@@ -551,19 +551,19 @@ inline auto allowed_console_command(std::string_view command) -> bool
   const auto end = command.find_first_of(" \t\r\n;");
   const auto name = command.substr(0, end);
   constexpr std::array allowed{
-    std::string_view{"cat_detach"}, std::string_view{"cat_exec"}, std::string_view{"cat_exec_textmode"},
-    std::string_view{"cat_load"}, std::string_view{"cat_save"}, std::string_view{"cat_unlock_achievements"},
-    std::string_view{"cat_lock_achievements"}, std::string_view{"cat_unlock_achievement"}, std::string_view{"cat_lock_achievement"},
-    std::string_view{"cat_dump_achievements"}, std::string_view{"cat_medal_flip"}, std::string_view{"cat_medal_changer"},
-    std::string_view{"cat_autoitem_rent"}, std::string_view{"cat_autoitem_craft"},
-    std::string_view{"cat_queue"}, std::string_view{"cat_cancelqueue"}, std::string_view{"cat_abandon"},
-    std::string_view{"cat_mvm_fix"}, std::string_view{"cat_mvm_quit"}, std::string_view{"cat_mvm_tele"},
-    std::string_view{"cat_mvm_rent"}, std::string_view{"cat_path_to"}, std::string_view{"cat_cancel_path"},
-    std::string_view{"cat_kill"}, std::string_view{"cat_menu"}, std::string_view{"cat_party_givelead"},
-    std::string_view{"cat_setcvar"}, std::string_view{"cat_getcvar"},
-    std::string_view{"cat_criteria"}, std::string_view{"cat_commands"}, std::string_view{"cat_playerlist_print"},
-    std::string_view{"cat_playerlist_info"}, std::string_view{"cat_config_get"}, std::string_view{"cat_config_set"},
-    std::string_view{"cat_config_toggle"}, std::string_view{"cat_config_reset"}, std::string_view{"cat_config_list"}
+    std::string_view{"pup_detach"}, std::string_view{"pup_exec"}, std::string_view{"pup_exec_textmode"},
+    std::string_view{"pup_load"}, std::string_view{"pup_save"}, std::string_view{"pup_unlock_achievements"},
+    std::string_view{"pup_lock_achievements"}, std::string_view{"pup_unlock_achievement"}, std::string_view{"pup_lock_achievement"},
+    std::string_view{"pup_dump_achievements"}, std::string_view{"pup_medal_flip"}, std::string_view{"pup_medal_changer"},
+    std::string_view{"pup_autoitem_rent"}, std::string_view{"pup_autoitem_craft"},
+    std::string_view{"pup_queue"}, std::string_view{"pup_cancelqueue"}, std::string_view{"pup_abandon"},
+    std::string_view{"pup_mvm_fix"}, std::string_view{"pup_mvm_quit"}, std::string_view{"pup_mvm_tele"},
+    std::string_view{"pup_mvm_rent"}, std::string_view{"pup_path_to"}, std::string_view{"pup_cancel_path"},
+    std::string_view{"pup_kill"}, std::string_view{"pup_menu"}, std::string_view{"pup_party_givelead"},
+    std::string_view{"pup_setcvar"}, std::string_view{"pup_getcvar"},
+    std::string_view{"pup_criteria"}, std::string_view{"pup_commands"}, std::string_view{"pup_playerlist_print"},
+    std::string_view{"pup_playerlist_info"}, std::string_view{"pup_config_get"}, std::string_view{"pup_config_set"},
+    std::string_view{"pup_config_toggle"}, std::string_view{"pup_config_reset"}, std::string_view{"pup_config_list"}
   };
   return !name.empty() && std::find(allowed.begin(), allowed.end(), name) != allowed.end();
 }

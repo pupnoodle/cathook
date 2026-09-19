@@ -125,7 +125,7 @@ private:
     if (fn == nullptr) {
       return 0;
     }
-    return cathook::core::memory::member_store_after_alloc(fn, fn + 0x800, alloc_size);
+    return puphook::core::memory::member_store_after_alloc(fn, fn + 0x800, alloc_size);
   }
 
   static std::ptrdiff_t decode_commands_offset(void** vtable) {

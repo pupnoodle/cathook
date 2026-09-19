@@ -3,7 +3,7 @@
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-WORKDIR /tmp/CATHOOK-bootstrap
+WORKDIR /tmp/PUPHOOK-bootstrap
 
 COPY install-deps ./install-deps
 COPY packages ./packages
@@ -17,6 +17,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     chmod +x /usr/local/bin/sudo \
  && bash ./install-deps \
- && rm -rf /tmp/CATHOOK-bootstrap
+ && rm -rf /tmp/PUPHOOK-bootstrap
 
 WORKDIR /workspace

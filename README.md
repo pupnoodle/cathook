@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="assets/cathook.png" alt="Cathook">
+  <img src="assets/puphook.png" alt="Puphook">
 </p>
 
 <p align="center">
-  Cathook is a Team Fortress 2 Linux internal DLC.
+  Puphook is a Team Fortress 2 Linux internal DLC.
 </p>
 
 # BETA WARNING
@@ -23,16 +23,16 @@ Doesnt matter what cheat you use, get ready for a gameban.
 
 ## Overview
 
-Cathook builds into a shared object that is injected into the TF2 process. It reads game state, calls Source Engine interfaces, hooks selected client/runtime functions, and renders or automates features from inside the game.
+Puphook builds into a shared object that is injected into the TF2 process. It reads game state, calls Source Engine interfaces, hooks selected client/runtime functions, and renders or automates features from inside the game.
 
 Useful project details:
 
-* The build uses a unity-style entry point in `src/cathook.cpp`.
-* Runtime files live under `/opt/cathook` by default.
-* Built libraries are installed to `/opt/cathook/bin`.
-* Runtime assets from `assets/` are installed to `/opt/cathook/assets`.
-* Runtime configs are stored as `.cat` files under `/opt/cathook/configs` by default, including `default.cat`.
-* Logs are written under `/opt/cathook/logs`.
+* The build uses a unity-style entry point in `src/puphook.cpp`.
+* Runtime files live under `/opt/puphook` by default.
+* Built libraries are installed to `/opt/puphook/bin`.
+* Runtime assets from `assets/` are installed to `/opt/puphook/assets`.
+* Runtime configs are stored as `.pup` files under `/opt/puphook/configs` by default, including `default.pup`. Legacy `.cat` files still load.
+* Logs are written under `/opt/puphook/logs`.
 
 For Source Engine interface and structure references, see Valve's [Source SDK 2013 Multiplayer](https://github.com/ValveSoftware/source-sdk-2013).
 
@@ -47,19 +47,19 @@ Install build dependencies for your distro:
 ./install-deps
 ```
 
-Install dependencies, build Cat, install runtime files, and prepare the bundled botpanel:
+Install dependencies, build Pup, install runtime files, and prepare the bundled botpanel:
 
 ```sh
 ./setup.sh
 ```
 
-Build Cat and choose the mode from the first-run terminal menu:
+Build Pup and choose the mode from the first-run terminal menu:
 
 ```sh
 sudo ./build.sh
 ```
 
-The saved mode is reused by `build.sh`, `attach.sh`, `preload`, `debug.sh`, and the Docker build wrappers. Remove `~/.config/cathook/mode` or set `CATHOOK_MODE_FILE` to choose a different preference file.
+The saved mode is reused by `build.sh`, `attach.sh`, `preload`, `debug.sh`, and the Docker build wrappers. Remove `~/.config/puphook/mode` or set `PUPHOOK_MODE_FILE` to choose a different preference file.
 
 Build an explicit mode:
 
@@ -69,7 +69,7 @@ sudo ./build.sh --textmode
 sudo ./build.sh --both
 ```
 
-For a local build without installing to `/opt/cathook`, use `./build.sh --no-install`.
+For a local build without installing to `/opt/puphook`, use `./build.sh --no-install`.
 
 For local development, use dev mode to skip repository update checks and avoid reset paths:
 
@@ -79,7 +79,7 @@ sudo ./attach.sh --dev
 ./setup.sh --dev
 ```
 
-You can also set `CATHOOK_DEV_MODE=1` for `build.sh`, `attach.sh`, `setup.sh`, or `botpanel/update`.
+You can also set `PUPHOOK_DEV_MODE=1` for `build.sh`, `attach.sh`, `setup.sh`, or `botpanel/update`.
 `--no-update` is accepted as an alias for `--dev`.
 
 Attach to a running TF2 process:
@@ -91,13 +91,13 @@ sudo ./attach.sh
 Use the textmode binary when attaching, overriding the saved mode:
 
 ```sh
-sudo CATHOOK_MODE=textmode ./attach.sh
+sudo PUPHOOK_MODE=textmode ./attach.sh
 sudo TEXTMODE=1 ./attach.sh
 ```
 
-`attach.sh` refreshes `/opt/cathook/assets` and keeps cathook exceptions in the single `/opt/cathook/logs/exception.log` file. Ctrl+C performs a synchronous cleanup, waits for all cathook callbacks to leave, and only then calls `dlclose`.
+`attach.sh` refreshes `/opt/puphook/assets` and keeps puphook exceptions in the single `/opt/puphook/logs/exception.log` file. Ctrl+C performs a synchronous cleanup, waits for all puphook callbacks to leave, and only then calls `dlclose`.
 It stages the temporary `dlopen` copy through `/proc/<pid>/root`, checks that the target process can read it, and retries alternate runtime directories when Ubuntu/Steam Runtime path isolation hides a staged file.
-It also copies any bundled `/opt/cathook/bin/libGLEW.so.*` next to the temporary library.
+It also copies any bundled `/opt/puphook/bin/libGLEW.so.*` next to the temporary library.
 
 ## Container Build
 
@@ -115,7 +115,7 @@ On PowerShell hosts:
 
 ## Contributing
 
-Do you want to submit code to Cathook? Open a pull request and keep changes focused.
+Do you want to submit code to Puphook? Open a pull request and keep changes focused.
 
 Currently, pupnoodle is the only maintainer, so reviews and issue responses may take time.
 
@@ -128,7 +128,7 @@ Keep code simple, direct, and consistent with the existing style:
 ## Credits
 
 This project is based on [TeamFortress2-Linux-Internal](https://github.com/Doctor-Coomer/TeamFortress2-Linux-Internal). <br>
-nullworks - original cathook creators<br>
-DrCoomer - cheat i based the "cathook" on<br>
+nullworks - original puphook creators<br>
+DrCoomer - cheat i based the "puphook" on<br>
 GatoPotato658 - Unibox. without him there would be nothing<br>
 Salmon - Salmonpaste.

@@ -58,7 +58,7 @@ constexpr int gr_state_preround = 3;
 constexpr int gr_state_between_rounds = 10;
 constexpr int tf_stun_controls = 1 << 1;
 constexpr int tf_stun_loser_state = 1 << 6;
-#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
+#if defined(PUPHOOK_TEXTMODE) && PUPHOOK_TEXTMODE
 
 constexpr bool textmode_build = true;
 constexpr float hazard_refresh_interval = 1.0f;

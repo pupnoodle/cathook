@@ -1,7 +1,7 @@
 #ifndef CORE_SHARED_MODULES_HPP
 #define CORE_SHARED_MODULES_HPP
 
-namespace cathook::core::modules
+namespace puphook::core::modules
 {
 
 inline constexpr const char* tf_client = "client.so";

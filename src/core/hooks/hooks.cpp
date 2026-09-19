@@ -50,7 +50,7 @@ bool query_page_permissions(void* address, memory_page_permissions& page_permiss
   const auto address_value = reinterpret_cast<std::uintptr_t>(address);
   page_permissions.page = reinterpret_cast<void*>(address_value & ~(page_size - 1));
 
-  const int protection = cathook::core::memory::protection_at(address);
+  const int protection = puphook::core::memory::protection_at(address);
   if (protection < 0) {
     print("failed to find memory mapping for %p\n", address);
     return false;
@@ -116,7 +116,7 @@ std::string find_loaded_library_path(const char* lib_path)
     return {};
   }
 
-  return cathook::core::memory::module_path(cathook::core::memory::file_name(lib_path));
+  return puphook::core::memory::module_path(puphook::core::memory::file_name(lib_path));
 }
 
 }
@@ -332,7 +332,7 @@ bool get_sdl_wrapper_target(void* func, const char* func_name, void*** ptr_to_fu
     return false;
   }
 
-  auto* slot = static_cast<void**>(cathook::core::memory::resolve_jmp_slot(func));
+  auto* slot = static_cast<void**>(puphook::core::memory::resolve_jmp_slot(func));
   if (slot == nullptr) {
     const auto* bytes = static_cast<const std::uint8_t*>(func);
     print("%s wrapper has unexpected prologue %02x %02x\n", func_name, bytes[0], bytes[1]);

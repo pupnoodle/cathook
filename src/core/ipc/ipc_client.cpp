@@ -38,7 +38,7 @@ V  o o  V  file: src/core/ipc/ipc_client.cpp
 #include <unistd.h>
 #include <vector>
 
-namespace cat_ipc::client
+namespace pup_ipc::client
 {
 namespace
 {
@@ -90,7 +90,7 @@ constexpr std::size_t max_pending_commands = command_ring_size;
 
 [[nodiscard]] auto textmode_build() -> bool
 {
-#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
+#if defined(PUPHOOK_TEXTMODE) && PUPHOOK_TEXTMODE
 
   return true;
 #else
@@ -123,7 +123,7 @@ constexpr std::size_t max_pending_commands = command_ring_size;
     return cached_local_account_id;
   }
 
-  if (const auto* env_id = std::getenv("CAT_STEAMID32"); env_id != nullptr)
+  if (const auto* env_id = std::getenv("PUP_STEAMID32"); env_id != nullptr)
   {
     std::uint32_t parsed_id = 0;
     const auto* end = env_id + std::strlen(env_id);
@@ -153,7 +153,7 @@ constexpr std::size_t max_pending_commands = command_ring_size;
 
 [[nodiscard]] auto bot_name_from_environment() -> std::string_view
 {
-  const auto* name = std::getenv("CAT_BOT_NAME");
+  const auto* name = std::getenv("PUP_BOT_NAME");
   return name != nullptr ? std::string_view{name} : std::string_view{};
 }
 
@@ -446,14 +446,14 @@ void try_connect()
       connected_server_starttime = 0;
       if (no_available_slot)
       {
-        print("[ipc] no available catbot peer slots\n");
+        print("[ipc] no available pupbot peer slots\n");
       }
       return;
     }
 
     injected_time = now_seconds();
     const auto connected_pid = ipc_state->peer_data[local_peer_id].pid;
-    print("[ipc] connected to catbot ipc as peer %d host_pid=%d ns_pid=%d\n",
+    print("[ipc] connected to pupbot ipc as peer %d host_pid=%d ns_pid=%d\n",
       local_peer_id,
       static_cast<int>(connected_pid),
       static_cast<int>(getpid()));

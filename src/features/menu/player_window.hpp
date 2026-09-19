@@ -33,7 +33,7 @@ V  o o  V  file: src/features/menu/player_window.hpp
 #include <string>
 #include <vector>
 
-namespace cat_menu
+namespace pup_menu
 {
 
 struct player_row
@@ -46,8 +46,8 @@ struct player_row
   bool alive = false;
   bool local = false;
   bool fake = false;
-  cathook::core::players::player_state state = cathook::core::players::player_state::default_state;
-  std::vector<cathook::core::players::role_id> roles{};
+  puphook::core::players::player_state state = puphook::core::players::player_state::default_state;
+  std::vector<puphook::core::players::role_id> roles{};
   bool steam_friend = false;
   bool ipc_friend = false;
 };
@@ -57,13 +57,13 @@ namespace
 
 inline Entity* get_player_resource_entity()
 {
-  return cathook::core::player_resource::get_player_resource_entity();
+  return puphook::core::player_resource::get_player_resource_entity();
 }
 
 template <typename value_type>
 inline value_type read_player_resource_value(Entity* player_resource, int array_offset, int player_index)
 {
-  return cathook::core::player_resource::read_value<value_type>(player_resource, array_offset, player_index);
+  return puphook::core::player_resource::read_value<value_type>(player_resource, array_offset, player_index);
 }
 
 inline unsigned long long steam_id64(const std::uint32_t account_id)
@@ -102,18 +102,18 @@ inline void call_votekick(const int user_id, const char* reason)
   engine->client_cmd_unrestricted(command);
 }
 
-inline ImVec4 role_color(const cathook::core::players::role_id role)
+inline ImVec4 role_color(const puphook::core::players::role_id role)
 {
-  using cathook::core::players::role_id;
+  using puphook::core::players::role_id;
   switch (role) {
-  case cathook::core::players::ignored_role: return { 0.55f, 0.55f, 0.58f, 1.0f };
-  case cathook::core::players::cheater_role: return { 0.86f, 0.28f, 0.28f, 1.0f };
-  case cathook::core::players::friend_role: return { 0.35f, 0.78f, 0.42f, 1.0f };
-  case cathook::core::players::party_role: return { 0.30f, 0.72f, 0.86f, 1.0f };
-  case cathook::core::players::f2p_role: return { 0.90f, 0.74f, 0.28f, 1.0f };
-  case cathook::core::players::ipc_role: return { 0.70f, 0.45f, 0.90f, 1.0f };
-  case cathook::core::players::textmode_role: return { 0.92f, 0.55f, 0.28f, 1.0f };
-  case cathook::core::players::identified_role: return menu_accent();
+  case puphook::core::players::ignored_role: return { 0.55f, 0.55f, 0.58f, 1.0f };
+  case puphook::core::players::cheater_role: return { 0.86f, 0.28f, 0.28f, 1.0f };
+  case puphook::core::players::friend_role: return { 0.35f, 0.78f, 0.42f, 1.0f };
+  case puphook::core::players::party_role: return { 0.30f, 0.72f, 0.86f, 1.0f };
+  case puphook::core::players::f2p_role: return { 0.90f, 0.74f, 0.28f, 1.0f };
+  case puphook::core::players::ipc_role: return { 0.70f, 0.45f, 0.90f, 1.0f };
+  case puphook::core::players::textmode_role: return { 0.92f, 0.55f, 0.28f, 1.0f };
+  case puphook::core::players::identified_role: return menu_accent();
   default: return { 0.50f, 0.55f, 0.62f, 1.0f };
   }
 }
@@ -133,9 +133,9 @@ inline ImVec4 team_card_color(const tf_team team, const bool alive)
   return color;
 }
 
-inline bool role_chip_removable(const cathook::core::players::role_id role)
+inline bool role_chip_removable(const puphook::core::players::role_id role)
 {
-  for (const auto& definition : cathook::core::players::role_definitions()) {
+  for (const auto& definition : puphook::core::players::role_definitions()) {
     if (definition.id == role) return definition.assignable && !definition.runtime;
   }
   return false;
@@ -186,7 +186,7 @@ inline std::vector<player_row> collect_player_rows() {
       continue;
     }
 
-    const char* name_ptr = cathook::core::player_resource::name_pointer(player_resource, ping_offset, index);
+    const char* name_ptr = puphook::core::player_resource::name_pointer(player_resource, ping_offset, index);
 
     player_row row{};
     row.entity_index = index;
@@ -199,9 +199,9 @@ inline std::vector<player_row> collect_player_rows() {
     row.fake = pinfo.fakeplayer;
 
     if (row.account_id != 0) {
-      row.state = cathook::core::players::state_for(row.account_id);
-      row.roles = cathook::core::players::roles_for(row.account_id);
-      row.ipc_friend = cat_ipc::client::is_local_ipc_friend(row.account_id);
+      row.state = puphook::core::players::state_for(row.account_id);
+      row.roles = puphook::core::players::roles_for(row.account_id);
+      row.ipc_friend = pup_ipc::client::is_local_ipc_friend(row.account_id);
       if (steam_friends != nullptr) {
         row.steam_friend = steam_friends->is_friend(pinfo.friends_id);
       }
@@ -245,13 +245,13 @@ inline void draw_player_context_menu(const char* popup_id, const player_row& row
 
     if (!row.fake && row.account_id != 0) {
       if (ImGui::BeginMenu("Add tag")) {
-        for (const auto& definition : cathook::core::players::role_definitions()) {
-          if (definition.id == cathook::core::players::default_role || !definition.assignable) continue;
-          if (cathook::core::players::has_role(row.account_id, definition.id)) continue;
+        for (const auto& definition : puphook::core::players::role_definitions()) {
+          if (definition.id == puphook::core::players::default_role || !definition.assignable) continue;
+          if (puphook::core::players::has_role(row.account_id, definition.id)) continue;
           const ImVec4 color = role_color(definition.id);
           ImGui::PushStyleColor(ImGuiCol_Text, color);
           if (ImGui::MenuItem(definition.name)) {
-            (void)cathook::core::players::add_role(row.account_id, definition.id, row.name);
+            (void)puphook::core::players::add_role(row.account_id, definition.id, row.name);
           }
           ImGui::PopStyleColor();
         }
@@ -259,7 +259,7 @@ inline void draw_player_context_menu(const char* popup_id, const player_row& row
       }
 
       if (!row.roles.empty() && ImGui::MenuItem(marked_card ? "Clear role" : "Clear tags")) {
-        (void)cathook::core::players::clear_state(row.account_id);
+        (void)puphook::core::players::clear_state(row.account_id);
       }
     }
     ImGui::EndPopup();
@@ -274,7 +274,7 @@ inline void draw_role_chips(const player_row& row, const float card_x, const flo
 
   float chips_width = 8.0f;
   for (const auto role : row.roles) {
-    const char* name = cathook::core::players::role_name(role);
+    const char* name = puphook::core::players::role_name(role);
     chips_width += ImGui::CalcTextSize(name).x + (role_chip_removable(role) ? 28.0f : 14.0f);
   }
   chips_width = std::min(chips_width, std::max(width * 0.5f, width - reserved_left));
@@ -288,7 +288,7 @@ inline void draw_role_chips(const player_row& row, const float card_x, const flo
     const ImVec2 origin = ImGui::GetWindowPos();
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     for (const auto role : row.roles) {
-      const char* name = cathook::core::players::role_name(role);
+      const char* name = puphook::core::players::role_name(role);
       const bool removable = role_chip_removable(role);
       const float chip_width = ImGui::CalcTextSize(name).x + (removable ? 24.0f : 10.0f);
       const ImVec2 chip_min{ origin.x + offset, origin.y + 4.0f };
@@ -304,7 +304,7 @@ inline void draw_role_chips(const player_row& row, const float card_x, const flo
         ImGui::SetCursorPos(ImVec2(offset + chip_width - 20.0f, 3.0f));
         ImGui::PushID(static_cast<int>(role));
         if (icon_button(ICON_MD_CANCEL, ImVec2(16.0f, 16.0f))) {
-          (void)cathook::core::players::remove_role(row.account_id, role);
+          (void)puphook::core::players::remove_role(row.account_id, role);
         }
         ImGui::PopID();
       }
@@ -340,15 +340,15 @@ inline void draw_player_card(const player_row& row, const float x, const float y
 
   const bool spectating = row.user_id > 0 && spectate::target_userid() == row.user_id;
   const bool show_icon = row.local || spectating || row.steam_friend || row.ipc_friend
-    || row.state == cathook::core::players::player_state::friend_state
-    || row.state == cathook::core::players::player_state::party;
+    || row.state == puphook::core::players::player_state::friend_state
+    || row.state == puphook::core::players::player_state::party;
   float text_x = 10.0f;
   if (show_icon) {
     const char* icon = ICON_MD_PERSON;
     if (!row.local) {
       if (spectating) icon = ICON_MD_VISIBILITY;
-      else if (row.steam_friend || row.state == cathook::core::players::player_state::friend_state) icon = ICON_MD_GROUP;
-      else if (row.ipc_friend || row.state == cathook::core::players::player_state::party) icon = ICON_MD_GROUPS;
+      else if (row.steam_friend || row.state == puphook::core::players::player_state::friend_state) icon = ICON_MD_GROUP;
+      else if (row.ipc_friend || row.state == puphook::core::players::player_state::party) icon = ICON_MD_GROUPS;
     }
     ImGui::SetCursorPos(ImVec2(x + 6.0f, y + (marked_card ? 8.0f : 4.0f)));
     if (ImFont* icons = font_icons(); icons != nullptr) {
@@ -370,7 +370,7 @@ inline void draw_player_card(const player_row& row, const float x, const float y
     std::string roles{};
     for (std::size_t index = 0; index < row.roles.size(); ++index) {
       if (index != 0) roles += ", ";
-      roles += cathook::core::players::role_name(row.roles[index]);
+      roles += puphook::core::players::role_name(row.roles[index]);
     }
     if (roles.empty()) roles = "Unmarked";
     ImGui::SetCursorPos(ImVec2(x + text_x, y + 26.0f));
@@ -380,7 +380,7 @@ inline void draw_player_card(const player_row& row, const float x, const float y
     if (row.account_id != 0) {
       ImGui::SetCursorPos(ImVec2(x + width - 24.0f, y + 4.0f));
       if (icon_button(ICON_MD_DELETE, ImVec2(18.0f, 18.0f))) {
-        (void)cathook::core::players::clear_state(row.account_id);
+        (void)puphook::core::players::clear_state(row.account_id);
       }
     }
   }
@@ -426,7 +426,7 @@ inline void draw_marked_players()
   mono::input_string_with_hint("##marked_search", &search, "Search marked players...");
 
   std::vector<player_row> marked{};
-  for (const auto& entry : cathook::core::players::entries(false)) {
+  for (const auto& entry : puphook::core::players::entries(false)) {
     player_row row{};
     row.account_id = entry.account_id;
     row.name = entry.name.empty() ? std::to_string(entry.account_id) : entry.name;
@@ -441,7 +441,7 @@ inline void draw_marked_players()
       std::string haystack = lowercase_copy(row.name + " " + std::to_string(row.account_id));
       for (const auto role : row.roles) {
         haystack += " ";
-        haystack += lowercase_copy(cathook::core::players::role_name(role));
+        haystack += lowercase_copy(puphook::core::players::role_name(role));
       }
       return haystack.find(needle) == std::string::npos;
     });

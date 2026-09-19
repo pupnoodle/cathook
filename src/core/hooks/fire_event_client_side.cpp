@@ -12,7 +12,6 @@ V  o o  V  file: src/core/hooks/fire_event_client_side.cpp
 #include "games/tf2/sdk/interfaces/game_event_manager.hpp"
 #include "games/tf2/sdk/entities/player.hpp"
 #include "games/tf2/sdk/interfaces/global_vars.hpp"
-#include "core/identify/identify.hpp"
 #include "core/ipc/ipc_client.hpp"
 #include "core/math/math.hpp"
 #include "features/automation/cheat_detection/cheat_detection.hpp"
@@ -30,33 +29,22 @@ V  o o  V  file: src/core/hooks/fire_event_client_side.cpp
 
 namespace crit_hack { void on_game_event(GameEvent* event); }
 #include <cfloat>
-#define TF_DEATH_DOMINATION				0x0001
-#define TF_DEATH_ASSISTER_DOMINATION	0x0002
-#define TF_DEATH_REVENGE				0x0004
-#define TF_DEATH_ASSISTER_REVENGE		0x0008
-#define TF_DEATH_FIRST_BLOOD			0x0010
-#define TF_DEATH_FEIGN_DEATH			0x0020
-#define TF_DEATH_INTERRUPTED			0x0040
-#define TF_DEATH_GIBBED					0x0080
-#define TF_DEATH_PURGATORY				0x0100
-#define TF_DEATH_MINIBOSS				0x0200
-#define TF_DEATH_AUSTRALIUM				0x0400
 
 bool (*fire_event_client_side_original)(void*, GameEvent*) = NULL;
 
 bool fire_event_client_side_hook(void* me, GameEvent* event) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (event == nullptr || fire_event_client_side_original == nullptr) {
     return fire_event_client_side_original != nullptr ? fire_event_client_side_original(me, event) : false;
   }
 
-  if (cathook::core::is_detach_pending()) {
+  if (puphook::core::is_detach_pending()) {
     return fire_event_client_side_original(me, event);
   }
 
   crit_hack::on_game_event(event);
 
-  cat_ipc::client::on_game_event(event);
+  pup_ipc::client::on_game_event(event);
 
   navbot::controller().on_game_event(event);
   medic_automation::controller().on_game_event(event);
@@ -128,17 +116,6 @@ bool fire_event_client_side_hook(void* me, GameEvent* event) {
     resolver::note_player_hurt(attacker, victim);
     aimbot::on_player_hurt(attacker, victim, event->get_int("damageamount"));
     hitmarker::on_player_hurt(attacker, victim, event->get_int("damageamount"), event->get_bool("crit"), event->get_int("custom") == 1);
-  }
-
-  if (std::strcmp(event_name, "player_death") == 0) {
-	if (event->get_int("death_flags") & TF_DEATH_FEIGN_DEATH) {
-
-	} else {
-	    Player* victim = entity_list->get_player_from_id(event->get_int("userid"));
-	    if (victim != nullptr && victim == entity_list->get_localplayer()) {
-	      cathook::core::identify::on_player_death(event->get_int("attacker"));
-	    }
-	}
   }
 
   return fire_event_client_side_original(me, event);

@@ -239,8 +239,8 @@ collect_roots() {
     # the standard locations without making the cleaner scan the filesystem.
     add_root "${STEAM_ROOT:-}"
     add_root "${STEAM_PATH:-}"
-    add_root "${CAT_STEAM_ROOT:-}"
-    add_root "${CAT_SHARED_STEAM_ROOT:-}"
+    add_root "${PUP_STEAM_ROOT:-}"
+    add_root "${PUP_SHARED_STEAM_ROOT:-}"
 
     # A Steam install in a custom directory normally has steam.sh. Searching
     # for that marker finds all such installs under this user's home while

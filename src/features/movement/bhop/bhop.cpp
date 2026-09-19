@@ -17,8 +17,11 @@ V  o o  V  file: src/features/movement/bhop/bhop.cpp
 #include "games/tf2/sdk/interfaces/convar_system.hpp"
 #include "games/tf2/sdk/interfaces/entity_list.hpp"
 #include "games/tf2/sdk/entities/player.hpp"
+#include "games/tf2/sdk/prediction_copy.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <vector>
 
 namespace
 {
@@ -81,6 +84,8 @@ struct movement_state_guard {
   int tickcount = 0;
   bool prediction_in_prediction = false;
   bool prediction_first_time_predicted = false;
+  bool pred_copy_valid = false;
+  std::vector<std::uint8_t> pred_data{};
 
   explicit movement_state_guard(Player* value)
     : player(value), origin(value->get_origin()), abs_origin(value->get_abs_origin()),
@@ -97,7 +102,10 @@ struct movement_state_guard {
       curtime(global_vars->curtime),
       frametime(global_vars->frametime), tickcount(global_vars->tickcount),
       prediction_in_prediction(prediction->in_prediction),
-      prediction_first_time_predicted(prediction->first_time_predicted) {}
+      prediction_first_time_predicted(prediction->first_time_predicted) {
+    pred_copy_valid = pred_copy::capture(value, value->get_pred_desc_map(), pred_data,
+      pred_copy::mode::everything, value->get_index());
+  }
 
   void restore()
   {
@@ -105,6 +113,10 @@ struct movement_state_guard {
       return;
     }
 
+    if (pred_copy_valid) {
+      pred_copy::restore(player, player->get_pred_desc_map(), pred_data,
+        pred_copy::mode::everything, player->get_index());
+    }
     player->set_origin(origin);
     player->set_abs_origin(abs_origin);
     player->set_velocity(velocity);

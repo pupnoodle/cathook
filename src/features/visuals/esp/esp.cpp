@@ -58,21 +58,21 @@ V  o o  V  file: src/features/visuals/esp/esp.cpp
 namespace
 {
 
-constexpr float cathook_corner_scale = 0.10f;
-constexpr float cathook_healthbar_width = 7.0f;
-constexpr float cathook_healthbar_fill_width = 5.0f;
-constexpr float cathook_healthbar_border = 1.0f;
-constexpr float cathook_text_padding = 4.0f;
-constexpr float cathook_head_emoji_size_base = 2500.0f;
-constexpr float cathook_head_emoji_size_bias = 15.0f;
-constexpr float cathook_head_emoji_tile_size = 64.0f;
-constexpr int cathook_class_icon_tile_row = 5;
-constexpr int cathook_head_emoji_tile_row = 4;
-constexpr int cathook_head_emoji_first_tile_column = 4;
-constexpr int cathook_head_emoji_style_count = 2;
-constexpr std::size_t cathook_head_emoji_cache_size = 65;
-constexpr float cathook_head_emoji_cache_interval = 0.05f;
-constexpr float cathook_head_emoji_manual_cache_interval = 0.15f;
+constexpr float puphook_corner_scale = 0.10f;
+constexpr float puphook_healthbar_width = 7.0f;
+constexpr float puphook_healthbar_fill_width = 5.0f;
+constexpr float puphook_healthbar_border = 1.0f;
+constexpr float puphook_text_padding = 4.0f;
+constexpr float puphook_head_emoji_size_base = 2500.0f;
+constexpr float puphook_head_emoji_size_bias = 15.0f;
+constexpr float puphook_head_emoji_tile_size = 64.0f;
+constexpr int puphook_class_icon_tile_row = 5;
+constexpr int puphook_head_emoji_tile_row = 4;
+constexpr int puphook_head_emoji_first_tile_column = 4;
+constexpr int puphook_head_emoji_style_count = 2;
+constexpr std::size_t puphook_head_emoji_cache_size = 65;
+constexpr float puphook_head_emoji_cache_interval = 0.05f;
+constexpr float puphook_head_emoji_manual_cache_interval = 0.15f;
 constexpr float esp_bounds_max_screen_scale = 1.35f;
 constexpr float esp_bounds_offscreen_margin_scale = 0.50f;
 constexpr std::size_t esp_bounds_min_projected_points = 2;
@@ -123,7 +123,7 @@ struct mafia_title_range
   const char* title = nullptr;
 };
 
-constexpr std::array<mafia_title_range, 10> cathook_mafia_titles = {{
+constexpr std::array<mafia_title_range, 10> puphook_mafia_titles = {{
   {0, 9, "Crook"},
   {50, 50, "Crook"},
   {10, 10, "Bad Cop"},
@@ -138,8 +138,8 @@ constexpr std::array<mafia_title_range, 10> cathook_mafia_titles = {{
 
 head_emoji_texture_state g_head_emoji_texture{};
 head_emoji_atlas_state g_head_emoji_atlas{};
-std::array<Vec3, cathook_head_emoji_cache_size> g_head_emoji_positions{};
-std::array<bool, cathook_head_emoji_cache_size> g_head_emoji_position_valid{};
+std::array<Vec3, puphook_head_emoji_cache_size> g_head_emoji_positions{};
+std::array<bool, puphook_head_emoji_cache_size> g_head_emoji_position_valid{};
 
 struct esp_bounds
 {
@@ -229,7 +229,7 @@ struct esp_bounds_cache_entry
   unsigned int last_seen_frame = 0;
 };
 
-std::array<esp_entity_key, cathook_head_emoji_cache_size> g_head_emoji_keys{};
+std::array<esp_entity_key, puphook_head_emoji_cache_size> g_head_emoji_keys{};
 float g_next_head_emoji_cache_time = 0.0f;
 float g_next_head_emoji_manual_cache_time = 0.0f;
 std::unordered_map<esp_entity_key, esp_smoothing_state, esp_entity_key_hash> g_esp_smoothing_states{};
@@ -257,7 +257,7 @@ bool g_esp_was_in_game = false;
 template <typename value_type>
 [[nodiscard]] value_type read_player_resource_value(Entity* player_resource, uintptr_t array_offset, int player_index)
 {
-  return cathook::core::player_resource::read_value<value_type>(
+  return puphook::core::player_resource::read_value<value_type>(
     player_resource, static_cast<int>(array_offset), player_index);
 }
 
@@ -655,9 +655,9 @@ void smooth_projected_box(Entity* entity, projected_box* box)
 [[nodiscard]] std::array<std::filesystem::path, 6> head_emoji_atlas_candidates()
 {
   return {
-    cathook::core::root_directory() / "assets" / "textures" / "atlas.png",
-    cathook::core::root_directory() / "assets" / "atlas.png",
-    cathook::core::root_directory() / "textures" / "atlas.png",
+    puphook::core::root_directory() / "assets" / "textures" / "atlas.png",
+    puphook::core::root_directory() / "assets" / "atlas.png",
+    puphook::core::root_directory() / "textures" / "atlas.png",
     std::filesystem::current_path() / "assets" / "textures" / "atlas.png",
     std::filesystem::current_path() / "src" / "features" / "visuals" / "esp" / "atlas.png",
     std::filesystem::current_path() / "atlas.png"
@@ -1070,10 +1070,10 @@ void reset_head_emoji_atlas()
     return {};
   }
 
-  const auto account_id = cathook::core::players::account_id_for_player_index(player->get_index());
-  auto roles = cathook::core::players::roles_for(account_id);
-  if (roles.empty() && cathook::core::players::has_role(account_id, cathook::core::players::friend_role)) {
-    roles.push_back(cathook::core::players::friend_role);
+  const auto account_id = puphook::core::players::account_id_for_player_index(player->get_index());
+  auto roles = puphook::core::players::roles_for(account_id);
+  if (roles.empty() && puphook::core::players::has_role(account_id, puphook::core::players::friend_role)) {
+    roles.push_back(puphook::core::players::friend_role);
   }
   if (roles.empty()) {
     return {};
@@ -1082,7 +1082,7 @@ void reset_head_emoji_atlas()
   std::string result = "[";
   for (std::size_t index = 0; index < roles.size(); ++index) {
     if (index != 0) result += ", ";
-    result += cathook::core::players::role_name(roles[index]);
+    result += puphook::core::players::role_name(roles[index]);
   }
   result += "]";
   return result;
@@ -1090,13 +1090,13 @@ void reset_head_emoji_atlas()
 
 [[nodiscard]] RGBA player_tag_color(Player* player)
 {
-  using player_state = cathook::core::players::player_state;
+  using player_state = puphook::core::players::player_state;
   if (player == nullptr) {
     return RGBA{200, 200, 200, 255};
   }
 
-  const auto account_id = cathook::core::players::account_id_for_player_index(player->get_index());
-  switch (cathook::core::players::state_for(account_id)) {
+  const auto account_id = puphook::core::players::account_id_for_player_index(player->get_index());
+  switch (puphook::core::players::state_for(account_id)) {
     case player_state::friend_state:
       return RGBA{100, 255, 100, 255};
     case player_state::party:
@@ -1215,7 +1215,7 @@ void reset_head_emoji_atlas()
 
 [[nodiscard]] bool player_is_priority(Player* player)
 {
-  return player != nullptr && cathook::core::players::is_prioritized(cathook::core::players::account_id_for_player_index(player->get_index()));
+  return player != nullptr && puphook::core::players::is_prioritized(puphook::core::players::account_id_for_player_index(player->get_index()));
 }
 
 [[nodiscard]] bool player_is_invisible_esp(Player* player)
@@ -1722,7 +1722,7 @@ void draw_entity_trajectory(ImDrawList* draw_list, Entity* entity, const visual_
 
 [[nodiscard]] Entity* get_player_resource_entity()
 {
-  return cathook::core::player_resource::get_player_resource_entity();
+  return puphook::core::player_resource::get_player_resource_entity();
 }
 
 [[nodiscard]] int get_mafia_level(Entity* player_resource, int player_index)
@@ -1755,10 +1755,10 @@ void draw_entity_trajectory(ImDrawList* draw_list, Entity* entity, const visual_
 
 [[nodiscard]] const char* get_mafia_title(Player* player, int mafia_level)
 {
-  std::array<const char*, cathook_mafia_titles.size()> matches{};
+  std::array<const char*, puphook_mafia_titles.size()> matches{};
   size_t match_count = 0;
 
-  for (const auto& range : cathook_mafia_titles) {
+  for (const auto& range : puphook_mafia_titles) {
     if (mafia_level < range.min_level || mafia_level > range.max_level || range.title == nullptr) {
       continue;
     }
@@ -1848,7 +1848,7 @@ void draw_entity_trajectory(ImDrawList* draw_list, Entity* entity, const visual_
 
 [[nodiscard]] int get_head_emoji_tile_column(int style)
 {
-  return cathook_head_emoji_first_tile_column + std::clamp(style, 0, cathook_head_emoji_style_count - 1);
+  return puphook_head_emoji_first_tile_column + std::clamp(style, 0, puphook_head_emoji_style_count - 1);
 }
 
 void draw_atlas_tile(
@@ -1871,11 +1871,11 @@ void draw_atlas_tile(
   const auto atlas_width = static_cast<float>(texture->Width);
   const auto atlas_height = static_cast<float>(texture->Height);
   const auto uv_min = ImVec2(
-    (static_cast<float>(tile_column) * cathook_head_emoji_tile_size) / atlas_width,
-    (static_cast<float>(tile_row) * cathook_head_emoji_tile_size) / atlas_height);
+    (static_cast<float>(tile_column) * puphook_head_emoji_tile_size) / atlas_width,
+    (static_cast<float>(tile_row) * puphook_head_emoji_tile_size) / atlas_height);
   const auto uv_max = ImVec2(
-    ((static_cast<float>(tile_column) + 1.0f) * cathook_head_emoji_tile_size) / atlas_width,
-    ((static_cast<float>(tile_row) + 1.0f) * cathook_head_emoji_tile_size) / atlas_height);
+    ((static_cast<float>(tile_column) + 1.0f) * puphook_head_emoji_tile_size) / atlas_width,
+    ((static_cast<float>(tile_row) + 1.0f) * puphook_head_emoji_tile_size) / atlas_height);
 
   draw_list->AddImage(
     texture->GetTexRef(),
@@ -2124,8 +2124,8 @@ void draw_corner_box(ImDrawList* draw_list, const esp_bounds& bounds, ImU32 colo
   }
 
   const auto black = black_with_alpha(alpha_scale);
-  const auto height_size = std::max(4.0f, (bounds.height() - 3.0f) * cathook_corner_scale);
-  const auto width_size = std::max(4.0f, (bounds.width() - 2.0f) * cathook_corner_scale);
+  const auto height_size = std::max(4.0f, (bounds.height() - 3.0f) * puphook_corner_scale);
+  const auto width_size = std::max(4.0f, (bounds.width() - 2.0f) * puphook_corner_scale);
 
   draw_list->AddRectFilled(ImVec2(bounds.min_x, bounds.min_y), ImVec2(bounds.min_x + width_size + 1.0f, bounds.min_y + 3.0f), black);
   draw_list->AddRectFilled(ImVec2(bounds.min_x, bounds.min_y + 3.0f), ImVec2(bounds.min_x + 3.0f, bounds.min_y + height_size), black);
@@ -2256,8 +2256,8 @@ void draw_vertical_health_bar(ImDrawList* draw_list, const esp_bounds& bounds, i
   const auto fill_color = with_alpha(get_health_color(health, max_health), alpha_scale);
   const auto clamped_ratio = std::clamp(static_cast<float>(health) / static_cast<float>(max_health), 0.0f, 1.0f);
 
-  const auto outer_min = ImVec2(bounds.min_x - cathook_healthbar_width, bounds.min_y - cathook_healthbar_border);
-  const auto outer_max = ImVec2(bounds.min_x, bounds.max_y + cathook_healthbar_border);
+  const auto outer_min = ImVec2(bounds.min_x - puphook_healthbar_width, bounds.min_y - puphook_healthbar_border);
+  const auto outer_max = ImVec2(bounds.min_x, bounds.max_y + puphook_healthbar_border);
   const auto fill_height = (outer_max.y - outer_min.y - 2.0f) * clamped_ratio;
   draw_list->AddRect(outer_min, outer_max, border, 0.0f, 0, 1.0f);
 
@@ -2265,8 +2265,8 @@ void draw_vertical_health_bar(ImDrawList* draw_list, const esp_bounds& bounds, i
     return;
   }
 
-  const auto fill_min = ImVec2(outer_min.x + cathook_healthbar_border, outer_max.y - fill_height - cathook_healthbar_border);
-  const auto fill_max = ImVec2(outer_min.x + cathook_healthbar_border + cathook_healthbar_fill_width, outer_max.y - cathook_healthbar_border);
+  const auto fill_min = ImVec2(outer_min.x + puphook_healthbar_border, outer_max.y - fill_height - puphook_healthbar_border);
+  const auto fill_max = ImVec2(outer_min.x + puphook_healthbar_border + puphook_healthbar_fill_width, outer_max.y - puphook_healthbar_border);
   draw_list->AddRectFilled(fill_min, fill_max, fill_color);
 }
 
@@ -2317,7 +2317,7 @@ void draw_right_line(ImDrawList* draw_list, const esp_bounds& bounds, float* y, 
     return;
   }
 
-  draw_text(draw_list, ImVec2(bounds.max_x + cathook_text_padding, *y), color, text);
+  draw_text(draw_list, ImVec2(bounds.max_x + puphook_text_padding, *y), color, text);
   *y += ImGui::GetTextLineHeight();
 }
 
@@ -2328,7 +2328,7 @@ void draw_left_line(ImDrawList* draw_list, const esp_bounds& bounds, float* y, I
   }
 
   const auto text_size = ImGui::CalcTextSize(text.c_str());
-  draw_text(draw_list, ImVec2(bounds.min_x - cathook_text_padding - text_size.x, *y), color, text);
+  draw_text(draw_list, ImVec2(bounds.min_x - puphook_text_padding - text_size.x, *y), color, text);
   *y += ImGui::GetTextLineHeight();
 }
 
@@ -2486,15 +2486,15 @@ void draw_player_mafia_text(ImDrawList* draw_list, const esp_bounds& bounds, Pla
   switch (group.esp.mafia_level_position) {
   case mafia_level_position::left: {
     const auto text_size = ImGui::CalcTextSize(mafia_text.c_str());
-    draw_text(draw_list, ImVec2(bounds.min_x - cathook_text_padding - text_size.x, bounds.min_y), text_color, mafia_text);
+    draw_text(draw_list, ImVec2(bounds.min_x - puphook_text_padding - text_size.x, bounds.min_y), text_color, mafia_text);
     break;
   }
   case mafia_level_position::right:
-    draw_text(draw_list, ImVec2(bounds.max_x + cathook_text_padding, right_aligned_y >= 0.0f ? right_aligned_y : bounds.min_y), text_color, mafia_text);
+    draw_text(draw_list, ImVec2(bounds.max_x + puphook_text_padding, right_aligned_y >= 0.0f ? right_aligned_y : bounds.min_y), text_color, mafia_text);
     break;
   case mafia_level_position::under_name:
   default: {
-    auto text_y = bounds.min_y - line_height - cathook_text_padding;
+    auto text_y = bounds.min_y - line_height - puphook_text_padding;
     if ((group.esp.draw_mask & group_esp_settings::name) != 0) {
       text_y -= line_height;
     }
@@ -2535,13 +2535,13 @@ void draw_player_class_icon(ImDrawList* draw_list, const esp_bounds& bounds, Pla
   const auto size = std::clamp(bounds.height() * 0.22f * group.esp.class_icon_scale, 16.0f, 44.0f);
   const auto center = ImVec2(
     bounds.center().x,
-    bounds.min_y - text_lines_above - cathook_text_padding - (size * 0.5f));
+    bounds.min_y - text_lines_above - puphook_text_padding - (size * 0.5f));
 
   const float alpha_scale = visual_groups::alpha_for_entity(player->to_entity(), group.esp.start, group.esp.end, group.esp.smooth_alpha);
   if (alpha_scale <= 0.0f) {
     return;
   }
-  draw_atlas_tile(draw_list, texture, tile_index, cathook_class_icon_tile_row, center, size,
+  draw_atlas_tile(draw_list, texture, tile_index, puphook_class_icon_tile_row, center, size,
     IM_COL32(255, 255, 255, static_cast<int>(std::round(255.0f * alpha_scale))));
 }
 
@@ -2583,7 +2583,7 @@ void draw_player_head_emoji(ImDrawList* draw_list, Player* player, Player* local
 
   const auto delta = get_esp_draw_origin(player->to_entity()) - get_esp_draw_origin(localplayer->to_entity());
   const auto distance = std::sqrt((delta.x * delta.x) + (delta.y * delta.y) + (delta.z * delta.z));
-  const auto distance_size = ((cathook_head_emoji_size_base * group.esp.head_emoji_scale) / (distance + 10.0f)) + cathook_head_emoji_size_bias;
+  const auto distance_size = ((puphook_head_emoji_size_base * group.esp.head_emoji_scale) / (distance + 10.0f)) + puphook_head_emoji_size_bias;
   const auto size = std::clamp(distance_size, 14.0f, 48.0f);
   if (size <= 0.0f) {
     return;
@@ -2598,7 +2598,7 @@ void draw_player_head_emoji(ImDrawList* draw_list, Player* player, Player* local
     draw_list,
     texture,
     get_head_emoji_tile_column(group.esp.head_emoji_style),
-    cathook_head_emoji_tile_row,
+    puphook_head_emoji_tile_row,
     smoothed_screen,
     size,
     IM_COL32(255, 255, 255, static_cast<int>(std::round(255.0f * alpha_scale))));
@@ -2689,7 +2689,7 @@ void draw_player_esp(ImDrawList* draw_list, Player* player, Player* localplayer,
 
   if ((group.esp.draw_mask & group_esp_settings::name) != 0) {
     const auto name = player_name(player);
-    const auto name_position = ImVec2((bounds.min_x + bounds.max_x) * 0.5f, bounds.min_y - ImGui::GetTextLineHeight() - cathook_text_padding);
+    const auto name_position = ImVec2((bounds.min_x + bounds.max_x) * 0.5f, bounds.min_y - ImGui::GetTextLineHeight() - puphook_text_padding);
     if ((group.esp.draw_mask & group_esp_settings::name_background) != 0) {
       draw_text_centered_with_background(draw_list, name_position, neutral_text, name, group.esp.background_alpha, alpha_scale);
     } else {
@@ -2999,7 +2999,7 @@ void update_player_head_emoji_cache()
   if (global_vars->realtime < g_next_head_emoji_cache_time) {
     return;
   }
-  g_next_head_emoji_cache_time = global_vars->realtime + cathook_head_emoji_cache_interval;
+  g_next_head_emoji_cache_time = global_vars->realtime + puphook_head_emoji_cache_interval;
   g_head_emoji_position_valid.fill(false);
 
   auto* localplayer = entity_list->get_localplayer();
@@ -3008,7 +3008,7 @@ void update_player_head_emoji_cache()
   }
 
   const auto max_players = std::min(
-    static_cast<unsigned int>(std::max(cathook::core::player_resource::max_client_index(), 0) + 1),
+    static_cast<unsigned int>(std::max(puphook::core::player_resource::max_client_index(), 0) + 1),
     static_cast<unsigned int>(g_head_emoji_positions.size()));
   for (unsigned int index = 1; index < max_players; ++index) {
     auto* player = entity_list->player_from_index(index);
@@ -3040,7 +3040,7 @@ void refresh_player_head_emoji_cache_for_draw()
     return;
   }
 
-  g_next_head_emoji_manual_cache_time = global_vars->realtime + cathook_head_emoji_manual_cache_interval;
+  g_next_head_emoji_manual_cache_time = global_vars->realtime + puphook_head_emoji_manual_cache_interval;
   g_next_head_emoji_cache_time = 0.0f;
   update_player_head_emoji_cache();
 }

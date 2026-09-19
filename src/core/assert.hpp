@@ -21,13 +21,13 @@ V  o o  V  file: src/core/assert.hpp
 
 #define error_assert(expression, message)				\
   if (expression) {							\
-    cathook::core::log_raw("fatal error: ");				\
-    cathook::core::log_raw(message);					\
+    puphook::core::log_raw("fatal error: ");				\
+    puphook::core::log_raw(message);					\
     error_box(message);							\
-    if (cathook::core::game_hooks_installed.load(std::memory_order_acquire)) { \
-      cathook::core::request_detach();					\
+    if (puphook::core::game_hooks_installed.load(std::memory_order_acquire)) { \
+      puphook::core::request_detach();					\
     } else {								\
-      cathook::core::abort_module_runtime_init();			\
+      puphook::core::abort_module_runtime_init();			\
     }									\
     return false;							\
   }

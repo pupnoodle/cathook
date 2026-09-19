@@ -287,7 +287,7 @@ const char* replacement_for(const char* original)
 
 void* particle_create_hook(void* instance, const char* name, int attachment, const char* attachment_name)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (particle_create_original == nullptr) return nullptr;
   if (clean_render()) return particle_create_original(instance, name, attachment, attachment_name);
   const char* replacement = replacement_for(name);

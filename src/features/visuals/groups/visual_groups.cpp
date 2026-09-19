@@ -154,16 +154,16 @@ std::uint32_t next_group_id = 1;
     return false;
   }
 
-  return cathook::core::players::is_prioritized(cathook::core::players::account_id_for_player_index(player->get_index()));
+  return puphook::core::players::is_prioritized(puphook::core::players::account_id_for_player_index(player->get_index()));
 }
 
-[[nodiscard]] bool is_cat_player(Player* player)
+[[nodiscard]] bool is_pup_player(Player* player)
 {
   if (player == nullptr) {
     return false;
   }
 
-  return cathook::core::players::is_cat(cathook::core::players::account_id_for_player_index(player->get_index()));
+  return puphook::core::players::is_pup(puphook::core::players::account_id_for_player_index(player->get_index()));
 }
 
 [[nodiscard]] bool is_party_player(Player* player)
@@ -172,7 +172,7 @@ std::uint32_t next_group_id = 1;
     return false;
   }
 
-  return cathook::core::players::state_for(cathook::core::players::account_id_for_player_index(player->get_index())) == cathook::core::players::player_state::party;
+  return puphook::core::players::state_for(puphook::core::players::account_id_for_player_index(player->get_index())) == puphook::core::players::player_state::party;
 }
 
 [[nodiscard]] bool is_target_player(Player* player)
@@ -683,7 +683,7 @@ std::uint32_t next_group_id = 1;
     if ((group.conditions & visual_group::condition_ignored) != 0 && owner->is_ignored()) {
       return true;
     }
-    if ((group.conditions & visual_group::condition_cat) != 0 && is_cat_player(owner)) {
+    if ((group.conditions & visual_group::condition_pup) != 0 && is_pup_player(owner)) {
       return true;
     }
     if ((group.conditions & visual_group::condition_party) != 0 && is_party_player(owner)) {
@@ -724,9 +724,9 @@ std::uint32_t next_group_id = 1;
     return false;
   }
 
-  const std::uint32_t account_id = cathook::core::players::account_id_for_player_index(owner->get_index());
+  const std::uint32_t account_id = puphook::core::players::account_id_for_player_index(owner->get_index());
   return std::ranges::any_of(group.roles, [account_id](const int role) {
-    return cathook::core::players::role_matches(account_id, role);
+    return puphook::core::players::role_matches(account_id, role);
   });
 }
 
@@ -1208,7 +1208,7 @@ RGBA_float color_for_entity(Entity* entity, const visual_group& group)
     return color;
   }
 
-  if (is_cat_player(owner)) {
+  if (is_pup_player(owner)) {
     color.r = 0.0f;
     color.g = 0.8f;
     color.b = 0.35f;

@@ -94,9 +94,9 @@ bool target_matches_mask(Player* player)
 {
   const auto mask = config.misc.automation.medic_heal_targets_mask;
   const auto account_id = static_cast<std::uint32_t>(std::max(player_account_id(player), 0));
-  const bool ipc_bot = cat_ipc::client::is_local_ipc_friend(account_id);
-  const bool friendly = account_id != 0 && cathook::core::players::is_friendly(account_id);
-  const bool ignored = account_id != 0 && cathook::core::players::is_ignored(account_id);
+  const bool ipc_bot = pup_ipc::client::is_local_ipc_friend(account_id);
+  const bool friendly = account_id != 0 && puphook::core::players::is_friendly(account_id);
+  const bool ignored = account_id != 0 && puphook::core::players::is_ignored(account_id);
 
   return ((mask & Misc::Automation::medic_heal_target_friends) != 0 && (friendly || player->is_friend()))
     || ((mask & Misc::Automation::medic_heal_target_ignored) != 0 && (ignored || player->is_ignored()))

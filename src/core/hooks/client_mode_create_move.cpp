@@ -157,6 +157,9 @@ struct move_features_result {
   bool requested_shot = false;
   bool psilent_command = false;
   Vec3 pre_aimbot_view_angles{};
+  Vec3 movement_view_angles{};
+  float original_forward_move = 0.0f;
+  float original_side_move = 0.0f;
 };
 
 static move_features_result run_move_features(user_cmd* user_cmd) {
@@ -204,6 +207,7 @@ static move_features_result run_move_features(user_cmd* user_cmd) {
   const Vec3 pre_aimbot_view_angles = user_cmd->view_angles;
 
   aimbot_note_render_clock();
+  aim_spread::begin_command();
   seed_pred::ask();
   start_engine_prediction(user_cmd);
   const aimbot::aimbot_run_result aimbot_result = suppress_aimbot
@@ -217,6 +221,9 @@ static move_features_result run_move_features(user_cmd* user_cmd) {
   auto_reflect::on_create_move(user_cmd);
 
   movement_fix(user_cmd, original_view_angles, corrected_forward_move, corrected_side_move);
+  result.movement_view_angles = original_view_angles;
+  result.original_forward_move = corrected_forward_move;
+  result.original_side_move = corrected_side_move;
   if (!menu_movement_blocked && !suppress_aimbot &&
       !navbot::controller().should_prioritize_danger_movement() &&
       !navbot::controller().should_prioritize_melee_movement() &&
@@ -225,16 +232,31 @@ static move_features_result run_move_features(user_cmd* user_cmd) {
     aimbot::apply_walk_to_target(entity_list->get_localplayer(), user_cmd);
   }
 
+  result.requested_shot = aimbot_result.requested_shot;
+  result.psilent_command = aimbot_result.psilent_command;
+  result.pre_aimbot_view_angles = pre_aimbot_view_angles;
+  const crit_hack::create_move_result crit_result =
+    crit_hack::on_create_move(user_cmd, result.requested_shot);
+  if (crit_result.attack_suppressed) {
+    user_cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2 | IN_ATTACK3);
+    if (result.psilent_command) {
+      user_cmd->view_angles = pre_aimbot_view_angles;
+    }
+    result.psilent_command = false;
+  } else if (localplayer != nullptr && localplayer->is_alive()) {
+    if (aim_spread::apply_command_nospread(localplayer, localplayer->get_weapon(), user_cmd)) {
+      movement_fix(user_cmd, original_view_angles, corrected_forward_move, corrected_side_move);
+    }
+  }
+
   end_engine_prediction();
 
   const bool fast_accelerate_psilent = !menu_movement_blocked && movement_post_prediction(user_cmd);
   const bool auto_edgebug_psilent = !menu_movement_blocked && auto_edgebug_create_move(user_cmd);
   const bool moonwalk_psilent = !menu_movement_blocked && moonwalk_create_move(user_cmd);
 
-  result.requested_shot = aimbot_result.requested_shot;
-  result.psilent_command = aimbot_result.psilent_command;
-  result.pre_aimbot_view_angles = pre_aimbot_view_angles;
-  result.use_psilent = fast_accelerate_psilent || moonwalk_psilent || auto_edgebug_psilent;
+  result.use_psilent = result.psilent_command || fast_accelerate_psilent || moonwalk_psilent ||
+    auto_edgebug_psilent;
   return result;
 }
 
@@ -268,26 +290,15 @@ static move_features_result run_move_feature_pipeline(user_cmd* user_cmd, Player
   update_player_head_emoji_cache();
   result = run_move_features(user_cmd);
   run_post_create_move_features(user_cmd);
-
-  const crit_hack::create_move_result crit_result =
-    crit_hack::on_create_move(user_cmd, result.requested_shot);
-  if (crit_result.attack_suppressed) {
-    user_cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2 | IN_ATTACK3);
-    if (result.psilent_command) {
-      user_cmd->view_angles = result.pre_aimbot_view_angles;
-    }
-  }
-  result.use_psilent = (result.psilent_command && !crit_result.attack_suppressed) ||
-    result.use_psilent;
   return result;
 }
 
 bool client_mode_create_move_hook(void* me, float sample_time, user_cmd* user_cmd) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   g_client_mode_pipeline_ran = false;
-  if (cathook::core::is_detach_pending()) {
+  if (puphook::core::is_detach_pending()) {
     const bool rc = client_mode_create_move_original(me, sample_time, user_cmd);
-    cathook::core::service_detach_request();
+    puphook::core::service_detach_request();
     return rc;
   }
 
@@ -298,7 +309,7 @@ bool client_mode_create_move_hook(void* me, float sample_time, user_cmd* user_cm
 
   Player* localplayer = entity_list != nullptr ? entity_list->get_localplayer() : nullptr;
   if (!called_from_client_create_move) {
-    cat_bind::run();
+    pup_bind::run();
     automation::controller().on_create_move(user_cmd);
   }
   const bool rc = call_client_mode_create_move(me, sample_time, user_cmd, localplayer);
@@ -306,7 +317,7 @@ bool client_mode_create_move_hook(void* me, float sample_time, user_cmd* user_cm
     if (tickbase::should_rebuild_cl_move()) {
       refresh_prediction_state();
     }
-    cat_bind::run();
+    pup_bind::run();
     automation::controller().on_create_move(user_cmd);
     thirdperson::update_taunt_camera();
   }

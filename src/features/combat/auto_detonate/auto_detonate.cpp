@@ -145,8 +145,8 @@ bool target_is_excluded(const entity_cache_player_entry& entry)
   }
 
   const auto account_id = static_cast<std::uint32_t>(friends_id);
-  return cathook::core::players::is_friendly(account_id) ||
-    cathook::core::players::is_ignored(account_id) ||
+  return puphook::core::players::is_friendly(account_id) ||
+    puphook::core::players::is_ignored(account_id) ||
     friend_cache_lookup(friends_id) ||
     (steam_friends != nullptr && steam_friends->is_friend(static_cast<int>(friends_id)));
 }

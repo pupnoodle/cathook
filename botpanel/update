@@ -3,12 +3,12 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
-web_panel_root="$script_dir/catbot-ipc-web-panel-main"
-ipc_server_root="$script_dir/catbot-ipc-server-main"
-database_root="$script_dir/catbot-database"
-repo_url="${CAT_REPO_URL:-https://github.com/pupnoodle/cathook}"
-install_root="${CATHOOK_ROOT:-/opt/cathook}"
-steamapps_detect_log="${CAT_STEAMAPPS_DETECT_LOG:-/tmp/cat-steamapps-detect.log}"
+web_panel_root="$script_dir/pupbot-ipc-web-panel-main"
+ipc_server_root="$script_dir/pupbot-ipc-server-main"
+database_root="$script_dir/pupbot-database"
+repo_url="${PUP_REPO_URL:-https://github.com/pupnoodle/puphook}"
+install_root="${PUPHOOK_ROOT:-/opt/puphook}"
+steamapps_detect_log="${PUP_STEAMAPPS_DETECT_LOG:-/tmp/pup-steamapps-detect.log}"
 shared_steamapps="/opt/steamapps"
 
 usage() {
@@ -18,12 +18,12 @@ Usage: ./botpanel/update [--dev|--no-update]
 Use --dev to skip repository/navmesh update checks and never reset local changes.
 
 Environment:
-  CATHOOK_DEV_MODE=1
-  CATHOOK_ALLOW_DISCARD=1   Allow discarding local changes during updates.
-  CATHOOK_ROOT=/opt/cathook       Copy navmeshes into CATHOOK_ROOT/navmeshes.
-  CAT_UPDATE_HOST_NAVMESHES=1  Copy navmeshes into the host TF2 maps directory.
-  CAT_STEAMAPPS_PATH=/path/to/steamapps
-  CAT_STEAM_ROOT=/path/to/steam
+  PUPHOOK_DEV_MODE=1
+  PUPHOOK_ALLOW_DISCARD=1   Allow discarding local changes during updates.
+  PUPHOOK_ROOT=/opt/puphook       Copy navmeshes into PUPHOOK_ROOT/navmeshes.
+  PUP_UPDATE_HOST_NAVMESHES=1  Copy navmeshes into the host TF2 maps directory.
+  PUP_STEAMAPPS_PATH=/path/to/steamapps
+  PUP_STEAM_ROOT=/path/to/steam
 EOF
 }
 
@@ -38,14 +38,14 @@ is_enabled() {
 }
 
 is_dev_mode() {
-    is_enabled "${CATHOOK_DEV_MODE:-${CAT_DEV_MODE:-0}}"
+    is_enabled "${PUPHOOK_DEV_MODE:-${PUP_DEV_MODE:-0}}"
 }
 
 parse_args() {
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --dev | --no-update)
-                export CATHOOK_DEV_MODE=1
+                export PUPHOOK_DEV_MODE=1
                 ;;
             -h | --help)
                 usage
@@ -115,8 +115,8 @@ write_steamapps_detect_log() {
         echo "user=${SUDO_USER:-$USER}"
         echo "user_home=$user_home"
         echo "HOME=$HOME"
-        echo "CAT_STEAM_ROOT=${CAT_STEAM_ROOT:-}"
-        echo "CAT_STEAMAPPS_PATH=${CAT_STEAMAPPS_PATH:-}"
+        echo "PUP_STEAM_ROOT=${PUP_STEAM_ROOT:-}"
+        echo "PUP_STEAMAPPS_PATH=${PUP_STEAMAPPS_PATH:-}"
         echo
         echo "Checked paths:"
         for candidate in "$@"; do
@@ -139,12 +139,12 @@ find_host_steamapps() {
     local -a candidates=()
 
     user_home="$(user_home_path)"
-    if [ -n "${CAT_STEAMAPPS_PATH:-}" ]; then
-        candidates+=("$CAT_STEAMAPPS_PATH")
+    if [ -n "${PUP_STEAMAPPS_PATH:-}" ]; then
+        candidates+=("$PUP_STEAMAPPS_PATH")
     fi
 
-    if [ -n "${CAT_STEAM_ROOT:-}" ]; then
-        candidates+=("$CAT_STEAM_ROOT/steamapps")
+    if [ -n "${PUP_STEAM_ROOT:-}" ]; then
+        candidates+=("$PUP_STEAM_ROOT/steamapps")
     fi
 
     candidates+=(
@@ -224,7 +224,7 @@ update_origin_url() {
 }
 
 allow_discard_enabled() {
-    case "${CATHOOK_ALLOW_DISCARD:-${CAT_ALLOW_DISCARD:-0}}" in
+    case "${PUPHOOK_ALLOW_DISCARD:-${PUP_ALLOW_DISCARD:-0}}" in
         1|true|TRUE|yes|YES|on|ON|force|FORCE)
             return 0
             ;;
@@ -239,13 +239,13 @@ discard_local_tracked_changes() {
     fi
 
     if allow_discard_enabled; then
-        echo "Discarding local tracked changes before updating (CATHOOK_ALLOW_DISCARD is set)..."
+        echo "Discarding local tracked changes before updating (PUPHOOK_ALLOW_DISCARD is set)..."
         run_repo_git reset --hard
         return 0
     fi
 
     echo "Local tracked changes found; refusing to discard them. Skipping repository update." >&2
-    echo "Commit, stash, or set CATHOOK_ALLOW_DISCARD=1 to allow discarding." >&2
+    echo "Commit, stash, or set PUPHOOK_ALLOW_DISCARD=1 to allow discarding." >&2
     return 1
 }
 
@@ -287,10 +287,10 @@ install_dependencies() {
 }
 
 build_and_install_runtime() {
-    local dev_mode="${CATHOOK_DEV_MODE:-${CAT_DEV_MODE:-0}}"
+    local dev_mode="${PUPHOOK_DEV_MODE:-${PUP_DEV_MODE:-0}}"
 
-    echo "Building and installing Cat textmode runtime..."
-    run_as_root env CAT_BUILD_MODE="${CAT_BUILD_MODE:-textmode}" CATHOOK_ROOT="${CATHOOK_ROOT:-/opt/cathook}" CATHOOK_DEV_MODE="$dev_mode" bash "$repo_root/build.sh" --textmode
+    echo "Building and installing Pup textmode runtime..."
+    run_as_root env PUP_BUILD_MODE="${PUP_BUILD_MODE:-textmode}" PUPHOOK_ROOT="${PUPHOOK_ROOT:-/opt/puphook}" PUPHOOK_DEV_MODE="$dev_mode" bash "$repo_root/build.sh" --textmode
 }
 
 build_web_panel() {
@@ -331,7 +331,7 @@ prepare_firejail() {
         return
     fi
 
-    run_as_root cp -n "$config_path" "$config_path.CATHOOK.bak" 2>/dev/null || true
+    run_as_root cp -n "$config_path" "$config_path.PUPHOOK.bak" 2>/dev/null || true
     run_as_root sed -i -E 's/^[[:space:]]*restricted-network[[:space:]]+yes/# restricted-network yes/' "$config_path"
 }
 
@@ -340,7 +340,7 @@ fetch_navmesh_database() {
     if [ -d "$database_root/.git" ]; then
         git -C "$database_root" fetch --depth 1
         if [ -n "$(git -C "$database_root" status --porcelain --untracked-files=no)" ] && ! allow_discard_enabled; then
-            echo "$database_root has local changes; refusing to reset. Set CATHOOK_ALLOW_DISCARD=1 to allow." >&2
+            echo "$database_root has local changes; refusing to reset. Set PUPHOOK_ALLOW_DISCARD=1 to allow." >&2
             return 1
         fi
         if git -C "$database_root" merge-base --is-ancestor HEAD origin/master 2>/dev/null; then
@@ -350,14 +350,14 @@ fetch_navmesh_database() {
         elif allow_discard_enabled; then
             git -C "$database_root" reset --hard origin/master
         else
-            echo "$database_root has local commits ahead of origin/master; refusing to reset. Set CATHOOK_ALLOW_DISCARD=1 to allow." >&2
+            echo "$database_root has local commits ahead of origin/master; refusing to reset. Set PUPHOOK_ALLOW_DISCARD=1 to allow." >&2
             return 1
         fi
     elif [ -d "$database_root" ]; then
         echo "$database_root exists but is not a git checkout; skipping navmesh update." >&2
         return 1
     else
-        git clone --depth 1 https://github.com/GatoPotato658/catbot-database "$database_root"
+        git clone --depth 1 https://github.com/GatoPotato658/pupbot-database "$database_root"
     fi
 }
 
@@ -372,7 +372,7 @@ copy_navmeshes_to() {
 }
 
 update_navmeshes() {
-    local cathook_navmeshes="$install_root/navmeshes"
+    local puphook_navmeshes="$install_root/navmeshes"
     local host_steamapps
     local host_tf2_maps
     local shared_tf2_maps="$shared_steamapps/common/Team Fortress 2/tf/maps"
@@ -384,27 +384,27 @@ update_navmeshes() {
     fi
 
     fetch_navmesh_database || return
-    copy_navmeshes_to "$cathook_navmeshes" "Cat navbot search path"
+    copy_navmeshes_to "$puphook_navmeshes" "Pup navbot search path"
 
     if ! host_steamapps="$(find_host_steamapps)"; then
         echo "Error: could not automatically find the host Steam steamapps directory." >&2
         echo "Detection log: $steamapps_detect_log" >&2
         cat "$steamapps_detect_log" >&2 2>/dev/null || true
-        echo "Navmeshes were copied to $cathook_navmeshes, but TF2 maps could not be located." >&2
+        echo "Navmeshes were copied to $puphook_navmeshes, but TF2 maps could not be located." >&2
         return
     fi
 
     host_tf2_maps="$host_steamapps/common/Team Fortress 2/tf/maps"
     if [ ! -d "$host_tf2_maps" ]; then
-        echo "TF2 maps directory not found at $host_tf2_maps; navmeshes were copied to $cathook_navmeshes only."
+        echo "TF2 maps directory not found at $host_tf2_maps; navmeshes were copied to $puphook_navmeshes only."
         return
     fi
 
     ensure_shared_steamapps "$host_steamapps" || return
 
-    if is_enabled "${CAT_UPDATE_HOST_NAVMESHES:-0}"; then
+    if is_enabled "${PUP_UPDATE_HOST_NAVMESHES:-0}"; then
         tf2_maps="$host_tf2_maps"
-        echo "CAT_UPDATE_HOST_NAVMESHES is enabled; navmeshes will also be copied to the host TF2 install."
+        echo "PUP_UPDATE_HOST_NAVMESHES is enabled; navmeshes will also be copied to the host TF2 install."
     else
         echo "Navmeshes will also be copied into /opt/steamapps, matching the shared potionhook steamapps path."
     fi

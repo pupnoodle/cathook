@@ -17,7 +17,7 @@ V  o o  V  file: src/core/logger.cpp
 #include <string>
 #include <vector>
 
-namespace cathook::core
+namespace puphook::core
 {
 
 namespace
@@ -31,7 +31,7 @@ std::filesystem::path fallback_root_directory()
     {
         if (*xdg_config_home != '\0')
         {
-            return std::filesystem::path{ xdg_config_home } / "cathook";
+            return std::filesystem::path{ xdg_config_home } / "puphook";
         }
     }
 
@@ -39,11 +39,11 @@ std::filesystem::path fallback_root_directory()
     {
         if (*home != '\0')
         {
-            return std::filesystem::path{ home } / ".config" / "cathook";
+            return std::filesystem::path{ home } / ".config" / "puphook";
         }
     }
 
-    return std::filesystem::temp_directory_path() / "cathook";
+    return std::filesystem::temp_directory_path() / "puphook";
 }
 
 bool can_use_root_directory(const std::filesystem::path& directory)
@@ -109,7 +109,7 @@ std::filesystem::path root_directory()
 {
     static const std::filesystem::path value = []()
     {
-        if (const char* const override_path{ std::getenv("CATHOOK_ROOT_DIR") })
+        if (const char* const override_path{ std::getenv("PUPHOOK_ROOT_DIR") })
         {
             if (*override_path != '\0')
             {
@@ -117,7 +117,7 @@ std::filesystem::path root_directory()
             }
         }
 
-        const std::filesystem::path preferred{ "/opt/cathook" };
+        const std::filesystem::path preferred{ "/opt/puphook" };
         if (can_use_root_directory(preferred))
         {
             return preferred;
@@ -158,7 +158,7 @@ logger* get_logger()
 {
     if (!g_logger)
     {
-        initialize_logger(log_directory() / "cathook.log");
+        initialize_logger(log_directory() / "puphook.log");
     }
 
     return g_logger.get();

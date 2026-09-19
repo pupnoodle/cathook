@@ -65,7 +65,6 @@ struct snapshot_state {
   std::uint32_t condition_bits = 0;
   Player* move_helper_host = nullptr;
   bool pred_copy_valid = false;
-  std::vector<pred_copy::field> pred_fields{};
   std::vector<std::uint8_t> pred_data{};
 };
 
@@ -438,8 +437,8 @@ inline void capture_snapshot(storage& state) {
   snap.player_cond = detail::read_shared_u32(snap.shared, detail::player_cond_offset());
   snap.condition_bits = detail::read_shared_u32(snap.shared, detail::condition_list_bits_offset());
   snap.move_helper_host = move_helper != nullptr ? move_helper->get_host() : nullptr;
-  snap.pred_copy_valid = pred_copy::capture(player, player->get_pred_desc_map(), snap.pred_fields,
-                                            snap.pred_data);
+  snap.pred_copy_valid = pred_copy::capture(player, player->get_pred_desc_map(), snap.pred_data,
+    state.local_sim ? pred_copy::mode::everything : pred_copy::mode::networked, player->get_index());
   if (global_vars != nullptr) {
     snap.curtime = global_vars->curtime;
     snap.frametime = global_vars->frametime;
@@ -735,7 +734,6 @@ inline bool initialize(Player* player, storage& state, const init_options& optio
   state = storage{};
 
   if (player == nullptr || !player->is_alive() || global_vars == nullptr ||
-      prediction == nullptr || game_movement == nullptr || move_helper == nullptr ||
       entity_list == nullptr) {
     return false;
   }
@@ -745,6 +743,9 @@ inline bool initialize(Player* player, storage& state, const init_options& optio
 
   const bool local =
     engine != nullptr && player->get_index() == engine->get_localplayer_index();
+  if (local && (prediction == nullptr || game_movement == nullptr || move_helper == nullptr)) {
+    return false;
+  }
 
   state.player = player;
   state.valid = true;
@@ -755,9 +756,16 @@ inline bool initialize(Player* player, storage& state, const init_options& optio
     options.local_command != nullptr ? options.local_command->buttons : player->get_buttons();
   state.bunny_hop = options.inject_jump && local && (jump_buttons & IN_JUMP) != 0;
 
-  detail::capture_snapshot(state);
-
-  move_helper->set_host(player);
+  if (local) {
+    detail::capture_snapshot(state);
+    if (!state.snapshot.pred_copy_valid) {
+      state.valid = false;
+      return false;
+    }
+    if (move_helper != nullptr) {
+      move_helper->set_host(player);
+    }
+  }
 
   user_cmd command{};
   if (local && options.local_command != nullptr) {
@@ -771,36 +779,24 @@ inline bool initialize(Player* player, storage& state, const init_options& optio
   command.weapon_subtype = 0;
   command.has_been_predicted = false;
   state.dummy_cmd = command;
-  player->set_current_cmd(&state.dummy_cmd);
+  if (local) {
+    player->set_current_cmd(&state.dummy_cmd);
+  }
 
   if (history(player->get_index()).empty()) {
     detail::synthesize_record(player, state);
   }
 
-  if (!local) {
-    detail::normalize_remote_velocity(state);
-    player->set_base_velocity(Vec3{});
-    if ((player->get_flags() & FL_ONGROUND) != 0 && !player->is_dormant()) {
-      Vec3 velocity = player->get_velocity();
-      velocity.z = std::min(velocity.z, 0.0f);
-      player->set_velocity(velocity);
-    } else {
-      player->set_ground_entity_handle(0);
-    }
+  if (local) {
+    player->set_ducked(player->is_ducking() && !player->is_dormant());
+    player->set_flags(player->get_flags() & ~static_cast<int>(FL_DUCKING));
+    player->set_duck_time(0.0f);
+    player->set_duck_jump_time(0.0f);
+    player->set_ducking_state(false);
+    player->set_in_duck_jump(false);
   }
-
-  player->set_ducked(player->is_ducking() && !player->is_dormant());
-  player->set_flags(player->get_flags() & ~static_cast<int>(FL_DUCKING));
-  player->set_duck_time(0.0f);
-  player->set_duck_jump_time(0.0f);
-  player->set_ducking_state(false);
-  player->set_in_duck_jump(false);
 
   detail::setup_move_data(state);
-  if (game_movement->check_stuck(player, &state.move_data) != 0) {
-    state.failed = true;
-    return false;
-  }
 
   state.sim_time = player->get_simulation_time();
   state.predicted_delta = detail::predicted_delta_from_history(player->get_index());
@@ -824,6 +820,7 @@ inline bool initialize(Player* player, storage& state, const init_options& optio
         strafe_hitchance(player->get_index(), detail::strafe_samples);
       if (confidence < options.hitchance_minimum) {
         state.failed = true;
+        restore(state);
         return false;
       }
     }
@@ -840,23 +837,45 @@ inline bool initialize(Player* player, storage& state, const init_options& optio
 
 inline bool run_tick(storage& state) {
   if (state.player == nullptr || !state.valid || state.failed || state.restored ||
-      game_movement == nullptr || global_vars == nullptr) {
+      global_vars == nullptr) {
     return false;
   }
 
   Player* player = state.player;
   MoveData& move_data = state.move_data;
   const float interval = tick_interval();
+  const bool paused = prediction != nullptr && prediction->engine_paused;
 
-    if (move_helper != nullptr) {
-      move_helper->set_host(player);
+  if (!state.local_sim) {
+    const Vec3 pre_origin = move_data.GetAbsOrigin();
+    Vec3 velocity = move_data.m_vecVelocity;
+    if ((player->get_flags() & FL_ONGROUND) == 0 && player->get_water_level() <= 1) {
+      velocity.z -= detail::gravity_value * interval;
     }
-    player->set_current_cmd(&state.dummy_cmd);
-    if (prediction != nullptr) {
+    const Vec3 post_origin = pre_origin + velocity * interval;
+    move_data.SetAbsOrigin(post_origin);
+    move_data.m_vecVelocity = velocity;
+    state.sim_time = detail::round_to_ticks(state.sim_time + interval);
+    state.predicted_origin = post_origin;
+    state.direct_move = player->is_on_ground() || player->get_water_level() > 1;
+    state.terminal_velocity = velocity;
+    state.path.push_back(post_origin);
+    return std::isfinite(post_origin.x) && std::isfinite(post_origin.y) &&
+      std::isfinite(post_origin.z);
+  }
+
+  if (game_movement == nullptr) {
+    return false;
+  }
+
+  if (move_helper != nullptr) {
+    move_helper->set_host(player);
+  }
+  player->set_current_cmd(&state.dummy_cmd);
+  if (prediction != nullptr) {
     prediction->in_prediction = true;
     prediction->first_time_predicted = false;
   }
-  const bool paused = prediction != nullptr && prediction->engine_paused;
   global_vars->frametime = paused ? 0.0f : interval;
 
   if (state.drain_charge_enabled && player->in_cond(TF_COND_SHIELD_CHARGE)) {
@@ -964,31 +983,39 @@ inline void restore(storage& state) {
   if (state.player == nullptr || !state.valid || state.restored) {
     return;
   }
+  if (!state.local_sim) {
+    state.restored = true;
+    return;
+  }
   Player* player = state.player;
   const snapshot_state& snap = state.snapshot;
-  if (!snap.pred_copy_valid || !pred_copy::restore(player, snap.pred_fields, snap.pred_data)) {
-    player->set_velocity(snap.velocity);
-    player->set_base_velocity(snap.base_velocity);
-    player->set_view_offset(snap.view_offset);
-    player->set_flags(snap.flags);
-    player->set_ground_entity_handle(snap.ground_entity_handle);
-    player->set_buttons(snap.buttons);
-    player->set_last_buttons(snap.last_buttons);
-    player->set_tickbase(snap.tickbase);
-    player->set_ducked(snap.ducked);
-    player->set_ducking_state(snap.ducking);
-    player->set_in_duck_jump(snap.in_duck_jump);
-    player->set_duck_time(snap.duck_time);
-    player->set_duck_jump_time(snap.duck_jump_time);
-    player->set_fall_velocity(snap.fall_velocity);
-    player->set_move_type(snap.move_type);
-    player->set_water_level(snap.water_level);
-    detail::set_charge_meter_value(player, snap.charge_meter);
-    detail::write_shared_u32(snap.shared, detail::player_cond_offset(), snap.player_cond);
-    detail::write_shared_u32(snap.shared, detail::condition_list_bits_offset(), snap.condition_bits);
+  if (snap.pred_copy_valid) {
+    pred_copy::restore(player, player->get_pred_desc_map(), snap.pred_data,
+      state.local_sim ? pred_copy::mode::everything : pred_copy::mode::networked,
+      player->get_index());
   }
-  player->set_network_origin(snap.origin);
+  player->set_velocity(snap.velocity);
+  player->set_base_velocity(snap.base_velocity);
+  player->set_view_offset(snap.view_offset);
+  player->set_flags(snap.flags);
+  player->set_ground_entity_handle(snap.ground_entity_handle);
+  player->set_buttons(snap.buttons);
+  player->set_last_buttons(snap.last_buttons);
+  player->set_tickbase(snap.tickbase);
+  player->set_ducked(snap.ducked);
+  player->set_ducking_state(snap.ducking);
+  player->set_in_duck_jump(snap.in_duck_jump);
+  player->set_duck_time(snap.duck_time);
+  player->set_duck_jump_time(snap.duck_jump_time);
+  player->set_fall_velocity(snap.fall_velocity);
+  player->set_move_type(snap.move_type);
+  player->set_water_level(snap.water_level);
+  detail::set_charge_meter_value(player, snap.charge_meter);
+  detail::write_shared_u32(snap.shared, detail::player_cond_offset(), snap.player_cond);
+  detail::write_shared_u32(snap.shared, detail::condition_list_bits_offset(), snap.condition_bits);
   player->set_abs_origin(snap.abs_origin);
+  player->set_network_origin(snap.origin);
+  player->mark_abs_transform_dirty();
   player->set_current_cmd(snap.current_cmd);
   if (global_vars != nullptr) {
     global_vars->curtime = snap.curtime;

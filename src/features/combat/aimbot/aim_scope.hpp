@@ -202,6 +202,12 @@ inline bool fire_ready(Player* localplayer, Weapon* weapon) {
     return false;
   }
 
+  const bool sniper_weapon = is_sniper_rifle(localplayer, weapon) ||
+    aimbot_weapon_requires_scope(weapon);
+  if (!sniper_weapon) {
+    return true;
+  }
+
   if (pending_scope_state == 1 && !aimbot_sniper_scope_confirmed(localplayer)) {
     return false;
   }

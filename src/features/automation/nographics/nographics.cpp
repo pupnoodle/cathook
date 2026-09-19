@@ -110,7 +110,7 @@ std::atomic_bool startup_patch_running = false;
 bool nographics_runtime_enabled = false;
 std::chrono::steady_clock::time_point nographics_next_maintenance{};
 constexpr auto nographics_maintenance_interval = std::chrono::seconds(2);
-#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
+#if defined(PUPHOOK_TEXTMODE) && PUPHOOK_TEXTMODE
 
 constexpr bool textmode_build = true;
 #else
@@ -120,7 +120,7 @@ constexpr bool textmode_build = false;
 
 bool module_is_loaded(const char* module_name)
 {
-  return cathook::core::memory::is_module_loaded(module_name);
+  return puphook::core::memory::is_module_loaded(module_name);
 }
 
 bool command_line_has_flag(const char* flag)
@@ -217,11 +217,11 @@ struct render_patch
 };
 
 render_patch render_patches[] = {
-  { {}, cathook::core::modules::tf_client, sigs::particle_property_create, 0, { 0x31, 0xC0, 0xC3 }, "particle_property_create", false },
-  { {}, cathook::core::modules::tf_client, sigs::play_sequence, 0, { 0xC3 }, "do_animation_events", false },
-  { {}, cathook::core::modules::tf_client, sigs::particle_system_precache, 0, { 0x31, 0xC0, 0xC3 }, "particle_system_precache", false },
-  { {}, cathook::core::modules::tf_client, sigs::particle_effect_create_event, 0, { 0x31, 0xC0, 0xC3 }, "particle_effect_create_event", false },
-  { {}, cathook::core::modules::tf_client, sigs::view_render_render, 0, { 0x31, 0xC0, 0x40, 0xC3 }, "view_render_render", true },
+  { {}, puphook::core::modules::tf_client, sigs::particle_property_create, 0, { 0x31, 0xC0, 0xC3 }, "particle_property_create", false },
+  { {}, puphook::core::modules::tf_client, sigs::play_sequence, 0, { 0xC3 }, "do_animation_events", false },
+  { {}, puphook::core::modules::tf_client, sigs::particle_system_precache, 0, { 0x31, 0xC0, 0xC3 }, "particle_system_precache", false },
+  { {}, puphook::core::modules::tf_client, sigs::particle_effect_create_event, 0, { 0x31, 0xC0, 0xC3 }, "particle_effect_create_event", false },
+  { {}, puphook::core::modules::tf_client, sigs::view_render_render, 0, { 0x31, 0xC0, 0x40, 0xC3 }, "view_render_render", true },
   { {}, "engine.so", sigs::video_mode_setup_startup_graphic, 0, { 0xC3 }, "video_mode_setup_startup_graphic", true },
   { {}, "engine.so", sigs::v_render_view, 0, { 0xC3 }, "v_render_view", true },
   { {}, "materialsystem.so", sigs::material_system_swap_buffers, 0, { 0x31, 0xC0, 0x40, 0xC3 }, "material_system_swap_buffers", true },
@@ -420,7 +420,7 @@ bool should_block_file(const char* raw_filename)
 
   const std::string_view extension = file_extension(filename);
 
-  if (path_equals(extension, ".cat") || path_equals(extension, ".cfg") ||
+  if (path_equals(extension, ".pup") || path_equals(extension, ".cfg") ||
       path_equals(extension, ".bsp") || path_equals(extension, ".nav") || is_required_model_asset(extension))
   {
     return false;
@@ -516,7 +516,7 @@ bool hook_vtable(void** vtable, int index, void* hook, void** original)
 
 file_handle_t open_hook(void* this_ptr, const char* filename, const char* options, const char* path_id)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (should_block_file(filename))
   {
     return nullptr;
@@ -527,7 +527,7 @@ file_handle_t open_hook(void* this_ptr, const char* filename, const char* option
 
 bool precache_hook(void* this_ptr, const char* filename, const char* path_id)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (filename != nullptr && precache_original != nullptr &&
       is_required_model_asset(file_extension(filename)))
   {
@@ -539,7 +539,7 @@ bool precache_hook(void* this_ptr, const char* filename, const char* path_id)
 
 bool read_file_hook(void* this_ptr, const char* filename, const char* path, void* buffer, int max_bytes, int starting_byte, void* alloc_fn)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (should_block_file(filename))
   {
     return false;
@@ -560,7 +560,7 @@ const char* skip_blocked_find_results(void* this_ptr, const char* filename, file
 
 const char* find_next_hook(void* this_ptr, file_find_handle_t handle)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   const char* filename = nullptr;
   do
   {
@@ -573,19 +573,19 @@ const char* find_next_hook(void* this_ptr, file_find_handle_t handle)
 
 const char* find_first_hook(void* this_ptr, const char* wildcard, file_find_handle_t* handle)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   return skip_blocked_find_results(this_ptr, find_first_original(this_ptr, wildcard, handle), handle);
 }
 
 const char* find_first_ex_hook(void* this_ptr, const char* wildcard, const char* path_id, file_find_handle_t* handle)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   return skip_blocked_find_results(this_ptr, find_first_ex_original(this_ptr, wildcard, path_id, handle), handle);
 }
 
 int async_read_multiple_hook(void* this_ptr, const file_async_request* requests, int request_count, void* controls)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (requests == nullptr || request_count <= 0)
   {
     return async_read_multiple_original(this_ptr, requests, request_count, controls);
@@ -659,7 +659,7 @@ int async_read_multiple_hook(void* this_ptr, const file_async_request* requests,
 
 file_handle_t open_ex_hook(void* this_ptr, const char* filename, const char* options, unsigned int flags, const char* path_id, char** resolved_filename)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (should_block_file(filename))
   {
     return nullptr;
@@ -670,7 +670,7 @@ file_handle_t open_ex_hook(void* this_ptr, const char* filename, const char* opt
 
 int read_file_ex_hook(void* this_ptr, const char* filename, const char* path, void** buffer, bool null_terminate, bool optimal_alloc, int max_bytes, int starting_byte, void* alloc_fn)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (should_block_file(filename))
   {
     return 0;
@@ -681,7 +681,7 @@ int read_file_ex_hook(void* this_ptr, const char* filename, const char* path, vo
 
 void add_files_to_cache_hook(void* this_ptr, file_cache_handle_t cache_id, const char** filenames, int filename_count, const char* path_id)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
 
   (void)this_ptr;
   (void)cache_id;
@@ -742,7 +742,7 @@ bool initialize_render_patches()
     return render_patches_ready;
   }
 
-  if (!module_is_loaded(cathook::core::modules::tf_client))
+  if (!module_is_loaded(puphook::core::modules::tf_client))
   {
     return false;
   }
@@ -777,7 +777,7 @@ bool initialize_render_patches()
   return render_patches_ready;
 }
 
-void apply_cathook2017_render_patches()
+void apply_puphook2017_render_patches()
 {
   initialize_render_patches();
   bool ok = true;
@@ -802,7 +802,7 @@ void apply_cathook2017_render_patches()
   {
     restore_render_patch_objects();
     render_patches_applied = false;
-    print("[nographics] Cathook2017 render patch apply failed\n");
+    print("[nographics] Puphook2017 render patch apply failed\n");
     return;
   }
 
@@ -945,15 +945,15 @@ void resolve_game_file_system_interface()
     game_file_system = static_cast<file_system*>(get_interface("./bin/linux64/filesystem_steam.so", "VFileSystem022"));
   }
 
-  if (game_file_system != nullptr || !module_is_loaded(cathook::core::modules::tf_client))
+  if (game_file_system != nullptr || !module_is_loaded(puphook::core::modules::tf_client))
   {
     return;
   }
 
-  auto* match = reinterpret_cast<std::uint8_t*>(sigscan_module(cathook::core::modules::tf_client, sigs::client_file_system));
+  auto* match = reinterpret_cast<std::uint8_t*>(sigscan_module(puphook::core::modules::tf_client, sigs::client_file_system));
   if (match != nullptr)
   {
-    game_file_system = *static_cast<file_system**>(cathook::core::memory::resolve_rip_relative(match + 15, 3, 7));
+    game_file_system = *static_cast<file_system**>(puphook::core::memory::resolve_rip_relative(match + 15, 3, 7));
   }
 }
 
@@ -986,7 +986,7 @@ void initialize()
     return;
   }
 
-  if (!initialized && module_is_loaded(cathook::core::modules::tf_client))
+  if (!initialized && module_is_loaded(puphook::core::modules::tf_client))
   {
     print("[nographics] VFileSystem022 is missing\n");
     initialized = true;
@@ -1013,7 +1013,7 @@ void prepare_startup_patches()
     resolve_material_system_interface();
     enable_file_system_hooks();
     update_material_stub(true);
-    apply_cathook2017_render_patches();
+    apply_puphook2017_render_patches();
   }
 }
 
@@ -1063,7 +1063,7 @@ void update()
   resolve_material_system_interface();
   enable_file_system_hooks();
   update_material_stub(textmode_build);
-  apply_cathook2017_render_patches();
+  apply_puphook2017_render_patches();
 
   nographics_runtime_enabled = true;
   nographics_next_maintenance = now + nographics_maintenance_interval;

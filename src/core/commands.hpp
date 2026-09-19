@@ -39,7 +39,7 @@ V  o o  V  file: src/core/commands.hpp
 
 void* get_interface(const char* lib_path, const char* version);
 
-namespace cathook::core
+namespace puphook::core
 {
 
 class command_args
@@ -158,7 +158,7 @@ inline bool write_cfg_file_if_missing(const char* file_name, const char* default
   std::filesystem::create_directories(cfg_path.parent_path(), error);
   if (error)
   {
-    console_print("[cat_exec] failed to create cfg directory '%s': %s\n",
+    console_print("[pup_exec] failed to create cfg directory '%s': %s\n",
       cfg_path.parent_path().string().c_str(),
       error.message().c_str());
     return false;
@@ -167,7 +167,7 @@ inline bool write_cfg_file_if_missing(const char* file_name, const char* default
   std::ofstream output{ cfg_path, std::ios::out | std::ios::trunc };
   if (!output.is_open())
   {
-    console_print("[cat_exec] failed to create cfg '%s'\n", cfg_path.string().c_str());
+    console_print("[pup_exec] failed to create cfg '%s'\n", cfg_path.string().c_str());
     return false;
   }
 
@@ -175,15 +175,15 @@ inline bool write_cfg_file_if_missing(const char* file_name, const char* default
   return output.good();
 }
 
-inline void ensure_cathook_cfg_files()
+inline void ensure_puphook_cfg_files()
 {
-  constexpr const char* cat_autoexec =
-    "// Put your custom cathook settings in this file\n"
-    "// This script will be executed each time you inject cathook\n";
+  constexpr const char* pup_autoexec =
+    "// Put your custom puphook settings in this file\n"
+    "// This script will be executed each time you inject puphook\n";
 
-  constexpr const char* cat_autoexec_textmode =
-    "// Put your custom cathook settings in this file\n"
-    "// This script will be executed each time you inject textmode cathook\n"
+  constexpr const char* pup_autoexec_textmode =
+    "// Put your custom puphook settings in this file\n"
+    "// This script will be executed each time you inject textmode puphook\n"
     "sv_cheats 1\n"
     "engine_no_focus_sleep 0\n"
     "mat_queue_mode 0\n"
@@ -191,13 +191,13 @@ inline void ensure_cathook_cfg_files()
     "tf_medigun_autoheal 1\n"
     "fps_max 30\n";
 
-  constexpr const char* cat_matchexec =
-    "// Put your custom cathook settings in this file\n"
+  constexpr const char* pup_matchexec =
+    "// Put your custom puphook settings in this file\n"
     "// This script will be executed each time you join a match\n";
 
-  write_cfg_file_if_missing("cat_autoexec.cfg", cat_autoexec);
-  write_cfg_file_if_missing("cat_autoexec_textmode.cfg", cat_autoexec_textmode);
-  write_cfg_file_if_missing("cat_matchexec.cfg", cat_matchexec);
+  write_cfg_file_if_missing("pup_autoexec.cfg", pup_autoexec);
+  write_cfg_file_if_missing("pup_autoexec_textmode.cfg", pup_autoexec_textmode);
+  write_cfg_file_if_missing("pup_matchexec.cfg", pup_matchexec);
 }
 
 inline void execute_client_command(const char* command_name, const char* command_text)
@@ -219,31 +219,31 @@ inline void execute_client_command(const char* command_name, const char* command
 
 inline void execute_cfg_file(const char* command_name, const char* cfg_name)
 {
-  ensure_cathook_cfg_files();
+  ensure_puphook_cfg_files();
 
   std::string command_text{ "exec " };
   command_text += cfg_name;
   execute_client_command(command_name, command_text.c_str());
 }
 
-inline void command_cat_exec_callback(const command_args& args)
+inline void command_pup_exec_callback(const command_args& args)
 {
-  execute_cfg_file(command_invocation_name(args, "cat_exec"), "cat_autoexec");
+  execute_cfg_file(command_invocation_name(args, "pup_exec"), "pup_autoexec");
 }
 
-inline void command_cat_exec_textmode_callback(const command_args& args)
+inline void command_pup_exec_textmode_callback(const command_args& args)
 {
-  execute_cfg_file(command_invocation_name(args, "cat_exec_textmode"), "cat_autoexec_textmode");
+  execute_cfg_file(command_invocation_name(args, "pup_exec_textmode"), "pup_autoexec_textmode");
 }
 
 inline void execute_startup_autoexec()
 {
-#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
+#if defined(PUPHOOK_TEXTMODE) && PUPHOOK_TEXTMODE
 
-  execute_cfg_file("cat_exec_textmode", "cat_autoexec_textmode");
+  execute_cfg_file("pup_exec_textmode", "pup_autoexec_textmode");
 #else
 
-  execute_cfg_file("cat_exec", "cat_autoexec");
+  execute_cfg_file("pup_exec", "pup_autoexec");
 #endif
 
   if (const char* extra_exec = std::getenv("CH_EXEC"); extra_exec != nullptr && extra_exec[0] != '\0')
@@ -291,7 +291,7 @@ inline std::string_view read_config_name_arg(const command_args& args, const cha
 
 inline void command_load_callback(const command_args& args)
 {
-  const auto name = read_config_name_arg(args, "cat_load");
+  const auto name = read_config_name_arg(args, "pup_load");
   if (name.empty())
   {
     return;
@@ -300,25 +300,25 @@ inline void command_load_callback(const command_args& args)
   auto* store = get_config_store();
   if (store == nullptr)
   {
-    console_print("[cat_load] config store unavailable\n");
+    console_print("[pup_load] config store unavailable\n");
     return;
   }
 
   if (!store->load_file(name))
   {
-    console_print("[cat_load] failed to load config '%s'\n", args.argv(1));
+    console_print("[pup_load] failed to load config '%s'\n", args.argv(1));
     return;
   }
 
   store->export_config(::config);
   reset_insider_settings_session(::config);
-  cat_bind::load(store);
-  console_print("[cat_load] loaded config '%s'\n", args.argv(1));
+  pup_bind::load(store);
+  console_print("[pup_load] loaded config '%s'\n", args.argv(1));
 }
 
 inline void command_save_callback(const command_args& args)
 {
-  const auto name = read_config_name_arg(args, "cat_save");
+  const auto name = read_config_name_arg(args, "pup_save");
   if (name.empty())
   {
     return;
@@ -327,24 +327,24 @@ inline void command_save_callback(const command_args& args)
   auto* store = get_config_store();
   if (store == nullptr)
   {
-    console_print("[cat_save] config store unavailable\n");
+    console_print("[pup_save] config store unavailable\n");
     return;
   }
 
   store->import_config(::config);
   if (!store->save_file(name))
   {
-    console_print("[cat_save] failed to save config '%s'\n", args.argv(1));
+    console_print("[pup_save] failed to save config '%s'\n", args.argv(1));
     return;
   }
 
-  if (!cat_bind::save(store, name))
+  if (!pup_bind::save(store, name))
   {
-    console_print("[cat_save] saved config '%s' but failed to save binds\n", args.argv(1));
+    console_print("[pup_save] saved config '%s' but failed to save binds\n", args.argv(1));
     return;
   }
 
-  console_print("[cat_save] saved config '%s'\n", args.argv(1));
+  console_print("[pup_save] saved config '%s'\n", args.argv(1));
 }
 
 struct developer_setting
@@ -419,7 +419,7 @@ inline std::optional<developer_setting> resolve_developer_setting(
 
   if (suffix_matches.empty())
   {
-    console_print("[%s] no setting named '%s'; use cat_config_list to inspect settings\n",
+    console_print("[%s] no setting named '%s'; use pup_config_list to inspect settings\n",
       command_name, wanted.c_str());
     return std::nullopt;
   }
@@ -461,7 +461,7 @@ inline bool apply_developer_setting(const char* command_name, const developer_se
 
 inline void command_config_get_callback(const command_args& args)
 {
-  const char* command_name = command_invocation_name(args, "cat_config_get");
+  const char* command_name = command_invocation_name(args, "pup_config_get");
   if (args.argc() < 2)
   {
     console_print("[%s] usage: %s <setting>\n", command_name, command_name);
@@ -476,7 +476,7 @@ inline void command_config_get_callback(const command_args& args)
 
 inline void command_config_set_callback(const command_args& args)
 {
-  const char* command_name = command_invocation_name(args, "cat_config_set");
+  const char* command_name = command_invocation_name(args, "pup_config_set");
   if (args.argc() < 2)
   {
     console_print("[%s] usage: %s <setting> <value>\n", command_name, command_name);
@@ -498,7 +498,7 @@ inline void command_config_set_callback(const command_args& args)
 
 inline void command_config_toggle_callback(const command_args& args)
 {
-  const char* command_name = command_invocation_name(args, "cat_config_toggle");
+  const char* command_name = command_invocation_name(args, "pup_config_toggle");
   if (args.argc() < 2)
   {
     console_print("[%s] usage: %s <setting>\n", command_name, command_name);
@@ -509,7 +509,7 @@ inline void command_config_toggle_callback(const command_args& args)
   if (!setting.has_value()) return;
   if (setting->type != developer_console_config::value_type::boolean)
   {
-    console_print("[%s] %s is not a boolean setting; use cat_config_set\n", command_name,
+    console_print("[%s] %s is not a boolean setting; use pup_config_set\n", command_name,
       setting->key.c_str());
     return;
   }
@@ -519,7 +519,7 @@ inline void command_config_toggle_callback(const command_args& args)
 
 inline void command_config_reset_callback(const command_args& args)
 {
-  const char* command_name = command_invocation_name(args, "cat_config_reset");
+  const char* command_name = command_invocation_name(args, "pup_config_reset");
   if (args.argc() < 2)
   {
     console_print("[%s] usage: %s <setting>\n", command_name, command_name);
@@ -540,7 +540,7 @@ inline void command_config_reset_callback(const command_args& args)
 
 inline void command_config_list_callback(const command_args& args)
 {
-  const char* command_name = command_invocation_name(args, "cat_config_list");
+  const char* command_name = command_invocation_name(args, "pup_config_list");
   auto* store = get_config_store();
   if (store == nullptr)
   {
@@ -672,12 +672,12 @@ inline void change_all_achievements(const achievement_change change, const char*
 
 inline void command_unlock_achievements_callback(const command_args&)
 {
-  change_all_achievements(achievement_change::unlock, "cat_unlock_achievements");
+  change_all_achievements(achievement_change::unlock, "pup_unlock_achievements");
 }
 
 inline void command_lock_achievements_callback(const command_args&)
 {
-  change_all_achievements(achievement_change::lock, "cat_lock_achievements");
+  change_all_achievements(achievement_change::lock, "pup_lock_achievements");
 }
 
 inline std::optional<int> read_int_arg(const command_args& args, const char* command_name, const int index, const char* label)
@@ -702,7 +702,7 @@ inline std::optional<int> read_int_arg(const command_args& args, const char* com
 
 inline void command_medal_flip_callback(const command_args& args)
 {
-  const char* command_name = command_invocation_name(args, "cat_medal_flip");
+  const char* command_name = command_invocation_name(args, "pup_medal_flip");
   if (args.argc() > 1)
   {
     const auto enabled = read_int_arg(args, command_name, 1, "enabled");
@@ -723,7 +723,7 @@ inline void command_medal_flip_callback(const command_args& args)
 
 inline void command_medal_changer_callback(const command_args& args)
 {
-  const char* command_name = command_invocation_name(args, "cat_medal_changer");
+  const char* command_name = command_invocation_name(args, "pup_medal_changer");
   const auto rank = read_int_arg(args, command_name, 1, "rank (1-1200, 0 disables)");
   if (!rank)
   {
@@ -750,7 +750,7 @@ inline const char* command_invocation_name(const command_args& args, const char*
 
 inline void command_unlock_achievement_callback(const command_args& args)
 {
-  const char* command_name = command_invocation_name(args, "cat_unlock_achievement");
+  const char* command_name = command_invocation_name(args, "pup_unlock_achievement");
   const auto achievement_id = read_int_arg(args, command_name, 1, "achievement_id");
   if (!achievement_id)
   {
@@ -768,7 +768,7 @@ inline void command_unlock_achievement_callback(const command_args& args)
 
 inline void command_lock_achievement_callback(const command_args& args)
 {
-  const char* command_name = command_invocation_name(args, "cat_lock_achievement");
+  const char* command_name = command_invocation_name(args, "pup_lock_achievement");
   const auto achievement_id = read_int_arg(args, command_name, 1, "achievement_id");
   if (!achievement_id)
   {
@@ -786,7 +786,7 @@ inline void command_lock_achievement_callback(const command_args& args)
 
 inline void command_autoitem_rent_callback(const command_args& args)
 {
-  const char* command_name = command_invocation_name(args, "cat_autoitem_rent");
+  const char* command_name = command_invocation_name(args, "pup_autoitem_rent");
   const auto item_def_id = read_int_arg(args, command_name, 1, "item_def_id");
   if (!item_def_id)
   {
@@ -804,7 +804,7 @@ inline void command_autoitem_rent_callback(const command_args& args)
 
 inline void command_autoitem_craft_callback(const command_args& args)
 {
-  const char* command_name = command_invocation_name(args, "cat_autoitem_craft");
+  const char* command_name = command_invocation_name(args, "pup_autoitem_craft");
   if (args.argc() < 2)
   {
     console_print("[%s] usage: %s <item_def_id> [item_def_id...]\n", command_name, command_name);
@@ -834,8 +834,8 @@ inline void command_autoitem_craft_callback(const command_args& args)
 
 inline void command_dump_achievements_callback(const command_args& args)
 {
-  const char* command_name = command_invocation_name(args, "cat_dump_achievements");
-  const char* path = args.argc() >= 2 ? args.argv(1) : "/tmp/cathook_achievements.txt";
+  const char* command_name = command_invocation_name(args, "pup_dump_achievements");
+  const char* path = args.argc() >= 2 ? args.argv(1) : "/tmp/puphook_achievements.txt";
   if (!autoitem::dump_achievements(path))
   {
     console_print("[%s] failed to dump achievements to %s\n", command_name, path);
@@ -849,54 +849,54 @@ inline void command_queue_callback(const command_args&)
 {
   if (!automation::request_casual_queue())
   {
-    console_print("[cat_queue] matchmaking API unavailable\n");
+    console_print("[pup_queue] matchmaking API unavailable\n");
     return;
   }
 
-  console_print("[cat_queue] requested casual matchmaking queue\n");
+  console_print("[pup_queue] requested casual matchmaking queue\n");
 }
 
 inline void command_cancel_queue_callback(const command_args&)
 {
   if (!automation::cancel_casual_queue())
   {
-    console_print("[cat_cancelqueue] matchmaking API unavailable\n");
+    console_print("[pup_cancelqueue] matchmaking API unavailable\n");
     return;
   }
 
-  console_print("[cat_cancelqueue] requested casual matchmaking queue cancel\n");
+  console_print("[pup_cancelqueue] requested casual matchmaking queue cancel\n");
 }
 
 inline void command_abandon_callback(const command_args&)
 {
   if (!automation::abandon_current_match())
   {
-    console_print("[cat_abandon] matchmaking client unavailable or no active match\n");
+    console_print("[pup_abandon] matchmaking client unavailable or no active match\n");
     return;
   }
 
-  console_print("[cat_abandon] requested match abandon\n");
+  console_print("[pup_abandon] requested match abandon\n");
 }
 
 inline void command_criteria_callback(const command_args&)
 {
   if (!automation::reload_casual_criteria())
   {
-    console_print("[cat_criteria] casual criteria API unavailable\n");
+    console_print("[pup_criteria] casual criteria API unavailable\n");
     return;
   }
 
-  console_print("[cat_criteria] reloaded casual criteria\n");
+  console_print("[pup_criteria] reloaded casual criteria\n");
 }
 
 inline void command_kill_callback(const command_args&)
 {
-  execute_client_command("cat_kill", (std::rand() & 1) != 0 ? "kill" : "explode");
+  execute_client_command("pup_kill", (std::rand() & 1) != 0 ? "kill" : "explode");
 }
 
 inline void command_setcvar_callback(const command_args& args)
 {
-  const char* command_name = command_invocation_name(args, "cat_setcvar");
+  const char* command_name = command_invocation_name(args, "pup_setcvar");
   if (args.argc() < 3)
   {
     console_print("[%s] usage: %s <cvar> <value>\n", command_name, command_name);
@@ -919,7 +919,7 @@ inline void command_setcvar_callback(const command_args& args)
 
 inline void command_getcvar_callback(const command_args& args)
 {
-  const char* command_name = command_invocation_name(args, "cat_getcvar");
+  const char* command_name = command_invocation_name(args, "pup_getcvar");
   if (args.argc() != 2)
   {
     console_print("[%s] usage: %s <cvar>\n", command_name, command_name);
@@ -939,7 +939,7 @@ inline void command_getcvar_callback(const command_args& args)
 
 inline void command_path_to_callback(const command_args& args)
 {
-  const char* command_name = command_invocation_name(args, "cat_path_to");
+  const char* command_name = command_invocation_name(args, "pup_path_to");
   if (args.argc() < 4)
   {
     console_print("[%s] usage: %s <x> <y> <z>\n", command_name, command_name);
@@ -965,12 +965,12 @@ inline void command_path_to_callback(const command_args& args)
 inline void command_cancel_path_callback(const command_args&)
 {
   navbot::controller().cancel_path();
-  console_print("[cat_cancel_path] canceled\n");
+  console_print("[pup_cancel_path] canceled\n");
 }
 
 inline void command_menu_callback(const command_args&)
 {
-  cat_bind::set_menu_open(!cat_bind::menu_open_state());
+  pup_bind::set_menu_open(!pup_bind::menu_open_state());
 }
 
 inline void command_mvm_fix_callback(const command_args&)
@@ -981,29 +981,29 @@ inline void command_mvm_fix_callback(const command_args&)
 inline void command_mvm_quit_callback(const command_args&)
 {
   automation::mvm_quit();
-  console_print("[cat_mvm_quit] abandoned match and disconnected\n");
+  console_print("[pup_mvm_quit] abandoned match and disconnected\n");
 }
 
 inline void command_mvm_tele_callback(const command_args&)
 {
   if (!navbot::controller().path_to_teleporter())
   {
-    console_print("[cat_mvm_tele] no reachable teleporter entrance found\n");
+    console_print("[pup_mvm_tele] no reachable teleporter entrance found\n");
     return;
   }
 
-  console_print("[cat_mvm_tele] pathing to closest teleporter entrance\n");
+  console_print("[pup_mvm_tele] pathing to closest teleporter entrance\n");
 }
 
 inline void command_mvm_rent_callback(const command_args&)
 {
   autoitem::mvm_rent();
-  console_print("[cat_mvm_rent] requested vaccinator and heatmaker\n");
+  console_print("[pup_mvm_rent] requested vaccinator and heatmaker\n");
 }
 
 inline void command_party_givelead_callback(const command_args& args)
 {
-  const char* command_name = command_invocation_name(args, "cat_party_givelead");
+  const char* command_name = command_invocation_name(args, "pup_party_givelead");
   if (args.argc() < 2)
   {
     console_print("[%s] usage: %s <account_id>\n", command_name, command_name);
@@ -1028,7 +1028,7 @@ inline void command_party_givelead_callback(const command_args& args)
 
 inline void command_commands_callback(const command_args&)
 {
-  console_print("[cat_commands] %d registered commands\n", static_cast<int>(registered_commands().size()));
+  console_print("[pup_commands] %d registered commands\n", static_cast<int>(registered_commands().size()));
   for (const auto& command_entry : registered_commands())
   {
     if (command_entry != nullptr)
@@ -1147,7 +1147,7 @@ inline std::optional<resolved_player_arg> resolve_player_arg(const command_args&
 
 inline void command_playerlist_load_callback(const command_args& args)
 {
-  const char* command_name = command_invocation_name(args, "cat_playerlist_load");
+  const char* command_name = command_invocation_name(args, "pup_playerlist_load");
   if (!players::load())
   {
     console_print("[%s] no saved player list found\n", command_name);
@@ -1159,7 +1159,7 @@ inline void command_playerlist_load_callback(const command_args& args)
 
 inline void command_spectate_callback(const command_args& args)
 {
-  const char* command_name = command_invocation_name(args, "cat_spectate");
+  const char* command_name = command_invocation_name(args, "pup_spectate");
   if (args.argc() <= 1)
   {
     spectate::set_target_userid(-1);
@@ -1227,7 +1227,7 @@ inline void command_spectate_callback(const command_args& args)
 
 inline void command_playerlist_save_callback(const command_args& args)
 {
-  const char* command_name = command_invocation_name(args, "cat_playerlist_save");
+  const char* command_name = command_invocation_name(args, "pup_playerlist_save");
   if (!players::save())
   {
     console_print("[%s] failed to save player list\n", command_name);
@@ -1239,7 +1239,7 @@ inline void command_playerlist_save_callback(const command_args& args)
 
 inline void command_playerlist_print_callback(const command_args& args)
 {
-  const char* command_name = command_invocation_name(args, "cat_playerlist_print");
+  const char* command_name = command_invocation_name(args, "pup_playerlist_print");
   const bool include_runtime = args.argc() >= 2 && (std::string_view{args.argv(1)} == "all" || std::string_view{args.argv(1)} == "1");
   const auto entries = players::entries(include_runtime);
   console_print("[%s] %d player entries%s\n", command_name, static_cast<int>(entries.size()), include_runtime ? " including runtime" : "");
@@ -1262,7 +1262,7 @@ inline void command_playerlist_print_callback(const command_args& args)
 
 inline void command_playerlist_clear_callback(const command_args& args)
 {
-  const char* command_name = command_invocation_name(args, "cat_playerlist_clear");
+  const char* command_name = command_invocation_name(args, "pup_playerlist_clear");
   const auto player = resolve_player_arg(args, command_name, 1);
   if (!player)
   {
@@ -1280,7 +1280,7 @@ inline void command_playerlist_clear_callback(const command_args& args)
 
 inline void command_playerlist_info_callback(const command_args& args)
 {
-  const char* command_name = command_invocation_name(args, "cat_playerlist_info");
+  const char* command_name = command_invocation_name(args, "pup_playerlist_info");
   const auto player = resolve_player_arg(args, command_name, 1);
   if (!player)
   {
@@ -1304,7 +1304,7 @@ inline void command_playerlist_info_callback(const command_args& args)
 
 inline void command_setrole_callback(const command_args& args)
 {
-  const char* command_name = command_invocation_name(args, "cat_setrole");
+  const char* command_name = command_invocation_name(args, "pup_setrole");
   const auto player = resolve_player_arg(args, command_name, 1);
   if (!player)
   {
@@ -1322,7 +1322,7 @@ inline void command_setrole_callback(const command_args& args)
   const auto role = players::parse_role(role_name);
   if (!role)
   {
-    console_print("[%s] unknown role '%s'; valid: default friend ignored cheater party f2p cat\n", command_name, args.argv(2));
+    console_print("[%s] unknown role '%s'; valid: default friend ignored cheater party f2p pup\n", command_name, args.argv(2));
     return;
   }
 
@@ -1367,54 +1367,54 @@ inline void register_commands() {
   }
 
   registered_commands().reserve(48);
-  add_command("cat_detach", command_detach_callback, "Detach cathook from TF2");
-  add_command("cat_exec", command_cat_exec_callback, "Execute tf/cfg/cat_autoexec.cfg");
-  add_command("cat_exec_textmode", command_cat_exec_textmode_callback, "Execute tf/cfg/cat_autoexec_textmode.cfg");
-  add_command("cat_load", command_load_callback, "Load a cathook config by name");
-  add_command("cat_save", command_save_callback, "Save the current cathook config by name");
-  add_command("cat_unlock_achievements", command_unlock_achievements_callback, "Unlock all TF2 achievements");
-  add_command("cat_lock_achievements", command_lock_achievements_callback, "Reset all TF2 achievements");
-  add_command("cat_unlock_achievement", command_unlock_achievement_callback, "Unlock one TF2 achievement by ID");
-  add_command("cat_lock_achievement", command_lock_achievement_callback, "Reset one TF2 achievement by ID");
-  add_command("cat_dump_achievements", command_dump_achievements_callback, "Dump TF2 achievement IDs and names");
-  add_command("cat_medal_flip", command_medal_flip_callback, "Toggle guaranteed Casual medal flip");
-  add_command("cat_medal_changer", command_medal_changer_callback, "Set the local Casual main-menu medal rank");
-  add_command("cat_autoitem_rent", command_autoitem_rent_callback, "Request an item preview/rental by item definition ID");
-  add_command("cat_autoitem_craft", command_autoitem_craft_callback, "Craft with one or more item definition IDs");
-  add_command("cat_achievement_unlock_single", command_unlock_achievement_callback, "Legacy alias: unlock one TF2 achievement by ID");
-  add_command("cat_achievement_lock_single", command_lock_achievement_callback, "Legacy alias: reset one TF2 achievement by ID");
-  add_command("cat_achievement_unlock", command_unlock_achievements_callback, "Legacy alias: unlock all TF2 achievements");
-  add_command("cat_achievement_lock", command_lock_achievements_callback, "Legacy alias: reset all TF2 achievements");
-  add_command("cat_achievement_dump", command_dump_achievements_callback, "Legacy alias: dump TF2 achievement IDs and names");
-  add_command("cat_rent_item", command_autoitem_rent_callback, "Legacy alias: request an item preview/rental by item definition ID");
-  add_command("cat_queue", command_queue_callback, "Start casual matchmaking queue");
-  add_command("cat_cancelqueue", command_cancel_queue_callback, "Cancel casual matchmaking queue");
-  add_command("cat_abandon", command_abandon_callback, "Abandon the current matchmaking match");
-  add_command("cat_criteria", command_criteria_callback, "Reload saved casual matchmaking criteria");
-  add_command("cat_kill", command_kill_callback, "Kill or explode the local player");
-  add_command("cat_setcvar", command_setcvar_callback, "Set a Source convar through the engine");
-  add_command("cat_getcvar", command_getcvar_callback, "Print a Source convar value");
-  add_command("cat_path_to", command_path_to_callback, "Path navbot to a world position");
-  add_command("cat_cancel_path", command_cancel_path_callback, "Cancel the current navbot command path");
-  add_command("cat_menu", command_menu_callback, "Toggle the cathook menu");
-  add_command("cat_mvm_fix", command_mvm_fix_callback, "Mark buybot funded and retry the server");
-  add_command("cat_mvm_quit", command_mvm_quit_callback, "Abandon the current match and disconnect");
-  add_command("cat_mvm_tele", command_mvm_tele_callback, "Path to the nearest teammate teleporter entrance");
-  add_command("cat_mvm_rent", command_mvm_rent_callback, "Rent and equip MvM vaccinator and heatmaker");
-  add_command("cat_party_givelead", command_party_givelead_callback, "Promote a party member to leader by account id");
-  add_command("cat_commands", command_commands_callback, "Print registered Cat commands");
-  add_command("cat_playerlist_load", command_playerlist_load_callback, "Load the persistent player list");
-  add_command("cat_playerlist_save", command_playerlist_save_callback, "Save the persistent player list");
-  add_command("cat_playerlist_print", command_playerlist_print_callback, "Print player list entries; pass 'all' to include runtime IPC entries");
-  add_command("cat_setrole", command_setrole_callback, "Set a player role: default friend ignored cheater party f2p cat");
-  add_command("cat_spectate", command_spectate_callback, "Spectate a player while alive: cat_spectate <#userid|index|name>");
-  add_command("cat_playerlist_clear", command_playerlist_clear_callback, "Clear a player list state");
-  add_command("cat_playerlist_info", command_playerlist_info_callback, "Show one player list entry");
-  add_command("cat_config_get", command_config_get_callback, "Read a cathook config setting");
-  add_command("cat_config_set", command_config_set_callback, "Set a cathook config setting");
-  add_command("cat_config_toggle", command_config_toggle_callback, "Toggle a boolean cathook config setting");
-  add_command("cat_config_reset", command_config_reset_callback, "Reset a cathook config setting to its default");
-  add_command("cat_config_list", command_config_list_callback, "List cathook config settings");
+  add_command("pup_detach", command_detach_callback, "Detach puphook from TF2");
+  add_command("pup_exec", command_pup_exec_callback, "Execute tf/cfg/pup_autoexec.cfg");
+  add_command("pup_exec_textmode", command_pup_exec_textmode_callback, "Execute tf/cfg/pup_autoexec_textmode.cfg");
+  add_command("pup_load", command_load_callback, "Load a puphook config by name");
+  add_command("pup_save", command_save_callback, "Save the current puphook config by name");
+  add_command("pup_unlock_achievements", command_unlock_achievements_callback, "Unlock all TF2 achievements");
+  add_command("pup_lock_achievements", command_lock_achievements_callback, "Reset all TF2 achievements");
+  add_command("pup_unlock_achievement", command_unlock_achievement_callback, "Unlock one TF2 achievement by ID");
+  add_command("pup_lock_achievement", command_lock_achievement_callback, "Reset one TF2 achievement by ID");
+  add_command("pup_dump_achievements", command_dump_achievements_callback, "Dump TF2 achievement IDs and names");
+  add_command("pup_medal_flip", command_medal_flip_callback, "Toggle guaranteed Casual medal flip");
+  add_command("pup_medal_changer", command_medal_changer_callback, "Set the local Casual main-menu medal rank");
+  add_command("pup_autoitem_rent", command_autoitem_rent_callback, "Request an item preview/rental by item definition ID");
+  add_command("pup_autoitem_craft", command_autoitem_craft_callback, "Craft with one or more item definition IDs");
+  add_command("pup_achievement_unlock_single", command_unlock_achievement_callback, "Legacy alias: unlock one TF2 achievement by ID");
+  add_command("pup_achievement_lock_single", command_lock_achievement_callback, "Legacy alias: reset one TF2 achievement by ID");
+  add_command("pup_achievement_unlock", command_unlock_achievements_callback, "Legacy alias: unlock all TF2 achievements");
+  add_command("pup_achievement_lock", command_lock_achievements_callback, "Legacy alias: reset all TF2 achievements");
+  add_command("pup_achievement_dump", command_dump_achievements_callback, "Legacy alias: dump TF2 achievement IDs and names");
+  add_command("pup_rent_item", command_autoitem_rent_callback, "Legacy alias: request an item preview/rental by item definition ID");
+  add_command("pup_queue", command_queue_callback, "Start casual matchmaking queue");
+  add_command("pup_cancelqueue", command_cancel_queue_callback, "Cancel casual matchmaking queue");
+  add_command("pup_abandon", command_abandon_callback, "Abandon the current matchmaking match");
+  add_command("pup_criteria", command_criteria_callback, "Reload saved casual matchmaking criteria");
+  add_command("pup_kill", command_kill_callback, "Kill or explode the local player");
+  add_command("pup_setcvar", command_setcvar_callback, "Set a Source convar through the engine");
+  add_command("pup_getcvar", command_getcvar_callback, "Print a Source convar value");
+  add_command("pup_path_to", command_path_to_callback, "Path navbot to a world position");
+  add_command("pup_cancel_path", command_cancel_path_callback, "Cancel the current navbot command path");
+  add_command("pup_menu", command_menu_callback, "Toggle the puphook menu");
+  add_command("pup_mvm_fix", command_mvm_fix_callback, "Mark buybot funded and retry the server");
+  add_command("pup_mvm_quit", command_mvm_quit_callback, "Abandon the current match and disconnect");
+  add_command("pup_mvm_tele", command_mvm_tele_callback, "Path to the nearest teammate teleporter entrance");
+  add_command("pup_mvm_rent", command_mvm_rent_callback, "Rent and equip MvM vaccinator and heatmaker");
+  add_command("pup_party_givelead", command_party_givelead_callback, "Promote a party member to leader by account id");
+  add_command("pup_commands", command_commands_callback, "Print registered Pup commands");
+  add_command("pup_playerlist_load", command_playerlist_load_callback, "Load the persistent player list");
+  add_command("pup_playerlist_save", command_playerlist_save_callback, "Save the persistent player list");
+  add_command("pup_playerlist_print", command_playerlist_print_callback, "Print player list entries; pass 'all' to include runtime IPC entries");
+  add_command("pup_setrole", command_setrole_callback, "Set a player role: default friend ignored cheater party f2p pup");
+  add_command("pup_spectate", command_spectate_callback, "Spectate a player while alive: pup_spectate <#userid|index|name>");
+  add_command("pup_playerlist_clear", command_playerlist_clear_callback, "Clear a player list state");
+  add_command("pup_playerlist_info", command_playerlist_info_callback, "Show one player list entry");
+  add_command("pup_config_get", command_config_get_callback, "Read a puphook config setting");
+  add_command("pup_config_set", command_config_set_callback, "Set a puphook config setting");
+  add_command("pup_config_toggle", command_config_toggle_callback, "Toggle a boolean puphook config setting");
+  add_command("pup_config_reset", command_config_reset_callback, "Reset a puphook config setting to its default");
+  add_command("pup_config_list", command_config_list_callback, "List puphook config settings");
   commands_registered() = true;
 }
 

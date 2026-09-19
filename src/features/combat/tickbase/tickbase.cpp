@@ -640,7 +640,7 @@ void start_shift(Player* localplayer, Weapon* weapon, user_cmd* cmd, int ticks_t
   g_state.should_antiwarp = config.misc.exploits.antiwarp
     && mode == shift_mode::doubletap
     && !weapon->is_melee()
-    && weapon->get_projectile_type() == 0;
+    && !weapon->is_projectile_weapon();
   if (g_state.should_antiwarp) {
     apply_antiwarp(localplayer, cmd);
   }

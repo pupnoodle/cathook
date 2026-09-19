@@ -6,9 +6,7 @@
 #include "core/math/math.hpp"
 #include "core/types.hpp"
 #include "games/tf2/sdk/entities/weapon.hpp"
-#include "games/tf2/sdk/interfaces/engine_trace.hpp"
 #include "games/tf2/sdk/interfaces/global_vars.hpp"
-#include "games/tf2/sdk/interfaces/vphysics.hpp"
 
 namespace projsim {
 
@@ -105,69 +103,10 @@ struct params {
   bool spin = false;
 };
 
-struct env_state {
-  IPhysicsEnvironment* env = nullptr;
-  IPhysicsObject* object = nullptr;
-  CPhysCollide* collide = nullptr;
-};
-
-inline env_state& shared_env() {
-  static env_state state{};
-  return state;
-}
-
-inline void shutdown() {
-  env_state& state = shared_env();
-  if (physics != nullptr && state.env != nullptr) {
-    if (state.object != nullptr) {
-      state.env->DestroyObject(state.object);
-    }
-    physics->DestroyEnvironment(state.env);
-  }
-  state = {};
-}
-
-inline bool ensure_env() {
-  env_state& state = shared_env();
-  if (physics == nullptr || physics_collision == nullptr) {
-    return false;
-  }
-  if (state.env == nullptr) {
-    state.env = physics->CreateEnvironment();
-  }
-  if (state.env == nullptr) {
-    return false;
-  }
-  if (state.object == nullptr) {
-    state.collide = physics_collision->BBoxToCollide({-2.0f, -2.0f, -2.0f}, {2.0f, 2.0f, 2.0f});
-    if (state.collide == nullptr) {
-      return false;
-    }
-    objectparams_t params{};
-    params.mass = 1.0f;
-    params.inertia = 0.0f;
-    params.damping = 0.0f;
-    params.rotdamping = 0.0f;
-    params.rotInertiaLimit = 0.0f;
-    params.pName = "projsim";
-    params.dragCoefficient = 0.0f;
-    params.enableCollisions = false;
-    state.object = state.env->CreatePolyObject(state.collide, 0, {}, {}, &params);
-    if (state.object != nullptr) {
-      state.object->Wake();
-    }
-  }
-  return state.object != nullptr;
-}
+inline void shutdown() {}
 
 inline bool physics_drag_ready() {
-  if (!ensure_env()) {
-    return false;
-  }
-  env_state& state = shared_env();
-  float probe = 1.0f;
-  state.object->SetDragCoefficient(&probe, &probe);
-  return std::fabs(state.object->m_dragCoefficient - 1.0f) < 0.01f;
+  return false;
 }
 
 struct simulation {
@@ -186,72 +125,24 @@ struct simulation {
     velocity = p.velocity;
     tick = 0;
     stopped = false;
+    physics_mode = false;
     path.clear();
     last_trace = {};
-
-    const drag_profile drag = drag_for_weapon(p.weapon_id);
-    physics_mode = drag.coefficient > 0.0f && length_squared(drag.linear) > 0.0f &&
-      physics_drag_ready();
-
-    if (physics_mode) {
-      env_state& state = shared_env();
-      float coefficient = drag.coefficient;
-      state.object->SetDragCoefficient(&coefficient, &coefficient);
-      state.object->m_dragBasis = drag.linear;
-      state.object->m_angDragBasis = drag.angular;
-      state.object->EnableGravity(true);
-      state.object->EnableDrag(true);
-      state.object->EnableCollisions(false);
-
-      physics_performanceparams_t performance{};
-      performance.Defaults();
-      performance.maxVelocity = 1000000.0f;
-      performance.maxAngularVelocity = 1000000.0f;
-      if (p.weapon_id == TF_WEAPON_GRENADELAUNCHER || p.weapon_id == TF_WEAPON_PIPEBOMBLAUNCHER ||
-          p.weapon_id == TF_WEAPON_STICKY_BALL_LAUNCHER || p.weapon_id == TF_WEAPON_CANNON ||
-          p.weapon_id == TF_WEAPON_CLEAVER || p.weapon_id == TF_WEAPON_GRENADE_CLEAVER ||
-          p.weapon_id == TF_WEAPON_BAT_WOOD || p.weapon_id == TF_WEAPON_BAT_GIFTWRAP) {
-        performance.maxVelocity = k_flMaxVelocity;
-        performance.maxAngularVelocity = k_flMaxAngularVelocity;
-      }
-      state.env->SetPerformanceSettings(&performance);
-      state.env->SetAirDensity(AIR_DENSITY);
-      state.env->SetGravity({0.0f, 0.0f, -p.gravity});
-      state.env->ResetSimulationClock();
-
-      Vec3 angular = drag.spin;
-      if (p.weapon_id == TF_WEAPON_GRENADELAUNCHER && !p.spin) {
-        angular = {};
-      }
-      state.object->SetPosition(p.origin, p.angles, true);
-      state.object->SetVelocity(&velocity, &angular);
-      state.object->Wake();
-      state.env->Simulate(tick_interval());
-      state.object->GetPosition(&position, nullptr);
-      state.object->GetVelocity(&velocity, nullptr);
-    } else if (p.gravity != 0.0f) {
-      velocity.z += p.gravity * tick_interval() * 0.5f;
-    }
     path.push_back(position);
   }
 
   bool step() {
     const float dt = tick_interval();
-    if (physics_mode) {
-      env_state& state = shared_env();
-      if (state.env == nullptr || state.object == nullptr) {
-        stopped = true;
-        return false;
-      }
-      state.env->Simulate(dt);
-      state.object->GetPosition(&position, nullptr);
-      state.object->GetVelocity(&velocity, nullptr);
-    } else {
-      if (p.gravity != 0.0f) {
-        velocity.z -= p.gravity * dt;
-      }
-      position = position + velocity * dt;
+    if (p.drag > 0.0f) {
+      const float scale = std::clamp(1.0f - p.drag * dt, 0.25f, 1.0f);
+      velocity.x *= scale;
+      velocity.y *= scale;
+      velocity.z *= scale;
     }
+    if (p.gravity != 0.0f) {
+      velocity.z -= p.gravity * dt;
+    }
+    position = position + velocity * dt;
 
     if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z)) {
       stopped = true;

@@ -13,7 +13,7 @@ if [ "$(id -u)" -eq 0 ]; then
     exit 1
 fi
 
-echo "Installing dependencies, building Cat, and preparing the bundled botpanel..."
+echo "Installing dependencies, building Pup, and preparing the bundled botpanel..."
 bash "$script_dir/botpanel/update" "$@"
 
 echo

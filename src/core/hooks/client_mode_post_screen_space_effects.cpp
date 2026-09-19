@@ -7,7 +7,7 @@ bool (*client_mode_post_screen_space_effects_original)(void*, const view_setup*)
 
 bool client_mode_post_screen_space_effects_hook(void* me, const view_setup* setup)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (config.visuals.removals.post_processing &&
       (engine == nullptr || !engine->is_drawing_loading_image())) {
     entity_visuals::on_post_screen_space_effects();

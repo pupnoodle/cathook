@@ -20,7 +20,7 @@ constexpr unsigned int tf_lobby_invite_type = 2008;
 constexpr unsigned int tf_lobby_type = 2004;
 constexpr std::uintptr_t tf_lobby_invite_id_offset = 0x20;
 constexpr int shared_object_type_vfunc_index = 2;
-#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
+#if defined(PUPHOOK_TEXTMODE) && PUPHOOK_TEXTMODE
 
 constexpr bool textmode_auto_casual_join = true;
 #else
@@ -102,7 +102,7 @@ std::intptr_t call_original_so_event(void* self, void* shared_object, const int 
 
 std::intptr_t tf_gc_client_system_so_event_hook(void* self, void* shared_object, const int event_type)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   const unsigned int object_type = get_shared_object_type(shared_object);
   const bool should_auto_join = auto_casual_join_enabled();
   const std::uint64_t lobby_id =

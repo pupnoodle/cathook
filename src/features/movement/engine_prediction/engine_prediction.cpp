@@ -11,6 +11,8 @@ V  o o  V  file: src/features/movement/engine_prediction/engine_prediction.cpp
 #include <array>
 #include <climits>
 #include <cmath>
+#include <cstring>
+#include <vector>
 #include "MD5/MD5.hpp"
 #include "engine_prediction.hpp"
 #include "core/print.hpp"
@@ -22,6 +24,7 @@ V  o o  V  file: src/features/movement/engine_prediction/engine_prediction.cpp
 #include "games/tf2/sdk/interfaces/global_vars.hpp"
 #include "games/tf2/sdk/interfaces/move_helper.hpp"
 #include "games/tf2/sdk/interfaces/prediction.hpp"
+#include "games/tf2/sdk/prediction_copy.hpp"
 #include "features/menu/config.hpp"
 
 namespace
@@ -30,6 +33,7 @@ namespace
 struct engine_prediction_player_snapshot {
   Vec3 origin{};
   Vec3 abs_origin{};
+  Vec3 network_origin{};
   Vec3 velocity{};
   Vec3 base_velocity{};
   Vec3 view_offset{};
@@ -70,18 +74,25 @@ struct engine_prediction_weapon_snapshot {
   float crit_time = 0.0f;
   int current_seed = 0;
   int last_crit_check_frame = 0;
-  float last_crit_check_time = 0.0f;
   float last_rapid_fire_crit_check_time = 0.0f;
-  bool current_attack_is_crit = false;
-  bool current_crit_is_random = false;
-  bool current_attack_is_during_demo_charge = false;
+};
+
+struct engine_prediction_other_player {
+  Player* player = nullptr;
+  Vec3 abs_origin{};
+  Vec3 mins{};
+  Vec3 maxs{};
 };
 
 struct engine_prediction_state {
   engine_prediction_player_snapshot player{};
   engine_prediction_global_snapshot globals{};
   std::array<engine_prediction_weapon_snapshot, Player::max_weapon_count> weapons{};
+  std::vector<std::uint8_t> pred_data{};
+  std::vector<engine_prediction_other_player> others{};
+  MoveData move_data{};
   int player_handle = 0;
+  bool pred_copy_valid = false;
   bool active = false;
 };
 
@@ -122,6 +133,7 @@ bool engine_prediction_capture(Player* localplayer) {
 
   prediction_state.player.origin = localplayer->get_origin();
   prediction_state.player.abs_origin = localplayer->get_abs_origin();
+  prediction_state.player.network_origin = localplayer->get_network_origin();
   prediction_state.player.velocity = localplayer->get_velocity();
   prediction_state.player.base_velocity = localplayer->get_base_velocity();
   prediction_state.player.view_offset = localplayer->get_view_offset();
@@ -142,6 +154,12 @@ bool engine_prediction_capture(Player* localplayer) {
   prediction_state.player.punch_angles = localplayer->get_punch_angles();
   prediction_state.player.next_attack = localplayer->get_next_attack();
   prediction_state.player_handle = localplayer->get_ref_handle();
+  prediction_state.pred_copy_valid = pred_copy::capture(
+    localplayer, localplayer->get_pred_desc_map(), prediction_state.pred_data,
+    pred_copy::mode::everything, localplayer->get_index());
+  if (!prediction_state.pred_copy_valid) {
+    return false;
+  }
 
   prediction_state.globals.curtime = global_vars->curtime;
   prediction_state.globals.frametime = global_vars->frametime;
@@ -168,11 +186,7 @@ bool engine_prediction_capture(Player* localplayer) {
     state.crit_time = weapon->crit_time();
     state.current_seed = weapon->current_seed();
     state.last_crit_check_frame = weapon->last_crit_check_frame();
-    state.last_crit_check_time = weapon->last_crit_check_time();
     state.last_rapid_fire_crit_check_time = weapon->last_rapid_fire_crit_check_time();
-    state.current_attack_is_crit = weapon->current_attack_is_crit();
-    state.current_crit_is_random = weapon->current_crit_is_random();
-    state.current_attack_is_during_demo_charge = weapon->current_attack_is_during_demo_charge();
   }
 
   return true;
@@ -196,15 +210,21 @@ void engine_prediction_restore_globals() {
   }
 }
 
-void engine_prediction_restore(Player* localplayer) {
-  engine_prediction_restore_globals();
+void engine_prediction_adjust_others(Player*) {
+  prediction_state.others.clear();
+}
+
+void engine_prediction_restore_others() {
+  prediction_state.others.clear();
+}
+
+void engine_prediction_restore_player_fields(Player* localplayer) {
   if (localplayer == nullptr) {
-    prediction_state.active = false;
     return;
   }
 
-  localplayer->set_origin(prediction_state.player.origin);
   localplayer->set_abs_origin(prediction_state.player.abs_origin);
+  localplayer->set_network_origin(prediction_state.player.network_origin);
   localplayer->set_velocity(prediction_state.player.velocity);
   localplayer->set_base_velocity(prediction_state.player.base_velocity);
   localplayer->set_view_offset(prediction_state.player.view_offset);
@@ -236,19 +256,42 @@ void engine_prediction_restore(Player* localplayer) {
       continue;
     }
 
-    weapon->crit_token_bucket() = state.crit_token_bucket;
-    weapon->crit_checks() = state.crit_checks;
-    weapon->crit_seed_requests() = state.crit_seed_requests;
-    weapon->crit_time() = state.crit_time;
-    weapon->current_seed() = state.current_seed;
-    weapon->last_crit_check_frame() = state.last_crit_check_frame;
-    weapon->last_crit_check_time() = state.last_crit_check_time;
-    weapon->last_rapid_fire_crit_check_time() = state.last_rapid_fire_crit_check_time;
-    weapon->current_attack_is_crit() = state.current_attack_is_crit;
-    weapon->current_crit_is_random() = state.current_crit_is_random;
-    weapon->current_attack_is_during_demo_charge() = state.current_attack_is_during_demo_charge;
+    if (tf2_combat::weapon::crit_token_bucket() != 0) {
+      weapon->crit_token_bucket() = state.crit_token_bucket;
+    }
+    if (tf2_combat::weapon::crit_checks() != 0) {
+      weapon->crit_checks() = state.crit_checks;
+    }
+    if (tf2_combat::weapon::crit_seed_requests() != 0) {
+      weapon->crit_seed_requests() = state.crit_seed_requests;
+    }
+    if (tf2_combat::weapon::crit_time() != 0) {
+      weapon->crit_time() = state.crit_time;
+    }
+    if (tf2_combat::weapon::current_seed() != 0 && state.current_seed >= 0) {
+      weapon->current_seed() = state.current_seed;
+    }
+    if (tf2_combat::weapon::last_crit_check_frame() != 0) {
+      weapon->last_crit_check_frame() = state.last_crit_check_frame;
+    }
+    if (tf2_combat::weapon::last_rapid_fire_crit_check_time() != 0) {
+      weapon->last_rapid_fire_crit_check_time() = state.last_rapid_fire_crit_check_time;
+    }
+  }
+}
+
+void engine_prediction_restore(Player* localplayer) {
+  engine_prediction_restore_globals();
+  if (localplayer == nullptr) {
+    prediction_state.active = false;
+    return;
   }
 
+  if (prediction_state.pred_copy_valid) {
+    pred_copy::restore(localplayer, localplayer->get_pred_desc_map(), prediction_state.pred_data,
+      pred_copy::mode::everything, localplayer->get_index());
+  }
+  engine_prediction_restore_player_fields(localplayer);
   prediction_state.active = false;
 }
 
@@ -292,20 +335,12 @@ void start_engine_prediction(user_cmd* user_cmd) {
 
   prediction_state.active = true;
 
-  static thread_local struct user_cmd predicted_command{};
-  predicted_command = *user_cmd;
-  predicted_command.buttons &= ~(IN_ATTACK | IN_ATTACK2 | IN_ATTACK3);
-  predicted_command.impulse = 0;
-  predicted_command.weapon_select = 0;
-  predicted_command.weapon_subtype = 0;
-  predicted_command.has_been_predicted = false;
-
   int predicted_tickbase = engine_prediction_tickbase(user_cmd, localplayer);
   localplayer->set_tickbase(predicted_tickbase);
-  localplayer->set_current_cmd(&predicted_command);
+  localplayer->set_current_cmd(user_cmd);
 
   if (random_seed != nullptr) {
-    *random_seed = MD5_PseudoRandom(static_cast<unsigned int>(predicted_command.command_number)) & INT_MAX;
+    *random_seed = MD5_PseudoRandom(static_cast<unsigned int>(user_cmd->command_number)) & INT_MAX;
   }
 
   const float interval = tick_interval();
@@ -315,11 +350,23 @@ void start_engine_prediction(user_cmd* user_cmd) {
 
   prediction->first_time_predicted = false;
   prediction->in_prediction = true;
-  prediction->set_local_view_angles(predicted_command.view_angles);
+  prediction->set_local_view_angles(user_cmd->view_angles);
 
   move_helper->set_host(localplayer);
-  prediction->run_command(localplayer, &predicted_command, move_helper);
+  engine_prediction_adjust_others(localplayer);
+  std::memset(&prediction_state.move_data, 0, sizeof(prediction_state.move_data));
+  prediction->setup_move(localplayer, user_cmd, move_helper, &prediction_state.move_data);
+  game_movement->process_movement(localplayer, &prediction_state.move_data);
+  prediction->finish_move(localplayer, user_cmd, &prediction_state.move_data);
+  engine_prediction_restore_others();
   move_helper->set_host(nullptr);
+  localplayer->set_current_cmd(nullptr);
+  localplayer->set_tickbase(prediction_state.player.tickbase);
+  if (random_seed != nullptr) {
+    *random_seed = static_cast<uint32_t>(-1);
+  }
+  prediction->in_prediction = prediction_state.globals.in_prediction;
+  prediction->first_time_predicted = prediction_state.globals.first_time_predicted;
 }
 
 void end_engine_prediction() {

@@ -1,5 +1,6 @@
 #include "games/tf2/sdk/entities/weapon.hpp"
 #include "games/tf2/sdk/entities/player.hpp"
+#include "games/tf2/sdk/combat_offsets.hpp"
 #include "games/tf2/sdk/interfaces/global_vars.hpp"
 #include "games/tf2/sdk/interfaces/prediction.hpp"
 
@@ -13,95 +14,35 @@ namespace
 
 constexpr int tf_weapon_primary_mode = 0;
 
-struct weapon_mode_guard
+int& first_predicted_seed()
 {
-  Weapon* weapon = nullptr;
-  int previous_mode = tf_weapon_primary_mode;
-
-  explicit weapon_mode_guard(Weapon* target)
-    : weapon(target)
-  {
-    if (weapon != nullptr) {
-      previous_mode = weapon->weapon_mode();
-      weapon->weapon_mode() = tf_weapon_primary_mode;
-    }
-  }
-
-  ~weapon_mode_guard()
-  {
-    if (weapon != nullptr) {
-      weapon->weapon_mode() = previous_mode;
-    }
-  }
-};
-
-struct crit_prediction_state
-{
-  float crit_token_bucket = 0.0f;
-  int crit_checks = 0;
-  int crit_seed_requests = 0;
-  int last_crit_check_frame = 0;
-  float last_crit_check_time = 0.0f;
-  float last_rapid_fire_crit_check_time = 0.0f;
-  float crit_time = 0.0f;
-  int current_seed = 0;
-};
-
-struct framecount_guard
-{
-  bool active = false;
-  int previous_framecount = 0;
-
-  explicit framecount_guard(Weapon* weapon)
-  {
-    if (weapon == nullptr || global_vars == nullptr) {
-      return;
-    }
-
-    Entity* owner_entity = weapon->to_entity()->get_owner_entity();
-    Player* owner = reinterpret_cast<Player*>(owner_entity);
-    user_cmd* command = owner != nullptr ? owner->current_command() : nullptr;
-    if (command == nullptr || command->command_number <= 0) {
-      return;
-    }
-
-    previous_framecount = global_vars->framecount;
-    global_vars->framecount = command->command_number;
-    active = true;
-  }
-
-  ~framecount_guard()
-  {
-    if (active && global_vars != nullptr) {
-      global_vars->framecount = previous_framecount;
-    }
-  }
-};
-
-crit_prediction_state read_crit_prediction_state(Weapon* weapon)
-{
-  return {
-    weapon->crit_token_bucket(),
-    weapon->crit_checks(),
-    weapon->crit_seed_requests(),
-    weapon->last_crit_check_frame(),
-    weapon->last_crit_check_time(),
-    weapon->last_rapid_fire_crit_check_time(),
-    weapon->crit_time(),
-    weapon->current_seed()
-  };
+  static int seed = -1;
+  return seed;
 }
 
-void restore_crit_prediction_state(Weapon* weapon, const crit_prediction_state& state)
+bool crit_field_offset_sane(int offset)
 {
-  weapon->crit_token_bucket() = state.crit_token_bucket;
-  weapon->crit_checks() = state.crit_checks;
-  weapon->crit_seed_requests() = state.crit_seed_requests;
-  weapon->last_crit_check_frame() = state.last_crit_check_frame;
-  weapon->last_crit_check_time() = state.last_crit_check_time;
-  weapon->last_rapid_fire_crit_check_time() = state.last_rapid_fire_crit_check_time;
-  weapon->crit_time() = state.crit_time;
-  weapon->current_seed() = state.current_seed;
+  return offset >= 256 && offset < 8192;
+}
+
+bool can_restore_crit_state()
+{
+  return crit_field_offset_sane(tf2_combat::weapon::crit_token_bucket()) &&
+    crit_field_offset_sane(tf2_combat::weapon::crit_checks()) &&
+    crit_field_offset_sane(tf2_combat::weapon::crit_seed_requests()) &&
+    crit_field_offset_sane(tf2_combat::weapon::crit_time()) &&
+    crit_field_offset_sane(tf2_combat::weapon::last_rapid_fire_crit_check_time()) &&
+    crit_field_offset_sane(tf2_combat::weapon::current_seed());
+}
+
+bool can_write_weapon_mode()
+{
+  return crit_field_offset_sane(tf2_combat::weapon::weapon_mode());
+}
+
+bool first_time_predicted()
+{
+  return prediction != nullptr && prediction->first_time_predicted;
 }
 
 bool run_calc_is_attack_critical_hook(
@@ -113,16 +54,45 @@ bool run_calc_is_attack_critical_hook(
     return false;
   }
 
-  weapon_mode_guard mode_guard{ force_primary_mode ? weapon : nullptr };
-  framecount_guard frame_guard{ weapon };
-
-  if (prediction == nullptr || prediction->first_time_predicted) {
-    return original(weapon);
+  int previous_mode = tf_weapon_primary_mode;
+  const bool write_mode = force_primary_mode && can_write_weapon_mode();
+  if (write_mode) {
+    previous_mode = weapon->weapon_mode();
+    weapon->weapon_mode() = tf_weapon_primary_mode;
   }
 
-  const crit_prediction_state state = read_crit_prediction_state(weapon);
+  if (first_time_predicted()) {
+    const bool result = original(weapon);
+    if (crit_field_offset_sane(tf2_combat::weapon::current_seed())) {
+      first_predicted_seed() = weapon->current_seed();
+    }
+    if (write_mode) {
+      weapon->weapon_mode() = previous_mode;
+    }
+    return result;
+  }
+
+  const bool restore = can_restore_crit_state();
+  const float crit_token_bucket = restore ? weapon->crit_token_bucket() : 0.0f;
+  const int crit_checks = restore ? weapon->crit_checks() : 0;
+  const int crit_seed_requests = restore ? weapon->crit_seed_requests() : 0;
+  const float last_rapid_fire_crit_check_time =
+    restore ? weapon->last_rapid_fire_crit_check_time() : 0.0f;
+  const float crit_time = restore ? weapon->crit_time() : 0.0f;
   const bool result = original(weapon);
-  restore_crit_prediction_state(weapon, state);
+  if (restore) {
+    weapon->crit_token_bucket() = crit_token_bucket;
+    weapon->crit_checks() = crit_checks;
+    weapon->crit_seed_requests() = crit_seed_requests;
+    weapon->last_rapid_fire_crit_check_time() = last_rapid_fire_crit_check_time;
+    weapon->crit_time() = crit_time;
+    if (first_predicted_seed() >= 0) {
+      weapon->current_seed() = first_predicted_seed();
+    }
+  }
+  if (write_mode) {
+    weapon->weapon_mode() = previous_mode;
+  }
   return result;
 }
 
@@ -130,7 +100,7 @@ bool run_calc_is_attack_critical_hook(
 
 bool ctf_weapon_base_calc_is_attack_critical_hook(Weapon* weapon)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   return run_calc_is_attack_critical_hook(
     weapon,
     ctf_weapon_base_calc_is_attack_critical_original,
@@ -139,7 +109,7 @@ bool ctf_weapon_base_calc_is_attack_critical_hook(Weapon* weapon)
 
 bool ctf_weapon_base_melee_calc_is_attack_critical_hook(Weapon* weapon)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   return run_calc_is_attack_critical_hook(
     weapon,
     ctf_weapon_base_melee_calc_is_attack_critical_original,

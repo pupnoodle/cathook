@@ -9,7 +9,7 @@
 
 #include "core/memory/maps.hpp"
 
-namespace cathook::core::memory
+namespace puphook::core::memory
 {
 
 inline std::int32_t read_disp32(const void* address, std::ptrdiff_t offset)

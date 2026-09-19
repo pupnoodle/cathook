@@ -8,7 +8,7 @@
 #include <string_view>
 #include <sys/mman.h>
 
-namespace cathook::core::memory
+namespace puphook::core::memory
 {
 
 struct entry

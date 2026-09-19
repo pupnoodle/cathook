@@ -68,7 +68,7 @@ inline void apply_player_resource(Player* player) {
   if (player == nullptr) {
     return;
   }
-  Entity* resource = cathook::core::player_resource::get_player_resource_entity();
+  Entity* resource = puphook::core::player_resource::get_player_resource_entity();
   if (resource == nullptr) {
     return;
   }
@@ -76,7 +76,7 @@ inline void apply_player_resource(Player* player) {
   static tf2_netvars::lazy_offset health_offset{"DT_TFPlayerResource", {"baseclass", "m_iHealth"}};
   const int index = player->get_index();
   if (alive_offset > 0) {
-    const bool alive = cathook::core::player_resource::read_value<bool>(resource, alive_offset, index);
+    const bool alive = puphook::core::player_resource::read_value<bool>(resource, alive_offset, index);
     static tf2_netvars::lazy_offset life_state_offset{"DT_BasePlayer", {"m_lifeState"}};
     if (life_state_offset > 0) {
       *reinterpret_cast<std::uint8_t*>(reinterpret_cast<uintptr_t>(player) + life_state_offset) =
@@ -87,7 +87,7 @@ inline void apply_player_resource(Player* player) {
     static tf2_netvars::lazy_offset player_health{"DT_BasePlayer", {"m_iHealth"}};
     if (player_health > 0) {
       *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(player) + player_health) =
-        cathook::core::player_resource::read_value<int>(resource, health_offset, index);
+        puphook::core::player_resource::read_value<int>(resource, health_offset, index);
     }
   }
 }
@@ -217,13 +217,6 @@ inline void update(Entity* entity) {
   }
 
   if (entity->is_dormant()) {
-    if (entity->get_class_id() == class_id::PLAYER) {
-      apply_player_resource(static_cast<Player*>(entity));
-    }
-    if (data* record = get(entity); record != nullptr) {
-      entity->set_network_origin(record->origin);
-      entity->set_abs_origin(record->origin);
-    }
     return;
   }
 

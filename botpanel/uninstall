@@ -8,10 +8,10 @@ echo "Removing legacy..."
 ./remove-legacy
 
 rm -rf ./user_instances
-rm -rf ./catbot-database
-rm -rf ./catbot-ipc-web-panel-main/node_modules
-rm -f ./catbot-ipc-web-panel-main/public/bundle.js
-rm -f ./catbot-ipc-web-panel-main/logs/main.log
-sudo rm -rf /opt/cathook/ipc
-sudo rm -f /opt/cathook/bin/libcathook-textmode.so
-sudo rm -f /opt/cathook/bin/libcathooktextmode.so
+rm -rf ./pupbot-database
+rm -rf ./pupbot-ipc-web-panel-main/node_modules
+rm -f ./pupbot-ipc-web-panel-main/public/bundle.js
+rm -f ./pupbot-ipc-web-panel-main/logs/main.log
+sudo rm -rf /opt/puphook/ipc
+sudo rm -f /opt/puphook/bin/libpuphook-textmode.so
+sudo rm -f /opt/puphook/bin/libpuphooktextmode.so

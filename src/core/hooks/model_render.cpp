@@ -10,7 +10,7 @@ void (*model_render_forced_material_override_original)(void*, Material*, Overrid
 
 void model_render_draw_model_execute_hook(void* me, const DrawModelState& state, const ModelRenderInfo& info, matrix_3x4* bones)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
 
   if (nographics::is_enabled()) {
     return;
@@ -39,7 +39,7 @@ void model_render_draw_model_execute_hook(void* me, const DrawModelState& state,
 
 void model_render_forced_material_override_hook(void* me, Material* material, OverrideType override_type)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (entity_visuals::is_rendering_effect()) return;
   if (model_render_forced_material_override_original != nullptr) {
     model_render_forced_material_override_original(me, material, override_type);

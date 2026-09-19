@@ -8,7 +8,7 @@
 #include "games/tf2/sdk/interfaces/entity_list.hpp"
 #include "games/tf2/sdk/interfaces/global_vars.hpp"
 
-namespace cathook::core::player_resource
+namespace puphook::core::player_resource
 {
 
 inline constexpr int absolute_max_client_index = 2048;

@@ -308,7 +308,9 @@ void update_weapon_info(Player* local, Weapon* weapon) {
     crit_chance = 0.02f * local->get_crit_mult();
   }
 
-  mult_crit_chance = attribute_manager->attrib_hook_value(1.0f, "mult_crit_chance", weapon->to_entity());
+  mult_crit_chance = attribute_manager != nullptr
+    ? attribute_manager->attrib_hook_value(1.0f, "mult_crit_chance", weapon->to_entity())
+    : 1.0f;
   crit_chance *= mult_crit_chance;
 
   const float bucket = weapon->crit_token_bucket();
@@ -335,13 +337,13 @@ void update_weapon_info(Player* local, Weapon* weapon) {
 
   float damage = static_cast<float>(weapon->get_damage());
   int projectiles_per_shot = weapon->get_bullets_per_shot();
-  if (!is_melee_weapon && projectiles_per_shot > 0)
+  if (!is_melee_weapon && projectiles_per_shot > 0 && attribute_manager != nullptr)
     projectiles_per_shot = static_cast<int>(attribute_manager->attrib_hook_value(static_cast<float>(projectiles_per_shot), "mult_bullets_per_shot", weapon->to_entity()));
   else
     projectiles_per_shot = 1;
 
   float base_damage = damage * projectiles_per_shot;
-  if (rapid_fire) {
+  if (rapid_fire && fire_rate > 0.0f) {
     damage = base_damage * (2.0f / fire_rate);
     if (damage * 3.0f > bucket_cap)
       damage = bucket_cap / 3.0f;
@@ -509,7 +511,7 @@ create_move_result on_create_move(user_cmd* cmd, bool aimbot_requested_shot) {
   }
 
   auto* weapon = local->get_weapon();
-  if (weapon == nullptr || !weapon_can_crit(weapon)) {
+  if (weapon == nullptr || !weapon_can_crit(weapon) || !tf2_combat::weapon::fields_ready()) {
     reset_weapon_info();
     return result;
   }
@@ -574,7 +576,8 @@ int predict_cmd_num(const user_cmd* cmd, Weapon* weapon) {
   if (weapon == nullptr) {
     weapon = local->get_weapon();
   }
-  if (weapon == nullptr || !weapon_can_crit(weapon) || local->is_crit_boosted() ||
+  if (weapon == nullptr || !weapon_can_crit(weapon) || !tf2_combat::weapon::fields_ready() ||
+      local->is_crit_boosted() ||
       weapon->crit_time() > global_vars->curtime) {
     return cmd->command_number;
   }
@@ -749,7 +752,10 @@ bool weapon_can_crit(Weapon* weapon, bool weapon_only) {
     if (local == nullptr || !local->is_alive() || local->is_dormant()) return false;
   }
   if (!weapon_only && !weapon->are_random_crits_enabled()) return false;
-  if (attribute_manager->attrib_hook_value(1.0f, "mult_crit_chance", weapon_entity) <= 0.0f) return false;
+  if (attribute_manager != nullptr &&
+      attribute_manager->attrib_hook_value(1.0f, "mult_crit_chance", weapon_entity) <= 0.0f) {
+    return false;
+  }
 
   switch (weapon->get_weapon_id()) {
     case TF_WEAPON_PDA:

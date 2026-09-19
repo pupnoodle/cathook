@@ -16,7 +16,7 @@
 #include <variant>
 #include <vector>
 
-namespace cat_bind
+namespace pup_bind
 {
 
 inline bool disabled()
@@ -903,7 +903,7 @@ inline bool condition_active(bind_entry& entry)
     if (weapon != nullptr) {
       const bool throwable = weapon->get_weapon_id() == TF_WEAPON_THROWABLE || weapon->get_weapon_id() == TF_WEAPON_GRENADE_THROWABLE;
       const bool melee = weapon->is_melee();
-      const bool projectile = !melee && !throwable && weapon->get_projectile_type() > 1;
+      const bool projectile = !melee && !throwable && weapon->is_projectile_weapon();
       result = entry.condition_value == 0 ? !melee && !throwable && !projectile
         : entry.condition_value == 1 ? projectile
         : entry.condition_value == 2 ? melee
@@ -1376,7 +1376,7 @@ inline const std::vector<bind_entry>& indicator_entries()
   return entries();
 }
 
-inline void save_to_store(cathook::core::config_store* store)
+inline void save_to_store(puphook::core::config_store* store)
 {
   std::lock_guard lock{ bind_mutex() };
   if (store == nullptr || disabled()) return;
@@ -1426,15 +1426,15 @@ inline void save_to_store(cathook::core::config_store* store)
   }
 }
 
-inline bool save(cathook::core::config_store* store, const std::string_view name)
+inline bool save(puphook::core::config_store* store, const std::string_view name)
 {
   if (store == nullptr || disabled()) return store != nullptr;
-  cathook::core::config_store bind_store = store->scoped_store("configs/binds");
+  puphook::core::config_store bind_store = store->scoped_store("configs/binds");
   save_to_store(&bind_store);
   return bind_store.save_file(name);
 }
 
-inline bool save(cathook::core::config_store* store)
+inline bool save(puphook::core::config_store* store)
 {
   return store != nullptr && save(store, store->current_name());
 }
@@ -1442,14 +1442,14 @@ inline bool save(cathook::core::config_store* store)
 inline void autosave_if_dirty()
 {
   if (!autosave_dirty() || disabled()) return;
-  cathook::core::config_store* store = cathook::core::get_config_store();
+  puphook::core::config_store* store = puphook::core::get_config_store();
   if (store == nullptr) return;
   const std::string name = store->current_name();
   store->import_config(config);
   if (store->save_file(name) && save(store, name)) autosave_dirty() = false;
 }
 
-inline void load_from_store(cathook::core::config_store* store)
+inline void load_from_store(puphook::core::config_store* store)
 {
   std::lock_guard lock{ bind_mutex() };
   if (store == nullptr || disabled()) return;
@@ -1504,10 +1504,10 @@ inline void load_from_store(cathook::core::config_store* store)
   autosave_dirty() = false;
 }
 
-inline bool load(cathook::core::config_store* store)
+inline bool load(puphook::core::config_store* store)
 {
   if (store == nullptr || disabled()) return store != nullptr;
-  cathook::core::config_store bind_store = store->scoped_store("configs/binds");
+  puphook::core::config_store bind_store = store->scoped_store("configs/binds");
   if (!bind_store.load_file(store->current_name())) {
     entries().clear();
     clear_registered_targets();
@@ -1519,10 +1519,10 @@ inline bool load(cathook::core::config_store* store)
   return true;
 }
 
-inline bool delete_file(cathook::core::config_store* store, const std::string_view name)
+inline bool delete_file(puphook::core::config_store* store, const std::string_view name)
 {
   if (store == nullptr || disabled()) return store != nullptr;
-  cathook::core::config_store bind_store = store->scoped_store("configs/binds");
+  puphook::core::config_store bind_store = store->scoped_store("configs/binds");
   return bind_store.delete_file(name);
 }
 

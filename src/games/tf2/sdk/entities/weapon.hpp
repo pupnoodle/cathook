@@ -21,6 +21,7 @@ V  o o  V  file: src/games/tf2/sdk/entities/weapon.hpp
 #include "games/tf2/sdk/interfaces/attribute_manager.hpp"
 #include "games/tf2/sdk/interfaces/convar_system.hpp"
 #include "games/tf2/sdk/netvars.hpp"
+#include "games/tf2/sdk/combat_offsets.hpp"
 
 #include "core/print.hpp"
 
@@ -767,28 +768,23 @@ enum {
 
 class Weapon : Entity {
 public:
-  static constexpr int weapon_data_base_offset = 1828;
-  static constexpr int weapon_data_stride = 64;
-  static constexpr int weapon_data_damage_offset = 0;
-  static constexpr int weapon_data_bullets_per_shot_offset = 4;
-  static constexpr int weapon_data_range_offset = 8;
-  static constexpr int weapon_data_spread_offset = 12;
-  static constexpr int weapon_data_fire_delay_offset = 24;
-  static constexpr int weapon_data_projectile_type_offset = 44;
-  static constexpr int weapon_data_ammo_per_shot_offset = 48;
-  static constexpr int weapon_data_projectile_speed_offset = 52;
-  static constexpr int weapon_data_smack_delay_offset = 56;
-  static constexpr int weapon_data_rapid_fire_offset = 60;
-  static constexpr int base_weapon_info_offset_from_last_crit_check = -40;
-  static constexpr int melee_weapon_info_offset_from_last_crit_check = 240;
-  static constexpr int current_attack_is_crit_offset = 22;
-  static constexpr int current_crit_is_random_offset = 23;
-  static constexpr int current_attack_is_during_demo_charge_offset = 24;
-
+  static int weapon_data_base_offset() { return tf2_combat::weapon::weapon_info_data(); }
+  static int weapon_data_stride() { return tf2_combat::weapon::weapon_info_stride(); }
+  static int weapon_data_fire_delay_offset() { return tf2_combat::weapon::weapon_data_fire_delay(); }
+  static int weapon_data_damage_offset() { return tf2_combat::weapon::weapon_data_damage(); }
+  static int weapon_data_bullets_per_shot_offset() { return tf2_combat::weapon::weapon_data_bullets(); }
+  static int weapon_data_projectile_type_offset() { return tf2_combat::weapon::weapon_data_projectile_type(); }
+  static int weapon_data_projectile_speed_offset() { return tf2_combat::weapon::weapon_data_projectile_speed(); }
+  static int weapon_data_smack_delay_offset() { return tf2_combat::weapon::weapon_data_smack_delay(); }
+  static int weapon_data_rapid_fire_offset() { return tf2_combat::weapon::weapon_data_rapid_fire(); }
   static auto reload_mode_offset() -> int
   {
     static tf2_netvars::lazy_offset offset{"DT_TFWeaponBase", {"m_iReloadMode"}};
     return offset;
+  }
+
+  int get_reload_mode() {
+    return field_at<int>(reload_mode_offset());
   }
 
   static auto last_crit_check_time_offset() -> int
@@ -855,9 +851,16 @@ public:
   }
 
   int get_slot() {
+    using get_slot_fn = int (*)(void*);
+    if (auto* const direct = reinterpret_cast<get_slot_fn>(tf2_combat::get().get_slot_fn)) {
+      return direct(this);
+    }
     void** vtable = *(void***)this;
-    auto get_slot_fn = (int (*)(void*))vtable[331];
-    return get_slot_fn(this);
+    const std::size_t slot = tf2_combat::weapon::get_slot();
+    if (vtable == nullptr || slot == 0 || vtable[slot] == nullptr) {
+      return -1;
+    }
+    return reinterpret_cast<get_slot_fn>(vtable[slot])(this);
   }
 
   bool are_random_crits_enabled() {
@@ -881,13 +884,21 @@ public:
 
   bool can_fire_critical_shot(bool headshot = false) {
     void** vtable = *(void***)this;
-    auto can_fire_critical_shot_fn = (bool (*)(void*, bool, void*))vtable[497];
+    const std::size_t slot = tf2_combat::weapon::can_fire_critical_shot();
+    if (vtable == nullptr || slot == 0 || vtable[slot] == nullptr) {
+      return true;
+    }
+    auto can_fire_critical_shot_fn = (bool (*)(void*, bool, void*))vtable[slot];
     return can_fire_critical_shot_fn(this, headshot, nullptr);
   }
 
   bool can_fire_random_critical_shot(float crit_chance) {
     void** vtable = *(void***)this;
-    auto can_fire_random_critical_shot_fn = (bool (*)(void*, float))vtable[498];
+    const std::size_t slot = tf2_combat::weapon::can_fire_random_critical_shot();
+    if (vtable == nullptr || slot == 0 || vtable[slot] == nullptr) {
+      return true;
+    }
+    auto can_fire_random_critical_shot_fn = (bool (*)(void*, float))vtable[slot];
     return can_fire_random_critical_shot_fn(this, crit_chance);
   }
 
@@ -908,7 +919,7 @@ public:
     }
 
     static const int item_class_offset =
-      cathook::core::memory::keyed_store_offset("client.so", "item_class");
+      puphook::core::memory::keyed_store_offset("client.so", "item_class");
     if (item_class_offset <= 0) {
       return nullptr;
     }
@@ -924,15 +935,31 @@ public:
     }
 
     const int weapon_id = get_weapon_id_uncached();
-    if (static_cast<unsigned>(def_id) < 16384) {
+    if (static_cast<unsigned>(def_id) < 16384 &&
+        (weapon_id != TF_WEAPON_NONE || tf2_combat::weapon::get_weapon_id() != 0)) {
       cached_ids[def_id] = weapon_id;
       cached_have[def_id] = 1;
     }
     return weapon_id;
   }
 
-  int get_weapon_id_uncached() {
-    if (const char* item_class = this->get_item_class(); item_class != nullptr) {
+  int get_weapon_id_from_vtable() {
+    void** vtable = *reinterpret_cast<void***>(this);
+    const std::size_t slot = tf2_combat::weapon::get_weapon_id();
+    if (vtable == nullptr || slot == 0 || vtable[slot] == nullptr) {
+      return TF_WEAPON_NONE;
+    }
+
+    using get_weapon_id_fn = int (*)(void*);
+    const int weapon_id = reinterpret_cast<get_weapon_id_fn>(vtable[slot])(this);
+    return weapon_id > TF_WEAPON_NONE && weapon_id < TF_WEAPON_COUNT ? weapon_id : TF_WEAPON_NONE;
+  }
+
+  int get_weapon_id_from_item_class() {
+    const char* item_class = this->get_item_class();
+    if (item_class == nullptr) {
+      return TF_WEAPON_NONE;
+    }
       static const struct {
         const char* item_class;
         int weapon_id;
@@ -1014,141 +1041,74 @@ public:
         {"tf_weapon_tranq", TF_WEAPON_TRANQ},
         {"tf_weapon_wrench", TF_WEAPON_WRENCH},
       };
-      for (const auto& entry : item_classes) {
-        if (std::strcmp(item_class, entry.item_class) == 0) {
-          return entry.weapon_id;
-        }
+    for (const auto& entry : item_classes) {
+      if (std::strcmp(item_class, entry.item_class) == 0) {
+        return entry.weapon_id;
       }
     }
-
-    const auto weapon_def_id = this->get_def_id();
-
-    switch (weapon_def_id) {
-    case Pyro_m_FlameThrower:
-    case Pyro_m_FlameThrowerR:
-    case Pyro_m_TheBackburner:
-    case Pyro_m_TheDegreaser:
-    case Pyro_m_ThePhlogistinator:
-    case Pyro_m_FestiveFlameThrower:
-    case Pyro_m_TheRainblower:
-    case Pyro_m_SilverBotkillerFlameThrowerMkI:
-    case Pyro_m_GoldBotkillerFlameThrowerMkI:
-    case Pyro_m_RustBotkillerFlameThrowerMkI:
-    case Pyro_m_BloodBotkillerFlameThrowerMkI:
-    case Pyro_m_CarbonadoBotkillerFlameThrowerMkI:
-    case Pyro_m_DiamondBotkillerFlameThrowerMkI:
-    case Pyro_m_SilverBotkillerFlameThrowerMkII:
-    case Pyro_m_GoldBotkillerFlameThrowerMkII:
-    case Pyro_m_FestiveBackburner:
-    case Pyro_m_ForestFire:
-    case Pyro_m_BarnBurner:
-    case Pyro_m_BovineBlazemaker:
-    case Pyro_m_EarthSkyandFire:
-    case Pyro_m_FlashFryer:
-    case Pyro_m_TurbineTorcher:
-    case Pyro_m_Autumn:
-    case Pyro_m_PumpkinPatch:
-    case Pyro_m_Nutcracker:
-    case Pyro_m_Balloonicorn:
-    case Pyro_m_Rainbow:
-    case Pyro_m_CoffinNail:
-    case Pyro_m_Warhawk:
-    case Pyro_m_NostromoNapalmer:
-      return TF_WEAPON_FLAMETHROWER;
-    case Heavy_m_Minigun:
-    case Heavy_m_MinigunR:
-    case Heavy_m_Natascha:
-    case Heavy_m_IronCurtain:
-    case Heavy_m_TheBrassBeast:
-    case Heavy_m_Tomislav:
-    case Heavy_m_FestiveMinigun:
-    case Heavy_m_SilverBotkillerMinigunMkI:
-    case Heavy_m_GoldBotkillerMinigunMkI:
-    case Heavy_m_TheHuoLongHeater:
-    case Heavy_m_TheHuoLongHeaterG:
-    case Heavy_m_Deflector_mvm:
-    case Heavy_m_RustBotkillerMinigunMkI:
-    case Heavy_m_BloodBotkillerMinigunMkI:
-    case Heavy_m_CarbonadoBotkillerMinigunMkI:
-    case Heavy_m_DiamondBotkillerMinigunMkI:
-    case Heavy_m_SilverBotkillerMinigunMkII:
-    case Heavy_m_GoldBotkillerMinigunMkII:
-    case Heavy_m_KingoftheJungle:
-    case Heavy_m_IronWood:
-    case Heavy_m_AntiqueAnnihilator:
-    case Heavy_m_WarRoom:
-    case Heavy_m_CitizenPain:
-    case Heavy_m_BrickHouse:
-    case Heavy_m_MacabreWeb:
-    case Heavy_m_PumpkinPatch:
-    case Heavy_m_Nutcracker:
-    case Heavy_m_BrainCandy:
-    case Heavy_m_MisterCuddles:
-    case Heavy_m_CoffinNail:
-    case Heavy_m_DressedtoKill:
-    case Heavy_m_TopShelf:
-    case Heavy_m_ButcherBird:
-      return TF_WEAPON_MINIGUN;
-    case Sniper_s_SMG:
-    case Sniper_s_SMGR:
-    case Sniper_s_FestiveSMG:
-      return TF_WEAPON_SMG;
-    case Sniper_s_TheCleanersCarbine:
-      return TF_WEAPON_CHARGED_SMG;
-    default:
-      break;
-    }
-
-    const bool is_scout_pistol =
-      weapon_def_id == Scout_s_ScoutsPistol
-      || weapon_def_id == Scout_s_PistolR
-      || weapon_def_id == Scout_s_VintageLugermorph
-      || weapon_def_id == Scout_s_Lugermorph
-      || weapon_def_id == Scout_s_TheWinger
-      || weapon_def_id == Scout_s_PrettyBoysPocketPistol
-      || weapon_def_id == Scout_s_RedRockRoscoe
-      || weapon_def_id == Scout_s_HomemadeHeater
-      || weapon_def_id == Scout_s_HickoryHolepuncher
-      || weapon_def_id == Scout_s_LocalHero
-      || weapon_def_id == Scout_s_BlackDahlia
-      || weapon_def_id == Scout_s_SandstoneSpecial
-      || weapon_def_id == Scout_s_MacabreWeb
-      || weapon_def_id == Scout_s_Nutcracker
-      || weapon_def_id == Scout_s_BlueMew
-      || weapon_def_id == Scout_s_BrainCandy
-      || weapon_def_id == Scout_s_ShottoHell
-      || weapon_def_id == Scout_s_DressedToKill
-      || weapon_def_id == Scout_s_Blitzkrieg
-      || weapon_def_id == Scout_s_TheCAPPER;
-    if (is_scout_pistol) {
-      return TF_WEAPON_PISTOL_SCOUT;
-    }
-
-    const bool is_engineer_pistol =
-      weapon_def_id == Engi_s_EngineersPistol
-      || weapon_def_id == Engi_s_PistolR
-      || weapon_def_id == Engi_s_VintageLugermorph
-      || weapon_def_id == Engi_s_Lugermorph
-      || weapon_def_id == Engi_s_RedRockRoscoe
-      || weapon_def_id == Engi_s_HomemadeHeater
-      || weapon_def_id == Engi_s_HickoryHolepuncher
-      || weapon_def_id == Engi_s_LocalHero
-      || weapon_def_id == Engi_s_BlackDahlia
-      || weapon_def_id == Engi_s_SandstoneSpecial
-      || weapon_def_id == Engi_s_MacabreWeb
-      || weapon_def_id == Engi_s_Nutcracker
-      || weapon_def_id == Engi_s_BlueMew
-      || weapon_def_id == Engi_s_BrainCandy
-      || weapon_def_id == Engi_s_ShottoHell
-      || weapon_def_id == Engi_s_DressedToKill
-      || weapon_def_id == Engi_s_Blitzkrieg
-      || weapon_def_id == Engi_s_TheCAPPER
-      || weapon_def_id == Engi_s_TheGigarCounter;
-    if (is_engineer_pistol) {
-      return TF_WEAPON_PISTOL;
-    }
-
     return TF_WEAPON_NONE;
+  }
+
+  int get_weapon_id_from_def_id() {
+    switch (get_def_id()) {
+    case Demoman_m_GrenadeLauncher:
+    case Demoman_m_GrenadeLauncherR:
+    case Demoman_m_TheLochnLoad:
+    case Demoman_m_FestiveGrenadeLauncher:
+    case Demoman_m_TheIronBomber:
+    case Demoman_m_Autumn:
+    case Demoman_m_MacabreWeb:
+    case Demoman_m_Rainbow:
+    case Demoman_m_SweetDreams:
+    case Demoman_m_CoffinNail:
+    case Demoman_m_TopShelf:
+    case Demoman_m_Warhawk:
+    case Demoman_m_ButcherBird:
+      return TF_WEAPON_GRENADELAUNCHER;
+    case Demoman_m_TheLooseCannon:
+      return TF_WEAPON_CANNON;
+    case Demoman_s_StickybombLauncher:
+    case Demoman_s_StickybombLauncherR:
+    case Demoman_s_FestiveStickybombLauncher:
+    case Demoman_s_TheScottishResistance:
+    case Demoman_s_TheQuickiebombLauncher:
+    case Demoman_s_StickyJumper:
+    case Demoman_s_SuddenFlurry:
+    case Demoman_s_CarpetBomber:
+    case Demoman_s_BlastedBombardier:
+    case Demoman_s_RooftopWrangler:
+    case Demoman_s_LiquidAsset:
+    case Demoman_s_PinkElephant:
+    case Demoman_s_Autumn:
+    case Demoman_s_PumpkinPatch:
+    case Demoman_s_MacabreWeb:
+    case Demoman_s_SweetDreams:
+    case Demoman_s_CoffinNail:
+    case Demoman_s_DressedtoKill:
+    case Demoman_s_Blitzkrieg:
+      return TF_WEAPON_PIPEBOMBLAUNCHER;
+    case Sniper_s_Jarate:
+    case Sniper_s_FestiveJarate:
+    case Sniper_s_TheSelfAwareBeautyMark:
+      return TF_WEAPON_JAR;
+    case Scout_s_MadMilk:
+    case Scout_s_MutatedMilk:
+      return TF_WEAPON_JAR_MILK;
+    case Pyro_s_GasPasser:
+      return TF_WEAPON_GRENADE_GAS;
+    default:
+      return TF_WEAPON_NONE;
+    }
+  }
+
+  int get_weapon_id_uncached() {
+    if (const int from_class = get_weapon_id_from_item_class(); from_class != TF_WEAPON_NONE) {
+      return from_class;
+    }
+    if (const int from_def = get_weapon_id_from_def_id(); from_def != TF_WEAPON_NONE) {
+      return from_def;
+    }
+    return get_weapon_id_from_vtable();
   }
 
   float get_charge_begin_time() {
@@ -1178,82 +1138,24 @@ public:
       return true;
     }
 
-    switch (this->get_def_id()) {
-    case 0:
-    case Demoman_t_Bottle:
-    case 2:
-    case 3:
-    case 4:
-    case 5:
-    case 6:
-    case 7:
-    case 8:
-    case 37:
-    case 38:
-    case 44:
-    case 132:
-    case 142:
-    case 153:
-    case 154:
-    case 155:
-    case 171:
-    case 172:
-    case 173:
-    case 190:
-    case 191:
-    case 192:
-    case 193:
-    case 194:
-    case 195:
-    case 196:
-    case 197:
-    case 214:
-    case 221:
-    case 225:
-    case 264:
-    case Demoman_t_HorselessHeadlessHorsemannsHeadtaker:
-    case 307:
-    case 310:
-    case 317:
-    case 325:
-    case 327:
-    case 329:
-    case 348:
-    case 349:
-    case 355:
-    case 357:
-    case 404:
-    case 423:
-    case 447:
-    case 450:
-    case 452:
-    case 466:
-    case 474:
-    case Demoman_t_NessiesNineIron:
-    case 572:
-    case 587:
-    case 589:
-    case 593:
-    case 609:
-    case 638:
-    case 648:
-    case 649:
-    case 656:
-    case 660:
-    case 739:
-    case 775:
-    case 813:
-    case 832:
-    case 880:
-    case 939:
-    case 954:
-    case 999:
-    case 1013:
-    case 1071:
-    case Demoman_t_FestiveEyelander:
-    case 1123:
-    case 1127:
-    case 30758:
+    switch (this->get_weapon_id()) {
+    case TF_WEAPON_BAT:
+    case TF_WEAPON_BAT_WOOD:
+    case TF_WEAPON_BOTTLE:
+    case TF_WEAPON_FIREAXE:
+    case TF_WEAPON_CLUB:
+    case TF_WEAPON_CROWBAR:
+    case TF_WEAPON_KNIFE:
+    case TF_WEAPON_FISTS:
+    case TF_WEAPON_SHOVEL:
+    case TF_WEAPON_WRENCH:
+    case TF_WEAPON_BONESAW:
+    case TF_WEAPON_BUILDER:
+    case TF_WEAPON_SWORD:
+    case TF_WEAPON_BAT_FISH:
+    case TF_WEAPON_STICKBOMB:
+    case TF_WEAPON_BAT_GIFTWRAP:
+    case TF_WEAPON_HARVESTER_SAW:
       return true;
     default:
       return false;
@@ -1334,6 +1236,66 @@ public:
 
   bool is_flamethrower() {
     return this->get_weapon_id() == TF_WEAPON_FLAMETHROWER;
+  }
+
+  bool is_projectile_weapon() {
+    switch (this->get_weapon_id()) {
+    case TF_WEAPON_CLEAVER:
+    case TF_WEAPON_GRENADE_CLEAVER:
+    case TF_WEAPON_ROCKETLAUNCHER:
+    case TF_WEAPON_ROCKETLAUNCHER_DIRECTHIT:
+    case TF_WEAPON_PARTICLE_CANNON:
+    case TF_WEAPON_RAYGUN:
+    case TF_WEAPON_FLAMETHROWER:
+    case TF_WEAPON_FLAMETHROWER_ROCKET:
+    case TF_WEAPON_FLAME_BALL:
+    case TF_WEAPON_FLAREGUN:
+    case TF_WEAPON_FLAREGUN_REVENGE:
+    case TF_WEAPON_GRENADELAUNCHER:
+    case TF_WEAPON_CANNON:
+    case TF_WEAPON_PIPEBOMBLAUNCHER:
+    case TF_WEAPON_STICKY_BALL_LAUNCHER:
+    case TF_WEAPON_SHOTGUN_BUILDING_RESCUE:
+    case TF_WEAPON_DRG_POMSON:
+    case TF_WEAPON_CROSSBOW:
+    case TF_WEAPON_SYRINGEGUN_MEDIC:
+    case TF_WEAPON_COMPOUND_BOW:
+    case TF_WEAPON_JAR:
+    case TF_WEAPON_JAR_MILK:
+    case TF_WEAPON_JAR_GAS:
+    case TF_WEAPON_GRENADE_JAR_GAS:
+    case TF_WEAPON_GRENADE_GAS:
+    case TF_WEAPON_PASSTIME_GUN:
+    case TF_WEAPON_LUNCHBOX:
+    case TF_WEAPON_GRAPPLINGHOOK:
+    case TF_WEAPON_THROWABLE:
+    case TF_WEAPON_GRENADE_THROWABLE:
+      return true;
+    default:
+      break;
+    }
+    switch (get_def_id()) {
+    case Demoman_m_GrenadeLauncher:
+    case Demoman_m_GrenadeLauncherR:
+    case Demoman_m_TheLochnLoad:
+    case Demoman_m_TheLooseCannon:
+    case Demoman_m_FestiveGrenadeLauncher:
+    case Demoman_m_TheIronBomber:
+    case Demoman_s_StickybombLauncher:
+    case Demoman_s_StickybombLauncherR:
+    case Demoman_s_FestiveStickybombLauncher:
+    case Demoman_s_TheScottishResistance:
+    case Demoman_s_TheQuickiebombLauncher:
+    case Sniper_s_Jarate:
+    case Sniper_s_FestiveJarate:
+    case Sniper_s_TheSelfAwareBeautyMark:
+    case Scout_s_MadMilk:
+    case Scout_s_MutatedMilk:
+    case Pyro_s_GasPasser:
+      return true;
+    default:
+      return false;
+    }
   }
 
   bool is_medigun() {
@@ -1434,19 +1396,18 @@ public:
   }
 
   uintptr_t get_weapon_info_base() {
-    const int offset = last_crit_check_time_offset();
-    if (offset <= 0) {
-      return 0;
-    }
-
     const int info_offset = get_slot() == 2
-      ? offset + melee_weapon_info_offset_from_last_crit_check
-      : offset + base_weapon_info_offset_from_last_crit_check;
+      ? tf2_combat::weapon::melee_weapon_data()
+      : tf2_combat::weapon::gun_weapon_data();
     if (info_offset <= 0) {
       return 0;
     }
 
     return *reinterpret_cast<uintptr_t*>(reinterpret_cast<uintptr_t>(this) + info_offset);
+  }
+
+  Vec3 get_spread_angles() {
+    return {};
   }
 
   uintptr_t get_weapon_data() {
@@ -1456,26 +1417,37 @@ public:
       return 0;
     }
 
-    return weapon_info + weapon_data_base_offset + (static_cast<uintptr_t>(mode) * weapon_data_stride);
+    const int data = weapon_data_base_offset();
+    const int stride = weapon_data_stride();
+    if (data <= 0 || stride <= 0) {
+      return 0;
+    }
+    return weapon_info + static_cast<uintptr_t>(data) +
+      (static_cast<uintptr_t>(mode) * static_cast<uintptr_t>(stride));
   }
 
   int get_damage() {
     const uintptr_t weapon_data = get_weapon_data();
-    if (weapon_data == 0) {
+    const int damage_offset = weapon_data_damage_offset();
+    if (weapon_data == 0 || damage_offset < 0) {
       return 0;
     }
 
-    const int base_damage = *reinterpret_cast<int*>(weapon_data + weapon_data_damage_offset);
+    const int base_damage = *reinterpret_cast<int*>(weapon_data + damage_offset);
+    if (attribute_manager == nullptr) {
+      return base_damage;
+    }
     return static_cast<int>(attribute_manager->attrib_hook_value(static_cast<float>(base_damage), "mult_dmg", to_entity()));
   }
 
   int get_bullets_per_shot() {
     const uintptr_t weapon_data = get_weapon_data();
-    if (weapon_data == 0) {
+    const int bullets_offset = weapon_data_bullets_per_shot_offset();
+    if (weapon_data == 0 || bullets_offset < 0) {
       return 1;
     }
 
-    const int bullets = *reinterpret_cast<int*>(weapon_data + weapon_data_bullets_per_shot_offset);
+    const int bullets = *reinterpret_cast<int*>(weapon_data + bullets_offset);
     if (bullets <= 0 || is_melee()) {
       return 1;
     }
@@ -1489,24 +1461,47 @@ public:
 
   int get_swing_range() {
     void** vtable = *reinterpret_cast<void***>(this);
-    constexpr std::size_t get_swing_range_index = 528;
-    if (vtable == nullptr || vtable[get_swing_range_index] == nullptr) {
+    const std::size_t slot = tf2_combat::weapon::get_swing_range();
+    if (vtable == nullptr || slot == 0 || vtable[slot] == nullptr) {
       return 0;
     }
 
     using get_swing_range_fn = int (*)(void*);
-    const int range = reinterpret_cast<get_swing_range_fn>(vtable[get_swing_range_index])(this);
+    const int range = reinterpret_cast<get_swing_range_fn>(vtable[slot])(this);
     return range > 0 && range <= 256 ? range : 0;
   }
 
   float get_hitscan_range() {
-    const uintptr_t weapon_data = get_weapon_data();
-    if (weapon_data == 0 || is_melee()) {
+    if (is_melee()) {
       return 0.0f;
     }
+    using get_range_fn = float (*)(void*);
+    if (auto* const direct = reinterpret_cast<get_range_fn>(tf2_combat::get().get_range_fn)) {
+      const float range = direct(this);
+      if (std::isfinite(range) && range > 0.0f) {
+        return range;
+      }
+    }
+    void** vtable = *reinterpret_cast<void***>(this);
+    const std::size_t slot = tf2_combat::weapon::get_range();
+    if (vtable != nullptr && slot != 0 && vtable[slot] != nullptr) {
+      const float range = reinterpret_cast<get_range_fn>(vtable[slot])(this);
+      if (std::isfinite(range) && range > 0.0f) {
+        return range;
+      }
+    }
 
-    const float range = *reinterpret_cast<float*>(weapon_data + weapon_data_range_offset);
-    return std::isfinite(range) && range > 0.0f ? range : 0.0f;
+    const uintptr_t weapon_data = get_weapon_data();
+    if (weapon_data == 0) {
+      return 8192.0f;
+    }
+
+    const int range_offset = tf2_combat::weapon::weapon_data_range();
+    if (range_offset <= 0) {
+      return 8192.0f;
+    }
+    const float range = *reinterpret_cast<float*>(weapon_data + range_offset);
+    return std::isfinite(range) && range > 0.0f ? range : 8192.0f;
   }
 
   float get_hitscan_spread() {
@@ -1515,7 +1510,11 @@ public:
       return 0.0f;
     }
 
-    float spread = *reinterpret_cast<float*>(weapon_data + weapon_data_spread_offset);
+    const int spread_offset = tf2_combat::weapon::weapon_data_spread();
+    if (spread_offset <= 0) {
+      return 0.0f;
+    }
+    float spread = *reinterpret_cast<float*>(weapon_data + spread_offset);
     if (attribute_manager != nullptr) {
       spread = attribute_manager->attrib_hook_value(spread, "mult_spread_scale", to_entity());
     }
@@ -1533,57 +1532,69 @@ public:
       return 0.0f;
     }
 
-    return *reinterpret_cast<float*>(weapon_data + weapon_data_fire_delay_offset);
+    const int delay_offset = weapon_data_fire_delay_offset();
+    if (delay_offset <= 0) {
+      return 0.0f;
+    }
+    const float delay = *reinterpret_cast<float*>(weapon_data + delay_offset);
+    return std::isfinite(delay) && delay > 0.0f ? delay : 0.0f;
   }
 
   int get_projectile_type() {
     const uintptr_t weapon_data = get_weapon_data();
-    if (weapon_data == 0) {
+    const int type_offset = weapon_data_projectile_type_offset();
+    if (weapon_data == 0 || type_offset <= 0) {
       return 0;
     }
 
-    return *reinterpret_cast<int*>(weapon_data + weapon_data_projectile_type_offset);
+    return *reinterpret_cast<int*>(weapon_data + type_offset);
   }
 
   float get_projectile_speed_from_data() {
     const uintptr_t weapon_data = get_weapon_data();
-    if (weapon_data == 0) {
+    const int speed_offset = weapon_data_projectile_speed_offset();
+    if (weapon_data == 0 || speed_offset <= 0) {
       return 0.0f;
     }
 
-    const float speed = *reinterpret_cast<float*>(weapon_data + weapon_data_projectile_speed_offset);
+    const float speed = *reinterpret_cast<float*>(weapon_data + speed_offset);
     return std::isfinite(speed) ? std::clamp(speed, 0.0f, 5000.0f) : 0.0f;
   }
 
   float get_smack_delay() {
     const uintptr_t weapon_data = get_weapon_data();
-    if (weapon_data == 0) {
+    const int delay_offset = weapon_data_smack_delay_offset();
+    if (weapon_data == 0 || delay_offset <= 0) {
       return 0.2f;
     }
 
-    const float smack_delay = *reinterpret_cast<float*>(weapon_data + weapon_data_smack_delay_offset);
+    const float smack_delay = *reinterpret_cast<float*>(weapon_data + delay_offset);
     return std::isfinite(smack_delay) ? std::clamp(smack_delay, 0.0f, 1.0f) : 0.2f;
   }
 
   float get_smack_time() {
-    const int offset = inspect_stage_offset();
+    const int offset = tf2_combat::weapon::smack_time();
     if (offset <= 0) {
       return -1.0f;
     }
 
-    return *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(this) + offset + 28);
+    return field_at<float>(offset);
   }
 
   bool is_rapid_fire() {
     const uintptr_t weapon_data = get_weapon_data();
-    if (weapon_data == 0) {
+    const int rapid_offset = weapon_data_rapid_fire_offset();
+    if (weapon_data == 0 || rapid_offset <= 0) {
       return false;
     }
 
-    return *reinterpret_cast<bool*>(weapon_data + weapon_data_rapid_fire_offset);
+    return *reinterpret_cast<bool*>(weapon_data + rapid_offset);
   }
 
   float get_mult_crit_chance() {
+    if (attribute_manager == nullptr) {
+      return 1.0f;
+    }
     return attribute_manager->attrib_hook_value(1.0f, "mult_crit_chance", to_entity());
   }
 
@@ -1618,23 +1629,23 @@ public:
   }
 
   int& weapon_mode() {
-    return field_at<int>(reload_mode_offset() - 4);
+    return field_at<int>(tf2_combat::weapon::weapon_mode());
   }
 
   float& crit_token_bucket() {
-    return field_at<float>(reload_mode_offset() - 240);
+    return field_at<float>(tf2_combat::weapon::crit_token_bucket());
   }
 
   int& crit_checks() {
-    return field_at<int>(reload_mode_offset() - 236);
+    return field_at<int>(tf2_combat::weapon::crit_checks());
   }
 
   int& crit_seed_requests() {
-    return field_at<int>(reload_mode_offset() - 232);
+    return field_at<int>(tf2_combat::weapon::crit_seed_requests());
   }
 
   float& crit_time() {
-    return field_at<float>(last_crit_check_time_offset() - 4);
+    return field_at<float>(tf2_combat::weapon::crit_time());
   }
 
   float& last_crit_check_time() {
@@ -1646,51 +1657,71 @@ public:
   }
 
   int& current_seed() {
-    return field_at<int>(last_crit_check_time_offset() + 8);
+    return field_at<int>(tf2_combat::weapon::current_seed());
   }
 
   int& last_crit_check_frame() {
-    return field_at<int>(last_crit_check_time_offset() + 4);
+    return field_at<int>(tf2_combat::weapon::last_crit_check_frame());
   }
 
   float& last_rapid_fire_crit_check_time() {
-    return field_at<float>(last_crit_check_time_offset() + 12);
+    return field_at<float>(tf2_combat::weapon::last_rapid_fire_crit_check_time());
   }
 
   bool& current_attack_is_crit() {
-    return field_at<bool>(reload_mode_offset() + current_attack_is_crit_offset);
+    return field_at<bool>(tf2_combat::weapon::current_attack_is_crit());
   }
 
   bool& current_crit_is_random() {
-    return field_at<bool>(reload_mode_offset() + current_crit_is_random_offset);
+    return field_at<bool>(tf2_combat::weapon::current_crit_is_random());
   }
 
   bool& current_attack_is_during_demo_charge() {
-    return field_at<bool>(reload_mode_offset() + current_attack_is_during_demo_charge_offset);
+    return field_at<bool>(tf2_combat::weapon::current_attack_is_during_demo_charge());
   }
 
   bool can_primary_attack() {
     Entity* owner = this->get_owner_entity();
-    if (owner == nullptr)
+    if (owner == nullptr && entity_list != nullptr) {
+      owner = reinterpret_cast<Entity*>(entity_list->get_localplayer());
+    }
+    if (owner == nullptr) {
       return false;
+    }
 
-    float next_attack = owner_next_attack(owner);
-    float next_primary_attack = this->get_next_primary_attack();
-    float time = owner->get_tickbase() * global_vars->interval_per_tick;
+    const float next_attack = owner_next_attack(owner);
+    const float next_primary_attack = this->get_next_primary_attack();
+    const float interval = global_vars != nullptr && global_vars->interval_per_tick > 0.0f
+      ? global_vars->interval_per_tick
+      : static_cast<float>(TICK_INTERVAL);
+    float time = static_cast<float>(owner->get_tickbase()) * interval;
+    if (time <= 0.0f && global_vars != nullptr) {
+      time = global_vars->curtime;
+    }
 
-    return (next_primary_attack <= time && next_attack <= time);
+    return next_primary_attack <= time && next_attack <= time;
   }
 
   bool can_secondary_attack() {
     Entity* owner = this->get_owner_entity();
-    if (owner == nullptr)
+    if (owner == nullptr && entity_list != nullptr) {
+      owner = reinterpret_cast<Entity*>(entity_list->get_localplayer());
+    }
+    if (owner == nullptr) {
       return false;
+    }
 
-    float next_attack = owner_next_attack(owner);
-    float next_secondary_attack = this->get_next_secondary_attack();
-    float time = owner->get_tickbase() * global_vars->interval_per_tick;
+    const float next_attack = owner_next_attack(owner);
+    const float next_secondary_attack = this->get_next_secondary_attack();
+    const float interval = global_vars != nullptr && global_vars->interval_per_tick > 0.0f
+      ? global_vars->interval_per_tick
+      : static_cast<float>(TICK_INTERVAL);
+    float time = static_cast<float>(owner->get_tickbase()) * interval;
+    if (time <= 0.0f && global_vars != nullptr) {
+      time = global_vars->curtime;
+    }
 
-    return (next_secondary_attack <= time && next_attack <= time);
+    return next_secondary_attack <= time && next_attack <= time;
   }
 
   static float owner_next_attack(Entity* owner) {

@@ -10,7 +10,7 @@
 
 #include "core/memory/maps.hpp"
 
-namespace cathook::core::memory
+namespace puphook::core::memory
 {
 
 struct mapping

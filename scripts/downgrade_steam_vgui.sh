@@ -2,7 +2,7 @@
 set -euo pipefail
 
 target_version="1689034492"
-archive_url="${CAT_STEAM_ARCHIVE_URL:-http://web.archive.org/web/20230711164652if_/media.steampowered.com/client}"
+archive_url="${PUP_STEAM_ARCHIVE_URL:-http://web.archive.org/web/20230711164652if_/media.steampowered.com/client}"
 force=0
 display_value="${DISPLAY:-}"
 
@@ -60,8 +60,8 @@ add_root() {
 
 collect_roots() {
   {
-    add_root "${CAT_STEAM_ROOT:-}"
-    add_root "${CAT_SHARED_STEAM_ROOT:-}"
+    add_root "${PUP_STEAM_ROOT:-}"
+    add_root "${PUP_SHARED_STEAM_ROOT:-}"
     add_root "$home_dir/.steam/debian-installation"
     add_root "$home_dir/.steam/steam"
     add_root "$home_dir/.steam/root"

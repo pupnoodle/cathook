@@ -16,6 +16,8 @@ V  o o  V  file: src/features/combat/auto_reflect/auto_reflect.cpp
 #include "features/menu/config.hpp"
 #include "games/tf2/sdk/entities/player.hpp"
 #include "games/tf2/sdk/entities/weapon.hpp"
+#include "features/combat/backtrack/backtrack.hpp"
+#include "games/tf2/sdk/interfaces/attribute_manager.hpp"
 #include "games/tf2/sdk/interfaces/client.hpp"
 #include "games/tf2/sdk/interfaces/engine.hpp"
 #include "games/tf2/sdk/interfaces/entity_list.hpp"
@@ -112,6 +114,24 @@ Vec3 estimated_velocity(Entity* projectile)
   return velocity;
 }
 
+bool projectile_touched(Entity* projectile)
+{
+  static tf2_netvars::lazy_offset touched_offset{"DT_TFProjectile_Pipebomb", { "m_bTouched" }};
+  if (touched_offset <= 0 || projectile == nullptr) {
+    return false;
+  }
+  return *reinterpret_cast<bool*>(
+    reinterpret_cast<std::uintptr_t>(projectile) + static_cast<std::uintptr_t>(touched_offset));
+}
+
+float airblast_radius(Weapon* weapon)
+{
+  const float scale = attribute_manager != nullptr
+    ? attribute_manager->attrib_hook_value(1.0f, "deflection_size_multiplier", weapon->to_entity())
+    : 1.0f;
+  return std::clamp(scale, 0.25f, 4.0f) * 128.0f;
+}
+
 bool type_enabled(Entity* projectile, enum class_id projectile_class)
 {
   switch (projectile_class)
@@ -184,16 +204,28 @@ void on_create_move(user_cmd* cmd)
   }
 
   auto* weapon = localplayer->get_weapon();
+  const int weapon_id = weapon != nullptr ? weapon->get_weapon_id() : 0;
   if (weapon == nullptr ||
-      weapon->get_weapon_id() != TF_WEAPON_FLAMETHROWER ||
+      (weapon_id != TF_WEAPON_FLAMETHROWER && weapon_id != TF_WEAPON_FLAME_BALL) ||
       weapon->get_def_id() == Pyro_m_ThePhlogistinator)
+  {
+    return;
+  }
+  if (attribute_manager != nullptr &&
+      attribute_manager->attrib_hook_value(0.0f, "airblast_disabled", weapon->to_entity()) != 0.0f)
+  {
+    return;
+  }
+  if (!weapon->can_secondary_attack())
   {
     return;
   }
 
   const Vec3 eye_position = localplayer->get_shoot_pos();
-  const float range = std::clamp(config.auto_reflect.range, 40.0f, 400.0f);
-  const float lead_time = static_cast<float>(prediction_ticks) * tick_interval();
+  const float blast_radius = airblast_radius(weapon);
+  const float range = std::max(std::clamp(config.auto_reflect.range, 40.0f, 400.0f), blast_radius);
+  const float lead_time = std::max(backtrack::real_latency_seconds() - 0.03f,
+    static_cast<float>(prediction_ticks) * tick_interval());
 
   Vec3 view_forward{};
   angle_vectors(cmd->view_angles, &view_forward, nullptr, nullptr);
@@ -203,7 +235,8 @@ void on_create_move(user_cmd* cmd)
     if (projectile == nullptr ||
         projectile->is_dormant() ||
         is_deflected(projectile) ||
-        !type_enabled(projectile, projectile_class))
+        !type_enabled(projectile, projectile_class) ||
+        (projectile_class == class_id::PILL_OR_STICKY && projectile_touched(projectile)))
     {
       return false;
     }
@@ -251,6 +284,7 @@ void on_create_move(user_cmd* cmd)
       }
     }
 
+    cmd->view_angles = angles_to_position(eye_position, predicted);
     cmd->buttons |= IN_ATTACK2;
     return true;
   };

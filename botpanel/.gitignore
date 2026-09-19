@@ -1,9 +1,9 @@
-cathook-location
-catbot-ipc-server
-catbot-ipc-web-panel
+puphook-location
+pupbot-ipc-server
+pupbot-ipc-web-panel
 account-generator
-catbot-database
-catbot
+pupbot-database
+pupbot
 just-disable-vac
 inject.log
 core

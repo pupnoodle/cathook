@@ -86,7 +86,7 @@ struct inventory_cache_layout
 
 inventory_cache_layout extract_inventory_layout()
 {
-  namespace mem = cathook::core::memory;
+  namespace mem = puphook::core::memory;
   inventory_cache_layout layout{};
 
   const auto* by_id = static_cast<const std::uint8_t*>(
@@ -280,7 +280,7 @@ void debug_log(const char* fmt, ...)
   va_list args{};
   va_start(args, fmt);
   print("[autoitem] ");
-  cathook::core::vlog_raw(fmt, args);
+  puphook::core::vlog_raw(fmt, args);
   va_end(args);
 }
 
@@ -289,7 +289,7 @@ void error_log(const char* fmt, ...)
   va_list args{};
   va_start(args, fmt);
   print("[autoitem][error] ");
-  cathook::core::vlog_raw(fmt, args);
+  puphook::core::vlog_raw(fmt, args);
   va_end(args);
 }
 
@@ -1191,7 +1191,7 @@ void initialize()
     auto* initializer = reinterpret_cast<std::uint8_t*>(sigscan_module("client.so", sigs::tf_inventory_manager_initializer));
     if (initializer != nullptr)
     {
-      g_inventory_api.inventory_manager = cathook::core::memory::resolve_rip_relative(initializer + 1, 3, 7);
+      g_inventory_api.inventory_manager = puphook::core::memory::resolve_rip_relative(initializer + 1, 3, 7);
     }
   }
 

@@ -19,14 +19,13 @@ V  o o  V  file: src/games/tf2/sdk/bitbuf.hpp
 
 #pragma pack(push, 4)
 struct bf_read {
-  const char* debug_name = nullptr;
+  const std::uint8_t* data = nullptr;
+  int data_bytes = 0;
+  int data_bits = 0;
+  int current_bit = 0;
   bool overflow = false;
   bool assert_on_overflow = false;
-  std::uint16_t reserved = 0;
-  int data_bits = 0;
-  int data_bytes = 0;
-  const std::uint8_t* data = nullptr;
-  int current_bit = 0;
+  const char* debug_name = nullptr;
 
   [[nodiscard]] bool is_valid() const {
     return data != nullptr && data_bits >= 0 && data_bytes >= 0;
@@ -61,10 +60,59 @@ struct bf_read {
 
     return data + current_byte;
   }
+
+  int read_u_bit_long(int bits) {
+    if (bits <= 0 || bits > 32 || data == nullptr || current_bit < 0 ||
+        current_bit + bits > data_bits) {
+      overflow = true;
+      if (data_bits >= 0) {
+        current_bit = data_bits;
+      }
+      return 0;
+    }
+
+    std::uint32_t value = 0;
+    for (int i = 0; i < bits; ++i) {
+      const int bit = current_bit + i;
+      value |= static_cast<std::uint32_t>((data[bit >> 3] >> (bit & 7)) & 1u) << i;
+    }
+    current_bit += bits;
+    return static_cast<int>(value);
+  }
+
+  int read_byte() {
+    return read_u_bit_long(8) & 0xFF;
+  }
+
+  bool read_string(char* out, int max_len, bool line = false) {
+    if (out == nullptr || max_len <= 0) {
+      return false;
+    }
+    int written = 0;
+    while (written + 1 < max_len) {
+      if (bits_left() < 8) {
+        overflow = true;
+        break;
+      }
+      const int ch = read_byte();
+      if (overflow || ch == 0 || (line && (ch == '\n' || ch == '\r'))) {
+        break;
+      }
+      out[written++] = static_cast<char>(ch);
+    }
+    out[written] = '\0';
+    return !overflow;
+  }
 };
 #pragma pack(pop)
 
 static_assert(sizeof(bf_read) == 0x20, "bf_read size mismatch");
+static_assert(offsetof(bf_read, data) == 0, "bf_read data offset mismatch");
+static_assert(offsetof(bf_read, data_bytes) == 8, "bf_read data_bytes offset mismatch");
+static_assert(offsetof(bf_read, data_bits) == 12, "bf_read data_bits offset mismatch");
+static_assert(offsetof(bf_read, current_bit) == 16, "bf_read current_bit offset mismatch");
+static_assert(offsetof(bf_read, overflow) == 20, "bf_read overflow offset mismatch");
+static_assert(offsetof(bf_read, debug_name) == 24, "bf_read debug_name offset mismatch");
 
 class bf_write {
 public:

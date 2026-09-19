@@ -18,7 +18,7 @@ V  o o  V  file: src/core/logger.hpp
 #include <mutex>
 #include <string_view>
 
-namespace cathook::core
+namespace puphook::core
 {
 
 class logger

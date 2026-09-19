@@ -8,11 +8,11 @@ fi
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
-source "$SCRIPT_DIR/cathook_mode.sh"
+source "$SCRIPT_DIR/puphook_mode.sh"
 
-CATHOOK_ROOT=${CATHOOK_ROOT:-/opt/cathook}
-CATHOOK_BIN_DIR=$CATHOOK_ROOT/bin
-CATHOOK_BINARY=${CATHOOK_BINARY:-}
+PUPHOOK_ROOT=${PUPHOOK_ROOT:-/opt/puphook}
+PUPHOOK_BIN_DIR=$PUPHOOK_ROOT/bin
+PUPHOOK_BINARY=${PUPHOOK_BINARY:-}
 TMP_RUNTIME_DIR=""
 
 cleanup_temp_runtime() {
@@ -99,20 +99,20 @@ copy_system_glew_dependency() {
 
 trap cleanup_temp_runtime EXIT
 
-if selected_mode="$(cathook_mode_from_env 0)"; then
-    CATHOOK_BINARY="$(cathook_binary_for_mode "$selected_mode")"
-elif [ -z "$CATHOOK_BINARY" ]; then
-    selected_mode="$(cathook_select_mode 0)"
-    CATHOOK_BINARY="$(cathook_binary_for_mode "$selected_mode")"
+if selected_mode="$(puphook_mode_from_env 0)"; then
+    PUPHOOK_BINARY="$(puphook_binary_for_mode "$selected_mode")"
+elif [ -z "$PUPHOOK_BINARY" ]; then
+    selected_mode="$(puphook_select_mode 0)"
+    PUPHOOK_BINARY="$(puphook_binary_for_mode "$selected_mode")"
 fi
 
-LIB_PATH="$CATHOOK_BIN_DIR/$CATHOOK_BINARY"
-if [ ! -f "$LIB_PATH" ] && [ -f "$SCRIPT_DIR/bin/$CATHOOK_BINARY" ]; then
-    LIB_PATH="$SCRIPT_DIR/bin/$CATHOOK_BINARY"
+LIB_PATH="$PUPHOOK_BIN_DIR/$PUPHOOK_BINARY"
+if [ ! -f "$LIB_PATH" ] && [ -f "$SCRIPT_DIR/bin/$PUPHOOK_BINARY" ]; then
+    LIB_PATH="$SCRIPT_DIR/bin/$PUPHOOK_BINARY"
 fi
 
 if [ ! -f "$LIB_PATH" ]; then
-    echo "Missing $CATHOOK_BINARY. Run ./build.sh first."
+    echo "Missing $PUPHOOK_BINARY. Run ./build.sh first."
     exit 1
 fi
 
@@ -140,20 +140,20 @@ else
 fi
 
 TMP_RUNTIME_DIR=$(mktemp -d /tmp/.glXXXXXX)
-TMP_LIB="$TMP_RUNTIME_DIR/$CATHOOK_BINARY"
+TMP_LIB="$TMP_RUNTIME_DIR/$PUPHOOK_BINARY"
 chmod 0755 "$TMP_RUNTIME_DIR"
 cp "$LIB_PATH" "$TMP_LIB"
 chmod 0755 "$TMP_LIB"
 copy_bundled_runtime_dependencies "$(dirname -- "$LIB_PATH")" "$TMP_RUNTIME_DIR"
-if [ "$(dirname -- "$LIB_PATH")" != "$CATHOOK_BIN_DIR" ]; then
-    copy_bundled_runtime_dependencies "$CATHOOK_BIN_DIR" "$TMP_RUNTIME_DIR"
+if [ "$(dirname -- "$LIB_PATH")" != "$PUPHOOK_BIN_DIR" ]; then
+    copy_bundled_runtime_dependencies "$PUPHOOK_BIN_DIR" "$TMP_RUNTIME_DIR"
 fi
 copy_system_glew_dependency "$LIB_PATH" "$TMP_RUNTIME_DIR"
 
-echo "Preloading $CATHOOK_BINARY as $TMP_LIB"
+echo "Preloading $PUPHOOK_BINARY as $TMP_LIB"
 (
     cd "$TF2_PATH"
-    CATHOOK_AUTO_ATTACH=1 LD_PRELOAD="$TMP_LIB" LD_LIBRARY_PATH="$TMP_RUNTIME_DIR:$CATHOOK_BIN_DIR:$TF2_PATH/bin:${LD_LIBRARY_PATH:-}" "$GAME_BIN" -game tf >/dev/null 2>&1 &
+    PUPHOOK_AUTO_ATTACH=1 LD_PRELOAD="$TMP_LIB" LD_LIBRARY_PATH="$TMP_RUNTIME_DIR:$PUPHOOK_BIN_DIR:$TF2_PATH/bin:${LD_LIBRARY_PATH:-}" "$GAME_BIN" -game tf >/dev/null 2>&1 &
 )
 
 sleep 10

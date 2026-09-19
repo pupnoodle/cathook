@@ -16,13 +16,8 @@ struct packet_weapon_state
   int crit_checks = 0;
   int crit_seed_requests = 0;
   int last_crit_check_frame = 0;
-  float last_crit_check_time = 0.0f;
   float last_rapid_fire_crit_check_time = 0.0f;
   float crit_time = 0.0f;
-  int current_seed = 0;
-  bool current_attack_is_crit = false;
-  bool current_crit_is_random = false;
-  bool current_attack_is_during_demo_charge = false;
 };
 
 using packet_weapon_states = std::array<packet_weapon_state, Player::max_weapon_count>;
@@ -40,13 +35,8 @@ packet_weapon_state read_packet_weapon_state(Player* localplayer, int slot)
   state.crit_checks = weapon->crit_checks();
   state.crit_seed_requests = weapon->crit_seed_requests();
   state.last_crit_check_frame = weapon->last_crit_check_frame();
-  state.last_crit_check_time = weapon->last_crit_check_time();
   state.last_rapid_fire_crit_check_time = weapon->last_rapid_fire_crit_check_time();
   state.crit_time = weapon->crit_time();
-  state.current_seed = weapon->current_seed();
-  state.current_attack_is_crit = weapon->current_attack_is_crit();
-  state.current_crit_is_random = weapon->current_crit_is_random();
-  state.current_attack_is_during_demo_charge = weapon->current_attack_is_during_demo_charge();
   return state;
 }
 
@@ -72,17 +62,24 @@ void restore_packet_weapon_state(Player* localplayer, int slot, const packet_wea
     return;
   }
 
-  weapon->crit_token_bucket() = state.crit_token_bucket;
-  weapon->crit_checks() = state.crit_checks;
-  weapon->crit_seed_requests() = state.crit_seed_requests;
-  weapon->last_crit_check_frame() = state.last_crit_check_frame;
-  weapon->last_crit_check_time() = state.last_crit_check_time;
-  weapon->last_rapid_fire_crit_check_time() = state.last_rapid_fire_crit_check_time;
-  weapon->crit_time() = state.crit_time;
-  weapon->current_seed() = state.current_seed;
-  weapon->current_attack_is_crit() = state.current_attack_is_crit;
-  weapon->current_crit_is_random() = state.current_crit_is_random;
-  weapon->current_attack_is_during_demo_charge() = state.current_attack_is_during_demo_charge;
+  if (tf2_combat::weapon::crit_token_bucket() != 0) {
+    weapon->crit_token_bucket() = state.crit_token_bucket;
+  }
+  if (tf2_combat::weapon::crit_checks() != 0) {
+    weapon->crit_checks() = state.crit_checks;
+  }
+  if (tf2_combat::weapon::crit_seed_requests() != 0) {
+    weapon->crit_seed_requests() = state.crit_seed_requests;
+  }
+  if (tf2_combat::weapon::last_crit_check_frame() != 0) {
+    weapon->last_crit_check_frame() = state.last_crit_check_frame;
+  }
+  if (tf2_combat::weapon::last_rapid_fire_crit_check_time() != 0) {
+    weapon->last_rapid_fire_crit_check_time() = state.last_rapid_fire_crit_check_time;
+  }
+  if (tf2_combat::weapon::crit_time() != 0) {
+    weapon->crit_time() = state.crit_time;
+  }
 }
 
 void restore_packet_weapon_states(Player* localplayer, const packet_weapon_states& states)
@@ -96,7 +93,7 @@ void restore_packet_weapon_states(Player* localplayer, const packet_weapon_state
 
 bool cl_process_packet_entities_hook(void* client_state, svc_packet_entities_message* message)
 {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   if (cl_process_packet_entities_original == nullptr) {
     return false;
   }

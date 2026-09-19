@@ -16,7 +16,7 @@ V  o o  V  file: src/core/hooks/in_cond.cpp
 bool (*in_cond_original)(void* me, int mask) = nullptr;
 
 bool in_cond_hook(void* me, int mask) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
 
   auto call_original = [&]() {
     if (in_cond_original != nullptr) {
@@ -25,7 +25,7 @@ bool in_cond_hook(void* me, int mask) {
     return tf_player_shared_in_cond(me, mask);
   };
 
-  if (cathook::core::is_detach_pending()) {
+  if (puphook::core::is_detach_pending()) {
     return call_original();
   }
 

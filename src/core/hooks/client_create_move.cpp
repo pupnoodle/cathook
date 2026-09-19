@@ -54,15 +54,15 @@ struct scoped_client_create_move_features {
 }
 
 void client_create_move_hook(void* me, int sequence_number, float input_sample_frametime, bool active) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   g_client_mode_pipeline_ran = false;
   {
     scoped_client_create_move_features feature_owner{};
     client_create_move_original(me, sequence_number, input_sample_frametime, active);
   }
 
-  if (cathook::core::is_detach_pending()) {
-    cathook::core::service_detach_request();
+  if (puphook::core::is_detach_pending()) {
+    puphook::core::service_detach_request();
     return;
   }
 
@@ -81,7 +81,7 @@ void client_create_move_hook(void* me, int sequence_number, float input_sample_f
     if (tickbase::should_rebuild_cl_move()) {
       refresh_prediction_state();
     }
-    cat_bind::run();
+    pup_bind::run();
     automation::controller().on_create_move(user_cmd);
     thirdperson::update_taunt_camera();
     run_move_feature_pipeline(user_cmd, entity_list != nullptr ? entity_list->get_localplayer() : nullptr);

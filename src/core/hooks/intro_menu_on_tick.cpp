@@ -13,7 +13,7 @@ V  o o  V  file: src/core/hooks/intro_menu_on_tick.cpp
 void (*intro_menu_on_tick_original)(void*) = NULL;
 
 void intro_menu_on_tick_hook(void* me) {
-  CATHOOK_HOOK_GUARD();
+  PUPHOOK_HOOK_GUARD();
   intro_menu_on_tick_original(me);
   automation::controller().on_menu_tick();
 }

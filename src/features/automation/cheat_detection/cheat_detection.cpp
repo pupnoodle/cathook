@@ -117,10 +117,7 @@ bool mini_crit_boosted(Player* player) {
 }
 
 bool is_hitscan_weapon(Weapon* weapon) {
-  if (weapon == nullptr || weapon->is_melee() || weapon->is_flamethrower()) {
-    return false;
-  }
-  return weapon->get_projectile_type() == 0;
+  return weapon != nullptr && !weapon->is_melee() && !weapon->is_projectile_weapon();
 }
 
 bool guaranteed_crit_weapon(Weapon* weapon) {
@@ -155,7 +152,7 @@ void infract(int index, player_detection& data, const char* reason) {
     data.marked = true;
     if (data.account_id != 0) {
       static_cast<void>(
-          cathook::core::players::add_role(data.account_id, cathook::core::players::cheater_role, name));
+          puphook::core::players::add_role(data.account_id, puphook::core::players::cheater_role, name));
     }
   }
 }
@@ -427,7 +424,7 @@ void on_net_update_end() {
       data.account_id = static_cast<std::uint32_t>(info.friends_id);
     }
     if (data.account_id != 0 &&
-        cathook::core::players::has_role(data.account_id, cathook::core::players::cheater_role)) {
+        puphook::core::players::has_role(data.account_id, puphook::core::players::cheater_role)) {
       data.marked = true;
       continue;
     }

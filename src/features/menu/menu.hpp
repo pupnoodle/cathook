@@ -57,12 +57,12 @@ inline static ImFont* menu_font_regular = nullptr;
 inline static ImFont* menu_font_bold_small = nullptr;
 inline static ImFont* menu_font_regular_large = nullptr;
 
-namespace cat_menu
+namespace pup_menu
 {
 
 }
 
-namespace cat_menu
+namespace pup_menu
 {
 
 constexpr float k_ui_scale{ 1.18f };
@@ -183,7 +183,7 @@ inline void draw_inventory_slot(const char* label, Misc::InventorySlot& slot, co
     option_labels.push_back(options[index].label.c_str());
     if (options[index].definition == static_cast<std::uint16_t>(slot.item)) selected_item = static_cast<int>(index);
   }
-  if (cat_menu::combo("Item", &selected_item, option_labels.data(), static_cast<int>(option_labels.size())) &&
+  if (pup_menu::combo("Item", &selected_item, option_labels.data(), static_cast<int>(option_labels.size())) &&
       selected_item >= 0 && static_cast<std::size_t>(selected_item) < options.size()) {
     slot.item = options[static_cast<std::size_t>(selected_item)].definition;
   }
@@ -195,15 +195,15 @@ inline void draw_inventory_slot(const char* label, Misc::InventorySlot& slot, co
     paintkit_labels.push_back(paintkits[index].label.c_str());
     if (paintkits[index].definition == static_cast<std::uint16_t>(slot.paintkit)) selected_paintkit = static_cast<int>(index);
   }
-  if (cat_menu::combo("War paint", &selected_paintkit, paintkit_labels.data(), static_cast<int>(paintkit_labels.size())) &&
+  if (pup_menu::combo("War paint", &selected_paintkit, paintkit_labels.data(), static_cast<int>(paintkit_labels.size())) &&
       selected_paintkit >= 0 && static_cast<std::size_t>(selected_paintkit) < paintkits.size()) {
     slot.paintkit = paintkits[static_cast<std::size_t>(selected_paintkit)].definition;
   }
-  cat_menu::combo("Wear", &slot.wear, inventory_wear_items, IM_ARRAYSIZE(inventory_wear_items));
-  cat_menu::combo("Seed", &slot.seed, inventory_seed_items, IM_ARRAYSIZE(inventory_seed_items));
-  cat_menu::combo("Style", &slot.style, inventory_style_items, IM_ARRAYSIZE(inventory_style_items));
-  cat_menu::combo("Sheen", &slot.sheen, inventory_sheen_items, IM_ARRAYSIZE(inventory_sheen_items));
-  cat_menu::combo("Killstreak", &slot.killstreak, inventory_killstreak_items, IM_ARRAYSIZE(inventory_killstreak_items));
+  pup_menu::combo("Wear", &slot.wear, inventory_wear_items, IM_ARRAYSIZE(inventory_wear_items));
+  pup_menu::combo("Seed", &slot.seed, inventory_seed_items, IM_ARRAYSIZE(inventory_seed_items));
+  pup_menu::combo("Style", &slot.style, inventory_style_items, IM_ARRAYSIZE(inventory_style_items));
+  pup_menu::combo("Sheen", &slot.sheen, inventory_sheen_items, IM_ARRAYSIZE(inventory_sheen_items));
+  pup_menu::combo("Killstreak", &slot.killstreak, inventory_killstreak_items, IM_ARRAYSIZE(inventory_killstreak_items));
   const auto& effects = inventory_changer::effect_options();
   std::vector<const char*> effect_labels{};
   effect_labels.reserve(effects.size());
@@ -212,7 +212,7 @@ inline void draw_inventory_slot(const char* label, Misc::InventorySlot& slot, co
     effect_labels.push_back(effects[index].label.c_str());
     if (effects[index].definition == static_cast<std::uint16_t>(slot.unusual)) selected_effect = static_cast<int>(index);
   }
-  if (cat_menu::combo("Unusual", &selected_effect, effect_labels.data(), static_cast<int>(effect_labels.size())) &&
+  if (pup_menu::combo("Unusual", &selected_effect, effect_labels.data(), static_cast<int>(effect_labels.size())) &&
       selected_effect >= 0 && static_cast<std::size_t>(selected_effect) < effects.size()) {
     slot.unusual = effects[static_cast<std::size_t>(selected_effect)].definition;
   }
@@ -228,7 +228,7 @@ inline void draw_inventory_definition(const char* label, int* definition, invent
     option_labels.push_back(options[index].label.c_str());
     if (options[index].definition == static_cast<std::uint16_t>(*definition)) selected = static_cast<int>(index);
   }
-  if (cat_menu::combo(label, &selected, option_labels.data(), static_cast<int>(option_labels.size())) &&
+  if (pup_menu::combo(label, &selected, option_labels.data(), static_cast<int>(option_labels.size())) &&
       selected >= 0 && static_cast<std::size_t>(selected) < options.size()) {
     *definition = options[static_cast<std::size_t>(selected)].definition;
   }
@@ -247,8 +247,8 @@ inline bool render_material_layers(const char* title, std::vector<chams_layer>& 
   for (const std::string& name : names) name_items.push_back(name.c_str());
   if (!name_items.empty()) {
     selected_material = std::clamp(selected_material, 0, static_cast<int>(name_items.size()) - 1);
-    cat_menu::combo("Add material", &selected_material, name_items.data(), static_cast<int>(name_items.size()));
-    if (cat_menu::accent_button("Add layer", {-1.0f, 22.0f}, false)) {
+    pup_menu::combo("Add material", &selected_material, name_items.data(), static_cast<int>(name_items.size()));
+    if (pup_menu::accent_button("Add layer", {-1.0f, 22.0f}, false)) {
       const std::string& name = names[static_cast<std::size_t>(selected_material)];
       if (std::ranges::find_if(layers, [&name](const chams_layer& layer) { return layer.material == name; }) == layers.end()) {
         layers.push_back(chams_layer{.material = name});
@@ -261,24 +261,24 @@ inline bool render_material_layers(const char* title, std::vector<chams_layer>& 
     std::vector<chams_layer>* layers;
     std::size_t index;
   };
-  constexpr const char* payload_type = "cathook_chams_layer";
-  const std::string layer_panel_key = cat_bind::target_path_component(title != nullptr ? title : "layers");
+  constexpr const char* payload_type = "puphook_chams_layer";
+  const std::string layer_panel_key = pup_bind::target_path_component(title != nullptr ? title : "layers");
   std::size_t pending_source = layers.size();
   std::size_t pending_destination = layers.size();
   for (std::size_t index = 0; index < layers.size();) {
     ImGui::PushID(static_cast<int>(index));
-    cat_bind::push_panel_label(layer_panel_key);
-    cat_bind::push_panel_label("layer_" + cat_bind::target_path_component(layers[index].material));
+    pup_bind::push_panel_label(layer_panel_key);
+    pup_bind::push_panel_label("layer_" + pup_bind::target_path_component(layers[index].material));
     bool remove = false;
     if (ImGui::BeginChild("material_layer_card", {0.0f, 0.0f}, ImGuiChildFlags_Border | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysAutoResize)) {
       ImGui::Text("%s", layers[index].material.c_str());
       ImGui::SameLine();
       remove = ImGui::SmallButton("remove");
-      cat_menu::color_picker("Color", &layers[index].color);
-      cat_menu::slider_float("Start distance", &layers[index].start, 0.0f, 2048.0f, "%.0f HU");
-      cat_menu::slider_float("End distance", &layers[index].end, 512.0f, 8192.0f, "%.0f HU");
+      pup_menu::color_picker("Color", &layers[index].color);
+      pup_menu::slider_float("Start distance", &layers[index].start, 0.0f, 2048.0f, "%.0f HU");
+      pup_menu::slider_float("End distance", &layers[index].end, 512.0f, 8192.0f, "%.0f HU");
       if (layers[index].end < layers[index].start) layers[index].end = layers[index].start;
-      cat_menu::checkbox("Fade with distance", &layers[index].smooth_alpha);
+      pup_menu::checkbox("Fade with distance", &layers[index].smooth_alpha);
     }
     ImGui::EndChild();
 
@@ -300,8 +300,8 @@ inline bool render_material_layers(const char* title, std::vector<chams_layer>& 
       ImGui::EndDragDropTarget();
     }
     ImGui::PopID();
-    cat_bind::pop_panel_label();
-    cat_bind::pop_panel_label();
+    pup_bind::pop_panel_label();
+    pup_bind::pop_panel_label();
     if (remove) {
       layers.erase(layers.begin() + static_cast<std::ptrdiff_t>(index));
       changed = true;
@@ -318,7 +318,7 @@ inline bool render_material_layers(const char* title, std::vector<chams_layer>& 
     changed = true;
     registry_changed = true;
   }
-  if (registry_changed) cat_bind::clear_registered_targets();
+  if (registry_changed) pup_bind::clear_registered_targets();
   if (layers.empty()) ImGui::TextDisabled("No materials configured.");
   ImGui::PopID();
   return changed;
@@ -375,7 +375,7 @@ struct panel_layout_state
 };
 
 inline std::filesystem::path assets_font_directory() {
-  return "/opt/cathook/assets/fonts";
+  return "/opt/puphook/assets/fonts";
 }
 
 inline std::vector<std::string>& available_font_names() {
@@ -477,7 +477,7 @@ inline void ensure_fonts() {
         regular_large = io.Fonts->AddFontFromFileTTF(custom_font_path_string.c_str(), 16.0f * preset_scale, &file_font_config);
 
         if (regular == nullptr && !logged_custom_font_error) {
-          cathook::core::log_raw("failed to load menu font: %s\n", custom_font_path_string.c_str());
+          puphook::core::log_raw("failed to load menu font: %s\n", custom_font_path_string.c_str());
           logged_custom_font_error = true;
         }
       }
@@ -625,11 +625,11 @@ inline void flow_panel(const char* name, int column_index, float height, draw_fn
   ImGui::SetCursorPos(position);
   const bool panel_visible = begin_panel(name, ImVec2(state.column_width, panel_height),
     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-  cat_bind::push_panel_label(name != nullptr ? name : "");
-  if (panel_visible || cat_bind::registering_targets()) {
+  pup_bind::push_panel_label(name != nullptr ? name : "");
+  if (panel_visible || pup_bind::registering_targets()) {
     draw_fn();
   }
-  cat_bind::pop_panel_label();
+  pup_bind::pop_panel_label();
   const float required_height = end_panel_ex();
   const float next_panel_height = auto_fit && panel_visible ? ImMax(scaled(1.0f), ImCeil(required_height)) : panel_height;
   if (auto_fit && panel_visible) {
@@ -687,20 +687,20 @@ inline float column_width(const int column_count) {
 
 inline bool checkbox(const char* label, bool* value) {
   if (label == nullptr || value == nullptr) return false;
-  if (cat_bind::registering_targets()) {
-    cat_bind::bindable_checkbox(label, value, false, false);
+  if (pup_bind::registering_targets()) {
+    pup_bind::bindable_checkbox(label, value, false, false);
     return false;
   }
   const bool changed = mono::toggle(label, value);
-  cat_bind::bindable_checkbox(label, value, changed, mono::last_item_interaction().hovered);
+  pup_bind::bindable_checkbox(label, value, changed, mono::last_item_interaction().hovered);
   return changed;
 }
 
 inline bool combo(const char* label, int* value, const char* const items[], const int item_count) {
   if (label == nullptr || value == nullptr || items == nullptr || item_count <= 0) return false;
 
-  if (cat_bind::registering_targets()) {
-    cat_bind::bindable_combo_int(label, value, false, items, item_count, false);
+  if (pup_bind::registering_targets()) {
+    pup_bind::bindable_combo_int(label, value, false, items, item_count, false);
     return false;
   }
 
@@ -710,7 +710,7 @@ inline bool combo(const char* label, int* value, const char* const items[], cons
     mono_items.emplace_back(items[index] != nullptr ? items[index] : "", index);
   }
   const bool mono_changed = mono::select_single(label, value, mono_items);
-  cat_bind::bindable_combo_int(label, value, mono_changed, items, item_count, mono::last_item_interaction().hovered);
+  pup_bind::bindable_combo_int(label, value, mono_changed, items, item_count, mono::last_item_interaction().hovered);
   return mono_changed;
 }
 
@@ -720,18 +720,18 @@ inline bool bools_combo(const char* label, std::initializer_list<std::pair<const
   mono_items.reserve(items.size());
   for (const auto& item : items) {
     if (item.first == nullptr || item.second == nullptr) continue;
-    cat_bind::bindable_checkbox(item.first, item.second, false, false);
-    if (!cat_bind::registering_targets()) mono_items.emplace_back(item.first, item.second);
+    pup_bind::bindable_checkbox(item.first, item.second, false, false);
+    if (!pup_bind::registering_targets()) mono_items.emplace_back(item.first, item.second);
   }
-  if (cat_bind::registering_targets() || mono_items.empty()) return false;
+  if (pup_bind::registering_targets() || mono_items.empty()) return false;
   return mono::select_multi(label, mono_items);
 }
 
 inline bool multi_select_combo(const char* label, uint32_t* value_mask, const char* const items[], const uint32_t item_bits[], const int item_count) {
   if (label == nullptr || value_mask == nullptr || items == nullptr || item_bits == nullptr || item_count <= 0) return false;
 
-  if (cat_bind::registering_targets()) {
-    cat_bind::multi_select_target(value_mask, label, false, false, items, item_bits, item_count);
+  if (pup_bind::registering_targets()) {
+    pup_bind::multi_select_target(value_mask, label, false, false, items, item_bits, item_count);
     return false;
   }
 
@@ -751,16 +751,16 @@ inline bool multi_select_combo(const char* label, uint32_t* value_mask, const ch
       else *value_mask &= ~item_bits[index];
     }
   }
-  cat_bind::multi_select_target(value_mask, label, mono_changed, mono::last_item_interaction().hovered, items, item_bits, item_count);
-  cat_bind::maybe_open_popup(value_mask, label, mono::last_item_interaction().hovered);
+  pup_bind::multi_select_target(value_mask, label, mono_changed, mono::last_item_interaction().hovered, items, item_bits, item_count);
+  pup_bind::maybe_open_popup(value_mask, label, mono::last_item_interaction().hovered);
   return mono_changed;
 }
 
 inline bool mask_checkbox(const char* label, uint32_t* value_mask, const uint32_t bit) {
   if (label == nullptr || value_mask == nullptr || bit == 0) return false;
 
-  if (cat_bind::registering_targets()) {
-    cat_bind::multi_select_target(value_mask, label, false, false, nullptr, nullptr, 0);
+  if (pup_bind::registering_targets()) {
+    pup_bind::multi_select_target(value_mask, label, false, false, nullptr, nullptr, 0);
     return false;
   }
 
@@ -770,43 +770,43 @@ inline bool mask_checkbox(const char* label, uint32_t* value_mask, const uint32_
     if (enabled) *value_mask |= bit;
     else *value_mask &= ~bit;
   }
-  cat_bind::multi_select_target(value_mask, label, changed, mono::last_item_interaction().hovered);
-  cat_bind::maybe_open_popup(value_mask, label, mono::last_item_interaction().hovered);
+  pup_bind::multi_select_target(value_mask, label, changed, mono::last_item_interaction().hovered);
+  pup_bind::maybe_open_popup(value_mask, label, mono::last_item_interaction().hovered);
   return changed;
 }
 
 inline bool slider_float(const char* label, float* value, float minimum, float maximum, const char* format) {
   if (label == nullptr || value == nullptr) return false;
-  if (cat_bind::registering_targets()) {
-    cat_bind::bindable_slider_float(label, value, false, minimum, maximum, format, false);
+  if (pup_bind::registering_targets()) {
+    pup_bind::bindable_slider_float(label, value, false, minimum, maximum, format, false);
     return false;
   }
   const bool mono_changed = mono::slider_float(label, value, minimum, maximum, format);
-  cat_bind::bindable_slider_float(label, value, mono_changed, minimum, maximum, format, mono::last_item_interaction().hovered);
+  pup_bind::bindable_slider_float(label, value, mono_changed, minimum, maximum, format, mono::last_item_interaction().hovered);
   return mono_changed;
 }
 
 inline bool slider_int(const char* label, int* value, int minimum, int maximum, const char* format = "%d") {
   if (label == nullptr || value == nullptr) return false;
-  if (cat_bind::registering_targets()) {
-    cat_bind::bindable_slider_int(label, value, false, minimum, maximum, format, false);
+  if (pup_bind::registering_targets()) {
+    pup_bind::bindable_slider_int(label, value, false, minimum, maximum, format, false);
     return false;
   }
   const bool mono_changed = mono::slider_int(label, value, minimum, maximum, format);
-  cat_bind::bindable_slider_int(label, value, mono_changed, minimum, maximum, format, mono::last_item_interaction().hovered);
+  pup_bind::bindable_slider_int(label, value, mono_changed, minimum, maximum, format, mono::last_item_interaction().hovered);
   return mono_changed;
 }
 
 inline bool input_text(const char* label, std::string* value) {
   if (label == nullptr || value == nullptr) return false;
 
-  if (cat_bind::registering_targets()) {
-    cat_bind::bindable_string(label, value, false, false);
+  if (pup_bind::registering_targets()) {
+    pup_bind::bindable_string(label, value, false, false);
     return false;
   }
 
   const bool mono_changed = mono::input_string(label, value);
-  cat_bind::bindable_string(label, value, mono_changed, mono::last_item_interaction().hovered);
+  pup_bind::bindable_string(label, value, mono_changed, mono::last_item_interaction().hovered);
   return mono_changed;
 }
 
@@ -830,8 +830,8 @@ inline bool color_picker(const char* label, RGBA_float* color) {
   ImGuiWindow* window = ImGui::GetCurrentWindow();
   if (window == nullptr || window->SkipItems || label == nullptr || color == nullptr) return false;
 
-  if (cat_bind::registering_targets()) {
-    cat_bind::bindable_color(label, color, false, false);
+  if (pup_bind::registering_targets()) {
+    pup_bind::bindable_color(label, color, false, false);
     return false;
   }
 
@@ -849,7 +849,7 @@ inline bool color_picker(const char* label, RGBA_float* color) {
     color->b = value.b / 255.0f;
     color->a = value.a / 255.0f;
   }
-  cat_bind::bindable_color(label, color, changed, mono::last_item_interaction().hovered);
+  pup_bind::bindable_color(label, color, changed, mono::last_item_interaction().hovered);
   ImGui::PopID();
   return changed;
 }
@@ -857,17 +857,17 @@ inline bool color_picker(const char* label, RGBA_float* color) {
 }
 
 static void get_input(SDL_Event* event) {
-  cat_bind::handle_input(event);
+  pup_bind::handle_input(event);
 }
 
 static void set_imgui_theme(void) {
-  cat_menu::ensure_fonts();
+  pup_menu::ensure_fonts();
   mono::apply_layout();
-  const ImVec4 accent = cat_menu::menu_accent();
+  const ImVec4 accent = pup_menu::menu_accent();
   mono::apply_colors({accent.x, accent.y, accent.z, accent.w});
 }
 
-static const char* cathook_watermark_version() {
+static const char* puphook_watermark_version() {
 #if defined(GIT_COMMIT_HASH) && defined(GIT_COMMITTER_DATE)
 
   return "Version: #" GIT_COMMIT_HASH " " GIT_COMMITTER_DATE;
@@ -878,8 +878,8 @@ static const char* cathook_watermark_version() {
 
 }
 
-static const char* cathook_watermark_type() {
-#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
+static const char* puphook_watermark_type() {
+#if defined(PUPHOOK_TEXTMODE) && PUPHOOK_TEXTMODE
 
   return " NOGUI";
 #else
@@ -895,13 +895,13 @@ static void draw_watermark(void) {
   const mono::color accent{ rainbow_color.r, rainbow_color.g, rainbow_color.b, rainbow_color.a };
   const mono::color text{ 1.0f, 1.0f, 1.0f, 1.0f };
   const std::vector<mono::overlay_text_line> lines{
-    { "cathook by pupnoodle", accent },
-    { cathook_watermark_version(), text },
-    { cathook_watermark_type(), text },
+    { "puphook by pupnoodle", accent },
+    { puphook_watermark_version(), text },
+    { puphook_watermark_type(), text },
     { "Press INSERT OR F11 to open/close menu and Player Manager.", text },
     { "Use mouse to navigate in menu.", text }
   };
-  mono::corner_text(lines, { 8.0f, 8.0f }, cat_menu::font_regular());
+  mono::corner_text(lines, { 8.0f, 8.0f }, pup_menu::font_regular());
 }
 
 static void draw_aimbot_content() {
@@ -986,94 +986,94 @@ static void draw_aimbot_content() {
     Aim::hitscan_mod_target_dormant
   };
 
-  cat_menu::begin_flow_layout("aimbot_layout", 2);
-  cat_menu::flow_panel("Aimbot", 0, 186.0f, [&]() {
-    cat_menu::checkbox("Enable", &config.aimbot.master);
-    cat_menu::bools_combo("Options", {
+  pup_menu::begin_flow_layout("aimbot_layout", 2);
+  pup_menu::flow_panel("Aimbot", 0, 186.0f, [&]() {
+    pup_menu::checkbox("Enable", &config.aimbot.master);
+    pup_menu::bools_combo("Options", {
       { "Auto shoot", &config.aimbot.auto_shoot },
       { "Shoot through glass", &config.aimbot.shoot_through_glass },
       { "Spread compensation", &config.aimbot.spread_compensation },
       { "Target dormant", &config.aimbot.target_dormant },
       { "Auto resolver", &config.aimbot.resolver }
     });
-    cat_menu::combo("Aim mode", (int*)&config.aimbot.aim_mode, aim_mode_items, IM_ARRAYSIZE(aim_mode_items));
-    cat_menu::slider_float("Aim FOV", &config.aimbot.fov, 0.0f, 180.0f, "%.0f deg");
-    cat_menu::slider_float("Assist strength", &config.aimbot.assist_strength, 0.0f, 100.0f, "%.0f%%");
-    cat_menu::slider_int("Resolver yaws", &config.aimbot.resolver_max_yaws, 4, 24);
+    pup_menu::combo("Aim mode", (int*)&config.aimbot.aim_mode, aim_mode_items, IM_ARRAYSIZE(aim_mode_items));
+    pup_menu::slider_float("Aim FOV", &config.aimbot.fov, 0.0f, 180.0f, "%.0f deg");
+    pup_menu::slider_float("Assist strength", &config.aimbot.assist_strength, 0.0f, 100.0f, "%.0f%%");
+    pup_menu::slider_int("Resolver yaws", &config.aimbot.resolver_max_yaws, 4, 24);
   });
-  cat_menu::flow_panel("Crit Hack", 0, 88.0f, [&]() {
-    cat_menu::checkbox("Enable Crit Hack", &config.crithack.enabled);
-    cat_menu::bools_combo("Options", {
+  pup_menu::flow_panel("Crit Hack", 0, 88.0f, [&]() {
+    pup_menu::checkbox("Enable Crit Hack", &config.crithack.enabled);
+    pup_menu::bools_combo("Options", {
       { "Force crits", &config.crithack.force_crits },
       { "Always melee crit", &config.crithack.always_melee },
       { "Avoid random crits", &config.crithack.avoid_random }
     });
   });
-  cat_menu::flow_panel("Target selection", 1, 254.0f, [&]() {
-    cat_menu::combo("Target", (int*)&config.aimbot.target_type, target_items, IM_ARRAYSIZE(target_items));
-    cat_menu::multi_select_combo("Aim at", &config.aimbot.aim_at, aim_at_items, aim_at_bits, IM_ARRAYSIZE(aim_at_items));
-    cat_menu::multi_select_combo("Hitscan hitboxes", &config.aimbot.hitscan_hitboxes, hitbox_items, hitbox_bits, IM_ARRAYSIZE(hitbox_items));
-    cat_menu::multi_select_combo("Melee hitboxes", &config.aimbot.melee_hitboxes, hitbox_items, hitbox_bits, IM_ARRAYSIZE(hitbox_items));
-    cat_menu::checkbox("Melee walk to target", &config.aimbot.melee_walk_to_target);
-    cat_menu::multi_select_combo("Ignore", &config.aimbot.ignore, ignore_items, ignore_bits, IM_ARRAYSIZE(ignore_items));
-    cat_menu::slider_float("Invisible threshold", &config.aimbot.ignore_invisible, 0.0f, 100.0f, "%.0f%%");
-    cat_menu::slider_int("Unsimulated ticks", &config.aimbot.ignore_unsimulated_ticks, 0, 21);
-    cat_menu::slider_int("Max targets", &config.aimbot.max_targets, 1, 6);
+  pup_menu::flow_panel("Target selection", 1, 254.0f, [&]() {
+    pup_menu::combo("Target", (int*)&config.aimbot.target_type, target_items, IM_ARRAYSIZE(target_items));
+    pup_menu::multi_select_combo("Aim at", &config.aimbot.aim_at, aim_at_items, aim_at_bits, IM_ARRAYSIZE(aim_at_items));
+    pup_menu::multi_select_combo("Hitscan hitboxes", &config.aimbot.hitscan_hitboxes, hitbox_items, hitbox_bits, IM_ARRAYSIZE(hitbox_items));
+    pup_menu::multi_select_combo("Melee hitboxes", &config.aimbot.melee_hitboxes, hitbox_items, hitbox_bits, IM_ARRAYSIZE(hitbox_items));
+    pup_menu::checkbox("Melee walk to target", &config.aimbot.melee_walk_to_target);
+    pup_menu::multi_select_combo("Ignore", &config.aimbot.ignore, ignore_items, ignore_bits, IM_ARRAYSIZE(ignore_items));
+    pup_menu::slider_float("Invisible threshold", &config.aimbot.ignore_invisible, 0.0f, 100.0f, "%.0f%%");
+    pup_menu::slider_int("Unsimulated ticks", &config.aimbot.ignore_unsimulated_ticks, 0, 21);
+    pup_menu::slider_int("Max targets", &config.aimbot.max_targets, 1, 6);
   });
-  cat_menu::flow_panel("Hitscan", 0, 188.0f, [&]() {
-    cat_menu::multi_select_combo("Modifiers", &config.aimbot.hitscan_modifiers, hitscan_modifier_items, hitscan_modifier_bits, IM_ARRAYSIZE(hitscan_modifier_items));
-    cat_menu::slider_float("Tapfire distance", &config.aimbot.tapfire_distance, 250.0f, 2000.0f, "%.0f HU");
-    cat_menu::slider_int("Peek ticks", &config.aimbot.peek_ticks, 0, 8);
-    cat_menu::slider_float("Multipoint scale", &config.aimbot.multipoint_scale, 0.0f, 100.0f, "%.0f%%");
-    cat_menu::slider_float("Bone size subtract", &config.aimbot.bone_size_subtract, 0.0f, 12.0f, "%.1f HU");
-    cat_menu::slider_float("Bone size min scale", &config.aimbot.bone_size_min_scale, 0.05f, 1.0f, "%.2f");
+  pup_menu::flow_panel("Hitscan", 0, 188.0f, [&]() {
+    pup_menu::multi_select_combo("Modifiers", &config.aimbot.hitscan_modifiers, hitscan_modifier_items, hitscan_modifier_bits, IM_ARRAYSIZE(hitscan_modifier_items));
+    pup_menu::slider_float("Tapfire distance", &config.aimbot.tapfire_distance, 250.0f, 2000.0f, "%.0f HU");
+    pup_menu::slider_int("Peek ticks", &config.aimbot.peek_ticks, 0, 8);
+    pup_menu::slider_float("Multipoint scale", &config.aimbot.multipoint_scale, 0.0f, 100.0f, "%.0f%%");
+    pup_menu::slider_float("Bone size subtract", &config.aimbot.bone_size_subtract, 0.0f, 12.0f, "%.1f HU");
+    pup_menu::slider_float("Bone size min scale", &config.aimbot.bone_size_min_scale, 0.05f, 1.0f, "%.2f");
   });
-  cat_menu::flow_panel("Projectile", 0, 320.0f, [&]() {
-    cat_menu::checkbox("Enable", &config.aimbot.projectile_active);
-    cat_menu::multi_select_combo("Modifiers", &config.aimbot.projectile_modifiers,
+  pup_menu::flow_panel("Projectile", 0, 320.0f, [&]() {
+    pup_menu::checkbox("Enable", &config.aimbot.projectile_active);
+    pup_menu::multi_select_combo("Modifiers", &config.aimbot.projectile_modifiers,
       projectile_modifier_items, projectile_modifier_bits, IM_ARRAYSIZE(projectile_modifier_items));
-    cat_menu::combo("Target mode", &config.aimbot.projectile_mode, projectile_mode_items, IM_ARRAYSIZE(projectile_mode_items));
-    cat_menu::combo("Prediction", (int*)&config.aimbot.projectile_prediction_mode,
+    pup_menu::combo("Target mode", &config.aimbot.projectile_mode, projectile_mode_items, IM_ARRAYSIZE(projectile_mode_items));
+    pup_menu::combo("Prediction", (int*)&config.aimbot.projectile_prediction_mode,
       projectile_prediction_items, IM_ARRAYSIZE(projectile_prediction_items));
-    cat_menu::combo("Aim position", &config.aimbot.projectile_aim_pos,
+    pup_menu::combo("Aim position", &config.aimbot.projectile_aim_pos,
       projectile_position_items, IM_ARRAYSIZE(projectile_position_items));
-    cat_menu::combo("Splash policy", &config.aimbot.projectile_splash_policy,
+    pup_menu::combo("Splash policy", &config.aimbot.projectile_splash_policy,
       projectile_splash_items, IM_ARRAYSIZE(projectile_splash_items));
-    cat_menu::slider_float("FOV", &config.aimbot.projectile_fov, 0.0f, 180.0f, "%.0f deg");
-    cat_menu::slider_int("Max simulation targets", &config.aimbot.projectile_max_sim_targets, 1, 6);
-    cat_menu::slider_float("Max simulation time", &config.aimbot.projectile_max_sim_time, 0.25f, 5.0f, "%.2fs");
-    cat_menu::slider_int("Multipoint scale", &config.aimbot.projectile_multipoint_scale, 50, 100);
-    cat_menu::checkbox("Smooth flamethrowers", &config.aimbot.projectile_smooth_flamethrowers_active);
-    cat_menu::slider_float("Flamethrower smooth", &config.aimbot.projectile_smooth_flamethrowers, 1.0f, 100.0f, "%.0f%%");
+    pup_menu::slider_float("FOV", &config.aimbot.projectile_fov, 0.0f, 180.0f, "%.0f deg");
+    pup_menu::slider_int("Max simulation targets", &config.aimbot.projectile_max_sim_targets, 1, 6);
+    pup_menu::slider_float("Max simulation time", &config.aimbot.projectile_max_sim_time, 0.25f, 5.0f, "%.2fs");
+    pup_menu::slider_int("Multipoint scale", &config.aimbot.projectile_multipoint_scale, 50, 100);
+    pup_menu::checkbox("Smooth flamethrowers", &config.aimbot.projectile_smooth_flamethrowers_active);
+    pup_menu::slider_float("Flamethrower smooth", &config.aimbot.projectile_smooth_flamethrowers, 1.0f, 100.0f, "%.0f%%");
   });
-  cat_menu::end_flow_layout();
+  pup_menu::end_flow_layout();
 }
 
 static void draw_aimbot_draw_content() {
-  cat_menu::begin_flow_layout("aimbot_draw_layout", 2);
-  cat_menu::flow_panel("FOV circle", 0, 112.0f, [&]() {
-    cat_menu::checkbox("Draw FOV", &config.aimbot.draw_fov);
+  pup_menu::begin_flow_layout("aimbot_draw_layout", 2);
+  pup_menu::flow_panel("FOV circle", 0, 112.0f, [&]() {
+    pup_menu::checkbox("Draw FOV", &config.aimbot.draw_fov);
   });
-  cat_menu::flow_panel("Debug overlay", 1, 144.0f, [&]() {
-    cat_menu::checkbox("Enable", &config.aimbot.debug_overlay);
-    cat_menu::slider_float("Position X", &config.aimbot.debug_overlay_x, 0.0f, 1920.0f, "%.0f px");
-    cat_menu::slider_float("Position Y", &config.aimbot.debug_overlay_y, 0.0f, 1080.0f, "%.0f px");
+  pup_menu::flow_panel("Debug overlay", 1, 144.0f, [&]() {
+    pup_menu::checkbox("Enable", &config.aimbot.debug_overlay);
+    pup_menu::slider_float("Position X", &config.aimbot.debug_overlay_x, 0.0f, 1920.0f, "%.0f px");
+    pup_menu::slider_float("Position Y", &config.aimbot.debug_overlay_y, 0.0f, 1080.0f, "%.0f px");
   });
-  cat_menu::end_flow_layout();
+  pup_menu::end_flow_layout();
 }
 
 static void draw_combat_weapons_content() {
-  cat_menu::begin_flow_layout("combat_weapons_layout", 2);
-  cat_menu::flow_panel("Sniper", 0, 100.0f, [&]() {
-    cat_menu::bools_combo("Scope", {
+  pup_menu::begin_flow_layout("combat_weapons_layout", 2);
+  pup_menu::flow_panel("Sniper", 0, 100.0f, [&]() {
+    pup_menu::bools_combo("Scope", {
       { "Automatic scope", &config.aimbot.sniper_auto_scope },
       { "Automatic unscope", &config.aimbot.sniper_auto_unscope }
     });
-    cat_menu::slider_float("Scope distance", &config.aimbot.sniper_scope_distance, 250.0f, 4000.0f, "%.0f HU");
-    cat_menu::slider_float("Scope cancel delay", &config.aimbot.sniper_scope_cancel_time, 1.0f, 5.0f, "%.1f s");
+    pup_menu::slider_float("Scope distance", &config.aimbot.sniper_scope_distance, 250.0f, 4000.0f, "%.0f HU");
+    pup_menu::slider_float("Scope cancel delay", &config.aimbot.sniper_scope_cancel_time, 1.0f, 5.0f, "%.1f s");
   });
-  cat_menu::flow_panel("Melee", 0, 156.0f, [&]() {
-    cat_menu::bools_combo("Options", {
+  pup_menu::flow_panel("Melee", 0, 156.0f, [&]() {
+    pup_menu::bools_combo("Options", {
       { "Auto backstab", &config.aimbot.melee_auto_backstab },
       { "Ignore razorback", &config.aimbot.melee_ignore_razorback },
       { "Whip teammates", &config.aimbot.melee_whip_team },
@@ -1081,34 +1081,34 @@ static void draw_combat_weapons_content() {
       { "Predict lag", &config.aimbot.melee_swing_predict_lag }
     });
     static const char* backstab_ping_items[] = { "Off", "Account ping", "Account ping + confirm" };
-    cat_menu::combo("Backstab ping", &config.aimbot.melee_backstab_ping_mode,
+    pup_menu::combo("Backstab ping", &config.aimbot.melee_backstab_ping_mode,
       backstab_ping_items, IM_ARRAYSIZE(backstab_ping_items));
-    cat_menu::slider_int("Swing ticks", &config.aimbot.melee_swing_ticks, 0, 14);
+    pup_menu::slider_int("Swing ticks", &config.aimbot.melee_swing_ticks, 0, 14);
     static const char* swing_validate_items[] = { "Both", "Swing", "Simulated" };
-    cat_menu::combo("Swing validation", &config.aimbot.melee_swing_validate_mode,
+    pup_menu::combo("Swing validation", &config.aimbot.melee_swing_validate_mode,
       swing_validate_items, IM_ARRAYSIZE(swing_validate_items));
   });
-  cat_menu::flow_panel("Heavy", 1, 80.0f, [&]() {
-    cat_menu::bools_combo("Rev", {
+  pup_menu::flow_panel("Heavy", 1, 80.0f, [&]() {
+    pup_menu::bools_combo("Rev", {
       { "Heavy auto rev", &config.aimbot.auto_rev },
       { "Heavy auto unrev", &config.aimbot.auto_unrev }
     });
-    cat_menu::slider_float("Heavy rev threshold", &config.aimbot.auto_rev_threshold, 200.0f, 1200.0f, "%.0f HU");
+    pup_menu::slider_float("Heavy rev threshold", &config.aimbot.auto_rev_threshold, 200.0f, 1200.0f, "%.0f HU");
   });
-  cat_menu::flow_panel("Auto detonate", 1, 116.0f, [&]() {
-    cat_menu::bools_combo("Detonate", {
+  pup_menu::flow_panel("Auto detonate", 1, 116.0f, [&]() {
+    pup_menu::bools_combo("Detonate", {
       { "Sticky detonation", &config.auto_detonate.stickies },
       { "Flare airburst", &config.auto_detonate.flares },
       { "Target buildings", &config.auto_detonate.buildings },
       { "Ignore cloaked", &config.auto_detonate.ignore_cloaked },
       { "Don't blow me up", &config.auto_detonate.dont_blow_me_up }
     });
-    cat_menu::slider_float("Sticky radius", &config.auto_detonate.sticky_radius, 40.0f, 400.0f, "%.0f HU");
-    cat_menu::slider_float("Flare radius", &config.auto_detonate.flare_radius, 40.0f, 400.0f, "%.0f HU");
+    pup_menu::slider_float("Sticky radius", &config.auto_detonate.sticky_radius, 40.0f, 400.0f, "%.0f HU");
+    pup_menu::slider_float("Flare radius", &config.auto_detonate.flare_radius, 40.0f, 400.0f, "%.0f HU");
   });
-  cat_menu::flow_panel("Auto reflect", 1, 116.0f, [&]() {
-    cat_menu::checkbox("Enable", &config.auto_reflect.enabled);
-    cat_menu::bools_combo("Projectiles", {
+  pup_menu::flow_panel("Auto reflect", 1, 116.0f, [&]() {
+    pup_menu::checkbox("Enable", &config.auto_reflect.enabled);
+    pup_menu::bools_combo("Projectiles", {
       { "Rockets", &config.auto_reflect.rockets },
       { "Sentry rockets", &config.auto_reflect.sentry_rockets },
       { "Pipes", &config.auto_reflect.pipes },
@@ -1117,23 +1117,23 @@ static void draw_combat_weapons_content() {
       { "Arrows", &config.auto_reflect.arrows },
       { "Burning teammates", &config.auto_reflect.burning_teammates }
     });
-    cat_menu::slider_float("Range", &config.auto_reflect.range, 40.0f, 400.0f, "%.0f HU");
-    cat_menu::slider_float("FOV limit", &config.auto_reflect.fov_limit, 0.0f, 180.0f, "%.0f deg");
+    pup_menu::slider_float("Range", &config.auto_reflect.range, 40.0f, 400.0f, "%.0f HU");
+    pup_menu::slider_float("FOV limit", &config.auto_reflect.fov_limit, 0.0f, 180.0f, "%.0f deg");
   });
-  cat_menu::end_flow_layout();
+  pup_menu::end_flow_layout();
 }
 
 static void draw_medic_content();
 
 static void draw_combat_tab(const int combat_subtab) {
   switch (combat_subtab) {
-    case cat_menu::combat_subtab_aimbot:
+    case pup_menu::combat_subtab_aimbot:
       draw_aimbot_content();
       break;
-    case cat_menu::combat_subtab_weapons:
+    case pup_menu::combat_subtab_weapons:
       draw_combat_weapons_content();
       break;
-    case cat_menu::combat_subtab_overlay:
+    case pup_menu::combat_subtab_overlay:
       draw_aimbot_draw_content();
       break;
   }
@@ -1149,13 +1149,13 @@ static void draw_visual_group_roles(std::vector<int>& selected_roles)
   for (const int role : selected_roles)
   {
     if (!preview.empty()) preview += ", ";
-    preview += cathook::core::players::role_name(role);
+    preview += puphook::core::players::role_name(role);
   }
 
   if (!ImGui::BeginCombo("Roles", preview.c_str())) return;
-  for (const auto& definition : cathook::core::players::role_definitions())
+  for (const auto& definition : puphook::core::players::role_definitions())
   {
-    if (definition.id == cathook::core::players::default_role) continue;
+    if (definition.id == puphook::core::players::default_role) continue;
     const bool selected = std::ranges::find(selected_roles, definition.id) != selected_roles.end();
     if (ImGui::Selectable(definition.name, selected))
     {
@@ -1202,7 +1202,7 @@ static void draw_visual_groups_content() {
 static void draw_visual_groups_content_tfwin() {
   visual_groups::ensure_defaults();
 
-  int& selected_group = cat_menu::selected_visual_group();
+  int& selected_group = pup_menu::selected_visual_group();
   static std::string new_group_name = "New profile";
 
   static const char* target_items[] = {
@@ -1216,12 +1216,12 @@ static void draw_visual_groups_content_tfwin() {
     visual_group::target_gargoyle, visual_group::target_fake_angle, visual_group::target_viewmodel_weapon, visual_group::target_viewmodel_hands
   };
   static const char* condition_items[] = {
-    "Enemy", "Team", "BLU", "RED", "Local", "Friends", "Party", "Priority", "Target", "Dormant", "CAT", "Ignored"
+    "Enemy", "Team", "BLU", "RED", "Local", "Friends", "Party", "Priority", "Target", "Dormant", "PUP", "Ignored"
   };
   static const uint32_t condition_bits[] = {
     visual_group::condition_enemy, visual_group::condition_team, visual_group::condition_blu, visual_group::condition_red,
     visual_group::condition_local, visual_group::condition_friends, visual_group::condition_party, visual_group::condition_priority,
-    visual_group::condition_target, visual_group::condition_dormant, visual_group::condition_cat, visual_group::condition_ignored
+    visual_group::condition_target, visual_group::condition_dormant, visual_group::condition_pup, visual_group::condition_ignored
   };
   static const char* player_items[] = {
     "Scout", "Soldier", "Pyro", "Demoman", "Heavy", "Engineer", "Medic", "Sniper", "Spy",
@@ -1287,8 +1287,8 @@ static void draw_visual_groups_content_tfwin() {
   }
 
   const float available_width = ImGui::GetContentRegionAvail().x;
-  const float profile_width = std::clamp(available_width * 0.34f, cat_menu::scaled(190.0f), cat_menu::scaled(240.0f));
-  const float gap = cat_menu::scaled(cat_menu::k_gap);
+  const float profile_width = std::clamp(available_width * 0.34f, pup_menu::scaled(190.0f), pup_menu::scaled(240.0f));
+  const float gap = pup_menu::scaled(pup_menu::k_gap);
   std::array<const char*, visual_group_config::max_groups> active_names{};
   std::array<uint32_t, visual_group_config::max_groups> active_bits{};
   int active_count = 0;
@@ -1306,11 +1306,11 @@ static void draw_visual_groups_content_tfwin() {
     ImGuiWindowFlags_NoScrollWithMouse);
   ImGui::TextUnformatted("Profiles");
   mono::group_separator();
-  cat_menu::input_text("New profile", &new_group_name);
+  pup_menu::input_text("New profile", &new_group_name);
   const float content_width = ImMax(1.0f, ImGui::GetContentRegionAvail().x);
   const float item_gap = ImGui::GetStyle().ItemSpacing.x;
   const float half_width = ImMax(1.0f, (content_width - item_gap) * 0.5f);
-  if (cat_menu::accent_button("New", { half_width, 22.0f }) &&
+  if (pup_menu::accent_button("New", { half_width, 22.0f }) &&
       config.visual_groups.groups.size() < visual_group_config::max_groups) {
     visual_group group{};
     group.bind_id = visual_groups::allocate_group_id();
@@ -1319,10 +1319,10 @@ static void draw_visual_groups_content_tfwin() {
     config.visual_groups.groups.emplace_back(std::move(group));
     selected_group = static_cast<int>(config.visual_groups.groups.size()) - 1;
     config.visual_groups.active_group_mask |= group_active_bit(selected_group);
-    cat_bind::clear_registered_targets();
+    pup_bind::clear_registered_targets();
   }
   ImGui::SameLine(0.0f, item_gap);
-  if (cat_menu::accent_button("Duplicate", { half_width, 22.0f }) &&
+  if (pup_menu::accent_button("Duplicate", { half_width, 22.0f }) &&
       selected_group >= 0 && selected_group < static_cast<int>(config.visual_groups.groups.size()) &&
       config.visual_groups.groups.size() < visual_group_config::max_groups) {
     visual_group group = config.visual_groups.groups[static_cast<std::size_t>(selected_group)];
@@ -1331,29 +1331,29 @@ static void draw_visual_groups_content_tfwin() {
     config.visual_groups.groups.emplace_back(std::move(group));
     selected_group = static_cast<int>(config.visual_groups.groups.size()) - 1;
     config.visual_groups.active_group_mask |= group_active_bit(selected_group);
-    cat_bind::clear_registered_targets();
+    pup_bind::clear_registered_targets();
   }
   const float action_width = ImMax(1.0f, (content_width - item_gap * 2.0f) / 3.0f);
-  if (cat_menu::accent_button("Delete", { action_width, cat_menu::k_button_height }, true)) {
+  if (pup_menu::accent_button("Delete", { action_width, pup_menu::k_button_height }, true)) {
     delete_visual_group(selected_group, &selected_group);
-    cat_bind::clear_registered_targets();
+    pup_bind::clear_registered_targets();
   }
   ImGui::SameLine(0.0f, item_gap);
-  if (cat_menu::accent_button("Up", { action_width, cat_menu::k_button_height }) && selected_group > 0) {
+  if (pup_menu::accent_button("Up", { action_width, pup_menu::k_button_height }) && selected_group > 0) {
     visual_groups::move_group(selected_group, selected_group - 1);
-    cat_bind::clear_registered_targets();
+    pup_bind::clear_registered_targets();
     --selected_group;
   }
   ImGui::SameLine(0.0f, item_gap);
-  if (cat_menu::accent_button("Down", { action_width, cat_menu::k_button_height }) &&
+  if (pup_menu::accent_button("Down", { action_width, pup_menu::k_button_height }) &&
       selected_group + 1 < static_cast<int>(config.visual_groups.groups.size())) {
     visual_groups::move_group(selected_group, selected_group + 1);
-    cat_bind::clear_registered_targets();
+    pup_bind::clear_registered_targets();
     ++selected_group;
   }
   rebuild_active_profiles();
   if (active_count > 0) {
-    cat_menu::multi_select_combo("Active profiles", &config.visual_groups.active_group_mask,
+    pup_menu::multi_select_combo("Active profiles", &config.visual_groups.active_group_mask,
       active_names.data(), active_bits.data(), active_count);
   }
   ImGui::TextDisabled("Top profile wins first.");
@@ -1365,7 +1365,7 @@ static void draw_visual_groups_content_tfwin() {
     const bool active = (config.visual_groups.active_group_mask & group_active_bit(index)) != 0;
     std::string label = active ? "* " : "  ";
     label += config.visual_groups.groups[static_cast<std::size_t>(index)].name;
-    if (cat_menu::list_row(label.c_str(), selected_group == index, { 0.0f, 28.0f })) {
+    if (pup_menu::list_row(label.c_str(), selected_group == index, { 0.0f, 28.0f })) {
       selected_group = index;
     }
     if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceNoPreviewTooltip)) {
@@ -1403,7 +1403,7 @@ static void draw_visual_groups_content_tfwin() {
     if (reorder_source < destination) --destination;
     if (destination != reorder_source && destination >= 0 && destination < static_cast<int>(config.visual_groups.groups.size())) {
       visual_groups::move_group(reorder_source, destination);
-      cat_bind::clear_registered_targets();
+      pup_bind::clear_registered_targets();
       if (old_selected == reorder_source) selected_group = destination;
       else if (reorder_source < old_selected && old_selected <= destination) --selected_group;
       else if (destination <= old_selected && old_selected < reorder_source) ++selected_group;
@@ -1421,7 +1421,7 @@ static void draw_visual_groups_content_tfwin() {
 
   selected_group = std::clamp(selected_group, 0, static_cast<int>(config.visual_groups.groups.size()) - 1);
   visual_group& group = config.visual_groups.groups[static_cast<std::size_t>(selected_group)];
-  cat_bind::push_panel_label("group_" + std::to_string(group.bind_id));
+  pup_bind::push_panel_label("group_" + std::to_string(group.bind_id));
 
   const auto end_panel = [] {
     ImGui::EndChild();
@@ -1437,111 +1437,111 @@ static void draw_visual_groups_content_tfwin() {
 
   if (ImGui::BeginChild("visual_profile_panel", { 0.0f, 0.0f }, inspector_panel_flags)) {
     draw_panel_header("Profile");
-    cat_menu::input_text("Name", &group.name);
-    cat_menu::color_picker("Profile color", &group.color);
-    cat_menu::checkbox("Tags use profile color", &group.tags_override_color);
+    pup_menu::input_text("Name", &group.name);
+    pup_menu::color_picker("Profile color", &group.color);
+    pup_menu::checkbox("Tags use profile color", &group.tags_override_color);
   }
   end_panel();
 
   if (ImGui::BeginChild("visual_targets_panel", { 0.0f, 0.0f }, inspector_panel_flags)) {
     draw_panel_header("Targets");
-    cat_menu::multi_select_combo("Entity target types", &group.targets, target_items, target_bits, IM_ARRAYSIZE(target_items));
+    pup_menu::multi_select_combo("Entity target types", &group.targets, target_items, target_bits, IM_ARRAYSIZE(target_items));
   }
   end_panel();
 
   if (ImGui::BeginChild("visual_conditions_panel", { 0.0f, 0.0f }, inspector_panel_flags)) {
     draw_panel_header("Conditions");
-    cat_menu::multi_select_combo("Conditions", &group.conditions, condition_items, condition_bits, IM_ARRAYSIZE(condition_items));
+    pup_menu::multi_select_combo("Conditions", &group.conditions, condition_items, condition_bits, IM_ARRAYSIZE(condition_items));
     draw_visual_group_roles(group.roles);
-    cat_menu::multi_select_combo("Player filters", &group.players, player_items, player_bits, IM_ARRAYSIZE(player_items));
-    cat_menu::multi_select_combo("Building filters", &group.buildings, building_items, building_bits, IM_ARRAYSIZE(building_items));
-    cat_menu::multi_select_combo("Projectile filters", &group.projectiles, projectile_items, projectile_bits, IM_ARRAYSIZE(projectile_items));
+    pup_menu::multi_select_combo("Player filters", &group.players, player_items, player_bits, IM_ARRAYSIZE(player_items));
+    pup_menu::multi_select_combo("Building filters", &group.buildings, building_items, building_bits, IM_ARRAYSIZE(building_items));
+    pup_menu::multi_select_combo("Projectile filters", &group.projectiles, projectile_items, projectile_bits, IM_ARRAYSIZE(projectile_items));
   }
   end_panel();
 
   if (ImGui::BeginChild("visual_esp_panel", { 0.0f, 0.0f }, inspector_panel_flags)) {
     draw_panel_header("ESP");
-    cat_menu::multi_select_combo("Draw", &group.esp.draw_mask, esp_items, esp_bits, IM_ARRAYSIZE(esp_items));
-    cat_menu::mask_checkbox("Emoji head", &group.esp.draw_mask, group_esp_settings::head_emoji);
-    cat_menu::mask_checkbox("Mafia level", &group.esp.draw_mask, group_esp_settings::mafia_level);
-    cat_menu::checkbox("Override color", &group.esp.override_color);
-    cat_menu::color_picker("ESP color", &group.esp.color);
-    cat_menu::combo("Box type", (int*)&group.esp.box_style, box_type_items, IM_ARRAYSIZE(box_type_items));
-    cat_menu::slider_float("Start drawing", &group.esp.start, 0.0f, 8192.0f, "%.0f HU");
-    cat_menu::slider_float("End drawing", &group.esp.end, 0.0f, 8192.0f, "%.0f HU");
+    pup_menu::multi_select_combo("Draw", &group.esp.draw_mask, esp_items, esp_bits, IM_ARRAYSIZE(esp_items));
+    pup_menu::mask_checkbox("Emoji head", &group.esp.draw_mask, group_esp_settings::head_emoji);
+    pup_menu::mask_checkbox("Mafia level", &group.esp.draw_mask, group_esp_settings::mafia_level);
+    pup_menu::checkbox("Override color", &group.esp.override_color);
+    pup_menu::color_picker("ESP color", &group.esp.color);
+    pup_menu::combo("Box type", (int*)&group.esp.box_style, box_type_items, IM_ARRAYSIZE(box_type_items));
+    pup_menu::slider_float("Start drawing", &group.esp.start, 0.0f, 8192.0f, "%.0f HU");
+    pup_menu::slider_float("End drawing", &group.esp.end, 0.0f, 8192.0f, "%.0f HU");
     if (group.esp.end < group.esp.start) group.esp.end = group.esp.start;
-    cat_menu::checkbox("Draw fade", &group.esp.smooth_alpha);
+    pup_menu::checkbox("Draw fade", &group.esp.smooth_alpha);
     int background_alpha = group.esp.background_alpha;
-    cat_menu::slider_int("Background alpha", &background_alpha, 0, 255);
+    pup_menu::slider_int("Background alpha", &background_alpha, 0, 255);
     group.esp.background_alpha = static_cast<uint8_t>(std::clamp(background_alpha, 0, 255));
-    cat_menu::slider_float("Class icon scale", &group.esp.class_icon_scale, 0.5f, 5.0f, "%.1f");
-    cat_menu::slider_float("Emoji scale", &group.esp.head_emoji_scale, 0.5f, 5.0f, "%.1f");
-    cat_menu::combo("Emoji style", &group.esp.head_emoji_style, head_emoji_items, IM_ARRAYSIZE(head_emoji_items));
-    cat_menu::combo("Mafia position", (int*)&group.esp.mafia_level_position, mafia_position_items, IM_ARRAYSIZE(mafia_position_items));
+    pup_menu::slider_float("Class icon scale", &group.esp.class_icon_scale, 0.5f, 5.0f, "%.1f");
+    pup_menu::slider_float("Emoji scale", &group.esp.head_emoji_scale, 0.5f, 5.0f, "%.1f");
+    pup_menu::combo("Emoji style", &group.esp.head_emoji_style, head_emoji_items, IM_ARRAYSIZE(head_emoji_items));
+    pup_menu::combo("Mafia position", (int*)&group.esp.mafia_level_position, mafia_position_items, IM_ARRAYSIZE(mafia_position_items));
   }
   end_panel();
 
   materials.prepare();
   if (ImGui::BeginChild("visual_chams_visible_panel", { 0.0f, 0.0f }, inspector_panel_flags)) {
     draw_panel_header("Visible chams");
-    cat_menu::render_material_layers("Visible layers", group.chams.visible);
+    pup_menu::render_material_layers("Visible layers", group.chams.visible);
   }
   end_panel();
 
   if (ImGui::BeginChild("visual_glow_panel", { 0.0f, 0.0f }, inspector_panel_flags)) {
     draw_panel_header("Glow");
-    cat_menu::color_picker("Color", &group.glow.color);
-    cat_menu::slider_float("Stencil scale", &group.glow.stencil, 0.0f, 10.0f, "%.1f");
+    pup_menu::color_picker("Color", &group.glow.color);
+    pup_menu::slider_float("Stencil scale", &group.glow.stencil, 0.0f, 10.0f, "%.1f");
     group.glow.stencil = std::clamp(std::round(group.glow.stencil * 10.0f) / 10.0f, 0.0f, 10.0f);
-    cat_menu::slider_float("Blur scale", &group.glow.blur, 0.0f, 100.0f, "%.1f");
-    cat_menu::slider_float("Render start", &group.glow.start, 0.0f, 2048.0f, "%.0f HU");
-    cat_menu::slider_float("Render end", &group.glow.end, 512.0f, 8192.0f, "%.0f HU");
+    pup_menu::slider_float("Blur scale", &group.glow.blur, 0.0f, 100.0f, "%.1f");
+    pup_menu::slider_float("Render start", &group.glow.start, 0.0f, 2048.0f, "%.0f HU");
+    pup_menu::slider_float("Render end", &group.glow.end, 512.0f, 8192.0f, "%.0f HU");
     if (group.glow.end < group.glow.start) group.glow.end = group.glow.start;
-    cat_menu::checkbox("Distance to alpha", &group.glow.smooth_alpha);
+    pup_menu::checkbox("Distance to alpha", &group.glow.smooth_alpha);
   }
   end_panel();
 
   if (ImGui::BeginChild("visual_chams_occluded_panel", { 0.0f, 0.0f }, inspector_panel_flags)) {
     draw_panel_header("Behind walls");
-    cat_menu::render_material_layers("Behind walls layers", group.chams.occluded);
+    pup_menu::render_material_layers("Behind walls layers", group.chams.occluded);
   }
   end_panel();
 
   if (ImGui::BeginChild("visual_backtrack_panel", { 0.0f, 0.0f }, inspector_panel_flags)) {
     draw_panel_header("Backtrack");
     auto& backtrack = group.backtrack_visuals;
-    cat_menu::checkbox("Backtrack", &backtrack.enabled);
+    pup_menu::checkbox("Backtrack", &backtrack.enabled);
     static const char* backtrack_record_items[] = { "Last", "First", "All" };
     ImGui::BeginDisabled(!backtrack.enabled);
-    cat_menu::combo("Records", &backtrack.record_mode, backtrack_record_items, IM_ARRAYSIZE(backtrack_record_items));
-    cat_menu::checkbox("Ignore z", &backtrack.ignore_z);
-    cat_menu::render_material_layers("Backtrack visible layers", backtrack.chams.visible);
-    cat_menu::render_material_layers("Backtrack behind walls layers", backtrack.chams.occluded);
+    pup_menu::combo("Records", &backtrack.record_mode, backtrack_record_items, IM_ARRAYSIZE(backtrack_record_items));
+    pup_menu::checkbox("Ignore z", &backtrack.ignore_z);
+    pup_menu::render_material_layers("Backtrack visible layers", backtrack.chams.visible);
+    pup_menu::render_material_layers("Backtrack behind walls layers", backtrack.chams.occluded);
     ImGui::TextUnformatted("Backtrack glow");
-    cat_menu::color_picker("Backtrack color", &backtrack.glow.color);
-    cat_menu::slider_float("Backtrack stencil scale", &backtrack.glow.stencil, 0.0f, 10.0f, "%.1f");
+    pup_menu::color_picker("Backtrack color", &backtrack.glow.color);
+    pup_menu::slider_float("Backtrack stencil scale", &backtrack.glow.stencil, 0.0f, 10.0f, "%.1f");
     backtrack.glow.stencil = std::clamp(std::round(backtrack.glow.stencil * 10.0f) / 10.0f, 0.0f, 10.0f);
-    cat_menu::slider_float("Backtrack blur scale", &backtrack.glow.blur, 0.0f, 100.0f, "%.1f");
-    cat_menu::slider_float("Backtrack render start", &backtrack.glow.start, 0.0f, 2048.0f, "%.0f HU");
-    cat_menu::slider_float("Backtrack render end", &backtrack.glow.end, 512.0f, 8192.0f, "%.0f HU");
+    pup_menu::slider_float("Backtrack blur scale", &backtrack.glow.blur, 0.0f, 100.0f, "%.1f");
+    pup_menu::slider_float("Backtrack render start", &backtrack.glow.start, 0.0f, 2048.0f, "%.0f HU");
+    pup_menu::slider_float("Backtrack render end", &backtrack.glow.end, 512.0f, 8192.0f, "%.0f HU");
     if (backtrack.glow.end < backtrack.glow.start) backtrack.glow.end = backtrack.glow.start;
-    cat_menu::checkbox("Backtrack distance to alpha", &backtrack.glow.smooth_alpha);
+    pup_menu::checkbox("Backtrack distance to alpha", &backtrack.glow.smooth_alpha);
     ImGui::EndDisabled();
   }
   end_panel();
 
   if (ImGui::BeginChild("visual_advanced_panel", { 0.0f, 0.0f }, inspector_panel_flags)) {
     draw_panel_header("Advanced");
-    cat_menu::checkbox("Offscreen arrows", &group.offscreen_arrows);
-    cat_menu::slider_int("Arrow offset", &group.offscreen_arrows_offset, 0, 500);
-    cat_menu::slider_float("Arrow max distance", &group.offscreen_arrows_max_distance, 0.0f, 8192.0f, "%.0f HU");
-    cat_menu::checkbox("Pickup timer", &group.pickup_timer);
-    cat_menu::multi_select_combo("Trajectory", &group.trajectory, trajectory_items, trajectory_bits, IM_ARRAYSIZE(trajectory_items));
-    cat_menu::multi_select_combo("Sightlines", &group.sightlines, sightline_items, sightline_bits, IM_ARRAYSIZE(sightline_items));
+    pup_menu::checkbox("Offscreen arrows", &group.offscreen_arrows);
+    pup_menu::slider_int("Arrow offset", &group.offscreen_arrows_offset, 0, 500);
+    pup_menu::slider_float("Arrow max distance", &group.offscreen_arrows_max_distance, 0.0f, 8192.0f, "%.0f HU");
+    pup_menu::checkbox("Pickup timer", &group.pickup_timer);
+    pup_menu::multi_select_combo("Trajectory", &group.trajectory, trajectory_items, trajectory_bits, IM_ARRAYSIZE(trajectory_items));
+    pup_menu::multi_select_combo("Sightlines", &group.sightlines, sightline_items, sightline_bits, IM_ARRAYSIZE(sightline_items));
   }
   end_panel();
 
-  cat_bind::pop_panel_label();
+  pup_bind::pop_panel_label();
   ImGui::EndChild();
 }
 
@@ -1571,55 +1571,55 @@ static void draw_visuals_world_content() {
         break;
       }
     }
-    if (cat_menu::combo(label, &selected, items, count)) value = items[selected];
+    if (pup_menu::combo(label, &selected, items, count)) value = items[selected];
   };
-  cat_menu::begin_flow_layout("visuals_world_layout", 2);
-  cat_menu::flow_panel("World", 0, 324.0f, [&]() {
-    cat_menu::combo("Skybox", &config.visuals.skybox_changer_index,
+  pup_menu::begin_flow_layout("visuals_world_layout", 2);
+  pup_menu::flow_panel("World", 0, 324.0f, [&]() {
+    pup_menu::combo("Skybox", &config.visuals.skybox_changer_index,
                     skybox_changer::option_names(), skybox_changer::option_count());
-    cat_menu::bools_combo("Thirdperson", {
+    pup_menu::bools_combo("Thirdperson", {
       { "Thirdperson", &config.visuals.thirdperson.enabled },
       { "Thirdperson crosshair", &config.visuals.thirdperson.crosshair },
       { "Thirdperson collision", &config.visuals.thirdperson.collision },
       { "Thirdperson scales", &config.visuals.thirdperson.scale }
     });
-    cat_menu::slider_float("Thirdperson distance", &config.visuals.thirdperson.distance, 0.0f, 400.0f, "%.0f HU");
-    cat_menu::slider_float("Thirdperson right", &config.visuals.thirdperson.right, -100.0f, 100.0f, "%.0f HU");
-    cat_menu::slider_float("Thirdperson up", &config.visuals.thirdperson.up, -100.0f, 100.0f, "%.0f HU");
-    cat_menu::checkbox("Override FOV", &config.visuals.override_fov);
-    cat_menu::slider_float("Custom FOV", &config.visuals.custom_fov, 30.1f, 150.0f, "%.0f deg");
-    cat_menu::checkbox("Override zoom FOV", &config.visuals.override_zoom_fov);
-    cat_menu::slider_float("Zoom FOV", &config.visuals.custom_zoom_fov, 1.0f, 150.0f, "%.0f deg");
-    cat_menu::checkbox("Override viewmodel FOV", &config.visuals.override_viewmodel_fov);
-    cat_menu::slider_float("Viewmodel FOV", &config.visuals.custom_viewmodel_fov, 30.1f, 150.0f, "%.0f deg");
-    cat_menu::bools_combo("ESP", {
+    pup_menu::slider_float("Thirdperson distance", &config.visuals.thirdperson.distance, 0.0f, 400.0f, "%.0f HU");
+    pup_menu::slider_float("Thirdperson right", &config.visuals.thirdperson.right, -100.0f, 100.0f, "%.0f HU");
+    pup_menu::slider_float("Thirdperson up", &config.visuals.thirdperson.up, -100.0f, 100.0f, "%.0f HU");
+    pup_menu::checkbox("Override FOV", &config.visuals.override_fov);
+    pup_menu::slider_float("Custom FOV", &config.visuals.custom_fov, 30.1f, 150.0f, "%.0f deg");
+    pup_menu::checkbox("Override zoom FOV", &config.visuals.override_zoom_fov);
+    pup_menu::slider_float("Zoom FOV", &config.visuals.custom_zoom_fov, 1.0f, 150.0f, "%.0f deg");
+    pup_menu::checkbox("Override viewmodel FOV", &config.visuals.override_viewmodel_fov);
+    pup_menu::slider_float("Viewmodel FOV", &config.visuals.custom_viewmodel_fov, 30.1f, 150.0f, "%.0f deg");
+    pup_menu::bools_combo("ESP", {
       { "ESP lerp", &config.visuals.esp_lerp },
       { "Dormant ESP", &config.visuals.dormant_esp }
     });
   });
-  cat_menu::flow_panel("Color modulation", 1, 270.0f, [&]() {
-    cat_menu::multi_select_combo("Modulations", &config.visuals.world.modulation_mask,
+  pup_menu::flow_panel("Color modulation", 1, 270.0f, [&]() {
+    pup_menu::multi_select_combo("Modulations", &config.visuals.world.modulation_mask,
                                  modulation_items, modulation_bits, IM_ARRAYSIZE(modulation_items));
-    cat_menu::color_picker("World color", &config.visuals.world.world_color);
-    cat_menu::color_picker("Sky color", &config.visuals.world.sky_color);
-    cat_menu::color_picker("Prop color", &config.visuals.world.prop_color);
-    cat_menu::color_picker("Particle color", &config.visuals.world.particle_color);
-    cat_menu::color_picker("Fog color", &config.visuals.world.fog_color);
-    cat_menu::combo("World texture", &config.visuals.world.world_texture,
+    pup_menu::color_picker("World color", &config.visuals.world.world_color);
+    pup_menu::color_picker("Sky color", &config.visuals.world.sky_color);
+    pup_menu::color_picker("Prop color", &config.visuals.world.prop_color);
+    pup_menu::color_picker("Particle color", &config.visuals.world.particle_color);
+    pup_menu::color_picker("Fog color", &config.visuals.world.fog_color);
+    pup_menu::combo("World texture", &config.visuals.world.world_texture,
                     world_texture_items, IM_ARRAYSIZE(world_texture_items));
   });
-  cat_menu::flow_panel("Effects", 0, 228.0f, [&]() {
+  pup_menu::flow_panel("Effects", 0, 228.0f, [&]() {
     string_combo("Projectile trail", config.visuals.effects.projectile_trail, projectile_trail_items,
                  IM_ARRAYSIZE(projectile_trail_items));
     string_combo("Medigun beam", config.visuals.effects.medigun_beam, beam_items, IM_ARRAYSIZE(beam_items));
     string_combo("Medigun charge", config.visuals.effects.medigun_charge, charge_items, IM_ARRAYSIZE(charge_items));
-    cat_menu::bools_combo("Remove", {
+    pup_menu::bools_combo("Remove", {
       { "Remove screen overlays", &config.visuals.effects.remove_screen_overlays },
       { "Remove screen effects", &config.visuals.effects.remove_screen_effects }
     });
   });
-  cat_menu::flow_panel("Removals", 1, 88.0f, [&]() {
-    cat_menu::bools_combo("Removals", {
+  pup_menu::flow_panel("Removals", 1, 88.0f, [&]() {
+    pup_menu::bools_combo("Removals", {
       { "Remove interpolation", &config.visuals.removals.interpolation },
       { "Remove lerp", &config.visuals.removals.lerp },
       { "Remove scope", &config.visuals.removals.scope },
@@ -1634,14 +1634,14 @@ static void draw_visuals_world_content() {
       { "Remove gibs", &config.visuals.removals.gibs }
     });
   });
-  cat_menu::end_flow_layout();
+  pup_menu::end_flow_layout();
 }
 
 static void draw_visuals_models_content() {
-  cat_menu::begin_flow_layout("visuals_models_layout", 2);
-  cat_menu::flow_panel("Skin changer", 0, 390.0f, [&]() {
-    cat_menu::checkbox("Enable skin changer", &config.visuals.skin_changer.enabled);
-    cat_menu::checkbox("Reskin to stock variants", &config.visuals.skin_changer.reskin);
+  pup_menu::begin_flow_layout("visuals_models_layout", 2);
+  pup_menu::flow_panel("Skin changer", 0, 390.0f, [&]() {
+    pup_menu::checkbox("Enable skin changer", &config.visuals.skin_changer.enabled);
+    pup_menu::checkbox("Reskin to stock variants", &config.visuals.skin_changer.reskin);
 
     Player* local = entity_list != nullptr && engine != nullptr && engine->is_in_game()
       ? entity_list->get_localplayer() : nullptr;
@@ -1667,12 +1667,12 @@ static void draw_visuals_models_content() {
     for (std::size_t index = 0; index < kit_ids.size(); ++index) {
       if (kit_ids[index] == skin->paintkit) selected_kit = static_cast<int>(index);
     }
-    if (cat_menu::combo("Paint kit", &selected_kit, kit_names.data(), static_cast<int>(kit_names.size())) &&
+    if (pup_menu::combo("Paint kit", &selected_kit, kit_names.data(), static_cast<int>(kit_names.size())) &&
         selected_kit >= 0 && static_cast<std::size_t>(selected_kit) < kit_ids.size()) {
       skin->paintkit = kit_ids[static_cast<std::size_t>(selected_kit)];
     }
-    cat_menu::slider_float("Wear", &skin->wear, 0.0f, 1.0f, "%.2f");
-    cat_menu::slider_int("Seed", &skin->seed, 0, 16);
+    pup_menu::slider_float("Wear", &skin->wear, 0.0f, 1.0f, "%.2f");
+    pup_menu::slider_int("Seed", &skin->seed, 0, 16);
     static const char* skin_quality_items[] = {
       "Auto", "Normal", "Genuine", "Vintage", "Unusual", "Unique", "Strange", "Haunted", "Collector's", "Decorated"
     };
@@ -1681,26 +1681,26 @@ static void draw_visuals_models_content() {
     for (int index = 0; index < IM_ARRAYSIZE(skin_quality_ids); ++index) {
       if (skin_quality_ids[index] == skin->quality) selected_quality = index;
     }
-    if (cat_menu::combo("Quality", &selected_quality, skin_quality_items, IM_ARRAYSIZE(skin_quality_items)) &&
+    if (pup_menu::combo("Quality", &selected_quality, skin_quality_items, IM_ARRAYSIZE(skin_quality_items)) &&
         selected_quality >= 0 && selected_quality < IM_ARRAYSIZE(skin_quality_ids)) {
       skin->quality = skin_quality_ids[selected_quality];
     }
-    cat_menu::checkbox("Festive", &skin->festive);
-    cat_menu::checkbox("Australium", &skin->australium);
+    pup_menu::checkbox("Festive", &skin->festive);
+    pup_menu::checkbox("Australium", &skin->australium);
     static const char* skin_killstreak_items[] = { "None", "Basic", "Specialized", "Professional" };
-    cat_menu::combo("Killstreak", &skin->killstreak, skin_killstreak_items, IM_ARRAYSIZE(skin_killstreak_items));
+    pup_menu::combo("Killstreak", &skin->killstreak, skin_killstreak_items, IM_ARRAYSIZE(skin_killstreak_items));
     static const char* skin_sheen_items[] = {
       "Off", "Team shine", "Deadly daffodil", "Manndarin", "Mean green",
       "Agonizing emerald", "Villainous violet", "Hot rod"
     };
-    cat_menu::combo("Sheen", &skin->sheen, skin_sheen_items, IM_ARRAYSIZE(skin_sheen_items));
+    pup_menu::combo("Sheen", &skin->sheen, skin_sheen_items, IM_ARRAYSIZE(skin_sheen_items));
     static const char* skin_unusual_items[] = {"None", "Hot", "Isotope", "Cool", "Energy Orb"};
-    cat_menu::combo("Weapon unusual", &skin->unusual, skin_unusual_items, IM_ARRAYSIZE(skin_unusual_items));
+    pup_menu::combo("Weapon unusual", &skin->unusual, skin_unusual_items, IM_ARRAYSIZE(skin_unusual_items));
     if (weapon != nullptr) {
       skin_changer::set(skin_key, override_skin);
     }
   });
-  cat_menu::end_flow_layout();
+  pup_menu::end_flow_layout();
 }
 
 static void draw_visuals_ui_content() {
@@ -1719,71 +1719,71 @@ static void draw_visuals_ui_content() {
     Visuals::Indicators::keybinds
   };
 
-  cat_menu::begin_flow_layout("visuals_ui_layout", 2);
-  cat_menu::flow_panel("Indicators", 0, 228.0f, [&]() {
-    cat_menu::multi_select_combo("Visible widgets", &config.visuals.indicators.enabled_mask, indicator_items, indicator_bits, IM_ARRAYSIZE(indicator_items));
-    cat_menu::bools_combo("Spectators", {
+  pup_menu::begin_flow_layout("visuals_ui_layout", 2);
+  pup_menu::flow_panel("Indicators", 0, 228.0f, [&]() {
+    pup_menu::multi_select_combo("Visible widgets", &config.visuals.indicators.enabled_mask, indicator_items, indicator_bits, IM_ARRAYSIZE(indicator_items));
+    pup_menu::bools_combo("Spectators", {
       { "Show spectator target", &config.visuals.spectator_list.show_target },
       { "Show spectator modes", &config.visuals.spectator_list.show_modes },
       { "Highlight firstperson", &config.visuals.spectator_list.highlight_firstperson }
     });
-    cat_menu::color_picker("Firstperson color", &config.visuals.spectator_list.firstperson_color);
+    pup_menu::color_picker("Firstperson color", &config.visuals.spectator_list.firstperson_color);
   });
-  cat_menu::flow_panel("Feedback", 1, 188.0f, [&]() {
-    cat_menu::checkbox("Hitmarker", &config.visuals.hitmarker.enabled);
-    cat_menu::checkbox("Damage text", &config.visuals.hitmarker.damage_text);
-    cat_menu::slider_float("Hitmarker duration", &config.visuals.hitmarker.duration, 0.20f, 1.50f, "%.2f s");
-    cat_menu::slider_float("Hitmarker size", &config.visuals.hitmarker.size, 4.0f, 16.0f, "%.1f px");
-    cat_menu::color_picker("Hitmarker color", &config.visuals.hitmarker.color);
-    cat_menu::color_picker("Crit color", &config.visuals.hitmarker.crit_color);
-    cat_menu::color_picker("Headshot color", &config.visuals.hitmarker.headshot_color);
+  pup_menu::flow_panel("Feedback", 1, 188.0f, [&]() {
+    pup_menu::checkbox("Hitmarker", &config.visuals.hitmarker.enabled);
+    pup_menu::checkbox("Damage text", &config.visuals.hitmarker.damage_text);
+    pup_menu::slider_float("Hitmarker duration", &config.visuals.hitmarker.duration, 0.20f, 1.50f, "%.2f s");
+    pup_menu::slider_float("Hitmarker size", &config.visuals.hitmarker.size, 4.0f, 16.0f, "%.1f px");
+    pup_menu::color_picker("Hitmarker color", &config.visuals.hitmarker.color);
+    pup_menu::color_picker("Crit color", &config.visuals.hitmarker.crit_color);
+    pup_menu::color_picker("Headshot color", &config.visuals.hitmarker.headshot_color);
   });
-  cat_menu::flow_panel("Casual medal", 0, 124.0f, [&]() {
-    cat_menu::checkbox("Guaranteed flip", &config.visuals.casual_medal.guaranteed_flip);
-    cat_menu::checkbox("Change displayed rank", &config.visuals.casual_medal.changer);
-    cat_menu::slider_int("Displayed rank", &config.visuals.casual_medal.rank, 1, 1200);
+  pup_menu::flow_panel("Casual medal", 0, 124.0f, [&]() {
+    pup_menu::checkbox("Guaranteed flip", &config.visuals.casual_medal.guaranteed_flip);
+    pup_menu::checkbox("Change displayed rank", &config.visuals.casual_medal.changer);
+    pup_menu::slider_int("Displayed rank", &config.visuals.casual_medal.rank, 1, 1200);
   });
-  cat_menu::flow_panel("Radar", 1, 356.0f, [&]() {
-    cat_menu::checkbox("Enable radar", &config.visuals.radar.enabled);
-    cat_menu::slider_float("Radar X", &config.visuals.radar.x, 0.0f, 1920.0f, "%.0f px");
-    cat_menu::slider_float("Radar Y", &config.visuals.radar.y, 0.0f, 1080.0f, "%.0f px");
-    cat_menu::slider_int("Radar size", &config.visuals.radar.size, 100, 600);
-    cat_menu::slider_float("Radar zoom", &config.visuals.radar.zoom, 5.0f, 50.0f, "%.1f");
-    cat_menu::slider_int("Icon size", &config.visuals.radar.icon_size, 10, 40);
-    cat_menu::checkbox("Class icons", &config.visuals.radar.use_icons);
+  pup_menu::flow_panel("Radar", 1, 356.0f, [&]() {
+    pup_menu::checkbox("Enable radar", &config.visuals.radar.enabled);
+    pup_menu::slider_float("Radar X", &config.visuals.radar.x, 0.0f, 1920.0f, "%.0f px");
+    pup_menu::slider_float("Radar Y", &config.visuals.radar.y, 0.0f, 1080.0f, "%.0f px");
+    pup_menu::slider_int("Radar size", &config.visuals.radar.size, 100, 600);
+    pup_menu::slider_float("Radar zoom", &config.visuals.radar.zoom, 5.0f, 50.0f, "%.1f");
+    pup_menu::slider_int("Icon size", &config.visuals.radar.icon_size, 10, 40);
+    pup_menu::checkbox("Class icons", &config.visuals.radar.use_icons);
     if (ImGui::IsItemHovered()) {
       ImGui::SetTooltip("Draw class icons from assets/textures/atlas.png.\nFalls back to plain dots when the class is unknown.");
     }
-    cat_menu::checkbox("Axis lines", &config.visuals.radar.axis_lines);
+    pup_menu::checkbox("Axis lines", &config.visuals.radar.axis_lines);
     if (ImGui::IsItemHovered()) {
       ImGui::SetTooltip("Full-span horizontal and vertical lines through the centre.\nThe short centre cross is always drawn.");
     }
-    cat_menu::slider_int("Range rings", &config.visuals.radar.range_rings, 0, 8);
+    pup_menu::slider_int("Range rings", &config.visuals.radar.range_rings, 0, 8);
     if (ImGui::IsItemHovered()) {
       ImGui::SetTooltip("Evenly spaced distance rings, 0 to turn them off.\nSpacing is in radar pixels, so the rings stay put while zoom\nchanges what distance they represent.");
     }
-    cat_menu::bools_combo("Players", {
+    pup_menu::bools_combo("Players", {
       { "Show teammates", &config.visuals.radar.show_teammates },
       { "Show enemies", &config.visuals.radar.show_enemies }
     });
   });
-  cat_menu::end_flow_layout();
+  pup_menu::end_flow_layout();
 }
 
 static void draw_navbot_content();
 
 static void draw_visuals_tab(const int visuals_subtab) {
   switch (visuals_subtab) {
-    case cat_menu::visuals_subtab_profiles:
+    case pup_menu::visuals_subtab_profiles:
       draw_visual_groups_content();
       break;
-    case cat_menu::visuals_subtab_world:
+    case pup_menu::visuals_subtab_world:
       draw_visuals_world_content();
       break;
-    case cat_menu::visuals_subtab_hud:
+    case pup_menu::visuals_subtab_hud:
       draw_visuals_ui_content();
       break;
-    case cat_menu::visuals_subtab_models:
+    case pup_menu::visuals_subtab_models:
       draw_visuals_models_content();
       break;
   }
@@ -1802,13 +1802,13 @@ static void draw_movement_content() {
     "Strafe silent"
   };
 
-  cat_menu::begin_flow_layout("movement_layout", 2);
-  cat_menu::flow_panel("Movement", 0, 220.0f, [&]() {
-    cat_menu::checkbox("Bhop", &config.misc.movement.bhop);
-    cat_menu::combo("Auto strafe", (int*)&config.misc.movement.auto_strafe, auto_strafe_items, IM_ARRAYSIZE(auto_strafe_items));
-    cat_menu::slider_float("Strafe turn scale", &config.misc.movement.auto_strafe_turn_scale, 0.0f, 1.0f, "%.2f");
-    cat_menu::slider_float("Strafe max delta", &config.misc.movement.auto_strafe_max_delta, 0.0f, 180.0f, "%.0f deg");
-    cat_menu::bools_combo("Jumps", {
+  pup_menu::begin_flow_layout("movement_layout", 2);
+  pup_menu::flow_panel("Movement", 0, 220.0f, [&]() {
+    pup_menu::checkbox("Bhop", &config.misc.movement.bhop);
+    pup_menu::combo("Auto strafe", (int*)&config.misc.movement.auto_strafe, auto_strafe_items, IM_ARRAYSIZE(auto_strafe_items));
+    pup_menu::slider_float("Strafe turn scale", &config.misc.movement.auto_strafe_turn_scale, 0.0f, 1.0f, "%.2f");
+    pup_menu::slider_float("Strafe max delta", &config.misc.movement.auto_strafe_max_delta, 0.0f, 180.0f, "%.0f deg");
+    pup_menu::bools_combo("Jumps", {
       { "Edge jump", &config.misc.movement.edge_jump },
       { "Jumpbug", &config.misc.movement.jumpbug },
       { "Duck jump", &config.misc.movement.duck_jump },
@@ -1816,21 +1816,21 @@ static void draw_movement_content() {
       { "Auto reverse jump", &config.misc.movement.auto_reverse_jump }
     });
   });
-  cat_menu::flow_panel("Movement extras", 1, 220.0f, [&]() {
-    cat_menu::bools_combo("Assist", {
+  pup_menu::flow_panel("Movement extras", 1, 220.0f, [&]() {
+    pup_menu::bools_combo("Assist", {
       { "Fast stop", &config.misc.movement.fast_stop },
       { "Fast accelerate", &config.misc.movement.fast_accelerate },
       { "No push", &config.misc.movement.no_push },
       { "Taunt slide", &config.misc.movement.taunt_slide }
     });
-    cat_menu::combo("Auto edgebug", (int*)&config.misc.movement.auto_edgebug, auto_edgebug_items, IM_ARRAYSIZE(auto_edgebug_items));
-    cat_menu::bools_combo("Moonwalk", {
+    pup_menu::combo("Auto edgebug", (int*)&config.misc.movement.auto_edgebug, auto_edgebug_items, IM_ARRAYSIZE(auto_edgebug_items));
+    pup_menu::bools_combo("Moonwalk", {
       { "Moonwalk", &config.misc.movement.moonwalk },
       { "Moonwalk forward", &config.misc.movement.moonwalk_forward },
       { "Moonwalk navbot compat", &config.misc.movement.moonwalk_navbot_compat }
     });
   });
-  cat_menu::end_flow_layout();
+  pup_menu::end_flow_layout();
 }
 
 static void draw_navbot_content() {
@@ -1877,21 +1877,21 @@ static void draw_navbot_content() {
     navbot_all_job_bits |= bit;
   }
 
-  cat_menu::begin_flow_layout("navbot_layout", 2);
-  cat_menu::flow_panel("NavBot", 0, 300.0f, [&]() {
-    cat_menu::checkbox("Navbot", &config.misc.automation.navbot_enabled);
+  pup_menu::begin_flow_layout("navbot_layout", 2);
+  pup_menu::flow_panel("NavBot", 0, 300.0f, [&]() {
+    pup_menu::checkbox("Navbot", &config.misc.automation.navbot_enabled);
     static const char* navbot_behavior_items[] = {
       "Default",
       "MvM automation"
     };
-    cat_menu::combo("Behavior", (int*)&config.misc.automation.navbot_behavior,
+    pup_menu::combo("Behavior", (int*)&config.misc.automation.navbot_behavior,
       navbot_behavior_items, IM_ARRAYSIZE(navbot_behavior_items));
-    cat_menu::bools_combo("Draw", {
+    pup_menu::bools_combo("Draw", {
       { "Draw path", &config.misc.automation.navbot_draw_path },
       { "Draw path boxes", &config.misc.automation.navbot_draw_path_boxes }
     });
-    cat_menu::color_picker("Path color", &config.misc.automation.navbot_path_color);
-    cat_menu::bools_combo("Options", {
+    pup_menu::color_picker("Path color", &config.misc.automation.navbot_path_color);
+    pup_menu::bools_combo("Options", {
       { "Don't path during warmup", &config.misc.automation.navbot_dont_path_during_warmup },
       { "Dynamic hazards", &config.misc.automation.navbot_hazards }
     });
@@ -1902,29 +1902,29 @@ static void draw_navbot_content() {
       "Secondary",
       "Melee"
     };
-    cat_menu::combo(
+    pup_menu::combo(
         "Weapon selection",
         (int*)&config.misc.automation.navbot_weapon_selection,
         navbot_weapon_selection_items,
         IM_ARRAYSIZE(navbot_weapon_selection_items));
-    cat_menu::combo("Enemy stalk mode", (int*)&config.misc.automation.enemy_stalk_mode, enemy_stalk_mode_items, IM_ARRAYSIZE(enemy_stalk_mode_items));
-    cat_menu::slider_float("Melee target range", &config.misc.automation.navbot_melee_target_range, 150.0f, 4000.0f, "%.0f HU");
-    cat_menu::slider_float("Crumb blacklist", &config.misc.automation.navbot_crumb_blacklist_seconds, 50.0f, 150.0f, "%.0f s");
-    cat_menu::checkbox("Debug text", &config.misc.automation.navbot_debug_text);
+    pup_menu::combo("Enemy stalk mode", (int*)&config.misc.automation.enemy_stalk_mode, enemy_stalk_mode_items, IM_ARRAYSIZE(enemy_stalk_mode_items));
+    pup_menu::slider_float("Melee target range", &config.misc.automation.navbot_melee_target_range, 150.0f, 4000.0f, "%.0f HU");
+    pup_menu::slider_float("Crumb blacklist", &config.misc.automation.navbot_crumb_blacklist_seconds, 50.0f, 150.0f, "%.0f s");
+    pup_menu::checkbox("Debug text", &config.misc.automation.navbot_debug_text);
   });
-  cat_menu::flow_panel("Path Look", 0, 132.0f, [&]() {
-    cat_menu::checkbox("Look at path", &config.misc.automation.navbot_look_at_path);
-    cat_menu::checkbox("Silent look", &config.misc.automation.navbot_look_at_path_silent);
-    cat_menu::slider_int("Slow aim", &config.misc.automation.navbot_look_at_path_speed, 1, 100);
-    cat_menu::slider_int("Spin chance", &config.misc.automation.navbot_look_at_path_spin_chance, 0, 100);
+  pup_menu::flow_panel("Path Look", 0, 132.0f, [&]() {
+    pup_menu::checkbox("Look at path", &config.misc.automation.navbot_look_at_path);
+    pup_menu::checkbox("Silent look", &config.misc.automation.navbot_look_at_path_silent);
+    pup_menu::slider_int("Slow aim", &config.misc.automation.navbot_look_at_path_speed, 1, 100);
+    pup_menu::slider_int("Spin chance", &config.misc.automation.navbot_look_at_path_spin_chance, 0, 100);
   });
-  cat_menu::flow_panel("Jobs", 1, 90.0f, [&]() {
+  pup_menu::flow_panel("Jobs", 1, 90.0f, [&]() {
     uint32_t navbot_enabled_jobs_mask = navbot_all_job_bits & ~config.misc.automation.navbot_excluded_jobs_mask;
-    if (cat_menu::multi_select_combo("Enabled jobs", &navbot_enabled_jobs_mask, navbot_job_items, navbot_job_bits, IM_ARRAYSIZE(navbot_job_items))) {
+    if (pup_menu::multi_select_combo("Enabled jobs", &navbot_enabled_jobs_mask, navbot_job_items, navbot_job_bits, IM_ARRAYSIZE(navbot_job_items))) {
       config.misc.automation.navbot_excluded_jobs_mask = navbot_all_job_bits & ~navbot_enabled_jobs_mask;
     }
   });
-  cat_menu::flow_panel("Followbot", 1, 220.0f, [&]() {
+  pup_menu::flow_panel("Followbot", 1, 220.0f, [&]() {
     static const char* followbot_target_items[] = {"Teammates", "Enemies"};
     static const uint32_t followbot_target_bits[] = {
       Misc::Automation::followbot_teammates,
@@ -1933,27 +1933,27 @@ static void draw_navbot_content() {
     static const char* followbot_preference_items[] = {"Off", "Friends", "Party"};
     static const char* followbot_nav_items[] = {"Off", "Normal", "Normal + Dormant"};
     static const char* followbot_look_items[] = {"Off", "Path", "Copy target", "At target"};
-    cat_menu::checkbox("Followbot", &config.misc.automation.followbot_enabled);
-    cat_menu::combo("Use nav mesh", (int*)&config.misc.automation.followbot_use_nav,
+    pup_menu::checkbox("Followbot", &config.misc.automation.followbot_enabled);
+    pup_menu::combo("Use nav mesh", (int*)&config.misc.automation.followbot_use_nav,
       followbot_nav_items, IM_ARRAYSIZE(followbot_nav_items));
-    cat_menu::multi_select_combo("Targets", &config.misc.automation.followbot_targets,
+    pup_menu::multi_select_combo("Targets", &config.misc.automation.followbot_targets,
       followbot_target_items, followbot_target_bits, IM_ARRAYSIZE(followbot_target_items));
-    cat_menu::combo("Prefer", (int*)&config.misc.automation.followbot_preference,
+    pup_menu::combo("Prefer", (int*)&config.misc.automation.followbot_preference,
       followbot_preference_items, IM_ARRAYSIZE(followbot_preference_items));
-    cat_menu::combo("Look at path", (int*)&config.misc.automation.followbot_look,
+    pup_menu::combo("Look at path", (int*)&config.misc.automation.followbot_look,
       followbot_look_items, IM_ARRAYSIZE(followbot_look_items));
-    cat_menu::bools_combo("Options", {
+    pup_menu::bools_combo("Options", {
       { "Avoid view snap", &config.misc.automation.followbot_look_no_snap },
       { "Ignore AFK targets", &config.misc.automation.followbot_ignore_afk }
     });
-    cat_menu::slider_int("Min priority", &config.misc.automation.followbot_min_priority, 0, 10);
-    cat_menu::slider_int("Max path nodes", &config.misc.automation.followbot_max_nodes, 50, 500);
-    cat_menu::slider_float("Activation distance", &config.misc.automation.followbot_activation_distance, 10.0f, 1200.0f, "%.0f HU");
-    cat_menu::slider_float("Follow distance", &config.misc.automation.followbot_follow_distance, 10.0f, 150.0f, "%.0f HU");
-    cat_menu::slider_float("Abandon distance", &config.misc.automation.followbot_abandon_distance, 250.0f, 1500.0f, "%.0f HU");
-    cat_menu::slider_float("Nav abandon distance", &config.misc.automation.followbot_nav_abandon_distance, 500.0f, 8000.0f, "%.0f HU");
+    pup_menu::slider_int("Min priority", &config.misc.automation.followbot_min_priority, 0, 10);
+    pup_menu::slider_int("Max path nodes", &config.misc.automation.followbot_max_nodes, 50, 500);
+    pup_menu::slider_float("Activation distance", &config.misc.automation.followbot_activation_distance, 10.0f, 1200.0f, "%.0f HU");
+    pup_menu::slider_float("Follow distance", &config.misc.automation.followbot_follow_distance, 10.0f, 150.0f, "%.0f HU");
+    pup_menu::slider_float("Abandon distance", &config.misc.automation.followbot_abandon_distance, 250.0f, 1500.0f, "%.0f HU");
+    pup_menu::slider_float("Nav abandon distance", &config.misc.automation.followbot_nav_abandon_distance, 500.0f, 8000.0f, "%.0f HU");
   });
-  cat_menu::end_flow_layout();
+  pup_menu::end_flow_layout();
 }
 
 static void draw_medic_content() {
@@ -1968,30 +1968,30 @@ static void draw_medic_content() {
     Misc::Automation::medic_heal_target_ipc_bots
   };
 
-  cat_menu::begin_flow_layout("medic_layout", 2);
-  cat_menu::flow_panel("Medic", 0, 184.0f, [&]() {
-    cat_menu::bools_combo("Assist", {
+  pup_menu::begin_flow_layout("medic_layout", 2);
+  pup_menu::flow_panel("Medic", 0, 184.0f, [&]() {
+    pup_menu::bools_combo("Assist", {
       { "Autoheal", &config.misc.automation.medic_autoheal },
       { "Autovacc", &config.misc.automation.medic_autovacc },
       { "Autouber", &config.misc.automation.medic_autouber }
     });
-    cat_menu::multi_select_combo("Heal targets", &config.misc.automation.medic_heal_targets_mask, heal_target_items, heal_target_bits, IM_ARRAYSIZE(heal_target_items));
+    pup_menu::multi_select_combo("Heal targets", &config.misc.automation.medic_heal_targets_mask, heal_target_items, heal_target_bits, IM_ARRAYSIZE(heal_target_items));
   });
-  cat_menu::end_flow_layout();
+  pup_menu::end_flow_layout();
 }
 
 static void draw_region_selector_panel(const char* list_id) {
-  bool region_selector_changed = cat_menu::checkbox("Enable", &config.misc.automation.region_selector);
+  bool region_selector_changed = pup_menu::checkbox("Enable", &config.misc.automation.region_selector);
 
   const float button_spacing = ImGui::GetStyle().ItemSpacing.x;
   const float button_row_width = ImMax(0.0f, ImGui::GetContentRegionAvail().x - 10.0f);
   const float button_width = ImMax(0.0f, ImFloor((button_row_width - button_spacing) * 0.5f));
-  if (cat_menu::accent_button("Allow all", ImVec2(button_width, 22.0f))) {
+  if (pup_menu::accent_button("Allow all", ImVec2(button_width, 22.0f))) {
     config.misc.automation.region_selector_allowed_mask = automation::region_selector::all_region_bits;
     region_selector_changed = true;
   }
   ImGui::SameLine(0.0f, button_spacing);
-  if (cat_menu::accent_button("Block all", ImVec2(button_width, 22.0f), true)) {
+  if (pup_menu::accent_button("Block all", ImVec2(button_width, 22.0f), true)) {
     config.misc.automation.region_selector_allowed_mask = 0;
     region_selector_changed = true;
   }
@@ -2005,13 +2005,13 @@ static void draw_region_selector_panel(const char* list_id) {
       ImGui::SeparatorText(current_continent.data());
 
       bool continent_allowed = automation::region_selector::are_all_continent_regions_allowed(current_continent);
-      if (cat_menu::checkbox(current_continent.data(), &continent_allowed)) {
+      if (pup_menu::checkbox(current_continent.data(), &continent_allowed)) {
         automation::region_selector::set_continent_regions_allowed(current_continent, continent_allowed);
         region_selector_changed = true;
       }
     }
     bool allowed = automation::region_selector::is_region_bit_allowed(data_center.bit);
-    if (cat_menu::checkbox(data_center.label, &allowed)) {
+    if (pup_menu::checkbox(data_center.label, &allowed)) {
       automation::region_selector::set_region_allowed(data_center.bit, allowed);
       region_selector_changed = true;
     }
@@ -2026,31 +2026,31 @@ static void draw_region_selector_panel(const char* list_id) {
 static void draw_chat_content() {
   static const char* chatspam_items[] = {
     "Off",
-    "Cathook",
+    "Puphook",
     "LMAOBOX",
     "Custom"
   };
   static const char* killsay_items[] = {
     "Off",
-    "Cathook",
+    "Puphook",
     "MLG",
     "Custom"
   };
 
-  cat_menu::begin_flow_layout("chat_layout", 2);
-  cat_menu::flow_panel("Chat spam", 0, 166.0f, [&]() {
-    cat_menu::combo("Chatspam", (int*)&config.misc.automation.chatspam, chatspam_items, IM_ARRAYSIZE(chatspam_items));
-    cat_menu::input_text("Spam file", &config.misc.automation.chatspam_file);
-    cat_menu::bools_combo("Options", {
+  pup_menu::begin_flow_layout("chat_layout", 2);
+  pup_menu::flow_panel("Chat spam", 0, 166.0f, [&]() {
+    pup_menu::combo("Chatspam", (int*)&config.misc.automation.chatspam, chatspam_items, IM_ARRAYSIZE(chatspam_items));
+    pup_menu::input_text("Spam file", &config.misc.automation.chatspam_file);
+    pup_menu::bools_combo("Options", {
       { "Random order", &config.misc.automation.chatspam_random },
       { "Team chat", &config.misc.automation.chatspam_team }
     });
-    cat_menu::slider_int("Spam delay", &config.misc.automation.chatspam_delay_ms, 250, 60000);
+    pup_menu::slider_int("Spam delay", &config.misc.automation.chatspam_delay_ms, 250, 60000);
   });
-  cat_menu::flow_panel("Killsay", 1, 128.0f, [&]() {
-    cat_menu::combo("Killsay", (int*)&config.misc.automation.killsay, killsay_items, IM_ARRAYSIZE(killsay_items));
-    cat_menu::input_text("Killsay file", &config.misc.automation.killsay_file);
-    cat_menu::slider_int("Killsay delay", &config.misc.automation.killsay_delay_ms, 0, 10000);
+  pup_menu::flow_panel("Killsay", 1, 128.0f, [&]() {
+    pup_menu::combo("Killsay", (int*)&config.misc.automation.killsay, killsay_items, IM_ARRAYSIZE(killsay_items));
+    pup_menu::input_text("Killsay file", &config.misc.automation.killsay_file);
+    pup_menu::slider_int("Killsay delay", &config.misc.automation.killsay_delay_ms, 0, 10000);
   });
   const char* voice_command_spam_items[] = {
     "Off",
@@ -2076,21 +2076,21 @@ static void draw_chat_content() {
     "Help",
     "Battle Cry"
   };
-  cat_menu::flow_panel("Spam", 0, 200.0f, [&]() {
-    cat_menu::checkbox("Noisemaker spam", &config.misc.automation.noisemaker_spam);
-    cat_menu::combo("Voice command spam", (int*)&config.misc.automation.voice_command_spam, voice_command_spam_items, IM_ARRAYSIZE(voice_command_spam_items));
-    cat_menu::checkbox("Micspam", &config.misc.automation.micspam);
-    cat_menu::slider_int("Micspam on", &config.misc.automation.micspam_interval_on_seconds, 1, 600, "%d s");
-    cat_menu::slider_int("Micspam off", &config.misc.automation.micspam_interval_off_seconds, 1, 600, "%d s");
-    cat_menu::checkbox("Micspam from file", &config.misc.automation.micspam_from_file);
+  pup_menu::flow_panel("Spam", 0, 200.0f, [&]() {
+    pup_menu::checkbox("Noisemaker spam", &config.misc.automation.noisemaker_spam);
+    pup_menu::combo("Voice command spam", (int*)&config.misc.automation.voice_command_spam, voice_command_spam_items, IM_ARRAYSIZE(voice_command_spam_items));
+    pup_menu::checkbox("Micspam", &config.misc.automation.micspam);
+    pup_menu::slider_int("Micspam on", &config.misc.automation.micspam_interval_on_seconds, 1, 600, "%d s");
+    pup_menu::slider_int("Micspam off", &config.misc.automation.micspam_interval_off_seconds, 1, 600, "%d s");
+    pup_menu::checkbox("Micspam from file", &config.misc.automation.micspam_from_file);
   });
-  cat_menu::flow_panel("Taunt", 1, 128.0f, [&]() {
-    cat_menu::checkbox("Auto taunt", &config.misc.automation.autotaunt);
-    cat_menu::slider_float("Taunt chance", &config.misc.automation.autotaunt_chance, 0.0f, 100.0f, "%.0f%%");
-    cat_menu::slider_float("Taunt safety distance", &config.misc.automation.autotaunt_safety_distance, 0.0f, 5000.0f, "%.0f HU");
-    cat_menu::slider_int("Taunt weapon slot", &config.misc.automation.autotaunt_weapon_slot, 0, 5);
+  pup_menu::flow_panel("Taunt", 1, 128.0f, [&]() {
+    pup_menu::checkbox("Auto taunt", &config.misc.automation.autotaunt);
+    pup_menu::slider_float("Taunt chance", &config.misc.automation.autotaunt_chance, 0.0f, 100.0f, "%.0f%%");
+    pup_menu::slider_float("Taunt safety distance", &config.misc.automation.autotaunt_safety_distance, 0.0f, 5000.0f, "%.0f HU");
+    pup_menu::slider_int("Taunt weapon slot", &config.misc.automation.autotaunt_weapon_slot, 0, 5);
   });
-  cat_menu::end_flow_layout();
+  pup_menu::end_flow_layout();
 }
 
 static void draw_queue_content() {
@@ -2118,38 +2118,38 @@ static void draw_queue_content() {
     "Instant"
   };
 
-  cat_menu::begin_flow_layout("queue_layout", 2);
-  cat_menu::flow_panel("Queue", 1, 248.0f, [&]() {
-    cat_menu::combo("Mode", (int*)&config.misc.automation.queue_mode, queueing_mode_items, IM_ARRAYSIZE(queueing_mode_items));
+  pup_menu::begin_flow_layout("queue_layout", 2);
+  pup_menu::flow_panel("Queue", 1, 248.0f, [&]() {
+    pup_menu::combo("Mode", (int*)&config.misc.automation.queue_mode, queueing_mode_items, IM_ARRAYSIZE(queueing_mode_items));
     if (config.misc.automation.queue_mode == Misc::Automation::queueing_mode::BOOST) {
-      cat_menu::checkbox("Enabled", &config.misc.automation.boost_queue_enabled);
-      cat_menu::combo("Boost", (int*)&config.misc.automation.boost_queue, boost_queue_mode_items, IM_ARRAYSIZE(boost_queue_mode_items));
+      pup_menu::checkbox("Enabled", &config.misc.automation.boost_queue_enabled);
+      pup_menu::combo("Boost", (int*)&config.misc.automation.boost_queue, boost_queue_mode_items, IM_ARRAYSIZE(boost_queue_mode_items));
       return;
     }
-    cat_menu::bools_combo("Queue", {
+    pup_menu::bools_combo("Queue", {
       { "Auto queue", &config.misc.automation.auto_queue },
       { "Auto requeue", &config.misc.automation.auto_requeue },
       { "Requeue on kick", &config.misc.automation.requeue_on_kick },
       { "Auto casual join", &config.misc.automation.auto_casual_join }
     });
-    cat_menu::combo("Queue mode", &config.misc.automation.auto_queue_mode, queue_mode_items, IM_ARRAYSIZE(queue_mode_items));
-    cat_menu::slider_int("RQ if players <", &config.misc.automation.rq_if_players_lte, 0, 32);
-    cat_menu::slider_int("RQ if players >", &config.misc.automation.rq_if_players_gte, 0, 32);
-    cat_menu::slider_int("RQ if IPC bots >", &config.misc.automation.rq_if_ipc_bots_gt, 0, 32);
-    cat_menu::bools_combo("Requeue", {
+    pup_menu::combo("Queue mode", &config.misc.automation.auto_queue_mode, queue_mode_items, IM_ARRAYSIZE(queue_mode_items));
+    pup_menu::slider_int("RQ if players <", &config.misc.automation.rq_if_players_lte, 0, 32);
+    pup_menu::slider_int("RQ if players >", &config.misc.automation.rq_if_players_gte, 0, 32);
+    pup_menu::slider_int("RQ if IPC bots >", &config.misc.automation.rq_if_ipc_bots_gt, 0, 32);
+    pup_menu::bools_combo("Requeue", {
       { "RQ if no navmesh", &config.misc.automation.rq_if_no_navmesh },
       { "RQ ignore friends", &config.misc.automation.rq_ignore_friends }
     });
-    cat_menu::combo("Requeue action", (int*)&config.misc.automation.requeue_action, requeue_action_items, IM_ARRAYSIZE(requeue_action_items));
+    pup_menu::combo("Requeue action", (int*)&config.misc.automation.requeue_action, requeue_action_items, IM_ARRAYSIZE(requeue_action_items));
   });
-  cat_menu::flow_panel("Region selector", 0, 390.0f, [&]() {
+  pup_menu::flow_panel("Region selector", 0, 390.0f, [&]() {
     draw_region_selector_panel("##queue_region_selector_list");
   }, false);
-  cat_menu::flow_panel("AutoParty", 0, 252.0f, [&]() {
-    cat_menu::checkbox("Enable", &config.misc.automation.autoparty);
-    cat_menu::slider_int("Max party size", &config.misc.automation.autoparty_max_party_size, 1, 6);
-    cat_menu::input_text("Hosts (Steam32 IDs)", &config.misc.automation.autoparty_party_hosts);
-    cat_menu::bools_combo("Options", {
+  pup_menu::flow_panel("AutoParty", 0, 252.0f, [&]() {
+    pup_menu::checkbox("Enable", &config.misc.automation.autoparty);
+    pup_menu::slider_int("Max party size", &config.misc.automation.autoparty_max_party_size, 1, 6);
+    pup_menu::input_text("Hosts (Steam32 IDs)", &config.misc.automation.autoparty_party_hosts);
+    pup_menu::bools_combo("Options", {
       { "Kick cheaters", &config.misc.automation.autoparty_kick_rage },
       { "Auto leave on offline member", &config.misc.automation.autoparty_auto_leave },
       { "Auto lock", &config.misc.automation.autoparty_auto_lock },
@@ -2158,12 +2158,12 @@ static void draw_queue_content() {
       { "Message kicks to party", &config.misc.automation.autoparty_message_kicks },
       { "IPC mode", &config.misc.automation.autoparty_ipc_mode }
     });
-    cat_menu::slider_int("IPC host count", &config.misc.automation.autoparty_ipc_count, 0, 8);
-    cat_menu::slider_int("Run every", &config.misc.automation.autoparty_run_frequency, 5, 300, "%d s");
+    pup_menu::slider_int("IPC host count", &config.misc.automation.autoparty_ipc_count, 0, 8);
+    pup_menu::slider_int("Run every", &config.misc.automation.autoparty_run_frequency, 5, 300, "%d s");
   });
   const char* class_items[] = { "Undefined", "Scout", "Sniper", "Soldier", "Demoman", "Medic", "Heavy", "Pyro", "Spy", "Engineer" };
-  cat_menu::flow_panel("MvM", 1, 268.0f, [&]() {
-    cat_menu::bools_combo("MvM", {
+  pup_menu::flow_panel("MvM", 1, 268.0f, [&]() {
+    pup_menu::bools_combo("MvM", {
       { "Instant respawn", &config.misc.automation.mvm_instant_respawn },
       { "Instant revive", &config.misc.automation.mvm_instant_revive },
       { "Allow inspect", &config.misc.automation.allow_mvm_inspect },
@@ -2171,15 +2171,15 @@ static void draw_queue_content() {
       { "Auto abandon Mann Up", &config.misc.automation.auto_mvm_abandon_mannup },
       { "Buybot", &config.misc.automation.mvm_buybot }
     });
-    cat_menu::slider_int("Buybot max cash", &config.misc.automation.mvm_buybot_max_cash, 0, 50000);
-    cat_menu::checkbox("Buybot auto class", &config.misc.automation.mvm_buybot_auto_class);
-    cat_menu::combo("Buybot class", (int*)&config.misc.automation.mvm_buybot_class,
+    pup_menu::slider_int("Buybot max cash", &config.misc.automation.mvm_buybot_max_cash, 0, 50000);
+    pup_menu::checkbox("Buybot auto class", &config.misc.automation.mvm_buybot_auto_class);
+    pup_menu::combo("Buybot class", (int*)&config.misc.automation.mvm_buybot_class,
       class_items, IM_ARRAYSIZE(class_items));
     static const char* mvm_chat_command_items[] = { "Off", "Party", "Friends", "Role" };
-    cat_menu::combo("Chat commands", (int*)&config.misc.automation.mvm_chat_commands,
+    pup_menu::combo("Chat commands", (int*)&config.misc.automation.mvm_chat_commands,
       mvm_chat_command_items, IM_ARRAYSIZE(mvm_chat_command_items));
     if (config.misc.automation.mvm_chat_commands == Misc::Automation::mvm_chat_command_mode::ROLE) {
-      static const char* chat_role_items[] = { "Ignored", "Cheater", "Friend", "Party", "F2P", "Cat" };
+      static const char* chat_role_items[] = { "Ignored", "Cheater", "Friend", "Party", "F2P", "Pup" };
       static const int chat_role_ids[] = { -1, -2, -3, -4, -5, -8 };
       int chat_role_index = 3;
       for (int index = 0; index < IM_ARRAYSIZE(chat_role_ids); ++index) {
@@ -2188,26 +2188,26 @@ static void draw_queue_content() {
           break;
         }
       }
-      if (cat_menu::combo("Chat command role", &chat_role_index, chat_role_items, IM_ARRAYSIZE(chat_role_items)) &&
+      if (pup_menu::combo("Chat command role", &chat_role_index, chat_role_items, IM_ARRAYSIZE(chat_role_items)) &&
           chat_role_index >= 0 && chat_role_index < IM_ARRAYSIZE(chat_role_ids)) {
         config.misc.automation.mvm_chat_commands_role = chat_role_ids[chat_role_index];
       }
     }
   });
-  cat_menu::end_flow_layout();
+  pup_menu::end_flow_layout();
 }
 
 static void draw_automation_utilities_content() {
   const char* class_items[] = { "Undefined", "Scout", "Sniper", "Soldier", "Demoman", "Medic", "Heavy", "Pyro", "Spy", "Engineer" };
 
-  cat_menu::begin_flow_layout("automation_utilities_layout", 2);
-  cat_menu::flow_panel("Class", 0, 104.0f, [&]() {
-    cat_menu::checkbox("Auto class select", &config.misc.automation.auto_class_select);
-    cat_menu::combo("Preferred class", (int*)&config.misc.automation.class_selected, class_items, IM_ARRAYSIZE(class_items));
-    cat_menu::checkbox("Don't join class during warmup", &config.misc.automation.auto_class_dont_join_during_warmup);
+  pup_menu::begin_flow_layout("automation_utilities_layout", 2);
+  pup_menu::flow_panel("Class", 0, 104.0f, [&]() {
+    pup_menu::checkbox("Auto class select", &config.misc.automation.auto_class_select);
+    pup_menu::combo("Preferred class", (int*)&config.misc.automation.class_selected, class_items, IM_ARRAYSIZE(class_items));
+    pup_menu::checkbox("Don't join class during warmup", &config.misc.automation.auto_class_dont_join_during_warmup);
   });
-  cat_menu::flow_panel("General", 0, 190.0f, [&]() {
-    cat_menu::bools_combo("General", {
+  pup_menu::flow_panel("General", 0, 190.0f, [&]() {
+    pup_menu::bools_combo("General", {
       { "Anti AFK", &config.misc.automation.anti_afk },
       { "Anti autobalance", &config.misc.automation.anti_autobalance },
       { "Anti MOTD", &config.misc.automation.anti_motd },
@@ -2215,17 +2215,17 @@ static void draw_automation_utilities_content() {
       { "Auto report", &config.misc.automation.auto_report },
       { "Auto vote map", &config.misc.automation.auto_vote_map }
     });
-    cat_menu::slider_int("Vote option", &config.misc.automation.auto_vote_map_option, 0, 2);
+    pup_menu::slider_int("Vote option", &config.misc.automation.auto_vote_map_option, 0, 2);
     static const char* auto_vote_items[] = {"Defend", "Assist", "Kick", "Kick all"};
     static const uint32_t auto_vote_bits[] = {
       Misc::Automation::auto_vote_defend, Misc::Automation::auto_vote_assist,
       Misc::Automation::auto_vote_kick, Misc::Automation::auto_vote_kick_all};
-    cat_menu::multi_select_combo("Auto vote", &config.misc.automation.auto_vote,
+    pup_menu::multi_select_combo("Auto vote", &config.misc.automation.auto_vote,
                                  auto_vote_items, auto_vote_bits, IM_ARRAYSIZE(auto_vote_items));
-    cat_menu::checkbox("Auto vote delay", &config.misc.automation.auto_vote_delay);
-    cat_menu::slider_float("Vote delay min", &config.misc.automation.auto_vote_delay_min, 0.0f, 30.0f, "%.1f s");
-    cat_menu::slider_float("Vote delay max", &config.misc.automation.auto_vote_delay_max, 0.0f, 30.0f, "%.1f s");
-    cat_menu::bools_combo("Extras", {
+    pup_menu::checkbox("Auto vote delay", &config.misc.automation.auto_vote_delay);
+    pup_menu::slider_float("Vote delay min", &config.misc.automation.auto_vote_delay_min, 0.0f, 30.0f, "%.1f s");
+    pup_menu::slider_float("Vote delay max", &config.misc.automation.auto_vote_delay_max, 0.0f, 30.0f, "%.1f s");
+    pup_menu::bools_combo("Extras", {
       { "Killstreak", &config.misc.automation.killstreak },
       { "Custom announcer", &config.misc.automation.custom_announcer }
     });
@@ -2236,22 +2236,22 @@ static void draw_automation_utilities_content() {
     Misc::CheatDetection::method_invalid_pitch, Misc::CheatDetection::method_packet_choking,
     Misc::CheatDetection::method_aim_flick, Misc::CheatDetection::method_duck_speed,
     Misc::CheatDetection::method_lagcomp_abuse, Misc::CheatDetection::method_crit_manipulation};
-  cat_menu::flow_panel("Cheat detection", 1, 190.0f, [&]() {
-    cat_menu::multi_select_combo("Methods", &config.misc.cheat_detection.methods,
+  pup_menu::flow_panel("Cheat detection", 1, 190.0f, [&]() {
+    pup_menu::multi_select_combo("Methods", &config.misc.cheat_detection.methods,
                                  cheat_detection_items, cheat_detection_bits, IM_ARRAYSIZE(cheat_detection_items));
-    cat_menu::slider_int("Detections to mark", &config.misc.cheat_detection.detections_required, 1, 20);
-    cat_menu::slider_float("Min flick", &config.misc.cheat_detection.min_flick, 1.0f, 180.0f, "%.0f deg");
-    cat_menu::slider_float("Max noise", &config.misc.cheat_detection.max_noise, 0.0f, 45.0f, "%.1f deg");
-    cat_menu::slider_int("Min choking ticks", &config.misc.cheat_detection.min_choking_ticks, 2, 128);
-    cat_menu::slider_int("Lag-comp min rewind", &config.misc.cheat_detection.lagcomp_min_delta, 2, 64);
-    cat_menu::slider_float("Lag-comp window", &config.misc.cheat_detection.lagcomp_window, 0.1f, 30.0f, "%.1f s");
-    cat_menu::slider_int("Lag-comp bursts", &config.misc.cheat_detection.lagcomp_burst_count, 1, 16);
-    cat_menu::slider_int("Crit window", &config.misc.cheat_detection.crit_window, 2, 200);
-    cat_menu::slider_float("Crit threshold", &config.misc.cheat_detection.crit_threshold, 1.0f, 100.0f, "%.0f%%");
+    pup_menu::slider_int("Detections to mark", &config.misc.cheat_detection.detections_required, 1, 20);
+    pup_menu::slider_float("Min flick", &config.misc.cheat_detection.min_flick, 1.0f, 180.0f, "%.0f deg");
+    pup_menu::slider_float("Max noise", &config.misc.cheat_detection.max_noise, 0.0f, 45.0f, "%.1f deg");
+    pup_menu::slider_int("Min choking ticks", &config.misc.cheat_detection.min_choking_ticks, 2, 128);
+    pup_menu::slider_int("Lag-comp min rewind", &config.misc.cheat_detection.lagcomp_min_delta, 2, 64);
+    pup_menu::slider_float("Lag-comp window", &config.misc.cheat_detection.lagcomp_window, 0.1f, 30.0f, "%.1f s");
+    pup_menu::slider_int("Lag-comp bursts", &config.misc.cheat_detection.lagcomp_burst_count, 1, 16);
+    pup_menu::slider_int("Crit window", &config.misc.cheat_detection.crit_window, 2, 200);
+    pup_menu::slider_float("Crit threshold", &config.misc.cheat_detection.crit_threshold, 1.0f, 100.0f, "%.0f%%");
   });
-  cat_menu::flow_panel("Profile presence", 0, 280.0f, [&]() {
-    cat_menu::checkbox("Enable", &config.misc.automation.stalker_enabled);
-    cat_menu::slider_int("Refresh interval", &config.misc.automation.stalker_interval, 5, 300, "%d s");
+  pup_menu::flow_panel("Profile presence", 0, 280.0f, [&]() {
+    pup_menu::checkbox("Enable", &config.misc.automation.stalker_enabled);
+    pup_menu::slider_int("Refresh interval", &config.misc.automation.stalker_interval, 5, 300, "%d s");
     ImGui::TextWrapped("Tracks SteamIDs listed in stalk.txt using Steam presence and public server queries.");
     const int tracked = automation::profile_stalker::status_count();
     if (tracked <= 0) {
@@ -2266,33 +2266,33 @@ static void draw_automation_utilities_content() {
       ImGui::TextUnformatted(card.card.empty() ? "Unknown" : card.card.c_str());
     }
   });
-  cat_menu::end_flow_layout();
+  pup_menu::end_flow_layout();
 }
 
 #if 0 // Inventory changer UI temporarily disabled.
 static void draw_inventory_changer_content() {
-  cat_menu::begin_flow_layout("inventory_changer_layout", 2);
-  cat_menu::flow_panel("Inventory changer", 0, 238.0f, [&]() {
-    cat_menu::checkbox("Enable", &config.misc.inventory_changer.enabled);
-    cat_menu::checkbox("Apply to all", &config.misc.inventory_changer.apply_to_all);
-    cat_menu::checkbox("Debug", &config.misc.inventory_changer.debug);
-    cat_menu::draw_inventory_definition("Crate", &config.misc.inventory_changer.crate,
+  pup_menu::begin_flow_layout("inventory_changer_layout", 2);
+  pup_menu::flow_panel("Inventory changer", 0, 238.0f, [&]() {
+    pup_menu::checkbox("Enable", &config.misc.inventory_changer.enabled);
+    pup_menu::checkbox("Apply to all", &config.misc.inventory_changer.apply_to_all);
+    pup_menu::checkbox("Debug", &config.misc.inventory_changer.debug);
+    pup_menu::draw_inventory_definition("Crate", &config.misc.inventory_changer.crate,
       inventory_changer::item_category::crate);
-    cat_menu::draw_inventory_definition("Key", &config.misc.inventory_changer.key,
+    pup_menu::draw_inventory_definition("Key", &config.misc.inventory_changer.key,
       inventory_changer::item_category::key);
     ImGui::TextWrapped("Crates and keys are local inventory redirects; opening still uses the game's normal key/item checks.");
   });
-  cat_menu::flow_panel("Weapons", 1, 540.0f, [&]() {
-    cat_menu::draw_inventory_slot("Primary", config.misc.inventory_changer.primary, true);
-    cat_menu::draw_inventory_slot("Secondary", config.misc.inventory_changer.secondary, true);
-    cat_menu::draw_inventory_slot("Melee", config.misc.inventory_changer.melee, true);
+  pup_menu::flow_panel("Weapons", 1, 540.0f, [&]() {
+    pup_menu::draw_inventory_slot("Primary", config.misc.inventory_changer.primary, true);
+    pup_menu::draw_inventory_slot("Secondary", config.misc.inventory_changer.secondary, true);
+    pup_menu::draw_inventory_slot("Melee", config.misc.inventory_changer.melee, true);
   });
-  cat_menu::flow_panel("Hats", 0, 540.0f, [&]() {
-    cat_menu::draw_inventory_slot("Hat 1", config.misc.inventory_changer.hat1, false);
-    cat_menu::draw_inventory_slot("Hat 2", config.misc.inventory_changer.hat2, false);
-    cat_menu::draw_inventory_slot("Hat 3", config.misc.inventory_changer.hat3, false);
+  pup_menu::flow_panel("Hats", 0, 540.0f, [&]() {
+    pup_menu::draw_inventory_slot("Hat 1", config.misc.inventory_changer.hat1, false);
+    pup_menu::draw_inventory_slot("Hat 2", config.misc.inventory_changer.hat2, false);
+    pup_menu::draw_inventory_slot("Hat 3", config.misc.inventory_changer.hat3, false);
   });
-  cat_menu::flow_panel("Taunt", 1, 100.0f, [&]() {
+  pup_menu::flow_panel("Taunt", 1, 100.0f, [&]() {
     const auto& effects = inventory_changer::effect_options();
     std::vector<const char*> effect_labels{};
     effect_labels.reserve(effects.size());
@@ -2301,65 +2301,65 @@ static void draw_inventory_changer_content() {
       effect_labels.push_back(effects[index].label.c_str());
       if (effects[index].definition == static_cast<std::uint16_t>(config.misc.inventory_changer.taunt1_unusual)) selected_effect = static_cast<int>(index);
     }
-    if (cat_menu::combo("Slot 1 unusual", &selected_effect, effect_labels.data(), static_cast<int>(effect_labels.size())) &&
+    if (pup_menu::combo("Slot 1 unusual", &selected_effect, effect_labels.data(), static_cast<int>(effect_labels.size())) &&
         selected_effect >= 0 && static_cast<std::size_t>(selected_effect) < effects.size()) {
       config.misc.inventory_changer.taunt1_unusual = effects[static_cast<std::size_t>(selected_effect)].definition;
     }
   });
-  cat_menu::end_flow_layout();
+  pup_menu::end_flow_layout();
 }
 #endif
 
 static void draw_autoitem_content() {
-  cat_menu::begin_flow_layout("autoitem_layout", 2);
-  cat_menu::flow_panel("AutoItem", 0, 116.0f, [&]() {
-    cat_menu::checkbox("Enable", &config.misc.automation.auto_item);
-    cat_menu::slider_int("Interval", &config.misc.automation.auto_item_interval_ms, 1000, 120000, "%d ms");
-    cat_menu::checkbox("Debug", &config.misc.automation.auto_item_debug);
+  pup_menu::begin_flow_layout("autoitem_layout", 2);
+  pup_menu::flow_panel("AutoItem", 0, 116.0f, [&]() {
+    pup_menu::checkbox("Enable", &config.misc.automation.auto_item);
+    pup_menu::slider_int("Interval", &config.misc.automation.auto_item_interval_ms, 1000, 120000, "%d ms");
+    pup_menu::checkbox("Debug", &config.misc.automation.auto_item_debug);
   });
-  cat_menu::flow_panel("Weapons", 1, 156.0f, [&]() {
-    cat_menu::checkbox("Weapons", &config.misc.automation.auto_item_weapons);
-    cat_menu::input_text("Primary", &config.misc.automation.auto_item_primary);
-    cat_menu::input_text("Secondary", &config.misc.automation.auto_item_secondary);
-    cat_menu::input_text("Melee", &config.misc.automation.auto_item_melee);
+  pup_menu::flow_panel("Weapons", 1, 156.0f, [&]() {
+    pup_menu::checkbox("Weapons", &config.misc.automation.auto_item_weapons);
+    pup_menu::input_text("Primary", &config.misc.automation.auto_item_primary);
+    pup_menu::input_text("Secondary", &config.misc.automation.auto_item_secondary);
+    pup_menu::input_text("Melee", &config.misc.automation.auto_item_melee);
   });
-  cat_menu::flow_panel("Equipment", 1, 182.0f, [&]() {
-    cat_menu::checkbox("Equipment", &config.misc.automation.auto_item_equipment);
-    cat_menu::input_text("Building", &config.misc.automation.auto_item_building);
-    cat_menu::input_text("PDA", &config.misc.automation.auto_item_pda);
-    cat_menu::input_text("PDA2", &config.misc.automation.auto_item_pda2);
-    cat_menu::input_text("Action", &config.misc.automation.auto_item_action);
-    cat_menu::input_text("Taunt", &config.misc.automation.auto_item_taunt);
+  pup_menu::flow_panel("Equipment", 1, 182.0f, [&]() {
+    pup_menu::checkbox("Equipment", &config.misc.automation.auto_item_equipment);
+    pup_menu::input_text("Building", &config.misc.automation.auto_item_building);
+    pup_menu::input_text("PDA", &config.misc.automation.auto_item_pda);
+    pup_menu::input_text("PDA2", &config.misc.automation.auto_item_pda2);
+    pup_menu::input_text("Action", &config.misc.automation.auto_item_action);
+    pup_menu::input_text("Taunt", &config.misc.automation.auto_item_taunt);
   });
-  cat_menu::flow_panel("Cosmetics", 1, 182.0f, [&]() {
-    cat_menu::checkbox("Hats", &config.misc.automation.auto_item_hats);
-    cat_menu::input_text("Hat 1", &config.misc.automation.auto_item_hat1);
-    cat_menu::input_text("Hat 2", &config.misc.automation.auto_item_hat2);
-    cat_menu::input_text("Hat 3", &config.misc.automation.auto_item_hat3);
-    cat_menu::checkbox("Noisemaker", &config.misc.automation.auto_item_noisemaker);
+  pup_menu::flow_panel("Cosmetics", 1, 182.0f, [&]() {
+    pup_menu::checkbox("Hats", &config.misc.automation.auto_item_hats);
+    pup_menu::input_text("Hat 1", &config.misc.automation.auto_item_hat1);
+    pup_menu::input_text("Hat 2", &config.misc.automation.auto_item_hat2);
+    pup_menu::input_text("Hat 3", &config.misc.automation.auto_item_hat3);
+    pup_menu::checkbox("Noisemaker", &config.misc.automation.auto_item_noisemaker);
   });
-  cat_menu::end_flow_layout();
+  pup_menu::end_flow_layout();
 }
 
 static void draw_ipc_content() {
-#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
+#if defined(PUPHOOK_TEXTMODE) && PUPHOOK_TEXTMODE
 
   config.ipc.enabled = true;
   config.ipc.auto_connect = true;
   config.ipc.auto_ignore_local_bots = true;
 #endif
 
-  const bool connected = cat_ipc::client::connected();
-  const int peer_id = cat_ipc::client::peer_id();
+  const bool connected = pup_ipc::client::connected();
+  const int peer_id = pup_ipc::client::peer_id();
 
-  cat_menu::begin_flow_layout("ipc_layout", 2);
-  cat_menu::flow_panel("Connection", 0, 156.0f, [&]() {
-    cat_menu::bools_combo("Connection", {
+  pup_menu::begin_flow_layout("ipc_layout", 2);
+  pup_menu::flow_panel("Connection", 0, 156.0f, [&]() {
+    pup_menu::bools_combo("Connection", {
       { "Enable IPC", &config.ipc.enabled },
       { "Auto connect", &config.ipc.auto_connect },
       { "Auto ignore local bots", &config.ipc.auto_ignore_local_bots }
     });
-#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
+#if defined(PUPHOOK_TEXTMODE) && PUPHOOK_TEXTMODE
 
     config.ipc.enabled = true;
     config.ipc.auto_connect = true;
@@ -2367,7 +2367,7 @@ static void draw_ipc_content() {
 #endif
 
     ImGui::Dummy(ImVec2(0.0f, 4.0f));
-    ImGui::PushStyleColor(ImGuiCol_Text, connected ? cat_menu::menu_accent() : cat_menu::k_text_soft);
+    ImGui::PushStyleColor(ImGuiCol_Text, connected ? pup_menu::menu_accent() : pup_menu::k_text_soft);
     if (connected) {
       ImGui::Text("Status: connected as peer %d", peer_id);
     } else {
@@ -2375,33 +2375,33 @@ static void draw_ipc_content() {
     }
     ImGui::PopStyleColor();
   });
-  cat_menu::flow_panel("Actions", 1, 112.0f, [&]() {
+  pup_menu::flow_panel("Actions", 1, 112.0f, [&]() {
     const float button_width = (ImGui::GetContentRegionAvail().x - 6.0f) * 0.5f;
-    if (cat_menu::accent_button("Connect", ImVec2(button_width, 22.0f))) {
+    if (pup_menu::accent_button("Connect", ImVec2(button_width, 22.0f))) {
       config.ipc.enabled = true;
-      cat_ipc::client::set_enabled(true);
-      cat_ipc::client::start();
+      pup_ipc::client::set_enabled(true);
+      pup_ipc::client::start();
     }
     ImGui::SameLine(0.0f, 6.0f);
-    if (cat_menu::accent_button("Reconnect", ImVec2(0.0f, 22.0f))) {
+    if (pup_menu::accent_button("Reconnect", ImVec2(0.0f, 22.0f))) {
       config.ipc.enabled = true;
-      cat_ipc::client::shutdown();
-      cat_ipc::client::set_enabled(true);
-      cat_ipc::client::start();
+      pup_ipc::client::shutdown();
+      pup_ipc::client::set_enabled(true);
+      pup_ipc::client::start();
     }
-#if !defined(CATHOOK_TEXTMODE) || !CATHOOK_TEXTMODE
+#if !defined(PUPHOOK_TEXTMODE) || !PUPHOOK_TEXTMODE
 
-    if (cat_menu::accent_button("Disconnect", ImVec2(0.0f, 22.0f), true)) {
+    if (pup_menu::accent_button("Disconnect", ImVec2(0.0f, 22.0f), true)) {
       config.ipc.enabled = false;
-      cat_ipc::client::shutdown();
+      pup_ipc::client::shutdown();
     }
 #endif
 
   });
-  cat_menu::flow_panel("Notes", 1, 94.0f, [&]() {
-    ImGui::PushStyleColor(ImGuiCol_Text, cat_menu::k_text_soft);
-    ImGui::TextUnformatted("Connect uses the catbot shared memory server.");
-#if defined(CATHOOK_TEXTMODE) && CATHOOK_TEXTMODE
+  pup_menu::flow_panel("Notes", 1, 94.0f, [&]() {
+    ImGui::PushStyleColor(ImGuiCol_Text, pup_menu::k_text_soft);
+    ImGui::TextUnformatted("Connect uses the pupbot shared memory server.");
+#if defined(PUPHOOK_TEXTMODE) && PUPHOOK_TEXTMODE
 
     ImGui::TextUnformatted("Textmode forces IPC on.");
 #else
@@ -2412,18 +2412,18 @@ static void draw_ipc_content() {
 
     ImGui::PopStyleColor();
   });
-  cat_menu::end_flow_layout();
+  pup_menu::end_flow_layout();
 }
 
 static void draw_automation_tab(const int automation_subtab) {
   switch (automation_subtab) {
-    case cat_menu::automation_subtab_general: draw_automation_utilities_content(); break;
-    case cat_menu::automation_subtab_queue: draw_queue_content(); break;
-    case cat_menu::automation_subtab_chat: draw_chat_content(); break;
-    case cat_menu::automation_subtab_items: draw_autoitem_content(); break;
-    case cat_menu::automation_subtab_navbot: draw_navbot_content(); break;
-    case cat_menu::automation_subtab_medic: draw_medic_content(); break;
-    case cat_menu::automation_subtab_ipc: draw_ipc_content(); break;
+    case pup_menu::automation_subtab_general: draw_automation_utilities_content(); break;
+    case pup_menu::automation_subtab_queue: draw_queue_content(); break;
+    case pup_menu::automation_subtab_chat: draw_chat_content(); break;
+    case pup_menu::automation_subtab_items: draw_autoitem_content(); break;
+    case pup_menu::automation_subtab_navbot: draw_navbot_content(); break;
+    case pup_menu::automation_subtab_medic: draw_medic_content(); break;
+    case pup_menu::automation_subtab_ipc: draw_ipc_content(); break;
   }
 }
 
@@ -2463,28 +2463,28 @@ static void draw_exploits_content() {
     "Sideways"
   };
 
-  cat_menu::begin_flow_layout("exploits_layout", 2);
+  pup_menu::begin_flow_layout("exploits_layout", 2);
 
-  cat_menu::flow_panel("Backtrack", 0, 280.0f, [&]() {
-    cat_menu::checkbox("Enable", &config.backtrack.enabled);
-    cat_menu::slider_int("Window", &config.backtrack.window_ms, 0, 1000, "%d ms");
-    cat_menu::slider_float("Fake latency", &config.backtrack.fake_latency_ms, 0.0f, 1000.0f, "%.0f ms");
-    cat_menu::checkbox("Fake interp", &config.backtrack.fake_interp);
+  pup_menu::flow_panel("Backtrack", 0, 280.0f, [&]() {
+    pup_menu::checkbox("Enable", &config.backtrack.enabled);
+    pup_menu::slider_int("Window", &config.backtrack.window_ms, 0, 1000, "%d ms");
+    pup_menu::slider_float("Fake latency", &config.backtrack.fake_latency_ms, 0.0f, 1000.0f, "%.0f ms");
+    pup_menu::checkbox("Fake interp", &config.backtrack.fake_interp);
     ImGui::BeginDisabled(!config.backtrack.fake_interp);
-    cat_menu::slider_float("Interpolation", &config.backtrack.interp_ms, 0.0f, 1000.0f, "%.0f ms");
+    pup_menu::slider_float("Interpolation", &config.backtrack.interp_ms, 0.0f, 1000.0f, "%.0f ms");
     ImGui::EndDisabled();
-    cat_menu::bools_combo("Aim", {
+    pup_menu::bools_combo("Aim", {
       { "Prefer on shot", &config.backtrack.prefer_on_shot },
       { "Backtrack to crosshair", &config.backtrack.to_crosshair }
     });
-    cat_menu::slider_int("Tick offset", &config.backtrack.offset_ticks, -4, 4, "%d ticks");
-    cat_menu::checkbox("Visualizer", &config.backtrack.visualizer);
-    cat_menu::combo("Visualizer style", (int*)&config.backtrack.visualizer_mode, backtrack_visualizer_items, IM_ARRAYSIZE(backtrack_visualizer_items));
-    cat_menu::slider_int("Ticks", &config.backtrack.visualizer_ticks, 1, 80);
+    pup_menu::slider_int("Tick offset", &config.backtrack.offset_ticks, -4, 4, "%d ticks");
+    pup_menu::checkbox("Visualizer", &config.backtrack.visualizer);
+    pup_menu::combo("Visualizer style", (int*)&config.backtrack.visualizer_mode, backtrack_visualizer_items, IM_ARRAYSIZE(backtrack_visualizer_items));
+    pup_menu::slider_int("Ticks", &config.backtrack.visualizer_ticks, 1, 80);
   });
 
-  cat_menu::flow_panel("Bypasses", 1, 88.0f, [&]() {
-    cat_menu::bools_combo("Bypasses", {
+  pup_menu::flow_panel("Bypasses", 1, 88.0f, [&]() {
+    pup_menu::bools_combo("Bypasses", {
       { "Bypass sv_pure", &config.misc.exploits.bypasspure },
       { "Pure bypass", &config.misc.exploits.pure_bypass },
       { "Cheats bypass", &config.misc.exploits.cheats_bypass },
@@ -2494,64 +2494,64 @@ static void draw_exploits_content() {
       { "Null graphics", &config.misc.exploits.null_graphics }
     });
   });
-  cat_menu::flow_panel("Tickbase", 1, 224.0f, [&]() {
-    cat_menu::checkbox("Tickbase", &config.misc.exploits.tickbase);
-    cat_menu::checkbox("Recharge", &config.misc.exploits.tickbase_recharge);
-    cat_menu::checkbox("Doubletap", &config.misc.exploits.doubletap);
-    cat_menu::slider_int("Doubletap ticks", &config.misc.exploits.doubletap_ticks, 1, 21);
-    cat_menu::checkbox("Warp", &config.misc.exploits.warp);
-    cat_menu::slider_int("Warp ticks", &config.misc.exploits.warp_ticks, 1, 21);
-    cat_menu::checkbox("Fakelag", &config.misc.exploits.fakelag);
-    cat_menu::slider_int("Fakelag ticks", &config.misc.exploits.fakelag_ticks, 1, 21);
-    cat_menu::checkbox("Antiwarp", &config.misc.exploits.antiwarp);
+  pup_menu::flow_panel("Tickbase", 1, 224.0f, [&]() {
+    pup_menu::checkbox("Tickbase", &config.misc.exploits.tickbase);
+    pup_menu::checkbox("Recharge", &config.misc.exploits.tickbase_recharge);
+    pup_menu::checkbox("Doubletap", &config.misc.exploits.doubletap);
+    pup_menu::slider_int("Doubletap ticks", &config.misc.exploits.doubletap_ticks, 1, 21);
+    pup_menu::checkbox("Warp", &config.misc.exploits.warp);
+    pup_menu::slider_int("Warp ticks", &config.misc.exploits.warp_ticks, 1, 21);
+    pup_menu::checkbox("Fakelag", &config.misc.exploits.fakelag);
+    pup_menu::slider_int("Fakelag ticks", &config.misc.exploits.fakelag_ticks, 1, 21);
+    pup_menu::checkbox("Antiwarp", &config.misc.exploits.antiwarp);
   });
-  cat_menu::flow_panel("Engine", 0, 118.0f, [&]() {
-    cat_menu::bools_combo("Engine", {
+  pup_menu::flow_panel("Engine", 0, 118.0f, [&]() {
+    pup_menu::bools_combo("Engine", {
       { "Equip region unlock", &config.misc.exploits.equip_region_unlock },
       { "Anti-cheat compat", &config.misc.exploits.anti_cheat_compat },
       { "Ping reducer", &config.misc.exploits.ping_reducer }
     });
-    cat_menu::slider_int("Ping target", &config.misc.exploits.ping_target, 1, 100);
+    pup_menu::slider_int("Ping target", &config.misc.exploits.ping_target, 1, 100);
   });
-  cat_menu::flow_panel("Anti-aim", 1, 286.0f, [&]() {
-    cat_menu::checkbox("Enable", &config.misc.exploits.anti_aim);
-    cat_menu::combo("Real pitch", (int*)&config.misc.exploits.anti_aim_real_pitch, anti_aim_pitch_items, IM_ARRAYSIZE(anti_aim_pitch_items));
-    cat_menu::combo("Fake pitch", (int*)&config.misc.exploits.anti_aim_fake_pitch, anti_aim_pitch_items, IM_ARRAYSIZE(anti_aim_pitch_items));
-    cat_menu::combo("Real base", (int*)&config.misc.exploits.anti_aim_real_yaw_base, anti_aim_yaw_base_items, IM_ARRAYSIZE(anti_aim_yaw_base_items));
-    cat_menu::combo("Fake base", (int*)&config.misc.exploits.anti_aim_fake_yaw_base, anti_aim_yaw_base_items, IM_ARRAYSIZE(anti_aim_yaw_base_items));
-    cat_menu::combo("Real yaw", (int*)&config.misc.exploits.anti_aim_real_yaw, anti_aim_yaw_items, IM_ARRAYSIZE(anti_aim_yaw_items));
-    cat_menu::combo("Fake yaw", (int*)&config.misc.exploits.anti_aim_fake_yaw, anti_aim_yaw_items, IM_ARRAYSIZE(anti_aim_yaw_items));
-    cat_menu::slider_float("Real offset", &config.misc.exploits.anti_aim_real_yaw_offset, -180.0f, 180.0f, "%.0f deg");
-    cat_menu::slider_float("Fake offset", &config.misc.exploits.anti_aim_fake_yaw_offset, -180.0f, 180.0f, "%.0f deg");
-    cat_menu::slider_float("Spin speed", &config.misc.exploits.anti_aim_spin_speed, -180.0f, 180.0f, "%.0f deg");
-    cat_menu::checkbox("Anti-overlap", &config.misc.exploits.anti_aim_anti_overlap);
+  pup_menu::flow_panel("Anti-aim", 1, 286.0f, [&]() {
+    pup_menu::checkbox("Enable", &config.misc.exploits.anti_aim);
+    pup_menu::combo("Real pitch", (int*)&config.misc.exploits.anti_aim_real_pitch, anti_aim_pitch_items, IM_ARRAYSIZE(anti_aim_pitch_items));
+    pup_menu::combo("Fake pitch", (int*)&config.misc.exploits.anti_aim_fake_pitch, anti_aim_pitch_items, IM_ARRAYSIZE(anti_aim_pitch_items));
+    pup_menu::combo("Real base", (int*)&config.misc.exploits.anti_aim_real_yaw_base, anti_aim_yaw_base_items, IM_ARRAYSIZE(anti_aim_yaw_base_items));
+    pup_menu::combo("Fake base", (int*)&config.misc.exploits.anti_aim_fake_yaw_base, anti_aim_yaw_base_items, IM_ARRAYSIZE(anti_aim_yaw_base_items));
+    pup_menu::combo("Real yaw", (int*)&config.misc.exploits.anti_aim_real_yaw, anti_aim_yaw_items, IM_ARRAYSIZE(anti_aim_yaw_items));
+    pup_menu::combo("Fake yaw", (int*)&config.misc.exploits.anti_aim_fake_yaw, anti_aim_yaw_items, IM_ARRAYSIZE(anti_aim_yaw_items));
+    pup_menu::slider_float("Real offset", &config.misc.exploits.anti_aim_real_yaw_offset, -180.0f, 180.0f, "%.0f deg");
+    pup_menu::slider_float("Fake offset", &config.misc.exploits.anti_aim_fake_yaw_offset, -180.0f, 180.0f, "%.0f deg");
+    pup_menu::slider_float("Spin speed", &config.misc.exploits.anti_aim_spin_speed, -180.0f, 180.0f, "%.0f deg");
+    pup_menu::checkbox("Anti-overlap", &config.misc.exploits.anti_aim_anti_overlap);
   });
-  cat_menu::end_flow_layout();
+  pup_menu::end_flow_layout();
 }
 
 static void draw_config_content() {
-  cathook::core::config_store* config_store = cathook::core::get_config_store();
+  puphook::core::config_store* config_store = puphook::core::get_config_store();
   if (config_store == nullptr) {
-    cat_menu::begin_panel("Configs", ImVec2(0.0f, 0.0f));
+    pup_menu::begin_panel("Configs", ImVec2(0.0f, 0.0f));
     ImGui::TextUnformatted("Config store unavailable");
-    cat_menu::end_panel();
+    pup_menu::end_panel();
     return;
   }
 
-  cat_menu::begin_flow_layout("config_layout", 2);
-  cat_menu::flow_panel("Config List", 0, 330.0f, [&]() {
+  pup_menu::begin_flow_layout("config_layout", 2);
+  pup_menu::flow_panel("Config List", 0, 330.0f, [&]() {
     const std::vector<std::string> configs = config_store->list_files();
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     ImGui::BeginChild("##config_list_box", ImVec2(-1.0f, 250.0f), false, ImGuiWindowFlags_NoBackground);
     if (configs.empty()) {
       ImGui::SetCursorPosY(8.0f);
-      ImGui::PushStyleColor(ImGuiCol_Text, cat_menu::k_text_soft);
+      ImGui::PushStyleColor(ImGuiCol_Text, pup_menu::k_text_soft);
       ImGui::TextUnformatted("No configs found.");
       ImGui::PopStyleColor();
     } else {
       for (int index = 0; index < static_cast<int>(configs.size()); ++index) {
         const bool selected = selected_config == index;
-        if (cat_menu::list_row(configs[index].c_str(), selected)) {
+        if (pup_menu::list_row(configs[index].c_str(), selected)) {
           selected_config = index;
           std::strncpy(config_name, configs[index].c_str(), std::size(config_name) - 1);
           config_name[std::size(config_name) - 1] = '\0';
@@ -2562,46 +2562,46 @@ static void draw_config_content() {
     ImGui::PopStyleVar();
 
     ImGui::Dummy(ImVec2(0.0f, 6.0f));
-    ImGui::PushStyleColor(ImGuiCol_Text, cat_menu::k_text_soft);
+    ImGui::PushStyleColor(ImGuiCol_Text, pup_menu::k_text_soft);
     ImGui::Text("Stored configs: %d", static_cast<int>(configs.size()));
     ImGui::Text("Current: %s", config_store->current_name().c_str());
     ImGui::PopStyleColor();
   });
-  cat_menu::flow_panel("Config Options", 1, 186.0f, [&]() {
-    cat_menu::input_text("Config name", config_name, static_cast<int>(std::size(config_name)));
+  pup_menu::flow_panel("Config Options", 1, 186.0f, [&]() {
+    pup_menu::input_text("Config name", config_name, static_cast<int>(std::size(config_name)));
     ImGui::Dummy(ImVec2(0.0f, 6.0f));
-    if (cat_menu::accent_button("Create", ImVec2((ImGui::GetContentRegionAvail().x - 6.0f) * 0.5f, 22.0f))) {
+    if (pup_menu::accent_button("Create", ImVec2((ImGui::GetContentRegionAvail().x - 6.0f) * 0.5f, 22.0f))) {
       config_store->import_config(config);
       if (config_store->save_file(config_name)) {
-        cat_bind::save(config_store, config_name);
+        pup_bind::save(config_store, config_name);
       }
     }
     ImGui::SameLine(0.0f, 6.0f);
-    if (cat_menu::accent_button("Save", ImVec2(0.0f, 22.0f))) {
+    if (pup_menu::accent_button("Save", ImVec2(0.0f, 22.0f))) {
       config_store->import_config(config);
       if (config_store->save_file(config_name)) {
-        cat_bind::save(config_store, config_name);
+        pup_bind::save(config_store, config_name);
       }
     }
-    if (cat_menu::accent_button("Load", ImVec2((ImGui::GetContentRegionAvail().x - 6.0f) * 0.5f, 22.0f))) {
+    if (pup_menu::accent_button("Load", ImVec2((ImGui::GetContentRegionAvail().x - 6.0f) * 0.5f, 22.0f))) {
       if (config_store->load_file(config_name)) {
         config_store->export_config(config);
         reset_insider_settings_session(config);
-        cat_bind::load(config_store);
+        pup_bind::load(config_store);
       }
     }
     ImGui::SameLine(0.0f, 6.0f);
-    if (cat_menu::accent_button("Delete", ImVec2(0.0f, 22.0f), true)) {
+    if (pup_menu::accent_button("Delete", ImVec2(0.0f, 22.0f), true)) {
       config_store->delete_file(config_name);
-      cat_bind::delete_file(config_store, config_name);
+      pup_bind::delete_file(config_store, config_name);
     }
     ImGui::Dummy(ImVec2(0.0f, 8.0f));
-    ImGui::PushStyleColor(ImGuiCol_Text, cat_menu::k_text_soft);
+    ImGui::PushStyleColor(ImGuiCol_Text, pup_menu::k_text_soft);
     ImGui::TextUnformatted("Actions save the current in-memory config.");
     ImGui::TextUnformatted("Load replaces the current settings from disk.");
     ImGui::PopStyleColor();
   });
-  cat_menu::end_flow_layout();
+  pup_menu::end_flow_layout();
 }
 
 static void draw_materials_content() {
@@ -2612,12 +2612,12 @@ static void draw_materials_content() {
   static bool selected_locked = false;
 
   ImGui::BeginChild("material_editor_layout", {0.0f, 0.0f}, ImGuiChildFlags_None);
-  const float left_width = std::clamp(ImGui::GetContentRegionAvail().x * 0.34f, cat_menu::scaled(190.0f), cat_menu::scaled(250.0f));
+  const float left_width = std::clamp(ImGui::GetContentRegionAvail().x * 0.34f, pup_menu::scaled(190.0f), pup_menu::scaled(250.0f));
   ImGui::BeginChild("material_manager", {left_width, 0.0f}, ImGuiChildFlags_Border);
   ImGui::TextUnformatted("material manager");
   mono::group_separator();
-  cat_menu::input_text("New material", &new_material_name);
-  if (cat_menu::accent_button("Create material", {-1.0f, 22.0f}) && materials.add(new_material_name)) {
+  pup_menu::input_text("New material", &new_material_name);
+  if (pup_menu::accent_button("Create material", {-1.0f, 22.0f}) && materials.add(new_material_name)) {
     selected_material = new_material_name;
     if (const auto definition = materials.find(selected_material)) {
       material_source = definition->vmt;
@@ -2625,7 +2625,7 @@ static void draw_materials_content() {
     }
     new_material_name.clear();
   }
-  if (cat_menu::accent_button("Reload materials", {-1.0f, 22.0f})) {
+  if (pup_menu::accent_button("Reload materials", {-1.0f, 22.0f})) {
     materials.reload();
     selected_material.clear();
     material_source.clear();
@@ -2640,7 +2640,7 @@ static void draw_materials_content() {
   ImGui::BeginChild("material_list", {0.0f, 0.0f}, ImGuiChildFlags_Border);
   for (const material_definition& definition : definitions) {
     ImGui::PushID(definition.name.c_str());
-    if (cat_menu::list_row(definition.name.c_str(), selected_material == definition.name, {0.0f, 26.0f})) {
+    if (pup_menu::list_row(definition.name.c_str(), selected_material == definition.name, {0.0f, 26.0f})) {
       selected_material = definition.name;
       material_source = definition.vmt;
       selected_locked = definition.locked;
@@ -2650,7 +2650,7 @@ static void draw_materials_content() {
   ImGui::EndChild();
   ImGui::EndChild();
 
-  ImGui::SameLine(0.0f, cat_menu::scaled(cat_menu::k_gap));
+  ImGui::SameLine(0.0f, pup_menu::scaled(pup_menu::k_gap));
   ImGui::BeginChild("material_editor", {0.0f, 0.0f}, ImGuiChildFlags_Border);
   ImGui::TextUnformatted("material editor");
   mono::group_separator();
@@ -2659,10 +2659,10 @@ static void draw_materials_content() {
   } else {
     ImGui::TextDisabled("%s: %s", selected_locked ? "viewing" : "editing", selected_material.c_str());
     if (!selected_locked) {
-      if (cat_menu::accent_button("Save material", {-1.0f, 22.0f})) {
+      if (pup_menu::accent_button("Save material", {-1.0f, 22.0f})) {
         materials.edit(selected_material, material_source);
       }
-      if (cat_menu::accent_button("Delete material", {-1.0f, 22.0f}, true) && materials.remove(selected_material)) {
+      if (pup_menu::accent_button("Delete material", {-1.0f, 22.0f}, true) && materials.remove(selected_material)) {
         selected_material.clear();
         material_source.clear();
         selected_locked = false;
@@ -2675,12 +2675,12 @@ static void draw_materials_content() {
 }
 
 static void draw_interface_content() {
-  cat_menu::begin_flow_layout("interface_layout", 1);
-  cat_menu::flow_panel("Menu appearance", 0, 252.0f, [&]() {
-    cat_menu::color_picker("Theme color", &config.misc.menu.theme_color);
-    cat_menu::combo("Menu scale", &config.misc.menu.dpi_scale, cat_menu::k_dpi_scale_labels.data(), static_cast<int>(cat_menu::k_dpi_scale_labels.size()));
+  pup_menu::begin_flow_layout("interface_layout", 1);
+  pup_menu::flow_panel("Menu appearance", 0, 252.0f, [&]() {
+    pup_menu::color_picker("Theme color", &config.misc.menu.theme_color);
+    pup_menu::combo("Menu scale", &config.misc.menu.dpi_scale, pup_menu::k_dpi_scale_labels.data(), static_cast<int>(pup_menu::k_dpi_scale_labels.size()));
   });
-  cat_menu::end_flow_layout();
+  pup_menu::end_flow_layout();
 }
 
 static void draw_system_tab(const int system_subtab) {
@@ -2699,15 +2699,15 @@ static void draw_system_tab(const int system_subtab) {
 #include "player_window.hpp"
 
 static void draw_binds_content() {
-  std::lock_guard lock{cat_bind::bind_mutex()};
+  std::lock_guard lock{pup_bind::bind_mutex()};
 
   static uint32_t selected_id{};
-  static cat_bind::bind_entry draft{};
+  static pup_bind::bind_entry draft{};
   static int picking_parent{};
   static uint32_t dragging_id{};
   static uint32_t dragging_parent{};
 
-  if (cat_bind::find_entry(selected_id) == nullptr) selected_id = 0;
+  if (pup_bind::find_entry(selected_id) == nullptr) selected_id = 0;
   if (picking_parent) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
   if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) dragging_id = 0;
 
@@ -2722,7 +2722,7 @@ static void draw_binds_content() {
     { "Sniper", static_cast<int>(tf_class::SNIPER) },
     { "Spy", static_cast<int>(tf_class::SPY) }
   };
-  const auto copy_fields = [](cat_bind::bind_entry& dest, const cat_bind::bind_entry& src) {
+  const auto copy_fields = [](pup_bind::bind_entry& dest, const pup_bind::bind_entry& src) {
     dest.name = src.name;
     dest.condition = src.condition;
     dest.key_mode = src.key_mode;
@@ -2737,21 +2737,21 @@ static void draw_binds_content() {
     draft = {};
     picking_parent = 0;
   };
-  const auto apply_condition_change = [](cat_bind::bind_entry& bind) {
-    if (bind.condition == cat_bind::bind_condition::player_class && bind.condition_value == 0) {
+  const auto apply_condition_change = [](pup_bind::bind_entry& bind) {
+    if (bind.condition == pup_bind::bind_condition::player_class && bind.condition_value == 0) {
       bind.condition_value = static_cast<int>(tf_class::SCOUT);
-    } else if (bind.condition != cat_bind::bind_condition::player_class && bind.condition != cat_bind::bind_condition::key) {
-      if (bind.condition == cat_bind::bind_condition::item_slot) bind.condition_value = std::clamp(bind.condition_value, 0, 8);
-      else if (bind.condition == cat_bind::bind_condition::weapon_type) bind.condition_value = std::clamp(bind.condition_value, 0, 3);
+    } else if (bind.condition != pup_bind::bind_condition::player_class && bind.condition != pup_bind::bind_condition::key) {
+      if (bind.condition == pup_bind::bind_condition::item_slot) bind.condition_value = std::clamp(bind.condition_value, 0, 8);
+      else if (bind.condition == pup_bind::bind_condition::weapon_type) bind.condition_value = std::clamp(bind.condition_value, 0, 3);
       else bind.condition_value = std::clamp(bind.condition_value, 0, 4);
     }
   };
-  const auto draw_condition_fields = [&](cat_bind::bind_entry& bind) {
+  const auto draw_condition_fields = [&](pup_bind::bind_entry& bind) {
     bool changed = false;
     int type = static_cast<int>(bind.condition);
     if (mono::select_single("Type", &type, { { "Key", 0 }, { "Class", 1 }, { "Weapon type", 2 }, { "Item slot", 3 }, { "Misc", 4 } })) {
-      bind.condition = static_cast<cat_bind::bind_condition>(type);
-      bind.condition_value = bind.condition == cat_bind::bind_condition::player_class ? static_cast<int>(tf_class::SCOUT) : 0;
+      bind.condition = static_cast<pup_bind::bind_condition>(type);
+      bind.condition_value = bind.condition == pup_bind::bind_condition::player_class ? static_cast<int>(tf_class::SCOUT) : 0;
       bind.toggle_state = false;
       bind.was_down = false;
       bind.press_pending = false;
@@ -2759,11 +2759,11 @@ static void draw_binds_content() {
     }
     apply_condition_change(bind);
     switch (bind.condition) {
-    case cat_bind::bind_condition::key:
+    case pup_bind::bind_condition::key:
     {
       int mode = static_cast<int>(bind.key_mode);
       if (mono::select_single("Behavior", &mode, { { "Hold", 0 }, { "Toggle", 1 }, { "Double click", 2 } })) {
-        bind.key_mode = static_cast<cat_bind::bind_key_mode>(mode);
+        bind.key_mode = static_cast<pup_bind::bind_key_mode>(mode);
         bind.toggle_state = false;
         bind.was_down = false;
         bind.press_pending = false;
@@ -2771,28 +2771,28 @@ static void draw_binds_content() {
       }
       break;
     }
-    case cat_bind::bind_condition::player_class:
+    case pup_bind::bind_condition::player_class:
       changed = mono::select_single("Class", &bind.condition_value, class_items) || changed;
       break;
-    case cat_bind::bind_condition::weapon_type:
+    case pup_bind::bind_condition::weapon_type:
       changed = mono::select_single("Weapon type", &bind.condition_value, { { "Hitscan", 0 }, { "Projectile", 1 }, { "Melee", 2 }, { "Throwable", 3 } }) || changed;
       break;
-    case cat_bind::bind_condition::item_slot:
+    case pup_bind::bind_condition::item_slot:
     {
       std::vector<std::pair<std::string, int>> slots{};
       for (int slot{}; slot < 9; ++slot) slots.emplace_back(std::to_string(slot + 1), slot);
       changed = mono::select_single("Item slot", &bind.condition_value, slots) || changed;
       break;
     }
-    case cat_bind::bind_condition::misc:
+    case pup_bind::bind_condition::misc:
       changed = mono::select_single("Misc", &bind.condition_value, { { "Spectated", 0 }, { "Spectated 1st", 1 }, { "Spectated 3rd", 2 }, { "Zoomed", 3 }, { "Aiming", 4 } }) || changed;
       break;
     }
     return changed;
   };
 
-  cat_menu::begin_flow_layout("bind_settings_layout", 1);
-  cat_menu::flow_panel("Settings", 0, 92.0f, [&] {
+  pup_menu::begin_flow_layout("bind_settings_layout", 1);
+  pup_menu::flow_panel("Settings", 0, 92.0f, [&] {
     if (ImGui::BeginTable("bind_window_settings", 3, ImGuiTableFlags_SizingStretchSame)) {
       ImGui::TableNextColumn();
       if (mono::toggle("Bind window", &config.misc.menu.bind_window)) {}
@@ -2803,14 +2803,14 @@ static void draw_binds_content() {
       ImGui::EndTable();
     }
   });
-  cat_menu::end_flow_layout();
+  pup_menu::end_flow_layout();
 
   mono::begin_panel("Binds", { 0.0f, 0.0f });
   if (ImGui::BeginTable("bind_form", 2, ImGuiTableFlags_SizingStretchSame)) {
     ImGui::TableNextColumn();
     if (mono::input_string("Name", &draft.name)) {}
     {
-      const cat_bind::bind_entry* parent = cat_bind::find_entry(draft.parent_id);
+      const pup_bind::bind_entry* parent = pup_bind::find_entry(draft.parent_id);
       std::string parent_label = "Parent: ";
       parent_label += picking_parent ? "..." : parent != nullptr ? parent->name : "None";
       if (mono::button(parent_label.c_str(), { -1.0f, 22.0f })) picking_parent = 2;
@@ -2822,34 +2822,34 @@ static void draw_binds_content() {
     if (mono::select_single("While", &invert, { { "Active", 0 }, { "Not active", 1 } })) draft.inverted = invert != 0;
     int visibility = static_cast<int>(draft.visibility);
     if (mono::select_single("Visibility", &visibility, { { "Always", 0 }, { "While active", 1 }, { "Hidden", 2 } })) {
-      draft.visibility = static_cast<cat_bind::bind_visibility>(visibility);
+      draft.visibility = static_cast<pup_bind::bind_visibility>(visibility);
     }
-    if (draft.condition == cat_bind::bind_condition::key) {
+    if (draft.condition == pup_bind::bind_condition::key) {
       if (draft.waiting) ImGui::TextDisabled("Press a key or mouse button...");
-      else cat_menu::input_key("Key", &draft.key);
+      else pup_menu::input_key("Key", &draft.key);
     }
 
-    const bool modifying = selected_id != 0 && cat_bind::find_entry(selected_id) != nullptr;
-    const bool parent_ok = draft.parent_id == 0 || cat_bind::find_entry(draft.parent_id) != nullptr;
-    const bool can_create = parent_ok && (draft.condition != cat_bind::bind_condition::key || draft.key != SDLK_UNKNOWN);
+    const bool modifying = selected_id != 0 && pup_bind::find_entry(selected_id) != nullptr;
+    const bool parent_ok = draft.parent_id == 0 || pup_bind::find_entry(draft.parent_id) != nullptr;
+    const bool can_create = parent_ok && (draft.condition != pup_bind::bind_condition::key || draft.key != SDLK_UNKNOWN);
     ImGui::BeginDisabled(!can_create);
-    if (cat_menu::icon_button(modifying ? ICON_MD_SETTINGS : ICON_MD_ADD, { 28.0f, 28.0f })) {
+    if (pup_menu::icon_button(modifying ? ICON_MD_SETTINGS : ICON_MD_ADD, { 28.0f, 28.0f })) {
       if (modifying) {
-        if (cat_bind::bind_entry* live = cat_bind::find_entry(selected_id)) {
+        if (pup_bind::bind_entry* live = pup_bind::find_entry(selected_id)) {
           copy_fields(*live, draft);
-          cat_bind::reparent(selected_id, draft.parent_id);
-          cat_bind::mark_dirty();
+          pup_bind::reparent(selected_id, draft.parent_id);
+          pup_bind::mark_dirty();
         }
       } else {
-        const uint32_t id = cat_bind::add(draft.name.empty() ? "new bind" : draft.name, draft.parent_id);
-        if (cat_bind::bind_entry* live = cat_bind::find_entry(id)) copy_fields(*live, draft);
+        const uint32_t id = pup_bind::add(draft.name.empty() ? "new bind" : draft.name, draft.parent_id);
+        if (pup_bind::bind_entry* live = pup_bind::find_entry(id)) copy_fields(*live, draft);
       }
       reset_form();
     }
     ImGui::SetItemTooltip(modifying ? "Modify bind" : "Create bind");
     ImGui::EndDisabled();
     ImGui::SameLine();
-    if (cat_menu::icon_button(ICON_MD_CLEAR, { 28.0f, 28.0f })) reset_form();
+    if (pup_menu::icon_button(ICON_MD_CLEAR, { 28.0f, 28.0f })) reset_form();
     ImGui::SetItemTooltip("Clear");
     ImGui::EndTable();
   }
@@ -2870,7 +2870,7 @@ static void draw_binds_content() {
   uint32_t delete_id{};
 
   const std::function<void(uint32_t, int)> draw_tree = [&](const uint32_t parent, const int depth) {
-    for (cat_bind::bind_entry& bind : cat_bind::entries()) {
+    for (pup_bind::bind_entry& bind : pup_bind::entries()) {
       if (bind.parent_id != parent) continue;
       ImGui::PushID(static_cast<int>(bind.id));
       const float indent = 8.0f + 28.0f * static_cast<float>(std::min(depth, 3));
@@ -2888,13 +2888,13 @@ static void draw_binds_content() {
 
       std::string type{};
       std::string info{};
-      cat_bind::describe_bind(bind, type, info);
+      pup_bind::describe_bind(bind, type, info);
       const float icon_strip = 125.0f;
       const float text_width = std::max(24.0f, width - icon_strip);
-      const bool enabled_path = cat_bind::will_be_enabled(bind.id);
+      const bool enabled_path = pup_bind::will_be_enabled(bind.id);
       const ImU32 name_color = ImGui::GetColorU32(bind.active ? ImGuiCol_CheckMark : enabled_path ? ImGuiCol_Text : ImGuiCol_TextDisabled);
       const ImU32 detail_color = ImGui::GetColorU32(enabled_path ? ImGuiCol_Text : ImGuiCol_TextDisabled);
-      draw_list->AddText({ row_min.x + 8.0f, row_min.y + 7.0f }, name_color, cat_menu::truncate_ui_text(bind.name, text_width / 3.0f - 8.0f).c_str());
+      draw_list->AddText({ row_min.x + 8.0f, row_min.y + 7.0f }, name_color, pup_menu::truncate_ui_text(bind.name, text_width / 3.0f - 8.0f).c_str());
       draw_list->AddText({ row_min.x + text_width / 3.0f, row_min.y + 7.0f }, detail_color, type.c_str());
       draw_list->AddText({ row_min.x + text_width * 2.0f / 3.0f, row_min.y + 7.0f }, detail_color, info.c_str());
 
@@ -2908,27 +2908,27 @@ static void draw_binds_content() {
       const auto place_icon = [&](const char* icon) {
         ImGui::SetCursorScreenPos({ row_min.x + icon_x, row_min.y + 3.0f });
         icon_x -= 25.0f;
-        return cat_menu::icon_button(icon, { 22.0f, 22.0f });
+        return pup_menu::icon_button(icon, { 22.0f, 22.0f });
       };
       ImGui::SetCursorScreenPos({ row_min.x + width - 125.0f, row_min.y });
       const bool pressed_delete = place_icon(ICON_MD_DELETE);
       if (place_icon(ICON_MD_EDIT)) {
-        cat_bind::set_editing(cat_bind::editing() == bind.id ? 0 : bind.id);
+        pup_bind::set_editing(pup_bind::editing() == bind.id ? 0 : bind.id);
       }
       if (place_icon(bind.inverted ? ICON_MD_CODE_OFF : ICON_MD_CODE)) {
         bind.inverted = !bind.inverted;
         if (selected_id == bind.id) draft.inverted = bind.inverted;
-        cat_bind::mark_dirty();
+        pup_bind::mark_dirty();
       }
-      if (place_icon(bind.visibility == cat_bind::bind_visibility::always ? ICON_MD_VISIBILITY : ICON_MD_VISIBILITY_OFF)) {
-        bind.visibility = static_cast<cat_bind::bind_visibility>((static_cast<int>(bind.visibility) + 1) % 3);
+      if (place_icon(bind.visibility == pup_bind::bind_visibility::always ? ICON_MD_VISIBILITY : ICON_MD_VISIBILITY_OFF)) {
+        bind.visibility = static_cast<pup_bind::bind_visibility>((static_cast<int>(bind.visibility) + 1) % 3);
         if (selected_id == bind.id) draft.visibility = bind.visibility;
-        cat_bind::mark_dirty();
+        pup_bind::mark_dirty();
       }
       if (place_icon(bind.enabled ? ICON_MD_TOGGLE_ON : ICON_MD_TOGGLE_OFF)) {
         bind.enabled = !bind.enabled;
         if (selected_id == bind.id) draft.enabled = bind.enabled;
-        cat_bind::mark_dirty();
+        pup_bind::mark_dirty();
       }
 
       if (row_clicked) {
@@ -2938,7 +2938,7 @@ static void draw_binds_content() {
           draft = bind;
         } else {
           picking_parent = 0;
-          if (selected_id == 0 || !cat_bind::would_cycle_parent(selected_id, bind.id)) draft.parent_id = bind.id;
+          if (selected_id == 0 || !pup_bind::would_cycle_parent(selected_id, bind.id)) draft.parent_id = bind.id;
           else draft.parent_id = 0;
         }
       } else if (row_right) {
@@ -2949,7 +2949,7 @@ static void draw_binds_content() {
       }
 
       if (pressed_delete) {
-        if ((bind.overrides.empty() && !cat_bind::has_children(bind.id)) || ImGui::GetIO().KeyShift) {
+        if ((bind.overrides.empty() && !pup_bind::has_children(bind.id)) || ImGui::GetIO().KeyShift) {
           delete_id = bind.id;
         } else {
           ImGui::OpenPopup("DeleteBind");
@@ -2969,15 +2969,15 @@ static void draw_binds_content() {
           changed = true;
         }
         changed = draw_condition_fields(bind) || changed;
-        if (bind.condition == cat_bind::bind_condition::key && cat_menu::input_key("Key", &bind.key)) changed = true;
+        if (bind.condition == pup_bind::bind_condition::key && pup_menu::input_key("Key", &bind.key)) changed = true;
         if (changed) {
           if (selected_id == bind.id) copy_fields(draft, bind);
-          cat_bind::mark_dirty();
+          pup_bind::mark_dirty();
         }
         ImGui::EndPopup();
       }
       if (ImGui::BeginPopupModal("DeleteBind", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("Do you really want to delete '%s'%s?", bind.name.c_str(), cat_bind::has_children(bind.id) ? " and all of its children" : "");
+        ImGui::Text("Do you really want to delete '%s'%s?", bind.name.c_str(), pup_bind::has_children(bind.id) ? " and all of its children" : "");
         if (mono::button("Yes", { 80.0f, 22.0f })) {
           delete_id = bind.id;
           ImGui::CloseCurrentPopup();
@@ -2996,22 +2996,22 @@ static void draw_binds_content() {
   draw_tree(0, 0);
 
   std::vector<uint32_t> dangling{};
-  for (const cat_bind::bind_entry& bind : cat_bind::entries()) {
-    if (bind.parent_id != 0 && cat_bind::find_entry(bind.parent_id) == nullptr) dangling.push_back(bind.id);
+  for (const pup_bind::bind_entry& bind : pup_bind::entries()) {
+    if (bind.parent_id != 0 && pup_bind::find_entry(bind.parent_id) == nullptr) dangling.push_back(bind.id);
   }
   if (!dangling.empty()) {
     ImGui::TextDisabled("Dangling");
     for (const uint32_t id : dangling) {
-      if (cat_bind::bind_entry* bind = cat_bind::find_entry(id)) bind->parent_id = 0;
+      if (pup_bind::bind_entry* bind = pup_bind::find_entry(id)) bind->parent_id = 0;
     }
-    cat_bind::mark_dirty();
+    pup_bind::mark_dirty();
   }
 
   if (dragging_id != 0) {
     const float mouse_y = ImGui::GetIO().MousePos.y;
     for (const bind_row_hit& hit : hits) {
       if (hit.parent == dragging_parent && hit.id != dragging_id && mouse_y >= hit.min_y && mouse_y < hit.max_y) {
-        cat_bind::move(dragging_id, hit.id);
+        pup_bind::move(dragging_id, hit.id);
         break;
       }
     }
@@ -3019,8 +3019,8 @@ static void draw_binds_content() {
 
   if (delete_id != 0) {
     if (selected_id == delete_id) reset_form();
-    if (cat_bind::editing() == delete_id) cat_bind::set_editing(0);
-    cat_bind::remove(delete_id);
+    if (pup_bind::editing() == delete_id) pup_bind::set_editing(0);
+    pup_bind::remove(delete_id);
   }
 
   if (picking_parent == 2) picking_parent = 1;
@@ -3029,7 +3029,7 @@ static void draw_binds_content() {
     draft.parent_id = 0;
   }
 
-  if (cat_bind::bind_entry* selected = cat_bind::find_entry(selected_id)) {
+  if (pup_bind::bind_entry* selected = pup_bind::find_entry(selected_id)) {
     ImGui::Dummy(ImVec2(0.0f, 8.0f));
     ImGui::TextDisabled("Feature overrides");
     if (selected->overrides.empty()) {
@@ -3037,52 +3037,52 @@ static void draw_binds_content() {
     }
     std::string override_to_clear{};
     for (const auto& [target_key, value] : selected->overrides) {
-      const cat_bind::target_entry* target = cat_bind::find_target(target_key);
-      ImGui::BulletText("%s = %s", target != nullptr ? target->label.c_str() : target_key.c_str(), cat_bind::format_bind_value(value).c_str());
+      const pup_bind::target_entry* target = pup_bind::find_target(target_key);
+      ImGui::BulletText("%s = %s", target != nullptr ? target->label.c_str() : target_key.c_str(), pup_bind::format_bind_value(value).c_str());
       ImGui::SameLine();
       ImGui::PushID(target_key.c_str());
       if (ImGui::SmallButton("clear")) override_to_clear = target_key;
       ImGui::PopID();
     }
-    if (!override_to_clear.empty()) cat_bind::clear_override(selected->id, override_to_clear);
-    if (cat_bind::editing() == selected->id) {
-      if (mono::button("done editing", { 160.0f, 22.0f })) cat_bind::set_editing(0);
+    if (!override_to_clear.empty()) pup_bind::clear_override(selected->id, override_to_clear);
+    if (pup_bind::editing() == selected->id) {
+      if (mono::button("done editing", { 160.0f, 22.0f })) pup_bind::set_editing(0);
     }
   }
   mono::end_panel();
 }
 
-enum cathook_tab_id
+enum puphook_tab_id
 {
-  cathook_tab_aimbot,
-  cathook_tab_automation,
-  cathook_tab_exploits,
-  cathook_tab_visuals,
-  cathook_tab_misc,
-  cathook_tab_binds,
-  cathook_tab_settings
+  puphook_tab_aimbot,
+  puphook_tab_automation,
+  puphook_tab_exploits,
+  puphook_tab_visuals,
+  puphook_tab_misc,
+  puphook_tab_binds,
+  puphook_tab_settings
 };
 
-static void draw_settings_content(const cathook_tab_id tab, const int section, const int settings_section) {
+static void draw_settings_content(const puphook_tab_id tab, const int section, const int settings_section) {
   enforce_insider_settings_lock(config);
 
   switch (tab) {
-  case cathook_tab_aimbot:    draw_combat_tab(section); break;
-  case cathook_tab_automation: draw_automation_tab(section); break;
-  case cathook_tab_exploits:  draw_exploits_content(); break;
-  case cathook_tab_visuals:   draw_visuals_tab(section); break;
-  case cathook_tab_misc:
+  case puphook_tab_aimbot:    draw_combat_tab(section); break;
+  case puphook_tab_automation: draw_automation_tab(section); break;
+  case puphook_tab_exploits:  draw_exploits_content(); break;
+  case puphook_tab_visuals:   draw_visuals_tab(section); break;
+  case puphook_tab_misc:
     draw_movement_content();
     break;
-  case cathook_tab_binds:     draw_binds_content(); break;
-  case cathook_tab_settings:  draw_system_tab(settings_section); break;
+  case puphook_tab_binds:     draw_binds_content(); break;
+  case puphook_tab_settings:  draw_system_tab(settings_section); break;
   }
 }
 
 static void warmup_bind_targets()
 {
   visual_groups::ensure_defaults();
-  if (cat_bind::disabled() || cat_bind::targets_warmed() || ImGui::GetCurrentContext() == nullptr) return;
+  if (pup_bind::disabled() || pup_bind::targets_warmed() || ImGui::GetCurrentContext() == nullptr) return;
 
   const ImVec2 display_size = ImGui::GetIO().DisplaySize;
   ImGui::SetNextWindowPos({ 0.0f, 0.0f }, ImGuiCond_Always);
@@ -3095,95 +3095,95 @@ static void warmup_bind_targets()
     ImGuiWindowFlags_NoSavedSettings |
     ImGuiWindowFlags_NoBringToFrontOnFocus;
 
-  if (!ImGui::Begin("##cathook_bind_target_warmup", nullptr, flags)) {
+  if (!ImGui::Begin("##puphook_bind_target_warmup", nullptr, flags)) {
     ImGui::End();
     return;
   }
 
   ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.0f);
-  cat_bind::target_registration_scope registration{};
+  pup_bind::target_registration_scope registration{};
 
-  draw_combat_tab(cat_menu::combat_subtab_aimbot);
-  draw_combat_tab(cat_menu::combat_subtab_weapons);
-  draw_combat_tab(cat_menu::combat_subtab_overlay);
-  draw_automation_tab(cat_menu::automation_subtab_general);
-  draw_automation_tab(cat_menu::automation_subtab_queue);
-  draw_automation_tab(cat_menu::automation_subtab_chat);
-  draw_automation_tab(cat_menu::automation_subtab_items);
-  draw_automation_tab(cat_menu::automation_subtab_navbot);
-  draw_automation_tab(cat_menu::automation_subtab_medic);
-  draw_automation_tab(cat_menu::automation_subtab_ipc);
+  draw_combat_tab(pup_menu::combat_subtab_aimbot);
+  draw_combat_tab(pup_menu::combat_subtab_weapons);
+  draw_combat_tab(pup_menu::combat_subtab_overlay);
+  draw_automation_tab(pup_menu::automation_subtab_general);
+  draw_automation_tab(pup_menu::automation_subtab_queue);
+  draw_automation_tab(pup_menu::automation_subtab_chat);
+  draw_automation_tab(pup_menu::automation_subtab_items);
+  draw_automation_tab(pup_menu::automation_subtab_navbot);
+  draw_automation_tab(pup_menu::automation_subtab_medic);
+  draw_automation_tab(pup_menu::automation_subtab_ipc);
   draw_exploits_content();
-  draw_visuals_tab(cat_menu::visuals_subtab_profiles);
-  draw_visuals_tab(cat_menu::visuals_subtab_world);
-  draw_visuals_tab(cat_menu::visuals_subtab_hud);
-  draw_visuals_tab(cat_menu::visuals_subtab_models);
+  draw_visuals_tab(pup_menu::visuals_subtab_profiles);
+  draw_visuals_tab(pup_menu::visuals_subtab_world);
+  draw_visuals_tab(pup_menu::visuals_subtab_hud);
+  draw_visuals_tab(pup_menu::visuals_subtab_models);
   draw_movement_content();
 
-  int& selected_group = cat_menu::selected_visual_group();
+  int& selected_group = pup_menu::selected_visual_group();
   const int previous_group = selected_group;
   const int group_count = static_cast<int>(config.visual_groups.groups.size());
   for (int index = 0; index < group_count; ++index) {
     selected_group = index;
     ImGui::PushID(index);
-    draw_visuals_tab(cat_menu::visuals_subtab_profiles);
+    draw_visuals_tab(pup_menu::visuals_subtab_profiles);
     ImGui::PopID();
   }
   selected_group = previous_group;
 
   ImGui::PopStyleVar();
   ImGui::End();
-  cat_bind::targets_warmed() = true;
+  pup_bind::targets_warmed() = true;
 }
 
 static void draw_menu(void) {
-  cat_bind::set_menu_open(menu_focused || player_manager_window_open);
+  pup_bind::set_menu_open(menu_focused || player_manager_window_open);
   set_imgui_theme();
 
   static mono::menu_state menu_state{};
   static mono::menu_state player_manager_state{};
-  static cathook_tab_id tab{ cathook_tab_aimbot };
+  static puphook_tab_id tab{ puphook_tab_aimbot };
   static int aimbot_section{};
   static int automation_section{};
   static int visuals_section{};
   static int settings_section{};
 
   const auto navbar_entry = [](const char* const label, const bool active, const char* const icon = nullptr) {
-    return mono::navbar_entry(label, active, icon, cat_menu::font_icons());
+    return mono::navbar_entry(label, active, icon, pup_menu::font_icons());
   };
   const auto subnavbar_entry = [](const char* const label, const bool active) {
-    return mono::subnavbar_entry(label, active, nullptr, cat_menu::font_icons());
+    return mono::subnavbar_entry(label, active, nullptr, pup_menu::font_icons());
   };
 
   if (menu_focused) {
-  const std::string editing_name = cat_bind::editing_name();
+  const std::string editing_name = pup_bind::editing_name();
   const bool visible = mono::begin_menu(
     {
       .id = "monolilth",
-      .title = "cathook",
-      .preferred_size = cat_menu::k_menu_size,
+      .title = "puphook",
+      .preferred_size = pup_menu::k_menu_size,
       .navbar_height = 42.0f,
       .subnavbar_height = 32.0f,
-      .show_subnavbar = tab != cathook_tab_exploits && tab != cathook_tab_binds && tab != cathook_tab_misc,
+      .show_subnavbar = tab != puphook_tab_exploits && tab != puphook_tab_binds && tab != puphook_tab_misc,
       .viewport_padding = 8.0f,
       .background_alpha = 0.80f
     },
     menu_state,
     [&] {
-      auto select = [&](const cathook_tab_id value, const char* const label, const char* const icon) {
+      auto select = [&](const puphook_tab_id value, const char* const label, const char* const icon) {
         if (navbar_entry(label, tab == value, icon) && tab != value) {
           tab = value;
           menu_state.reset_scroll = true;
         }
       };
 
-      select(cathook_tab_aimbot, "Combat", ICON_MD_GPS_FIXED);
-      select(cathook_tab_automation, "Automation", ICON_MD_AUTORENEW);
-      select(cathook_tab_exploits, "Exploits", ICON_MD_BOLT);
-      select(cathook_tab_visuals, "Visuals", ICON_MD_VISIBILITY);
-      select(cathook_tab_misc, "Movement", ICON_MD_DIRECTIONS_RUN);
-      select(cathook_tab_binds, "Binds", ICON_MD_VPN_KEY);
-      select(cathook_tab_settings, "Settings", ICON_MD_SETTINGS);
+      select(puphook_tab_aimbot, "Combat", ICON_MD_GPS_FIXED);
+      select(puphook_tab_automation, "Automation", ICON_MD_AUTORENEW);
+      select(puphook_tab_exploits, "Exploits", ICON_MD_BOLT);
+      select(puphook_tab_visuals, "Visuals", ICON_MD_VISIBILITY);
+      select(puphook_tab_misc, "Movement", ICON_MD_DIRECTIONS_RUN);
+      select(puphook_tab_binds, "Binds", ICON_MD_VPN_KEY);
+      select(puphook_tab_settings, "Settings", ICON_MD_SETTINGS);
     },
     [&] {
       const auto select_section = [&](int& current, const int value, const char* const label) {
@@ -3193,34 +3193,34 @@ static void draw_menu(void) {
         }
       };
       switch (tab) {
-      case cathook_tab_aimbot:
-        select_section(aimbot_section, cat_menu::combat_subtab_aimbot, "Aimbot");
-        select_section(aimbot_section, cat_menu::combat_subtab_weapons, "Weapons");
-        select_section(aimbot_section, cat_menu::combat_subtab_overlay, "Overlay");
+      case puphook_tab_aimbot:
+        select_section(aimbot_section, pup_menu::combat_subtab_aimbot, "Aimbot");
+        select_section(aimbot_section, pup_menu::combat_subtab_weapons, "Weapons");
+        select_section(aimbot_section, pup_menu::combat_subtab_overlay, "Overlay");
         break;
-      case cathook_tab_automation:
-        select_section(automation_section, cat_menu::automation_subtab_general, "General");
-        select_section(automation_section, cat_menu::automation_subtab_queue, "Queue");
-        select_section(automation_section, cat_menu::automation_subtab_chat, "Chat");
-        select_section(automation_section, cat_menu::automation_subtab_items, "Items");
-        select_section(automation_section, cat_menu::automation_subtab_navbot, "Navbot");
-        select_section(automation_section, cat_menu::automation_subtab_medic, "Medic");
-        select_section(automation_section, cat_menu::automation_subtab_ipc, "IPC");
+      case puphook_tab_automation:
+        select_section(automation_section, pup_menu::automation_subtab_general, "General");
+        select_section(automation_section, pup_menu::automation_subtab_queue, "Queue");
+        select_section(automation_section, pup_menu::automation_subtab_chat, "Chat");
+        select_section(automation_section, pup_menu::automation_subtab_items, "Items");
+        select_section(automation_section, pup_menu::automation_subtab_navbot, "Navbot");
+        select_section(automation_section, pup_menu::automation_subtab_medic, "Medic");
+        select_section(automation_section, pup_menu::automation_subtab_ipc, "IPC");
         break;
-      case cathook_tab_visuals:
-        select_section(visuals_section, cat_menu::visuals_subtab_profiles, "Profiles");
-        select_section(visuals_section, cat_menu::visuals_subtab_world, "World");
-        select_section(visuals_section, cat_menu::visuals_subtab_hud, "HUD");
-        select_section(visuals_section, cat_menu::visuals_subtab_models, "Models");
+      case puphook_tab_visuals:
+        select_section(visuals_section, pup_menu::visuals_subtab_profiles, "Profiles");
+        select_section(visuals_section, pup_menu::visuals_subtab_world, "World");
+        select_section(visuals_section, pup_menu::visuals_subtab_hud, "HUD");
+        select_section(visuals_section, pup_menu::visuals_subtab_models, "Models");
         break;
-      case cathook_tab_settings:
+      case puphook_tab_settings:
         select_section(settings_section, 0, "Configurations");
         select_section(settings_section, 1, "Materials");
         select_section(settings_section, 2, "Interface");
         break;
-      case cathook_tab_misc:
-      case cathook_tab_exploits:
-      case cathook_tab_binds:
+      case puphook_tab_misc:
+      case puphook_tab_exploits:
+      case puphook_tab_binds:
         break;
       }
     },
@@ -3228,13 +3228,13 @@ static void draw_menu(void) {
       .label = "editing bind",
       .value = editing_name,
       .action = "done",
-      .on_action = [] { cat_bind::set_editing(0); }
+      .on_action = [] { pup_bind::set_editing(0); }
     });
 
   if (visible) {
-    draw_settings_content(tab, tab == cathook_tab_visuals ? visuals_section : tab == cathook_tab_aimbot ? aimbot_section :
-      tab == cathook_tab_automation ? automation_section : 0, settings_section);
-    cat_bind::draw_popup();
+    draw_settings_content(tab, tab == puphook_tab_visuals ? visuals_section : tab == puphook_tab_aimbot ? aimbot_section :
+      tab == puphook_tab_automation ? automation_section : 0, settings_section);
+    pup_bind::draw_popup();
   }
   mono::end_menu(visible);
   }
@@ -3242,13 +3242,13 @@ static void draw_menu(void) {
   if (player_manager_window_open) {
     if (!player_manager_state.position_initialized) {
       player_manager_state.position = {
-        menu_state.position.x + cat_menu::k_menu_size.x + 24.0f,
+        menu_state.position.x + pup_menu::k_menu_size.x + 24.0f,
         menu_state.position.y
       };
     }
     const bool player_visible = mono::begin_menu(
       {
-        .id = "cathook_player_manager##mono_menu",
+        .id = "puphook_player_manager##mono_menu",
         .title = "Player Manager",
         .preferred_size = { 720.0f, 540.0f },
         .show_subnavbar = false,
@@ -3263,13 +3263,13 @@ static void draw_menu(void) {
         .action = "close",
         .on_action = [] {
           player_manager_window_open = false;
-          cat_bind::set_menu_open(menu_focused);
+          pup_bind::set_menu_open(menu_focused);
           if (!menu_focused && surface != nullptr) {
             surface->set_cursor_visible(false);
           }
         }
       });
-    if (player_visible) cat_menu::draw_player_window_content();
+    if (player_visible) pup_menu::draw_player_window_content();
     mono::end_menu(player_visible);
   }
 }

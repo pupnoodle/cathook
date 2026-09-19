@@ -29,7 +29,7 @@ public:
         return 0;
       }
       const auto* fn = static_cast<const std::uint8_t*>(vtable[12]);
-      return cathook::core::memory::member_store_of_arg(fn, fn + 0x80, 6);
+      return puphook::core::memory::member_store_of_arg(fn, fn + 0x80, 6);
     }();
     if (host_offset <= 0) {
       return nullptr;
