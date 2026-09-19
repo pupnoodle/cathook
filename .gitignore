@@ -292,3 +292,6 @@ scripts/updater-preferences
 
 # clangd
 .cache
+# Runtime-generated config autosaves
+data/configs/autosaves/
+*.autosave.conf
