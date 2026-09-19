@@ -1,7 +1,7 @@
 # Cathook Training Software
 ![banner](https://user-images.githubusercontent.com/13179138/134817300-d4865695-af33-4e83-a017-5ec0d31ea0a1.png)
 
-[![CircleCI](https://circleci.com/gh/nullworks/cathook.svg?style=svg)](https://circleci.com/gh/nullworks/cathook)
+The port itself is made with ai.
 
 ## Risk of VAC detection
 
@@ -29,19 +29,18 @@ and a lot of useful features, including
 * Automatic matchmaking
 * And many more features!
 
-[FULL LIST OF FEATURES HERE](https://github.com/nullworks/cathook/wiki/Feature-List-and-explanations)
+[FULL LIST OF FEATURES HERE](xxx)
 
 # Installing, updating, attaching (injecting)
 
-[View our short guide to installing and using cathook](https://github.com/nullworks/cathook/wiki/Installing,-Attaching-And-General-Infos)
+[View our short guide to installing and using cathook](xxxxx)
 
 ## Community
-You can chat with other cathook users in [our official Telegram group](https://t.me/nullworks) and the [cathook announcements channel](https://t.me/cathook_cheat).
-If you don't have Telegram, you can chat with other cathook users in our official Matrix room, however, you will have to ask TotallyNotElite or BenCat07 for an invite to said room.
+dsc.gg/unibox
 
 ## Reporting Issues
 
-If some things doesn't work as expected, please open issues on GitHub using [this page](https://github.com/nullworks/cathook/issues).
+If some things doesn't work as expected, please open issues on GitHub using [this page](https://github.com/pupnoodle/cathook/issues).
 
 ## Contributing
 
