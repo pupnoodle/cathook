@@ -291,10 +291,6 @@ public:
         Vector close(0.0f);
         float x, y, z;
 
-        assert(point.x >= 0 && point.y >= 0);
-        assert(m_nwCorner.x >= 0 && m_nwCorner.y >= 0);
-        assert(m_seCorner.x >= 0 && m_seCorner.y >= 0);
-
         x = std::clamp(point.x, m_nwCorner.x, m_seCorner.x);
 
         y = std::clamp(point.y, m_nwCorner.y, m_seCorner.y);
