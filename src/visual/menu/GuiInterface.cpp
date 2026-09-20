@@ -8,6 +8,7 @@
 #include <menu/menu/special/SettingsManagerList.hpp>
 #include <menu/menu/special/ConfigsManagerList.hpp>
 #include <menu/menu/special/PlayerListController.hpp>
+#include <menu/menu/special/SkinChangerController.hpp>
 #include <hack.hpp>
 #include <common.hpp>
 
@@ -17,6 +18,7 @@ static bool init_done{ false };
 static bool listener_added{ false };
 
 static std::unique_ptr<zerokernel::special::PlayerListController> controller{ nullptr };
+static std::unique_ptr<zerokernel::special::SkinChangerController> skin_controller{ nullptr };
 
 static zerokernel::special::PlayerListData createPlayerListData(int userid)
 {
@@ -188,6 +190,12 @@ static void load()
 
     initPlayerlist();
 
+    auto skinchanger_list = dynamic_cast<zerokernel::Container *>(zerokernel::Menu::instance->wm->getElementById("skinchanger-controls"));
+    if (skinchanger_list)
+        skin_controller = std::make_unique<zerokernel::special::SkinChangerController>(*skinchanger_list);
+    else
+        logging::Info("skinchanger-controls element not found\n");
+
     zerokernel::Menu::instance->update();
     zerokernel::Menu::instance->setInGame(true);
 }
@@ -224,6 +232,8 @@ void gui::draw()
         return;
 
     zerokernel::Menu::instance->update();
+    if (skin_controller)
+        skin_controller->update();
     zerokernel::Menu::instance->render();
 }
 

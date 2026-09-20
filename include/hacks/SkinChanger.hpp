@@ -125,4 +125,26 @@ void Load(std::string filename, bool merge = false);
 
 void FrameStageNotify(int stage);
 void DrawText();
+
+constexpr int defaults_key = -1;
+
+struct SkinConfig
+{
+    int paintkit{ 0 };
+    float wear{ 0.0f };
+    int seed{ 0 };
+    int quality{ -1 };
+    bool festive{ false };
+    bool australium{ false };
+    int killstreak{ 0 };
+    int sheen{ 0 };
+    int unusual{ 0 };
+};
+SkinConfig GetSkinConfig(int key);
+void SetSkinConfig(int key, const SkinConfig &skin);
+int ActiveSkinKey();
+bool ConsumeMenuDirty();
+const char *weapon_label(int skin_key);
+const char *kit_name(int id);
+void get_kits(int skin_key, std::vector<const char *> &names, std::vector<int> &ids);
 } // namespace hacks::tf2::skinchanger

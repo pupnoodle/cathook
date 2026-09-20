@@ -1,7 +1,10 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <mutex>
+#include <vector>
 
 #include "bytepatch.hpp"
 #include "funchook.h"
@@ -13,6 +16,18 @@ class DetourHook
     funchook_t *fh{ nullptr };
     void *orig_func{ nullptr };
     void *hook_fn{ nullptr };
+
+    static std::vector<DetourHook *> &registry()
+    {
+        static std::vector<DetourHook *> hooks;
+        return hooks;
+    }
+
+    static std::mutex &registryMutex()
+    {
+        static std::mutex mutex;
+        return mutex;
+    }
 
 public:
     DetourHook() = default;
@@ -44,7 +59,12 @@ public:
             funchook_destroy(fh);
             fh        = nullptr;
             orig_func = nullptr;
+            return;
         }
+        std::lock_guard<std::mutex> lock(registryMutex());
+        auto &hooks = registry();
+        if (std::find(hooks.begin(), hooks.end(), this) == hooks.end())
+            hooks.push_back(this);
     }
 
     void InitBytepatch() {}
@@ -57,6 +77,13 @@ public:
         funchook_destroy(fh);
         fh        = nullptr;
         orig_func = nullptr;
+    }
+
+    static void ShutdownAll()
+    {
+        std::lock_guard<std::mutex> lock(registryMutex());
+        for (DetourHook *hook : registry())
+            hook->Shutdown();
     }
 
     ~DetourHook()

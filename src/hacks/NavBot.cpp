@@ -465,6 +465,12 @@ enum slots
 #if ENABLE_VISUALS
 std::vector<Vector> slight_danger_drawlist_normal;
 std::vector<Vector> slight_danger_drawlist_dormant;
+static std::mutex navbot_draw_mutex;
+static std::vector<std::string> debug_lines_snapshot;
+static std::vector<Vector> danger_normal_snapshot;
+static std::vector<Vector> danger_dormant_snapshot;
+static std::vector<Vector> blacklist_snapshot;
+static bool nav_ready_snapshot = false;
 #endif
 static Timer blacklist_update_timer{};
 static Timer dormant_update_timer{};
@@ -1585,9 +1591,16 @@ static void updateSlot(std::pair<CachedEntity *, float> &nearest)
 static const char *active_task     = "init";
 static unsigned long long cm_calls = 0;
 
+#if ENABLE_VISUALS
+static void updateDrawSnapshot();
+#endif
+
 static void CreateMove()
 {
     ++cm_calls;
+#if ENABLE_VISUALS
+    updateDrawSnapshot();
+#endif
     if (!enabled)
     {
         active_task = "disabled";
@@ -1701,36 +1714,52 @@ std::vector<std::string> getDebugInfoLines()
     return lines;
 }
 
+#if ENABLE_VISUALS
+static void updateDrawSnapshot()
+{
+    std::lock_guard<std::mutex> lock(navbot_draw_mutex);
+    nav_ready_snapshot      = navparser::NavEngine::isReady();
+    debug_lines_snapshot    = getDebugInfoLines();
+    danger_normal_snapshot  = slight_danger_drawlist_normal;
+    danger_dormant_snapshot = slight_danger_drawlist_dormant;
+    blacklist_snapshot.clear();
+    if (nav_ready_snapshot)
+        for (auto &area : *navparser::NavEngine::getFreeBlacklist())
+            blacklist_snapshot.push_back(area.first->m_center);
+}
+#endif
+
 void drawDebugInfo()
 {
 #if ENABLE_VISUALS
     AddSideString("--- NavBot ---", colors::gui);
-    for (auto &line : getDebugInfoLines())
+    std::lock_guard<std::mutex> lock(navbot_draw_mutex);
+    for (auto &line : debug_lines_snapshot)
         AddSideString(line);
 #endif
 }
 #if ENABLE_VISUALS
 void Draw()
 {
-    if (!draw_danger || !navparser::NavEngine::isReady())
+    std::lock_guard<std::mutex> lock(navbot_draw_mutex);
+    if (!draw_danger || !nav_ready_snapshot)
         return;
-    for (auto &area : slight_danger_drawlist_normal)
+    for (auto &area : danger_normal_snapshot)
     {
         Vector out;
         if (draw::WorldToScreen(area, out))
             draw::Rectangle(out.x - 2.0f, out.y - 2.0f, 4.0f, 4.0f, colors::orange);
     }
-    for (auto &area : slight_danger_drawlist_dormant)
+    for (auto &area : danger_dormant_snapshot)
     {
         Vector out;
         if (draw::WorldToScreen(area, out))
             draw::Rectangle(out.x - 2.0f, out.y - 2.0f, 4.0f, 4.0f, colors::orange);
     }
-    for (auto &area : *navparser::NavEngine::getFreeBlacklist())
+    for (auto &center : blacklist_snapshot)
     {
         Vector out;
-
-        if (draw::WorldToScreen(area.first->m_center, out))
+        if (draw::WorldToScreen(center, out))
             draw::Rectangle(out.x - 2.0f, out.y - 2.0f, 4.0f, 4.0f, colors::red);
     }
 }

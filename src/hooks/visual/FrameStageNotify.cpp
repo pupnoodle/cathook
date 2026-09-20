@@ -21,10 +21,17 @@ static settings::Rgba nightmode_skybox_color{ "visual.night-mode.skybox-color", 
 static settings::Boolean no_shake{ "visual.no-shake", "true" };
 static settings::Boolean override_textures{ "visual.override-textures", "false" };
 static settings::String override_textures_texture{ "visual.override-textures.custom-texture", "dev/dev_measuregeneric01b" };
+static settings::Int skybox_changer{ "misc.skybox-override", "0" };
+
+const char *skynum[] = { "", "sky_tf2_04", "sky_upward", "sky_dustbowl_01", "sky_goldrush_01", "sky_granary_01", "sky_well_01", "sky_gravel_01", "sky_badlands_01", "sky_hydro_01", "sky_night_01", "sky_nightfall_01", "sky_trainyard_01", "sky_stormfront_01", "sky_morningsnow_01", "sky_alpinestorm_01", "sky_harvest_01", "sky_harvest_night_01", "sky_halloween", "sky_halloween_night_01", "sky_halloween_night2014_01", "sky_island_01", "sky_jungle_01", "sky_invasion2fort_01", "sky_well_02", "sky_outpost_01", "sky_coastal_01", "sky_rainbow_01", "sky_badlands_pyroland_01", "sky_pyroland_01", "sky_pyroland_02", "sky_pyroland_03" };
 
 // Should we update?
 static bool update_nightmode         = false;
 static bool update_override_textures = false;
+static bool update_skybox            = false;
+static bool nightmode_applied        = false;
+static int skybox_retries            = 0;
+static bool skybox_overridden        = false;
 
 // Which strings trigger this nightmode option
 std::vector<std::string> world_strings         = { "World" };
@@ -91,7 +98,7 @@ DEFINE_HOOKED_METHOD(FrameStageNotify, void, void *this_, ClientFrameStage_t sta
         update_override_textures = false;
     }
 
-    if (update_nightmode && *nightmode_gui <= 0.0f && *nightmode_world <= 0.0f && *nightmode_skybox <= 0.0f)
+    if (update_nightmode && *nightmode_gui <= 0.0f && *nightmode_world <= 0.0f && *nightmode_skybox <= 0.0f && !nightmode_applied)
         update_nightmode = false;
 
     if (update_nightmode)
@@ -102,7 +109,8 @@ DEFINE_HOOKED_METHOD(FrameStageNotify, void, void *this_, ClientFrameStage_t sta
             r_DrawSpecificStaticProp = g_ICvar->FindVar("r_DrawSpecificStaticProp");
             return;
         }
-        r_DrawSpecificStaticProp->SetValue(0);
+        bool nightmode_enabled = *nightmode_gui > 0.0f || *nightmode_world > 0.0f || *nightmode_skybox > 0.0f;
+        r_DrawSpecificStaticProp->SetValue(nightmode_enabled ? 0 : -1);
 
         for (MaterialHandle_t i = g_IMaterialSystem->FirstMaterial(); i != g_IMaterialSystem->InvalidMaterial(); i = g_IMaterialSystem->NextMaterial(i))
         {
@@ -187,7 +195,40 @@ DEFINE_HOOKED_METHOD(FrameStageNotify, void, void *this_, ClientFrameStage_t sta
                 }
             }
         }
-        update_nightmode = false;
+        nightmode_applied = nightmode_enabled;
+        update_nightmode  = false;
+    }
+
+    if (update_skybox && g_IEngine->IsInGame())
+    {
+        typedef bool (*LoadNamedSkys_Fn)(const char *);
+        static LoadNamedSkys_Fn LoadNamedSkys = LoadNamedSkys_Fn(gSignatures.GetEngineSignature(sigs::load_named_skys));
+        const char *skyname = nullptr;
+        int idx             = (int) skybox_changer;
+        if (idx > 0 && idx < (int) (sizeof(skynum) / sizeof(*skynum)))
+            skyname = skynum[idx];
+        else if (skybox_overridden)
+        {
+            static ConVar *sv_skyname = g_ICvar->FindVar("sv_skyname");
+            if (sv_skyname)
+                skyname = sv_skyname->GetString();
+        }
+        if (!LoadNamedSkys || !skyname || !*skyname)
+        {
+            update_skybox  = false;
+            skybox_retries = 0;
+        }
+        else if (LoadNamedSkys(skyname))
+        {
+            skybox_overridden = idx > 0;
+            update_skybox     = false;
+            skybox_retries    = 0;
+        }
+        else if (++skybox_retries > 240)
+        {
+            update_skybox  = false;
+            skybox_retries = 0;
+        }
     }
 
     if (!g_IEngine->IsInGame())
@@ -232,12 +273,14 @@ static InitRoutine init_fsn(
         nightmode_skybox_color.installChangeCallback(rvarCallback<rgba_t>);
         override_textures.installChangeCallback([](settings::VariableBase<bool> &, bool after) { update_override_textures = true; });
         override_textures_texture.installChangeCallback([](settings::VariableBase<std::string> &, std::string after) { update_override_textures = true; });
+        skybox_changer.installChangeCallback([](settings::VariableBase<int> &, int after) { update_skybox = true; });
         EC::Register(
             EC::LevelInit,
             []()
             {
                 update_nightmode         = true;
                 update_override_textures = true;
+                update_skybox            = true;
             },
             "levelinit_fsn");
     });

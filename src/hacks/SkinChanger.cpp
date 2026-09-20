@@ -38,6 +38,13 @@ using ForceFullUpdate_t = void (*)(CBaseClientState *);
 static ForceFullUpdate_t ForceFullUpdateFn{ nullptr };
 
 static bool force_item_update = false;
+static bool menu_dirty = true;
+
+static void request_update()
+{
+    force_item_update = true;
+    menu_dirty        = true;
+}
 
 ItemSchemaPtr_t GetItemSchema(void)
 {
@@ -673,6 +680,8 @@ float int_bits(int value)
 
 const char *weapon_label(int skin_key)
 {
+    if (skin_key == defaults_key)
+        return "All weapons";
     switch (paint_family_of(skin_key))
     {
     case family_scattergun:
@@ -792,7 +801,7 @@ static CatCommand australize("australize", "Make everything australium",
                                      mod.Set(2022, int_bits(1));
                                      mod.Set(542, 1.0f);
                                  }
-                                 force_item_update = true;
+                                 request_update();
                              });
 static CatCommand set_attr("skinchanger_set", "Set attribute on active weapon. Format: <attr defindex> <attr value>",
                            [](const CCommand &args)
@@ -811,7 +820,7 @@ static CatCommand set_attr("skinchanger_set", "Set attribute on active weapon. F
                                    unsigned attrid = std::strtoul(args.Arg(1), nullptr, 10);
                                    float attrv     = std::strtof(args.Arg(2), nullptr);
                                    GetModifier(key).Set(attrid, attrv);
-                                   force_item_update = true;
+                                   request_update();
                                }
                                catch (const std::invalid_argument &)
                                {
@@ -834,7 +843,7 @@ static CatCommand remove_attr("skinchanger_remove", "Remove attribute",
                                       enable          = true;
                                       unsigned attrid = std::strtoul(args.Arg(1), nullptr, 10);
                                       GetModifier(key).Remove(attrid);
-                                      force_item_update = true;
+                                      request_update();
                                   }
                                   catch (const std::invalid_argument &)
                                   {
@@ -857,7 +866,7 @@ static CatCommand set_redirect("skinchanger_redirect", "Set Redirect",
                                        enable                                        = true;
                                        unsigned redirect                             = std::strtoul(args.Arg(1), nullptr, 10);
                                        GetModifier(defidx).defidx_redirect           = redirect;
-                                       force_item_update                             = true;
+                                       request_update();
                                    }
                                    catch (const std::invalid_argument &)
                                    {
@@ -906,7 +915,7 @@ static CatCommand load("skinchanger_load", "Load",
                                filename = args.Arg(1);
                            }
                            Load(filename);
-                           force_item_update = true;
+                           request_update();
                        });
 static CatCommand load_merge("skinchanger_load_merge", "Load with merge",
                              [](const CCommand &args)
@@ -918,7 +927,7 @@ static CatCommand load_merge("skinchanger_load_merge", "Load with merge",
                                      filename = args.Arg(1);
                                  }
                                  Load(filename, true);
-                                 force_item_update = true;
+                                 request_update();
                              });
 static CatCommand remove_redirect("skinchanger_remove_redirect", "Remove redirect",
                                   [](const CCommand &args)
@@ -935,7 +944,7 @@ static CatCommand remove_redirect("skinchanger_remove_redirect", "Remove redirec
                                           unsigned redirectid                     = std::strtoul(args.Arg(1), nullptr, 10);
                                           GetModifier(redirectid).defidx_redirect = 0;
                                           logging::Info("Redirect removed");
-                                          force_item_update = true;
+                                          request_update();
                                       }
                                       catch (const std::invalid_argument &)
                                       {
@@ -946,7 +955,7 @@ static CatCommand reset("skinchanger_reset", "Reset",
                         []()
                         {
                             modifier_map.clear();
-                            force_item_update = true;
+                            request_update();
                         });
 
 static CatCommand dump_itemdef("skinchanger_dump_def", "Dump CEconItemDefinition for the active weapon",
@@ -1040,7 +1049,7 @@ static CatCommand set_paint("skinchanger_paint", "Set warpaint on active weapon.
                                         set_attr_int(mod, attribute_seed, 0);
                                     logging::Info("Set kit %i on %s (%i)", kit, weapon_label(key), key);
                                 }
-                                force_item_update = true;
+                                request_update();
                             });
 static CatCommand set_wear("skinchanger_wear", "Set paint wear on active weapon (0.0 - 1.0)",
                            [](const CCommand &args)
@@ -1055,7 +1064,7 @@ static CatCommand set_wear("skinchanger_wear", "Set paint wear on active weapon 
                                }
                                enable = true;
                                GetModifier(key).Set(attribute_wear, std::clamp(std::strtof(args.Arg(1), nullptr), 0.0f, 1.0f));
-                               force_item_update = true;
+                               request_update();
                            });
 static CatCommand set_seed("skinchanger_seed", "Set paint seed on active weapon",
                            [](const CCommand &args)
@@ -1072,7 +1081,7 @@ static CatCommand set_seed("skinchanger_seed", "Set paint seed on active weapon"
                                auto &mod    = GetModifier(key);
                                set_attr_int(mod, attribute_seed, std::atoi(args.Arg(1)));
                                set_attr_int(mod, attribute_seed_hi, 0);
-                               force_item_update = true;
+                               request_update();
                            });
 static CatCommand set_quality("skinchanger_quality", "Set item quality on active weapon (-1 = automatic)",
                               [](const CCommand &args)
@@ -1087,7 +1096,7 @@ static CatCommand set_quality("skinchanger_quality", "Set item quality on active
                                   }
                                   enable                    = true;
                                   GetModifier(key).quality  = std::atoi(args.Arg(1));
-                                  force_item_update         = true;
+                                  request_update();
                               });
 static CatCommand set_australium("skinchanger_australium", "Toggle australium on active weapon",
                                  []()
@@ -1109,7 +1118,7 @@ static CatCommand set_australium("skinchanger_australium", "Toggle australium on
                                          set_attr_int(mod, attribute_loot_rarity, 1);
                                          mod.Set(attribute_style_override, 1.0f);
                                      }
-                                     force_item_update = true;
+                                     request_update();
                                  });
 static CatCommand set_festive("skinchanger_festive", "Toggle festivizer on active weapon",
                               []()
@@ -1123,7 +1132,7 @@ static CatCommand set_festive("skinchanger_festive", "Toggle festivizer on activ
                                       mod.Remove(attribute_festive);
                                   else
                                       mod.Set(attribute_festive, 1.0f);
-                                  force_item_update = true;
+                                  request_update();
                               });
 static CatCommand set_unusual("skinchanger_unusual", "Set unusual weapon effect on active weapon (0 = off, 1 = hot, 2 = isotope, 3 = cool, 4 = energy orb)",
                               [](const CCommand &args)
@@ -1143,7 +1152,7 @@ static CatCommand set_unusual("skinchanger_unusual", "Set unusual weapon effect 
                                       mod.Set(attribute_unusual_weapon, float(fx));
                                   else
                                       mod.Remove(attribute_unusual_weapon);
-                                  force_item_update = true;
+                                  request_update();
                               });
 static CatCommand set_killstreak("skinchanger_killstreak", "Set killstreak tier on active weapon (0 - 3)",
                                  [](const CCommand &args)
@@ -1170,7 +1179,7 @@ static CatCommand set_killstreak("skinchanger_killstreak", "Set killstreak tier 
                                          mod.Remove(attribute_killstreak_tier);
                                          mod.Remove(attribute_killstreak_sheen);
                                      }
-                                     force_item_update = true;
+                                     request_update();
                                  });
 static CatCommand set_sheen("skinchanger_sheen", "Set killstreak sheen on active weapon (0 - 7)",
                             [](const CCommand &args)
@@ -1190,7 +1199,7 @@ static CatCommand set_sheen("skinchanger_sheen", "Set killstreak sheen on active
                                     mod.Set(attribute_killstreak_sheen, float(sheen));
                                 else
                                     mod.Remove(attribute_killstreak_sheen);
-                                force_item_update = true;
+                                request_update();
                             });
 static CatCommand list_kits("skinchanger_kits", "List warpaints for the active weapon",
                             []()
@@ -1233,7 +1242,7 @@ void FrameStageNotify(int stage)
     {
         was_enabled       = bool(enable);
         was_reskin        = bool(reskin);
-        force_item_update = true;
+        request_update();
     }
     if (force_item_update)
     {
@@ -1294,6 +1303,8 @@ void FrameStageNotify(int stage)
             if (key != defidx)
                 it = modifier_map.find(key);
         }
+        if (it == modifier_map.end() || it->second.Default())
+            it = modifier_map.find(defaults_key);
         if (it == modifier_map.end() || it->second.Default())
         {
             if (reskin)
@@ -1534,4 +1545,127 @@ def_attribute_modifier &GetModifier(int idx)
 }
 // A map that maps an Item Definition Index to a modifier
 boost::unordered_flat_map<int, def_attribute_modifier> modifier_map{};
+
+static float attr_flt(const def_attribute_modifier &mod, int id)
+{
+    for (const auto &a : mod.modifiers)
+        if (a.defidx == id)
+            return a.value;
+    return 0.0f;
+}
+
+static int attr_int(const def_attribute_modifier &mod, int id)
+{
+    const float f = attr_flt(mod, id);
+    int i;
+    std::memcpy(&i, &f, sizeof(i));
+    return i;
+}
+
+const char *kit_name(int id)
+{
+    for (const auto &k : kits)
+        if (k.id == id)
+            return k.name;
+    return nullptr;
+}
+
+int ActiveSkinKey()
+{
+    return active_skin_key();
+}
+
+bool ConsumeMenuDirty()
+{
+    const bool dirty = menu_dirty;
+    menu_dirty       = false;
+    return dirty;
+}
+
+SkinConfig GetSkinConfig(int key)
+{
+    SkinConfig s;
+    const auto it = modifier_map.find(key);
+    if (it == modifier_map.end())
+        return s;
+    const auto &mod = it->second;
+    s.paintkit     = attr_int(mod, attribute_paintkit);
+    s.wear         = attr_flt(mod, attribute_wear);
+    s.seed         = attr_int(mod, attribute_seed);
+    s.quality      = mod.quality;
+    s.festive      = mod.HasAttr(attribute_festive);
+    s.australium   = mod.HasAttr(attribute_australium);
+    s.killstreak   = int(attr_flt(mod, attribute_killstreak_tier));
+    s.sheen        = int(attr_flt(mod, attribute_killstreak_sheen));
+    switch (int(attr_flt(mod, attribute_unusual_weapon)))
+    {
+    case unusual_hot:
+        s.unusual = 1;
+        break;
+    case unusual_isotope:
+        s.unusual = 2;
+        break;
+    case unusual_cool:
+        s.unusual = 3;
+        break;
+    case unusual_energy_orb:
+        s.unusual = 4;
+        break;
+    }
+    return s;
+}
+
+void SetSkinConfig(int key, const SkinConfig &s)
+{
+    auto &mod = GetModifier(key);
+    if (s.paintkit)
+    {
+        set_attr_int(mod, attribute_paintkit, s.paintkit);
+        mod.Set(attribute_inspect, 1.0f);
+        set_attr_int(mod, attribute_seed_hi, 0);
+        mod.Set(attribute_wear, std::clamp(s.wear, 0.0f, 1.0f));
+        set_attr_int(mod, attribute_seed, s.seed);
+    }
+    else
+    {
+        mod.Remove(attribute_paintkit);
+        mod.Remove(attribute_wear);
+        mod.Remove(attribute_inspect);
+        mod.Remove(attribute_seed);
+        mod.Remove(attribute_seed_hi);
+    }
+    if (s.australium)
+    {
+        set_attr_int(mod, attribute_australium, 1);
+        set_attr_int(mod, attribute_loot_rarity, 1);
+        mod.Set(attribute_style_override, 1.0f);
+    }
+    else
+    {
+        mod.Remove(attribute_australium);
+        mod.Remove(attribute_loot_rarity);
+        mod.Remove(attribute_style_override);
+    }
+    if (s.festive)
+        mod.Set(attribute_festive, 1.0f);
+    else
+        mod.Remove(attribute_festive);
+    if (s.killstreak > 0)
+        mod.Set(attribute_killstreak_tier, float(s.killstreak));
+    else
+        mod.Remove(attribute_killstreak_tier);
+    const int sheen = s.sheen ? s.sheen : (s.killstreak > 0 ? 1 : 0);
+    if (sheen)
+        mod.Set(attribute_killstreak_sheen, float(sheen));
+    else
+        mod.Remove(attribute_killstreak_sheen);
+    if (const int fx = unusual_particle(s.unusual))
+        mod.Set(attribute_unusual_weapon, float(fx));
+    else
+        mod.Remove(attribute_unusual_weapon);
+    mod.quality = s.quality;
+
+    enable = true;
+    request_update();
+}
 } // namespace hacks::tf2::skinchanger

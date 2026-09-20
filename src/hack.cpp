@@ -583,5 +583,9 @@ void hack::Shutdown()
     }
     logging::Info("Releasing VMT hooks..");
     hooks::ReleaseAllHooks();
+    logging::Info("Releasing detour hooks..");
+    DetourHook::ShutdownAll();
+    logging::Info("Releasing bytepatches..");
+    BytePatch::ShutdownAll();
     logging::Info("Success..");
 }

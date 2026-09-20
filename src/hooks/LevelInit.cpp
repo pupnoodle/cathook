@@ -17,12 +17,9 @@
 #endif
 
 static settings::Boolean halloween_mode{ "misc.force-halloween", "false" };
-static settings::Int skybox_changer{ "misc.skybox-override", "0" };
 extern settings::Boolean random_name;
 extern settings::String force_name;
 extern std::string name_forced;
-
-const char *skynum[] = { "", "sky_tf2_04", "sky_upward", "sky_dustbowl_01", "sky_goldrush_01", "sky_granary_01", "sky_well_01", "sky_gravel_01", "sky_badlands_01", "sky_hydro_01", "sky_night_01", "sky_nightfall_01", "sky_trainyard_01", "sky_stormfront_01", "sky_morningsnow_01", "sky_alpinestorm_01", "sky_harvest_01", "sky_harvest_night_01", "sky_halloween", "sky_halloween_night_01", "sky_halloween_night2014_01", "sky_island_01", "sky_jungle_01", "sky_invasion2fort_01", "sky_well_02", "sky_outpost_01", "sky_coastal_01", "sky_rainbow_01", "sky_badlands_pyroland_01", "sky_pyroland_01", "sky_pyroland_02", "sky_pyroland_03" };
 
 namespace hooked_methods
 {
@@ -36,20 +33,6 @@ DEFINE_HOOKED_METHOD(LevelInit, void, void *this_, const char *name)
 #if ENABLE_GUI
     gui::onLevelLoad();
 #endif
-    if (skybox_changer)
-    {
-        typedef bool (*LoadNamedSkys_Fn)(const char *);
-        uintptr_t addr                        = gSignatures.GetEngineSignature(sigs::load_named_skys);
-        static LoadNamedSkys_Fn LoadNamedSkys = LoadNamedSkys_Fn(addr);
-        if (!LoadNamedSkys)
-            logging::Info("LoadNamedSkys missing");
-        else
-        {
-            logging::Info("Going to load the skybox");
-            bool succ = LoadNamedSkys(skynum[(int) skybox_changer]);
-            logging::Info("Loaded Skybox: %s", succ ? "true" : "false");
-        }
-    }
     ConVar *holiday = g_ICvar->FindVar("tf_forced_holiday");
     if (halloween_mode)
         holiday->SetValue(2);

@@ -6,21 +6,7 @@
             <AutoVariable width="fill" target="skinchanger.debug" label="Debug info" tooltip="Shows defindex and attribute list of the active weapon on screen."/>
         </List>
     </Box>
-    <Box padding="12 6 6 6" width="content" height="content" name="Commands" x="235">
-        <List width="360">
-            <Text>Console commands (apply to the weapon in hand):</Text>
-            <Text>  skinchanger_paint &lt;kit id|name&gt; - set warpaint</Text>
-            <Text>  skinchanger_kits - list warpaints for this weapon</Text>
-            <Text>  skinchanger_wear &lt;0-1&gt; - paint wear</Text>
-            <Text>  skinchanger_seed &lt;n&gt; - paint seed</Text>
-            <Text>  skinchanger_quality &lt;n&gt; - item quality (-1 = auto)</Text>
-            <Text>  skinchanger_festive - toggle festivizer</Text>
-            <Text>  skinchanger_australium - australium (or australize cmd)</Text>
-            <Text>  skinchanger_unusual &lt;0-4&gt; - unusual effect</Text>
-            <Text>  skinchanger_killstreak &lt;0-3&gt; - killstreak tier</Text>
-            <Text>  skinchanger_sheen &lt;0-7&gt; - killstreak sheen</Text>
-            <Text>  skinchanger_save/load &lt;name&gt; - preset files</Text>
-            <Text>  skinchanger_list / skinchanger_reset</Text>
-        </List>
+    <Box padding="12 6 6 6" width="content" height="content" name="Weapon skin" x="245">
+        <ScrollableList id="skinchanger-controls" width="320" height="390"/>
     </Box>
 </Tab>

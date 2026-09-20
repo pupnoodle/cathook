@@ -1,5 +1,8 @@
 #pragma once
+#include <algorithm>
 #include <functional>
+#include <mutex>
+#include <vector>
 #include <stdio.h>
 #include <string.h>
 #include "core/logging.hpp"
@@ -12,6 +15,18 @@ class BytePatch
     std::vector<unsigned char> patch_bytes;
     std::vector<unsigned char> original;
     bool patched{ false };
+
+    static std::vector<BytePatch *> &registry()
+    {
+        static std::vector<BytePatch *> patches;
+        return patches;
+    }
+
+    static std::mutex &registryMutex()
+    {
+        static std::mutex mutex;
+        return mutex;
+    }
 
 public:
     ~BytePatch()
@@ -87,6 +102,10 @@ public:
             memcpy(addr, &patch_bytes[0], size);
             mprotect(page, mprot_len, PROT_EXEC);
             patched = true;
+            std::lock_guard<std::mutex> lock(registryMutex());
+            auto &patches = registry();
+            if (std::find(patches.begin(), patches.end(), this) == patches.end())
+                patches.push_back(this);
         }
     }
     void Shutdown()
@@ -106,5 +125,12 @@ public:
             mprotect(page, mprot_len, PROT_EXEC);
             patched = false;
         }
+    }
+
+    static void ShutdownAll()
+    {
+        std::lock_guard<std::mutex> lock(registryMutex());
+        for (BytePatch *patch : registry())
+            patch->Shutdown();
     }
 };

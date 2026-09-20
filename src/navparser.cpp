@@ -688,6 +688,15 @@ namespace NavEngine
 std::unique_ptr<Map> map;
 Crumb last_crumb;
 std::vector<Crumb> crumbs;
+#if ENABLE_VISUALS
+static std::mutex navdraw_mutex;
+static std::vector<std::string> debug_lines_snapshot;
+static std::vector<Vector> crumb_snapshot;
+static bool dbg_nav_ready  = false;
+static bool dbg_area_valid = false;
+static Vector dbg_area_quad[4];
+static Vector dbg_area_edge;
+#endif
 
 int current_priority    = 0;
 bool current_navtolocal = false;
@@ -1186,10 +1195,17 @@ void updateStuckTime()
     }
 }
 
+#if ENABLE_VISUALS
+static void updateDrawSnapshot();
+#endif
+
 static void CreateMove()
 {
     ++navdebug.cm_calls;
     ensureMapLoaded();
+#if ENABLE_VISUALS
+    updateDrawSnapshot();
+#endif
     if (!isReady())
         return;
     if (CE_BAD(LOCAL_E) || !LOCAL_E->m_bAlivePlayer())
@@ -1302,19 +1318,46 @@ void drawDebugInfo()
 {
 #if ENABLE_VISUALS
     AddSideString("--- NavEngine ---", colors::gui);
-    for (auto &line : getDebugInfoLines())
+    std::lock_guard<std::mutex> lock(navdraw_mutex);
+    for (auto &line : debug_lines_snapshot)
         AddSideString(line);
 #endif
 }
 
 #if ENABLE_VISUALS
-void drawNavArea(CNavArea *area)
+static void updateDrawSnapshot()
+{
+    std::lock_guard<std::mutex> lock(navdraw_mutex);
+    debug_lines_snapshot = getDebugInfoLines();
+    crumb_snapshot.clear();
+    crumb_snapshot.reserve(crumbs.size());
+    for (auto &c : crumbs)
+        crumb_snapshot.push_back(c.vec);
+    dbg_nav_ready  = isReady();
+    dbg_area_valid = false;
+    if (draw_debug_areas && dbg_nav_ready && CE_GOOD(LOCAL_E) && LOCAL_E->m_bAlivePlayer())
+    {
+        auto area = map->findClosestNavSquare(g_pLocalPlayer->v_Origin);
+        if (area)
+        {
+            dbg_area_quad[0] = area->m_nwCorner;
+            dbg_area_quad[1] = area->getNeCorner();
+            dbg_area_quad[2] = area->getSwCorner();
+            dbg_area_quad[3] = area->m_seCorner;
+            dbg_area_edge    = area->getNearestPoint(g_pLocalPlayer->v_Origin.AsVector2D());
+            dbg_area_edge.z += PLAYER_JUMP_HEIGHT;
+            dbg_area_valid   = true;
+        }
+    }
+}
+
+void drawNavArea(const Vector quad[4])
 {
     Vector nw, ne, sw, se;
-    bool nw_screen = draw::WorldToScreen(area->m_nwCorner, nw);
-    bool ne_screen = draw::WorldToScreen(area->getNeCorner(), ne);
-    bool sw_screen = draw::WorldToScreen(area->getSwCorner(), sw);
-    bool se_screen = draw::WorldToScreen(area->m_seCorner, se);
+    bool nw_screen = draw::WorldToScreen(quad[0], nw);
+    bool ne_screen = draw::WorldToScreen(quad[1], ne);
+    bool sw_screen = draw::WorldToScreen(quad[2], sw);
+    bool se_screen = draw::WorldToScreen(quad[3], se);
 
     // Nw -> Ne
     if (nw_screen && ne_screen)
@@ -1332,36 +1375,31 @@ void drawNavArea(CNavArea *area)
 
 void Draw()
 {
-    if (!isReady() || !draw)
+    if (!draw)
         return;
-    if (draw_debug_areas && CE_GOOD(LOCAL_E) && LOCAL_E->m_bAlivePlayer())
+    std::lock_guard<std::mutex> lock(navdraw_mutex);
+    if (!dbg_nav_ready)
+        return;
+    if (dbg_area_valid)
     {
-        auto area = map->findClosestNavSquare(g_pLocalPlayer->v_Origin);
-        if (!area)
-            return;
-        auto edge = area->getNearestPoint(g_pLocalPlayer->v_Origin.AsVector2D());
         Vector scrEdge;
-        edge.z += PLAYER_JUMP_HEIGHT;
-        if (draw::WorldToScreen(edge, scrEdge))
+        if (draw::WorldToScreen(dbg_area_edge, scrEdge))
             draw::Rectangle(scrEdge.x - 2.0f, scrEdge.y - 2.0f, 4.0f, 4.0f, colors::red);
-        drawNavArea(area);
+        drawNavArea(dbg_area_quad);
     }
 
-    if (crumbs.empty())
-        return;
-
-    for (size_t i = 0; i < crumbs.size(); i++)
+    for (size_t i = 0; i < crumb_snapshot.size(); i++)
     {
-        Vector start_pos = crumbs[i].vec;
+        Vector start_pos = crumb_snapshot[i];
 
         Vector start_screen, end_screen;
         if (draw::WorldToScreen(start_pos, start_screen))
         {
             draw::Rectangle(start_screen.x - 5.0f, start_screen.y - 5.0f, 10.0f, 10.0f, colors::white);
 
-            if (i < crumbs.size() - 1)
+            if (i < crumb_snapshot.size() - 1)
             {
-                Vector end_pos = crumbs[i + 1].vec;
+                Vector end_pos = crumb_snapshot[i + 1];
                 if (draw::WorldToScreen(end_pos, end_screen))
                     draw::Line(start_screen.x, start_screen.y, end_screen.x - start_screen.x, end_screen.y - start_screen.y, colors::white, 2.0f);
             }

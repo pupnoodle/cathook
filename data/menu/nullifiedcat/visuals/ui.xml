@@ -6,7 +6,7 @@
             <AutoVariable width="fill" target="visual.disable" label="Disable visuals"/>
             <AutoVariable width="fill" target="visual.medal-flip" label="Guaranteed medal flip"/>
             <AutoVariable width="fill" target="visual.medal-changer" label="Change casual medal" tooltip="Overrides the rank shown on your casual badge in the main menu and scoreboard."/>
-            <AutoVariable width="fill" target="visual.medal-changer.rank" label="Casual medal rank" min="1" max="150"/>
+            <AutoVariable width="fill" target="visual.medal-changer.rank" label="Casual medal rank" min="1" max="1200" tooltip="150 levels x 8 tiers; higher values show fancier medals."/>
             <LabeledObject width="fill" label="Software cursor mode" tooltip="WARNING: Advanced users only.">
                 <Select target="visual.software-cursor-mode">
                     <Option name="Keep" value="0"/>
