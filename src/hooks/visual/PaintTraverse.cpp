@@ -95,7 +95,9 @@ DEFINE_HOOKED_METHOD(PaintTraverse, void, vgui::IPanel *this_, vgui::VPANEL pane
     call_default = true;
     if (no_scope && ((panel_scope && panel == panel_scope) || (panel_scope_charge && panel == panel_scope_charge)))
         call_default = false;
-    if (isHackActive() && (health_panel || panel_scope || motd_panel || motd_panel_sd) && ((panel == health_panel && mchealthbar::minecraftHP) || (hacks::shared::catbot::catbotmode && hacks::shared::catbot::anti_motd && (panel == motd_panel || panel == motd_panel_sd))))
+    if (isHackActive() && panel == health_panel && mchealthbar::minecraftHP)
+        call_default = false;
+    if (isHackActive() && hacks::shared::catbot::anti_motd && (panel == motd_panel || panel == motd_panel_sd))
         call_default = false;
 
     if (software_cursor_mode)

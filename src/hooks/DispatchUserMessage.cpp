@@ -16,6 +16,8 @@
 #include "nullnexus.hpp"
 #include "votelogger.hpp"
 #include "nospread.hpp"
+#include "discord.hpp"
+#include <cstring>
 
 static settings::Boolean dispatch_log{ "debug.log-dispatch-user-msg", "false" };
 static settings::Boolean chat_filter_enable{ "chat.censor.enable", "false" };
@@ -138,11 +140,18 @@ DEFINE_HOOKED_METHOD(DispatchUserMessage, bool, void *this_, int type, bf_read &
         break;
     }
     case 12:
-        if (hacks::shared::catbot::anti_motd && hacks::shared::catbot::catbotmode)
+        if (hacks::shared::catbot::anti_motd)
         {
-            data = std::string(buf_data);
-            if (data.find("class_") != data.npos)
-                return false;
+            char panel[64]{};
+            buf.ReadString(panel, sizeof(panel));
+            const bool show = buf.ReadByte() != 0;
+            buf.Seek(0);
+            if (show && !std::strcmp(panel, "info"))
+            {
+                // CTextWindow::OnCommand("okay") case 1 — Linux client has no closedwelcomemenu.
+                g_IEngine->ClientCmd_Unrestricted("joingame");
+                return true;
+            }
         }
         break;
     case 5:
@@ -264,7 +273,10 @@ DEFINE_HOOKED_METHOD(DispatchUserMessage, bool, void *this_, int type, bf_read &
                 }
         }
         if (event.find("TF_Chat") == 0)
+        {
             hacks::shared::ChatCommands::handleChatMessage(message, data[0]);
+            discord::LogChat(data[0], message, event.find("Team") != std::string::npos);
+        }
         chatlog::LogMessage(data[0], message);
         buf = bf_read(data.c_str(), data.size());
         buf.Seek(0);

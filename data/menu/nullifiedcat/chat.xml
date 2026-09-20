@@ -132,4 +132,15 @@
             <AutoVariable width="fill" target="votelogger.restart-on-kick" label="Crash when kicked"/>
         </List>
     </Box>
+    <Box padding="12 6 6 6" width="content" height="content" name="Discord" x="545">
+        <List width="200">
+            <AutoVariable width="fill" target="discord.enable" label="Enable Discord" tooltip="Relay in-game chat and autoreport logs to Discord webhooks. Create a webhook in channel settings -> Integrations."/>
+            <AutoVariable width="fill" target="discord.chat" label="Relay chat"/>
+            <AutoVariable width="fill" target="discord.chat.webhook" label="Chat webhook"/>
+            <AutoVariable width="fill" target="discord.reports" label="Log reports"/>
+            <AutoVariable width="fill" target="discord.reports.webhook" label="Report webhook" tooltip="Leave empty to reuse the chat webhook."/>
+            <AutoVariable width="fill" target="discord.chat.no-ipc" label="Ignore IPC"/>
+            <AutoVariable width="fill" target="discord.chat.no-spam" label="Ignore own spam"/>
+        </List>
+    </Box>
 </Tab>

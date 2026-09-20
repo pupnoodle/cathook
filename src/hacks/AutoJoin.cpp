@@ -21,7 +21,13 @@ static settings::Boolean autojoin_team{ "autojoin.team", "false" };
 static settings::Int autojoin_class{ "autojoin.class", "0" };
 static settings::Boolean auto_queue{ "autojoin.auto-queue", "false" };
 static settings::Boolean auto_requeue{ "autojoin.auto-requeue", "false" };
+static settings::Boolean auto_accept_q{ "autojoin.auto-accept-q", "false" };
 static settings::Boolean partybypass{ "hack.party-bypass", "false" };
+
+// Protocol SO type IDs from EGCTFProtoObjectTypes (tf_gcmessages.h)
+constexpr int k_SO_GameServerLobby = 2004;
+constexpr int k_SO_LobbyInvite     = 2008;
+constexpr int k_SOChange_Create    = 0;
 
 /*
  * Credits to Blackfire for helping me with auto-requeue!
@@ -118,17 +124,25 @@ void updateSearch()
 static void update()
 {
     static Timer autoteam_timer{};
-    if (autoteam_timer.test_and_set(750))
+    if (!autoteam_timer.test_and_set(750))
+        return;
+    if (!g_IEngine->IsInGame() || CE_BAD(LOCAL_E))
+        return;
+
+    const int want_class = int(autojoin_class);
+    // Class select implies joining a team first; the team checkbox still works alone.
+    if ((*autojoin_team || want_class) && UnassignedTeam())
     {
-        if (autojoin_team and UnassignedTeam())
-        {
-            hack::ExecuteCommand("autoteam");
-        }
-        else if (autojoin_class and UnassignedClass())
-        {
-            if (int(autojoin_class) < 10)
-                g_IEngine->ExecuteClientCmd(format("join_class ", classnames[int(autojoin_class) - 1]).c_str());
-        }
+        g_IEngine->ClientCmd_Unrestricted("team_ui_setup");
+        g_IEngine->ClientCmd_Unrestricted("menuopen");
+        g_IEngine->ClientCmd_Unrestricted("autoteam");
+        g_IEngine->ClientCmd_Unrestricted("menuclosed");
+        return;
+    }
+    if (want_class && want_class < 10 && (UnassignedClass() || !LOCAL_E->m_bAlivePlayer()))
+    {
+        g_IEngine->ClientCmd_Unrestricted(format("joinclass ", classnames[want_class - 1]).c_str());
+        g_IEngine->ClientCmd_Unrestricted("menuclosed");
     }
 }
 
@@ -145,6 +159,72 @@ static DetourHook can_invite_detour;
 static DetourHook class_menu_detour;
 static DetourHook team_menu_detour;
 static DetourHook intro_menu_detour;
+static DetourHook so_changed_detour;
+
+static int shared_object_type(void *obj)
+{
+    static const int voff = []() -> int {
+        auto *code = reinterpret_cast<uint8_t *>(gSignatures.GetClientSignature(sigs::tf_gc_client_system_so_event));
+        if (code)
+        {
+            for (int i = 0; i < 64; ++i)
+            {
+                if (code[i] == 0xFF && code[i + 1] == 0x50 && code[i + 3] == 0x3D && code[i + 4] == 0xD4 && code[i + 5] == 0x07)
+                    return code[i + 2];
+            }
+        }
+        return -1;
+    }();
+    if (!obj || voff < 0)
+        return 0;
+    auto vtable = *reinterpret_cast<uintptr_t *>(obj);
+    auto fn     = *reinterpret_cast<int (**)(void *)>(vtable + voff);
+    return fn ? fn(obj) : 0;
+}
+
+static uint64_t lobby_invite_group_id(void *obj)
+{
+    static const int voff = []() -> int {
+        auto *code = reinterpret_cast<uint8_t *>(gSignatures.GetClientSignature(sigs::tf_gc_client_system_get_match_invite));
+        if (code)
+        {
+            for (int i = 0; i < 0x80; ++i)
+            {
+                if (code[i] == 0x48 && code[i + 1] == 0x8B && code[i + 2] == 0x03 && code[i + 3] == 0x48 && code[i + 4] == 0x8B && code[i + 5] == 0x40)
+                    return code[i + 6];
+            }
+        }
+        return -1;
+    }();
+    if (!obj || voff < 0)
+        return 0;
+    auto vtable = *reinterpret_cast<uintptr_t *>(obj);
+    auto fn     = *reinterpret_cast<uint64_t (**)(void *)>(vtable + voff);
+    return fn ? fn(obj) : 0;
+}
+
+static uintptr_t so_changed_hook(re::CTFGCClientSystem *this_, void *obj, int change)
+{
+    using Fn = uintptr_t (*)(re::CTFGCClientSystem *, void *, int);
+    auto orig = Fn(so_changed_detour.GetOriginalFunc());
+    if (!orig)
+        return 0;
+    if (!*auto_accept_q || !obj || change != k_SOChange_Create)
+        return orig(this_, obj, change);
+
+    const int type = shared_object_type(obj);
+    if (type == k_SO_LobbyInvite)
+    {
+        if (uint64_t id = lobby_invite_group_id(obj))
+            this_->RequestAcceptMatchInvite(id);
+        return orig(this_, obj, change);
+    }
+
+    auto result = orig(this_, obj, change);
+    if (type == k_SO_GameServerLobby)
+        this_->JoinMMMatch();
+    return result;
+}
 
 static void class_menu_show_panel_hook(void *me, bool show)
 {
@@ -211,6 +291,8 @@ static InitRoutine init(
             team_menu_detour.Init(addr, (void *) team_menu_show_panel_hook);
         if (auto addr = gSignatures.GetClientSignature(sigs::intro_menu_on_tick))
             intro_menu_detour.Init(addr, (void *) intro_menu_on_tick_hook);
+        if (auto addr = gSignatures.GetClientSignature(sigs::tf_gc_client_system_so_event))
+            so_changed_detour.Init(addr, (void *) so_changed_hook);
         EC::Register(
             EC::Shutdown,
             []()
@@ -220,6 +302,7 @@ static InitRoutine init(
                 class_menu_detour.Shutdown();
                 team_menu_detour.Shutdown();
                 intro_menu_detour.Shutdown();
+                so_changed_detour.Shutdown();
             },
             "shutdown_autojoin");
     });

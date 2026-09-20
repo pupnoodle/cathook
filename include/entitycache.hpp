@@ -104,10 +104,9 @@ public:
     Vector m_vecOrigin() const
     {
         IClientEntity *e = InternalEntity();
-        if (!e)
+        if (!e || !netvar.m_vecOrigin)
             return {};
-        typedef const Vector &(*fn_t)(IClientEntity *);
-        return vfunc<fn_t>(e, vtables::entity::get_abs_origin)(e);
+        return NET_VECTOR(e, netvar.m_vecOrigin);
     }
 
     std::optional<Vector> m_vecDormantOrigin() const
@@ -116,10 +115,7 @@ public:
         if (!e)
             return std::nullopt;
         if (!EntIsDormant(e))
-        {
-            typedef const Vector &(*fn_t)(IClientEntity *);
-            return vfunc<fn_t>(e, vtables::entity::get_abs_origin)(e);
-        }
+            return m_vecOrigin();
         auto vec = soundcache::GetSoundLocation(m_IDX);
         if (vec)
             return *vec;

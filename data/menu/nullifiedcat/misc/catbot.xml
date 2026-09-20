@@ -3,8 +3,11 @@
         <List width="200">
             <AutoVariable width="fill" target="autojoin.auto-queue" label="Auto queue"/>
             <AutoVariable width="fill" target="autojoin.auto-requeue" label="Auto requeue"/>
+            <AutoVariable width="fill" target="autojoin.auto-accept-q" label="Auto-accept q" tooltip="Accept the casual ready popup and match invites."/>
+            <AutoVariable width="fill" target="autojoin.no-queue-while-loading" label="No queue while loading"/>
             <AutoVariable width="fill" target="autoqueue.mode" label="Autoqueue mode" min="0" max="12"/>
             <AutoVariable width="fill" target="hack.requeue-on-kick" label="Requeue on kick"/>
+            <AutoVariable width="fill" target="cat-bot.autoqueue-report" label="Autoreport queue" tooltip="Queues Casual 12v12, reports everyone, then abandons and requeues. Uses Autojoin class."/>
             <AutoVariable width="fill" target="autotaunt.enable" label="Autotaunt enabled"/>
             <LabeledObject width="fill" label="Autotaunt weapon">
                 <Select target="autotaunt.auto-weapon">
@@ -75,6 +78,8 @@
             <AutoVariable width="fill" target="cat-bot.abandon-if.ipc-bots-gte" label="Abandon if IPC bots Gte"/>
             <AutoVariable width="fill" target="cat-bot.abandon-if.humans-lte" label="Abandon if humans Lte"/>
             <AutoVariable width="fill" target="cat-bot.abandon-if.players-lte" label="Abandon if players Lte"/>
+            <AutoVariable width="fill" target="cat-bot.abandon-if.no-navmesh" label="Abandon if no navmesh"/>
+            <AutoVariable width="fill" target="misc.auto-abandon" label="Auto abandon on disconnect" tooltip="When you disconnect, also abandon the matchmaking assignment so you can requeue. Skipped for anti-autobalance reconnects."/>
             <AutoVariable width="fill" target="cat-bot.auto-crouch" label="Autocrouch"/>
             <AutoVariable width="fill" target="cat-bot.mark-human-after-kills" label="Mark human after kills"/>
             <AutoVariable width="fill" target="cat-bot.micspam.enable" label="Micspam"/>
@@ -84,6 +89,8 @@
             <AutoVariable width="fill" target="cat-bot.votekicks.rage-only" label="Rage only votekicks"/>
             <AutoVariable width="fill" target="cat-bot.always-crouch" label="Always crouch"/>
             <AutoVariable width="fill" target="cat-bot.autoreport" label="Autoreport"/>
+            <AutoVariable width="fill" target="cat-bot.autoreport.bypass-cooldown" label="Bypass report cooldown"/>
+            <AutoVariable width="fill" target="discord.enable" label="Discord logs" tooltip="Master switch. Webhooks are in the Chat tab."/>
             <AutoVariable width="fill" target="cat-bot.anti-autobalance" label="Anti auto balance"/>
             <AutoVariable width="fill" target="misc.autodisguise" label="Autodisguise"/>
             <AutoVariable width="fill" target="cat-bot.anti-motd" label="Anti MOTD"/>

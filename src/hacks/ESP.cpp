@@ -129,6 +129,7 @@ void __attribute__((fastcall)) Draw3DBox(CachedEntity *ent, const rgba_t &clr);
 void __attribute__((fastcall)) DrawBox(CachedEntity *ent, const rgba_t &clr);
 void BoxCorners(int minx, int miny, int maxx, int maxy, const rgba_t &color, bool transparent);
 bool GetCollide(CachedEntity *ent);
+bool EspWorldOrigin(CachedEntity *ent, Vector &origin);
 
 // Storage vars for entities that need to be re-drawn
 std::vector<std::pair<CachedEntity *, float>> entities_need_repaint{};
@@ -1461,14 +1462,12 @@ void _FASTCALL Draw3DBox(CachedEntity *ent, const rgba_t &clr)
     if (CE_INVALID(ent) || !ent->m_bAlivePlayer())
         return;
 
-    Vector origin = EntCollisionOrigin(RAW_ENT(ent));
-    Vector mins   = EntOBBMins(RAW_ENT(ent));
-    Vector maxs   = EntOBBMaxs(RAW_ENT(ent));
-    // Dormant
-    if (EntIsDormant(RAW_ENT(ent)))
-    {
-        origin = *ent->m_vecDormantOrigin();
-    }
+    IClientEntity *raw = RAW_ENT(ent);
+    Vector origin;
+    if (!raw || !EspWorldOrigin(ent, origin))
+        return;
+    Vector mins = EntOBBMins(raw);
+    Vector maxs = EntOBBMaxs(raw);
 
     // Create a array for storing box points
     Vector corners[8]; // World vectors
@@ -1587,6 +1586,23 @@ void BoxCorners(int minx, int miny, int maxx, int maxy, const rgba_t &color, boo
     draw::Line(maxx - 1, maxy - 2, 0, -heightSize, color, 0.5f);
 }
 
+bool EspWorldOrigin(CachedEntity *ent, Vector &origin)
+{
+    IClientEntity *raw = RAW_ENT(ent);
+    if (!raw)
+        return false;
+    if (EntIsDormant(raw))
+    {
+        auto vec = ent->m_vecDormantOrigin();
+        if (!vec)
+            return false;
+        origin = *vec;
+        return true;
+    }
+    origin = ent->m_vecOrigin();
+    return true;
+}
+
 // Used for caching collidable bounds
 bool GetCollide(CachedEntity *ent)
 {
@@ -1596,25 +1612,21 @@ bool GetCollide(CachedEntity *ent)
     if (CE_INVALID(ent) || !ent->m_bAlivePlayer())
         return false;
 
+    IClientEntity *raw = RAW_ENT(ent);
+    if (!raw)
+        return false;
+
     // Grab esp data
     ESPData &ent_data = data[ent->m_IDX];
 
     // If entity has cached collides, return it. Otherwise generate new bounds
     if (!ent_data.has_collide)
     {
-
-        // Get collision center, max, and mins
-        Vector origin = EntCollisionOrigin(RAW_ENT(ent));
-        // Dormant
-        if (EntIsDormant(RAW_ENT(ent)))
-        {
-            auto vec = ent->m_vecDormantOrigin();
-            if (!vec)
-                return false;
-            origin = *vec;
-        }
-        Vector mins = EntOBBMins(RAW_ENT(ent)) + origin;
-        Vector maxs = EntOBBMaxs(RAW_ENT(ent)) + origin;
+        Vector origin;
+        if (!EspWorldOrigin(ent, origin))
+            return false;
+        Vector mins = EntOBBMins(raw) + origin;
+        Vector maxs = EntOBBMaxs(raw) + origin;
 
         // Create a array for storing box points
         Vector points_r[8]; // World vectors

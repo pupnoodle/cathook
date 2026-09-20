@@ -74,9 +74,8 @@ static gc_layout live_gc_layout()
 CTFGCClientSystem *CTFGCClientSystem::GTFGCClientSystem()
 {
     typedef CTFGCClientSystem *(*GTFGCClientSystem_t)();
-    static uintptr_t addr1                          = SigAdd(gSignatures.GetClientSignature(sigs::get_matchmaking_client), 16);
-    static GTFGCClientSystem_t GTFGCClientSystem_fn = GTFGCClientSystem_t(addr1);
-    return GTFGCClientSystem_fn ? GTFGCClientSystem_fn() : nullptr;
+    static auto fn = GTFGCClientSystem_t(gSignatures.GetClientSignature(sigs::get_matchmaking_client));
+    return fn ? fn() : nullptr;
 }
 
 void CTFGCClientSystem::AbandonCurrentMatch()
@@ -123,6 +122,14 @@ int CTFGCClientSystem::JoinMMMatch()
     typedef int (*JoinMMMatch_t)(CTFGCClientSystem *);
     static auto fn = JoinMMMatch_t(gSignatures.GetClientSignature(sigs::tf_gc_client_system_join_mm_match));
     return fn ? fn(this) : 0;
+}
+
+void CTFGCClientSystem::RequestAcceptMatchInvite(uint64_t lobby_id)
+{
+    using Fn = void (*)(CTFGCClientSystem *, uint64_t);
+    static auto fn = Fn(gSignatures.GetClientSignature(sigs::tf_gc_client_system_request_accept_match_invite));
+    if (fn)
+        fn(this, lobby_id);
 }
 
 void CTFGCClientSystem::ForcePingRefresh()

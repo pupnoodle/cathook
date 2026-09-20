@@ -16,6 +16,7 @@
 #include "SettingCommands.hpp"
 #include "glob.h"
 #include "DetourHook.hpp"
+#include "discord.hpp"
 
 namespace hacks::shared::catbot
 {
@@ -567,6 +568,7 @@ static std::atomic_bool can_report = false;
 static std::vector<unsigned> to_report;
 void reportall()
 {
+    to_report.clear();
     can_report = false;
     for (auto const &ent: entity_cache::player_cache)
     {
@@ -600,6 +602,32 @@ static char report_recent_check_hook(uint64_t steamid64, char warn)
     return orig ? orig(steamid64, warn) : 1;
 }
 
+static std::string name_for_friendsid(unsigned friendsID)
+{
+    player_info_s info{};
+    if (!g_GlobalVars)
+        return {};
+    for (int i = 1; i <= g_GlobalVars->maxClients; ++i)
+    {
+        if (!GetPlayerInfo(i, &info) || info.friendsID != friendsID)
+            continue;
+        return info.name;
+    }
+    return {};
+}
+
+static void send_report(unsigned friendsID)
+{
+    typedef uint64_t (*ReportPlayer_t)(uint64_t, int);
+    static uintptr_t addr1                = gSignatures.GetClientSignature(sigs::report_player_account);
+    static ReportPlayer_t ReportPlayer_fn = ReportPlayer_t(addr1);
+    if (!addr1)
+        return;
+    CSteamID id(friendsID, EUniverse::k_EUniversePublic, EAccountType::k_EAccountTypeIndividual);
+    ReportPlayer_fn(id.ConvertToUint64(), 1);
+    discord::LogReport(friendsID, name_for_friendsid(friendsID));
+}
+
 CatCommand report("report_all", "Report all players", []() { reportall(); });
 CatCommand report_uid("report_steamid", "Report with steamid",
                       [](const CCommand &args)
@@ -621,13 +649,7 @@ CatCommand report_uid("report_steamid", "Report with steamid",
                               logging::Info("Report machine broke");
                               return;
                           }
-                          typedef uint64_t (*ReportPlayer_t)(uint64_t, int);
-                          static uintptr_t addr1                = gSignatures.GetClientSignature(sigs::report_player_account);
-                          static ReportPlayer_t ReportPlayer_fn = ReportPlayer_t(addr1);
-                          if (!addr1)
-                              return;
-                          CSteamID id(steamid, EUniverse::k_EUniversePublic, EAccountType::k_EAccountTypeIndividual);
-                          ReportPlayer_fn(id.ConvertToUint64(), 1);
+                          send_report(steamid);
                       });
 
 namespace autoqueue_report_state
@@ -645,6 +667,27 @@ enum class State
 
 static State state = State::Idle;
 static Timer state_timer{};
+static std::string reported_match;
+static int settle_tries = 0;
+
+static std::string currentMatchId()
+{
+    if (!g_IEngine || !g_IEngine->IsInGame())
+        return {};
+    std::string id;
+    if (CNetChan *ch = g_IEngine->GetNetChannelInfo())
+    {
+        if (const char *addr = ch->GetAddress())
+            id = addr;
+    }
+    if (const char *map = g_IEngine->GetLevelName())
+    {
+        if (!id.empty())
+            id.push_back('/');
+        id += map;
+    }
+    return id;
+}
 
 static void startCasualQueue()
 {
@@ -662,7 +705,23 @@ static void startCasualQueue()
 
 static void reset()
 {
-    state = State::Idle;
+    state         = State::Idle;
+    settle_tries  = 0;
+    reported_match.clear();
+}
+
+void onLevelInit()
+{
+    to_report.clear();
+    can_report   = false;
+    settle_tries = 0;
+    if (state == State::Abandoning || state == State::PostAbandonCooldown)
+    {
+        logging::Info("autoqueue-report: new map, starting report cycle");
+        reported_match.clear();
+        state_timer.update();
+        state = State::WaitingForClass;
+    }
 }
 
 void update()
@@ -717,14 +776,10 @@ void update()
         }
         if (CE_BAD(LOCAL_E))
             break;
-        if (g_pLocalPlayer->team == TEAM_UNK || g_pLocalPlayer->team == TEAM_SPEC)
-        {
-            hack::ExecuteCommand("autoteam");
-            break;
-        }
-        if (g_pLocalPlayer->clazz == 0)
+        if (g_pLocalPlayer->team == TEAM_UNK || g_pLocalPlayer->team == TEAM_SPEC || g_pLocalPlayer->clazz == 0)
             break;
         logging::Info("autoqueue-report: class chosen, settling in before reporting");
+        settle_tries = 0;
         state_timer.update();
         state = State::SettlingIn;
         break;
@@ -738,7 +793,20 @@ void update()
         if (state_timer.test_and_set(4000))
         {
             reportall();
-            state = State::Reporting;
+            if (!to_report.empty())
+            {
+                reported_match = currentMatchId();
+                state          = State::Reporting;
+                break;
+            }
+            if (++settle_tries >= 5)
+            {
+                logging::Info("autoqueue-report: no players to report, abandoning match");
+                reported_match = currentMatchId();
+                tfmm::disconnectAndAbandon();
+                state_timer.update();
+                state = State::Abandoning;
+            }
         }
         break;
 
@@ -747,6 +815,15 @@ void update()
         {
             reset();
             break;
+        }
+        {
+            const auto now = currentMatchId();
+            if (!now.empty() && !reported_match.empty() && now != reported_match)
+            {
+                settle_tries = 0;
+                state        = State::WaitingForClass;
+                break;
+            }
         }
         if (!can_report && to_report.empty())
         {
@@ -758,16 +835,28 @@ void update()
         break;
 
     case State::Abandoning:
+    {
+        const auto now = currentMatchId();
+        if (in_game && !now.empty() && !reported_match.empty() && now != reported_match)
+        {
+            logging::Info("autoqueue-report: new match after abandon, reporting this one");
+            settle_tries = 0;
+            reported_match.clear();
+            state_timer.update();
+            state = State::WaitingForClass;
+            break;
+        }
         if (!in_game && !(gc && gc->BConnectedToMatchServer(false)))
         {
             state_timer.update();
             state = State::PostAbandonCooldown;
         }
-        else if (state_timer.test_and_set(15000))
+        else if (!now.empty() && now == reported_match && state_timer.test_and_set(15000))
         {
             tfmm::disconnectAndAbandon();
         }
         break;
+    }
 
     case State::PostAbandonCooldown:
         if (state_timer.test_and_set(5000))
@@ -892,11 +981,6 @@ void update()
 
     if (can_report)
     {
-        typedef uint64_t (*ReportPlayer_t)(uint64_t, int);
-        static uintptr_t addr1                = gSignatures.GetClientSignature(sigs::report_player_account);
-        static ReportPlayer_t ReportPlayer_fn = ReportPlayer_t(addr1);
-        if (!addr1)
-            return;
         if (report_timer2.test_and_set(400))
         {
             if (to_report.empty())
@@ -905,8 +989,7 @@ void update()
             {
                 auto rep = to_report.back();
                 to_report.pop_back();
-                CSteamID id(rep, EUniverse::k_EUniversePublic, EAccountType::k_EAccountTypeIndividual);
-                ReportPlayer_fn(id.ConvertToUint64(), 1);
+                send_report(rep);
             }
         }
     }
@@ -1086,6 +1169,7 @@ void level_init()
 {
     deaths = 0;
     level_init_timer.update();
+    autoqueue_report_state::onLevelInit();
 }
 
 void shutdown()

@@ -63,7 +63,8 @@ void BeginConVars()
                                      "tf_medigun_autoheal 1\n"
                                      "cat_fixvac\n"
                                      "fps_max 30\n"
-                                     "cat_ipc_connect";
+                                     "cat_ipc_connect\n"
+                                     "cat_load bot\n";
         }
     }
     if (!std::ifstream("tf/cfg/cat_autoexec.cfg"))

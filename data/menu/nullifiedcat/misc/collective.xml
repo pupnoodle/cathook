@@ -2,7 +2,6 @@
     <Box height="content" width="content" padding="12 6 6 6" name="Collective">
         <List width="200">
             <AutoVariable width="fill" target="misc.anti-afk" label="Enable antiafk"/>
-            <AutoVariable width="fill" target="misc.auto-abandon" label="Enable auto abandon"/>
             <AutoVariable width="fill" target="misc.auto-balance-spam" label="Enable auto balance spam"/>
             <AutoVariable width="fill" target="misc.pure-bypass" label="Bypass sv_pure" tooltip="Skip loading the server's PureServerWhitelist so custom files are not forced off."/>
             <AutoVariable width="fill" target="misc.cheats-bypass" label="Cheats bypass" tooltip="Force client sv_cheats to 1 so FCVAR_CHEAT commands work locally."/>
