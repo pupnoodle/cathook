@@ -53,60 +53,75 @@ static settings::Boolean fix_cyoaanim{ "remove.contracker", "false" };
 
 #if !ENFORCE_STREAM_SAFETY && ENABLE_VISUALS
 static DetourHook tf_shoulddraw_detour{};
+static DetourHook tf_wearable_shoulddraw_detour{};
+static DetourHook econ_wearable_shoulddraw_detour{};
 typedef bool (*ShouldDrawFn)(IClientEntity *);
-static ShouldDrawFn baseplayer_shoulddraw;
+static ShouldDrawFn baseentity_shoulddraw;
+static ShouldDrawFn baseanimating_shoulddraw;
+
+constexpr ptrdiff_t wearable_owner_handle = 1876;
 
 static bool TFShouldDraw_hook(IClientEntity *self)
 {
     auto original = (ShouldDrawFn) tf_shoulddraw_detour.GetOriginalFunc();
     if (!original)
         return true;
-    if (render_zoomed && baseplayer_shoulddraw && CE_GOOD(LOCAL_E) && self == (IClientEntity *) RAW_ENT(LOCAL_E))
-    {
-        bool ret  = baseplayer_shoulddraw(self);
-        char flag = *((char *) self + 4979);
-        static int dbg = 0;
-        if (++dbg % 300 == 0)
-            logging::Info("SD local: zoomed=%d flag=%d ret=%d orig=%d", (int) g_pLocalPlayer->bZoomed, (int) flag, (int) ret, (int) original(self));
-        return ret;
-    }
-    bool ret = original(self);
-    tf_shoulddraw_detour.RestorePatch();
-    return ret;
+    if (render_zoomed && baseentity_shoulddraw && g_pLocalPlayer->bZoomed && CE_GOOD(LOCAL_E) && self == (IClientEntity *) RAW_ENT(LOCAL_E))
+        return baseentity_shoulddraw(self);
+    return original(self);
 }
 
-void forceLocalDrawFrameStage()
+static bool WearableShouldDraw(IClientEntity *self, ShouldDrawFn original)
 {
-    static bool wrote_flag = false;
-    if (!CE_GOOD(LOCAL_E))
-        return;
-    auto flag = (char *) RAW_ENT(LOCAL_E) + 4979;
-    if (render_zoomed && g_pLocalPlayer->bZoomed)
+    if (!original)
+        return false;
+    if (render_zoomed && baseanimating_shoulddraw && g_pLocalPlayer->bZoomed && CE_GOOD(LOCAL_E))
     {
-        *flag      = 1;
-        wrote_flag = true;
+        int owner = *(int *) ((char *) self + wearable_owner_handle);
+        if (owner != -1 && HandleToIDX(owner) == LOCAL_E->m_IDX)
+        {
+            if (vfunc<bool (*)(IClientEntity *)>(self, vtables::entity::is_viewmodel_wearable)(self))
+                return false;
+            return baseanimating_shoulddraw(self);
+        }
     }
-    else if (wrote_flag)
-    {
-        *flag      = 0;
-        wrote_flag = false;
-    }
+    return original(self);
 }
 
+static bool TFWearableShouldDraw_hook(IClientEntity *self)
+{
+    return WearableShouldDraw(self, (ShouldDrawFn) tf_wearable_shoulddraw_detour.GetOriginalFunc());
+}
 
+static bool EconWearableShouldDraw_hook(IClientEntity *self)
+{
+    return WearableShouldDraw(self, (ShouldDrawFn) econ_wearable_shoulddraw_detour.GetOriginalFunc());
+}
 
 static void tryPatchLocalPlayerShouldDraw(bool after)
 {
     if (after)
     {
-        if (!baseplayer_shoulddraw)
-            baseplayer_shoulddraw = ShouldDrawFn(gSignatures.GetClientSignature(sigs::base_player_should_draw));
+        if (!baseentity_shoulddraw)
+            baseentity_shoulddraw = ShouldDrawFn(gSignatures.GetClientSignature(sigs::base_entity_should_draw));
+        if (!baseanimating_shoulddraw)
+            baseanimating_shoulddraw = ShouldDrawFn(gSignatures.GetClientSignature(sigs::base_animating_should_draw));
         auto tf = gSignatures.GetClientSignature(sigs::tf_player_should_draw);
         if (tf && !tf_shoulddraw_detour.GetOriginalFunc())
             tf_shoulddraw_detour.Init(tf, (void *) TFShouldDraw_hook);
+        auto tw = gSignatures.GetClientSignature(sigs::tf_wearable_should_draw);
+        if (tw && !tf_wearable_shoulddraw_detour.GetOriginalFunc())
+            tf_wearable_shoulddraw_detour.Init(tw, (void *) TFWearableShouldDraw_hook);
+        auto ew = gSignatures.GetClientSignature(sigs::econ_wearable_should_draw);
+        if (ew && !econ_wearable_shoulddraw_detour.GetOriginalFunc())
+            econ_wearable_shoulddraw_detour.Init(ew, (void *) EconWearableShouldDraw_hook);
     }
     else
+    {
         tf_shoulddraw_detour.Shutdown();
+        tf_wearable_shoulddraw_detour.Shutdown();
+        econ_wearable_shoulddraw_detour.Shutdown();
+    }
 }
 #endif
 

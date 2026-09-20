@@ -21,6 +21,7 @@ constexpr std::size_t should_interpolate      = 210;
 constexpr std::size_t update_ik_locks         = 229;
 constexpr std::size_t calculate_ik_locks      = 230;
 constexpr std::size_t frame_advance           = 254;
+constexpr std::size_t is_viewmodel_wearable   = 302;
 }
 
 namespace renderable
