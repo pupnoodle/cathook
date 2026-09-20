@@ -14,6 +14,7 @@ namespace hacks::tf::thirdperson
 static settings::Boolean enable{ "visual.thirdperson.enable", "false" };
 static settings::Button thirdperson_key{ "visual.thirdperson-button", "<null>" };
 static settings::Boolean real_angles{ "visual.thirdperson.real-angles", "false" };
+static settings::Boolean fake_angles{ "visual.thirdperson.fake-angles", "true" };
 static settings::Boolean disable_zoomed{ "visual.thirdperson.disable-zoomed", "false" };
 static bool was_enabled{ false };
 
@@ -65,10 +66,27 @@ void frameStageNotify()
             CE_INT(LOCAL_E, netvar.nForceTauntCam) = 0;
         was_enabled                            = false;
     }
-    if (real_angles && g_IInput->CAM_IsThirdPerson() && netvar.deadflag)
+    if (g_IInput->CAM_IsThirdPerson() && netvar.deadflag)
     {
-        CE_FLOAT(LOCAL_E, netvar.deadflag + 4) = g_pLocalPlayer->realAngles.x;
-        CE_FLOAT(LOCAL_E, netvar.deadflag + 8) = g_pLocalPlayer->realAngles.y;
+        if (fake_angles)
+        {
+            Vector ang = g_pLocalPlayer->fakeAngles;
+            while (ang.x > 180.0f)
+                ang.x -= 360.0f;
+            while (ang.x < -180.0f)
+                ang.x += 360.0f;
+            while (ang.y > 180.0f)
+                ang.y -= 360.0f;
+            while (ang.y < -180.0f)
+                ang.y += 360.0f;
+            CE_FLOAT(LOCAL_E, netvar.deadflag + 4) = ang.x;
+            CE_FLOAT(LOCAL_E, netvar.deadflag + 8) = ang.y;
+        }
+        else if (real_angles)
+        {
+            CE_FLOAT(LOCAL_E, netvar.deadflag + 4) = g_pLocalPlayer->realAngles.x;
+            CE_FLOAT(LOCAL_E, netvar.deadflag + 8) = g_pLocalPlayer->realAngles.y;
+        }
     }
 }
 } // namespace hacks::tf::thirdperson

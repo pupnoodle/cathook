@@ -18,6 +18,9 @@ void CreateMove();
 void DrawText();
 #endif
 int getCarriedBuilding();
+#if !ENFORCE_STREAM_SAFETY && ENABLE_VISUALS
+void forceLocalDrawFrameStage();
+#endif
 
 extern int last_number;
 

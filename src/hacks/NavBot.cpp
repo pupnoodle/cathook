@@ -1582,12 +1582,27 @@ static void updateSlot(std::pair<CachedEntity *, float> &nearest)
     }
 }
 
+static const char *active_task     = "init";
+static unsigned long long cm_calls = 0;
+
 static void CreateMove()
 {
-    if (!enabled || !navparser::NavEngine::isReady())
+    ++cm_calls;
+    if (!enabled)
+    {
+        active_task = "disabled";
         return;
+    }
+    if (!navparser::NavEngine::isReady())
+    {
+        active_task = "navengine not ready";
+        return;
+    }
     if (CE_BAD(LOCAL_E) || !LOCAL_E->m_bAlivePlayer() || HasCondition<TFCond_HalloweenGhostMode>(LOCAL_E))
+    {
+        active_task = "dead/invalid";
         return;
+    }
 
     refreshSniperSpots();
     refreshLocalBuildings();
@@ -1625,36 +1640,38 @@ static void CreateMove()
 
     // Try to escape danger first of all
     if (escapeDanger())
-        return;
+        active_task = "escape-danger";
     // Second priority should be getting health
     else if (getHealth())
-        return;
+        active_task = "health";
     // If we aren't getting health, get ammo
     else if (getAmmo())
-        return;
+        active_task = "ammo";
     // Try to run engineer logic
     else if (runEngineerLogic())
-        return;
+        active_task = "engineer";
     else if (meleeAttack(slot, nearest))
-        return;
+        active_task = "melee";
     // Try to capture objectives
     else if (captureObjectives())
-        return;
+        active_task = "capture";
     // Try to snipe sentries
     else if (snipeSentries())
-        return;
+        active_task = "snipe-sentries";
     // Try to hide if reloading
     else if (runReload())
-        return;
+        active_task = "reload";
     // Try to stalk enemies
     else if (stayNear())
-        return;
+        active_task = "stay-near";
     // Try to get health with a lower prioritiy
     else if (getHealth(true))
-        return;
+        active_task = "health-low";
     // We have nothing else to do, roam
     else if (doRoam())
-        return;
+        active_task = "roam";
+    else
+        active_task = "idle";
 }
 
 void LevelInit()
@@ -1667,6 +1684,30 @@ void LevelInit()
     mySentry    = nullptr;
     myDispenser = nullptr;
     current_building_spot.Invalidate();
+}
+
+std::vector<std::string> getDebugInfoLines()
+{
+    std::vector<std::string> lines;
+    lines.push_back(format("nb:", *enabled ? "1" : "0", " cm:", cm_calls, " task:", active_task, " prio:", navparser::getPriorityName(navparser::NavEngine::current_priority)));
+    if (CE_GOOD(LOCAL_E))
+    {
+        auto nearest = getNearestPlayerDistance();
+        lines.push_back(format("enemy ", nearest.first ? format("#", nearest.first->m_IDX) : std::string("none"), " d:", (int) nearest.second, " | hp:", LOCAL_E->m_iHealth(), "/", g_pPlayerResource->GetMaxHealth(LOCAL_E), " mtl:", CE_INT(LOCAL_E, netvar.m_iAmmo + 12), " s:", slot, " z:", g_pLocalPlayer->bZoomed ? "1" : "0"));
+        lines.push_back(format("srch h:", shouldSearchHealth() ? "y" : "n", "/", shouldSearchHealth(true) ? "y" : "n", " a:", shouldSearchAmmo() ? "y" : "n", " | cfg ", (int) selected_config.min_full_danger, "/", (int) selected_config.min_slight_danger, "/", (int) selected_config.max, selected_config.prefer_far ? " far" : ""));
+    }
+    lines.push_back(format("spots sn:", sniper_spots.size(), " b:", building_spots.size(), " cap:", (int) current_capturetype, " ow:", overwrite_capture ? "1" : "0"));
+    lines.push_back(format("engie m:", isEngieMode() ? "1" : "0", " s:", CE_GOOD(mySentry) ? "y" : "n", " d:", CE_GOOD(myDispenser) ? "y" : "n", " at:", build_attempts, " (", (int) current_building_spot.x, ",", (int) current_building_spot.y, ",", (int) current_building_spot.z, ")"));
+    return lines;
+}
+
+void drawDebugInfo()
+{
+#if ENABLE_VISUALS
+    AddSideString("--- NavBot ---", colors::gui);
+    for (auto &line : getDebugInfoLines())
+        AddSideString(line);
+#endif
 }
 #if ENABLE_VISUALS
 void Draw()

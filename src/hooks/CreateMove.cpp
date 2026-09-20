@@ -492,6 +492,8 @@ DEFINE_HOOKED_METHOD(CreateMoveInput, void, IInput *this_, int sequence_nr, floa
         if (engine_prediction::original_origin.IsValid())
             engine_prediction::FinishEnginePrediction(RAW_ENT(LOCAL_E), current_late_user_cmd);
     }
+    if (bSendPackets && *bSendPackets)
+        g_pLocalPlayer->fakeAngles = current_late_user_cmd->viewangles;
     // Write the usercmd
     WriteCmd(this_, current_late_user_cmd, sequence_nr);
 }

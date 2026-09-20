@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+#include <vector>
 // #include <array>
 // #include <stdint.h>
 
@@ -73,4 +75,6 @@ struct bot_class_config
 };*/
 std::pair<CachedEntity *, float> getNearestPlayerDistance();
 bool isEnabled();
+std::vector<std::string> getDebugInfoLines();
+void drawDebugInfo();
 } // namespace hacks::tf2::NavBot

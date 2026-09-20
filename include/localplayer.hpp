@@ -59,6 +59,7 @@ public:
 
     bool isFakeAngleCM = false;
     Vector realAngles{ 0.0f, 0.0f, 0.0f };
+    Vector fakeAngles{ 0.0f, 0.0f, 0.0f };
 };
 
 #define LOCAL_E g_pLocalPlayer->entity

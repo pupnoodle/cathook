@@ -29,6 +29,8 @@ constexpr float PLAYER_WIDTH       = 49;
 constexpr float HALF_PLAYER_WIDTH  = PLAYER_WIDTH / 2.0f;
 constexpr float PLAYER_JUMP_HEIGHT = 72.0f;
 
+const char *getPriorityName(int priority);
+
 #define TICKCOUNT_TIMESTAMP(seconds) (g_GlobalVars->tickcount + int(seconds / g_GlobalVars->interval_per_tick))
 
 // Basic Blacklist reasons, you can add your own externally and use them
@@ -92,6 +94,9 @@ bool navTo(const Vector &destination, int priority = 5, bool should_repath = tru
 void abandonPath();
 // Use to cancel pathing completely
 void cancelPath();
+
+std::vector<std::string> getDebugInfoLines();
+void drawDebugInfo();
 
 // Return the whole thing
 std::unordered_map<CNavArea *, BlacklistReason> *getFreeBlacklist();

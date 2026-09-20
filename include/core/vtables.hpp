@@ -312,7 +312,7 @@ constexpr std::size_t set_stencil_reference_value       = 122;
 constexpr std::size_t set_stencil_test_mask             = 123;
 constexpr std::size_t set_stencil_write_mask            = 124;
 constexpr std::size_t clear_stencil_buffer_rectangle    = 125;
-constexpr std::size_t override_alpha_write_enable       = 195;
+constexpr std::size_t override_alpha_write_enable       = 193;
 }
 
 namespace netchan

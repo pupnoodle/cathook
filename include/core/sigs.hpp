@@ -247,6 +247,8 @@ constexpr const char* tf_player_should_draw =
   "55 48 89 E5 41 54 49 89 FC 53 E8 ? ? ? ? 84 C0 74 0B 41 80 BC 24 A8 1C 00 00 00";
 constexpr const char* base_player_should_draw =
   "55 48 89 E5 41 54 49 89 FC 48 83 EC 08 E8 ? ? ? ? 84 C0 75 0A 4C 8B 65 F8 31 C0 C9 C3 66 90 4C 89 E7 4C 8B 65 F8 C9 E9 ? ? ? ? 0F 1F 00";
+constexpr const char* base_entity_should_draw =
+  "80 BF DD 0B 00 00 00 74 07 31 C0 C3 0F 1F 40 00 E9 ? ? ? ?";
 constexpr const char* base_animating_should_draw =
   "55 48 8D 15 ? ? ? ? 48 89 E5 41 54 49 89 FC 48 83 EC 08 48 8B 07 48 8B 80 00 09 00 00 48 39 D0 75 ? 48 8D 87 30 0C 00 00";
 constexpr const char* econ_wearable_should_draw =

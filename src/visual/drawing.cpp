@@ -32,10 +32,10 @@
 #include "xoverlay.h"
 #endif
 
-std::array<std::string, 32> side_strings;
-std::array<std::string, 32> center_strings;
-std::array<rgba_t, 32> side_strings_colors{ colors::empty };
-std::array<rgba_t, 32> center_strings_colors{ colors::empty };
+std::array<std::string, 64> side_strings;
+std::array<std::string, 64> center_strings;
+std::array<rgba_t, 64> side_strings_colors{ colors::empty };
+std::array<rgba_t, 64> center_strings_colors{ colors::empty };
 size_t side_strings_count{ 0 };
 size_t center_strings_count{ 0 };
 static settings::Int esp_font_size{ "visual.font_size.esp", "13" };
@@ -54,6 +54,8 @@ void ResetStrings()
 
 void AddSideString(const std::string &string, const rgba_t &color)
 {
+    if (side_strings_count >= side_strings.size())
+        return;
     side_strings[side_strings_count]        = string;
     side_strings_colors[side_strings_count] = color;
     ++side_strings_count;
@@ -80,6 +82,8 @@ void DrawStrings()
 
 void AddCenterString(const std::string &string, const rgba_t &color)
 {
+    if (center_strings_count >= center_strings.size())
+        return;
     center_strings[center_strings_count]        = string;
     center_strings_colors[center_strings_count] = color;
     ++center_strings_count;

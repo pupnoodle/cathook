@@ -26,6 +26,8 @@
 #endif
 
 #include <memory>
+#include <functional>
+#include <unordered_set>
 #include <boost/container_hash/hash.hpp>
 
 namespace navparser
@@ -47,6 +49,58 @@ static settings::Int stuck_blacklist_time{ "nav.anti-stuck.blacklist-time", "120
 static settings::Int sticky_ignore_time{ "nav.ignore.sticky-time", "15" };
 static settings::Boolean path_during_setup{ "nav.path-during-setup", "false" };
 
+static struct
+{
+    std::string ready_reason = "never ran";
+    std::string navto_reason;
+    std::string nav_path;
+    std::string level_name;
+    Vector navto_dest;
+    size_t areas = 0, connections = 0, isolated_areas = 0;
+    long long last_solve_ns = 0;
+    int last_solve_result = -1;
+    size_t last_solve_nodes = 0;
+    unsigned int navto_ok = 0, navto_fail = 0, abandons = 0, cancels = 0;
+    unsigned long long cm_calls = 0;
+    unsigned int edge_pass = 0, edge_cachedok = 0, edge_selfbl = 0, edge_freebl = 0, edge_height = 0, edge_cachedbad = 0, edge_rayfail = 0;
+    std::string rayfail_detail;
+} navdebug;
+
+const char *getPriorityName(int priority)
+{
+    switch (priority)
+    {
+    case 0:
+        return "none";
+    case patrol:
+        return "patrol";
+    case lowprio_health:
+        return "lowprio_health";
+    case staynear:
+        return "staynear";
+    case run_reload:
+        return "run_reload";
+    case snipe_sentry:
+        return "snipe_sentry";
+    case followbot:
+        return "followbot";
+    case ammo:
+        return "ammo";
+    case capture:
+        return "capture";
+    case prio_melee:
+        return "melee";
+    case engineer:
+        return "engineer";
+    case health:
+        return "health";
+    case danger:
+        return "danger";
+    default:
+        return "?";
+    }
+}
+
 // Cast a Ray and return if it hit
 static bool CastRay(Vector origin, Vector endpos, unsigned mask, ITraceFilter *filter)
 {
@@ -64,6 +118,21 @@ static bool CastRay(Vector origin, Vector endpos, unsigned mask, ITraceFilter *f
     return trace.DidHit();
 }
 
+static bool PassableSide(Vector origin, Vector target, Vector offset, unsigned int mask)
+{
+    trace_t trace;
+    Ray_t ray;
+    ray.Init(origin - offset, target - offset);
+    g_ITrace->TraceRay(ray, mask, &trace::filter_navigation, &trace);
+    if (!trace.DidHit())
+        return true;
+    if (!trace.startsolid && !trace.allsolid)
+        return false;
+    ray.Init(origin - offset * 0.5f, target - offset * 0.5f);
+    g_ITrace->TraceRay(ray, mask, &trace::filter_navigation, &trace);
+    return !trace.DidHit();
+}
+
 // Vischeck that considers player width
 static bool IsPlayerPassableNavigation(Vector origin, Vector target, unsigned int mask = MASK_PLAYERSOLID)
 {
@@ -79,12 +148,7 @@ static bool IsPlayerPassableNavigation(Vector origin, Vector target, unsigned in
     right.NormalizeInPlace();
     Vector offset = right * HALF_PLAYER_WIDTH;
 
-    // Left ray hit something
-    if (CastRay(origin - offset, target - offset, mask, &trace::filter_navigation))
-        return false;
-
-    // Return if the right ray hit something
-    return !CastRay(origin + offset, target + offset, mask, &trace::filter_navigation);
+    return PassableSide(origin, target, offset, mask) && PassableSide(origin, target, -offset, mask);
 }
 
 enum class NavState
@@ -173,12 +237,56 @@ navPoints determinePoints(CNavArea *current, CNavArea *next)
     return navPoints(area_center, center_point, center_next, next_center);
 };
 
+static int NavRayHit(Vector origin, Vector target, trace_t *out)
+{
+    Vector delta = target - origin;
+    delta.z      = 0.0f;
+    if (delta.Length() < 16.0f)
+        return 0;
+    if (std::fabs(target.z - origin.z) <= PLAYER_JUMP_HEIGHT)
+        target.z = origin.z;
+    Vector right(-delta.y, delta.x, 0.0f);
+    right.NormalizeInPlace();
+    Vector offset = right * HALF_PLAYER_WIDTH;
+    Ray_t ray;
+    ray.Init(origin - offset, target - offset);
+    g_ITrace->TraceRay(ray, MASK_PLAYERSOLID, &trace::filter_navigation, out);
+    if (out->DidHit())
+        return 1;
+    ray.Init(origin + offset, target + offset);
+    g_ITrace->TraceRay(ray, MASK_PLAYERSOLID, &trace::filter_navigation, out);
+    return out->DidHit() ? 2 : 0;
+}
+
+static std::string NavEdgeFailDetail(CNavArea *from, CNavArea *to, const navPoints &points)
+{
+    trace_t tr;
+    int ray         = NavRayHit(points.current, points.center, &tr);
+    const char *seg = "cur>ctr";
+    if (!ray)
+    {
+        ray = NavRayHit(points.center, points.next, &tr);
+        seg = "ctr>next";
+    }
+    if (!ray)
+        return format("e", (int) from->m_id, ">", (int) to->m_id, " flaky(none hit on retry)");
+    int idx = -1, cid = -1;
+    if (tr.m_pEnt)
+    {
+        idx       = EntIndex(reinterpret_cast<IClientEntity *>(tr.m_pEnt));
+        auto *cc  = EntClientClass(reinterpret_cast<IClientEntity *>(tr.m_pEnt));
+        if (cc)
+            cid = cc->m_ClassID;
+    }
+    return format("e", (int) from->m_id, ">", (int) to->m_id, " ", seg, " ray", ray, " frac:", tr.fraction, " ss:", (int) tr.startsolid, " as:", (int) tr.allsolid, " ent:", idx, " cid:", cid, " at ", (int) tr.endpos.x, ",", (int) tr.endpos.y, ",", (int) tr.endpos.z);
+}
+
 class Map : public micropather::Graph
 {
 public:
     CNavFile navfile;
     NavState state;
-    micropather::MicroPather pather{ this, 3000, 6, true };
+    micropather::MicroPather pather{ this, 3000, 6, false };
     std::string mapname;
     std::unordered_map<std::pair<CNavArea *, CNavArea *>, CachedConnection, boost::hash<std::pair<CNavArea *, CNavArea *>>> vischeck_cache;
     std::unordered_map<std::pair<CNavArea *, CNavArea *>, CachedStucktime, boost::hash<std::pair<CNavArea *, CNavArea *>>> connection_stuck_time;
@@ -189,16 +297,77 @@ public:
     // When the local player stands on one of the nav squares the free blacklist should NOT run
     bool free_blacklist_blocked = false;
 
+    std::unordered_set<CNavArea *> reachable_areas;
+
     Map(const char *nav_path, std::string level_name) : navfile(nav_path), mapname(std::move(level_name))
     {
         if (!navfile.m_isOK)
             state = NavState::Unavailable;
         else
+        {
             state = NavState::Active;
+            computeReachableAreas();
+        }
+    }
+
+    void computeReachableAreas()
+    {
+        std::unordered_map<CNavArea *, std::vector<CNavArea *>> reverse;
+        for (auto &area : navfile.m_areas)
+            for (auto &conn : area.m_connections)
+                if (conn.area)
+                    reverse[conn.area].push_back(&area);
+
+        std::unordered_set<CNavArea *> visited;
+        std::vector<CNavArea *> order;
+        std::function<void(CNavArea *)> dfs1 = [&](CNavArea *node) {
+            visited.insert(node);
+            for (auto &conn : node->m_connections)
+                if (conn.area && !visited.count(conn.area))
+                    dfs1(conn.area);
+            order.push_back(node);
+        };
+        for (auto &area : navfile.m_areas)
+            if (!visited.count(&area))
+                dfs1(&area);
+
+        visited.clear();
+        std::vector<CNavArea *> best_scc;
+        std::function<void(CNavArea *, std::vector<CNavArea *> &)> dfs2 = [&](CNavArea *node, std::vector<CNavArea *> &comp) {
+            visited.insert(node);
+            comp.push_back(node);
+            auto it = reverse.find(node);
+            if (it != reverse.end())
+                for (auto *next : it->second)
+                    if (!visited.count(next))
+                        dfs2(next, comp);
+        };
+        for (auto it = order.rbegin(); it != order.rend(); ++it)
+        {
+            if (visited.count(*it))
+                continue;
+            std::vector<CNavArea *> comp;
+            dfs2(*it, comp);
+            if (comp.size() > best_scc.size())
+                best_scc = std::move(comp);
+        }
+        if (best_scc.empty())
+            return;
+
+        std::vector<CNavArea *> stack{ best_scc.front() };
+        reachable_areas.insert(best_scc.front());
+        while (!stack.empty())
+        {
+            CNavArea *node = stack.back();
+            stack.pop_back();
+            for (auto &conn : node->m_connections)
+                if (conn.area && reachable_areas.insert(conn.area).second)
+                    stack.push_back(conn.area);
+        }
     }
     float LeastCostEstimate(void *start, void *end) override
     {
-        return reinterpret_cast<CNavArea *>(start)->m_center.DistToSqr(reinterpret_cast<CNavArea *>(end)->m_center);
+        return reinterpret_cast<CNavArea *>(start)->m_center.DistTo(reinterpret_cast<CNavArea *>(end)->m_center);
     }
     void AdjacentCost(void *main, std::vector<micropather::StateCost> *adjacent) override
     {
@@ -211,7 +380,10 @@ public:
 
             // Entered and marked bad?
             if (cached_connection != vischeck_cache.end() && !cached_connection->second.vischeck_state)
+            {
+                ++navdebug.edge_selfbl;
                 continue;
+            }
 
             // If the extern blacklist is running, ensure we don't try to use a bad area
             bool is_blacklisted = false;
@@ -225,7 +397,10 @@ public:
                     }
                 }
             if (is_blacklisted)
+            {
+                ++navdebug.edge_freebl;
                 continue;
+            }
 
             auto points = determinePoints(&area, connection.area);
 
@@ -236,7 +411,10 @@ public:
 
             // Too high for us to jump!
             if (height_diff > PLAYER_JUMP_HEIGHT)
+            {
+                ++navdebug.edge_height;
                 continue;
+            }
 
             points.current.z += PLAYER_JUMP_HEIGHT;
             points.center.z += PLAYER_JUMP_HEIGHT;
@@ -248,30 +426,37 @@ public:
             {
                 if (cached->second.vischeck_state)
                 {
-                    float cost = connection.area->m_center.DistToSqr(area.m_center);
+                    ++navdebug.edge_cachedok;
+                    float cost = points.next.DistTo(points.current);
                     adjacent->push_back(micropather::StateCost{ reinterpret_cast<void *>(connection.area), cost });
                 }
+                else
+                    ++navdebug.edge_cachedbad;
             }
             else
             {
                 // Check if there is direct line of sight
                 if (IsPlayerPassableNavigation(points.current, points.center) && IsPlayerPassableNavigation(points.center, points.next))
                 {
+                    ++navdebug.edge_pass;
                     vischeck_cache[key] = { TICKCOUNT_TIMESTAMP(60), true };
 
-                    float cost = points.next.DistToSqr(points.current);
+                    float cost = points.next.DistTo(points.current);
                     adjacent->push_back(micropather::StateCost{ reinterpret_cast<void *>(connection.area), cost });
                 }
                 else
                 {
+                    ++navdebug.edge_rayfail;
                     vischeck_cache[key] = { TICKCOUNT_TIMESTAMP(60), false };
+                    if (navdebug.rayfail_detail.empty())
+                        navdebug.rayfail_detail = NavEdgeFailDetail(&area, connection.area, points);
                 }
             }
         }
     }
 
 
-    CNavArea *findClosestNavSquare(const Vector &vec)
+    CNavArea *findClosestNavSquare(const Vector &vec, bool require_reachable = false)
     {
         auto vec_corrected = vec;
         vec_corrected.z += PLAYER_JUMP_HEIGHT;
@@ -281,6 +466,12 @@ public:
 
         for (auto &i : navfile.m_areas)
         {
+            if (i.m_connections.empty())
+                continue;
+
+            if (require_reachable && !reachable_areas.count(&i))
+                continue;
+
             // Marked bad, do not use if local origin
             if (g_pLocalPlayer->v_Origin == vec)
             {
@@ -333,11 +524,22 @@ public:
         std::vector<void *> pathNodes;
         float cost;
 
+        navdebug.edge_pass = navdebug.edge_cachedok = navdebug.edge_selfbl = navdebug.edge_freebl = navdebug.edge_height = navdebug.edge_cachedbad = navdebug.edge_rayfail = 0;
+        navdebug.rayfail_detail.clear();
+
         time_point begin_pathing = high_resolution_clock::now();
         int result               = pather.Solve(reinterpret_cast<void *>(local), reinterpret_cast<void *>(dest), &pathNodes, &cost);
         long long timetaken      = duration_cast<nanoseconds>(high_resolution_clock::now() - begin_pathing).count();
+        navdebug.last_solve_result = result;
+        navdebug.last_solve_nodes  = pathNodes.size();
+        navdebug.last_solve_ns     = timetaken;
+        if (result != micropather::MicroPather::SOLVED && result != micropather::MicroPather::START_END_SAME)
+        {
+            logging::Info("NavDbg: solve fail r=%d | edges pass=%u cok=%u selfbl=%u freebl=%u height=%u cbad=%u rayfail=%u | %s", result, navdebug.edge_pass, navdebug.edge_cachedok, navdebug.edge_selfbl, navdebug.edge_freebl, navdebug.edge_height, navdebug.edge_cachedbad, navdebug.edge_rayfail, navdebug.rayfail_detail.c_str());
+            pather.Reset();
+        }
         if (log_pathing)
-            logging::Info("Pathing: Pather result: %i. Time taken (NS): %lld", result, timetaken);
+            logging::Info("Pathing: Pather result: %i. Nodes: %zu. Time taken (NS): %lld", result, pathNodes.size(), timetaken);
         // Start and end are the same, return start node
         if (result == micropather::MicroPather::START_END_SAME)
             return { reinterpret_cast<void *>(local) };
@@ -524,6 +726,7 @@ static void ensureMapLoaded()
     if (!g_IEngine->IsInGame())
         return;
     std::string level_name = GetLevelName();
+    navdebug.level_name = level_name;
     if (level_name.empty())
         return;
     if (map && map->mapname == level_name)
@@ -542,19 +745,47 @@ static void ensureMapLoaded()
     logging::Info("Pathing: Nav File location: %s", nav_path.c_str());
     map       = std::make_unique<Map>(nav_path.c_str(), level_name);
     map_dirty = false;
+
+    navdebug.nav_path       = nav_path;
+    navdebug.areas          = map->navfile.m_areas.size();
+    navdebug.connections    = 0;
+    navdebug.isolated_areas = 0;
+    for (auto &area : map->navfile.m_areas)
+    {
+        navdebug.connections += area.m_connections.size();
+        if (area.m_connections.empty())
+            ++navdebug.isolated_areas;
+    }
 }
 
 bool isReady()
 {
     ensureMapLoaded();
+    auto fail = [](const char *reason)
+    {
+        navdebug.ready_reason = reason;
+        return false;
+    };
     if (!enabled && !hacks::tf2::NavBot::isEnabled())
-        return false;
-    if (!map || map->state != NavState::Active || !g_IEngine->IsInGame())
-        return false;
+        return fail("nav.enabled and navbot.enabled both off");
+    if (!g_IEngine->IsInGame())
+        return fail("not in game");
+    if (!map)
+        return fail("map object not loaded");
+    if (map->state != NavState::Active)
+        return fail("nav file unavailable/invalid");
     if (path_during_setup)
+    {
+        navdebug.ready_reason.clear();
         return true;
+    }
     std::string level_name = GetLevelName();
-    return level_name == "plr_pipeline" || g_pGameRules->RoundMode() > CGameRules::GR_STATE_PREROUND;
+    if (level_name == "plr_pipeline" || g_pGameRules->RoundMode() > CGameRules::GR_STATE_PREROUND)
+    {
+        navdebug.ready_reason.clear();
+        return true;
+    }
+    return fail("waiting for round start (preround/setup)");
 }
 
 bool isPathing()
@@ -579,48 +810,60 @@ std::vector<Crumb> *getCrumbs()
 
 static Timer inactivity{};
 static Timer time_spent_on_crumb{};
+static Timer navto_fail_cooldown{};
+static Vector last_failed_dest{};
+static bool have_failed_dest = false;
 
 bool navTo(const Vector &destination, int priority, bool should_repath, bool nav_to_local, bool is_repath)
 {
-    if (!isReady())
+    auto fail = [&](std::string reason)
+    {
+        if (log_pathing && reason != navdebug.navto_reason)
+            logging::Info("Pathing: navTo failed: %s (dest %.0f,%.0f,%.0f prio %d)", reason.c_str(), destination.x, destination.y, destination.z, priority);
+        navdebug.navto_reason = std::move(reason);
+        ++navdebug.navto_fail;
+        last_failed_dest  = destination;
+        have_failed_dest  = true;
+        navto_fail_cooldown.update();
         return false;
+    };
+    if (!isReady())
+        return fail("not ready: " + navdebug.ready_reason);
     // Don't path, priority is too low
     if (priority < current_priority)
+        return fail(format("priority ", priority, " < current ", current_priority));
+    if (have_failed_dest && destination == last_failed_dest && !navto_fail_cooldown.check(500))
+    {
+        ++navdebug.navto_fail;
         return false;
+    }
     if (log_pathing)
         logging::Info("Priority: %d", priority);
 
     CNavArea *start_area = map->findClosestNavSquare(g_pLocalPlayer->v_Origin);
-    CNavArea *dest_area  = map->findClosestNavSquare(destination);
+    CNavArea *dest_area  = map->findClosestNavSquare(destination, true);
+    if (!dest_area)
+        dest_area = map->findClosestNavSquare(destination);
 
-    if (!start_area || !dest_area)
-        return false;
+    if (!start_area)
+        return fail("no start area found");
+    if (!dest_area)
+        return fail("no dest area found");
     auto path = map->findPath(start_area, dest_area);
     if (path.empty())
-        return false;
+        return fail(format("pather no path (result ", navdebug.last_solve_result, ", start #", start_area->m_id, " dest #", dest_area->m_id, ")"));
 
-    if (!nav_to_local)
-        path.erase(path.begin());
     crumbs.clear();
 
-    for (size_t i = 0; i < path.size(); ++i)
+    for (size_t i = 0; i + 1 < path.size(); ++i)
     {
-        auto *area = reinterpret_cast<CNavArea *>(path[i]);
+        auto *area      = reinterpret_cast<CNavArea *>(path[i]);
+        auto *next_area = (CNavArea *) path[i + 1];
 
+        auto points   = determinePoints(area, next_area);
+        points.center = handleDropdown(points.center, points.next);
 
-        if (i != path.size() - 1)
-        {
-            auto *next_area = (CNavArea *) path[i + 1];
-
-            auto points = determinePoints(area, next_area);
-
-            points.center = handleDropdown(points.center, points.next);
-
-            crumbs.push_back({ area, points.current });
-            crumbs.push_back({ area, points.center });
-        }
-        else
-            crumbs.push_back({ area, area->m_center });
+        crumbs.push_back({ area, points.center });
     }
 
     crumbs.push_back({ nullptr, destination });
@@ -633,6 +876,12 @@ bool navTo(const Vector &destination, int priority, bool should_repath, bool nav
     if (repath_on_fail)
         last_destination = destination;
 
+    ++navdebug.navto_ok;
+    navdebug.navto_reason.clear();
+    have_failed_dest = false;
+    navdebug.navto_dest = destination;
+    if (log_pathing)
+        logging::Info("Pathing: navTo ok prio %d dest (%.0f,%.0f,%.0f) nodes %zu crumbs %zu", priority, destination.x, destination.y, destination.z, path.size(), crumbs.size());
     return true;
 }
 
@@ -641,6 +890,9 @@ void abandonPath()
 {
     if (!map)
         return;
+    ++navdebug.abandons;
+    if (log_pathing)
+        logging::Info("Pathing: abandonPath (repath=%d)", repath_on_fail);
     map->pather.Reset();
     crumbs.clear();
     last_crumb.navarea = nullptr;
@@ -654,6 +906,7 @@ void abandonPath()
 // Use to cancel pathing completely
 void cancelPath()
 {
+    ++navdebug.cancels;
     crumbs.clear();
     last_crumb.navarea = nullptr;
     current_priority   = 0;
@@ -935,6 +1188,7 @@ void updateStuckTime()
 
 static void CreateMove()
 {
+    ++navdebug.cm_calls;
     ensureMapLoaded();
     if (!isReady())
         return;
@@ -951,6 +1205,13 @@ static void CreateMove()
     followCrumbs();
     updateStuckTime();
     map->updateIgnores();
+
+    if (log_pathing)
+    {
+        static Timer status_timer{};
+        if (status_timer.test_and_set(2000))
+            logging::Info("NavDbg: ready=1 crumbs=%zu prio=%s(%d) areas=%zu conns=%zu iso=%zu bl=%zu vc=%zu fail='%s'", crumbs.size(), getPriorityName(current_priority), current_priority, navdebug.areas, navdebug.connections, navdebug.isolated_areas, map->free_blacklist.size(), map->vischeck_cache.size(), navdebug.navto_reason.c_str());
+    }
 }
 
 void LevelInit()
@@ -994,6 +1255,56 @@ void clearFreeBlacklist(BlacklistReason reason)
         else
             ++it;
     }
+}
+
+static long long msSince(const Timer &t)
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(Timer::clock::now() - t.last).count();
+}
+
+std::vector<std::string> getDebugInfoLines()
+{
+    std::vector<std::string> lines;
+    lines.push_back(format("cm:", navdebug.cm_calls, " nav:", *enabled ? "1" : "0", "/", hacks::tf2::NavBot::isEnabled() ? "1" : "0", " ready:", navdebug.ready_reason.empty() ? "yes" : format("no(", navdebug.ready_reason, ")")));
+    if (map)
+        lines.push_back(format("map '", map->mapname, "' ", map->state == NavState::Active ? "Active" : "Unavailable", " ok:", map->navfile.m_isOK ? "1" : "0", " areas:", navdebug.areas, " conns:", navdebug.connections, " iso:", navdebug.isolated_areas, " reach:", map->reachable_areas.size()));
+    else
+        lines.push_back(format("map: not loaded level '", navdebug.level_name, "'"));
+    lines.push_back(format("navfile: '", navdebug.nav_path, "'"));
+    lines.push_back(format("ingame:", g_IEngine->IsInGame() ? "1" : "0", " rm:", (int) g_pGameRules->RoundMode(), " crumbs:", crumbs.size(), " prio:", getPriorityName(current_priority), "(", current_priority, ")"));
+    if (!crumbs.empty())
+    {
+        auto &c0 = crumbs[0];
+        std::string line = format("c0 #", c0.navarea ? (int) c0.navarea->m_id : -1, " (", (int) c0.vec.x, ",", (int) c0.vec.y, ",", (int) c0.vec.z, ") d:", (int) c0.vec.DistTo(g_pLocalPlayer->v_Origin), "/", (int) (c0.navarea ? 50.0f : 20.0f));
+        if (crumbs.size() > 1)
+            line += format(" | c1 #", crumbs[1].navarea ? (int) crumbs[1].navarea->m_id : -1, " d:", (int) crumbs[1].vec.DistTo(g_pLocalPlayer->v_Origin));
+        line += format(" | last #", crumbs.back().navarea ? (int) crumbs.back().navarea->m_id : -1);
+        lines.push_back(line);
+    }
+    lines.push_back(format("tmr inact:", msSince(inactivity), " crumb:", msSince(time_spent_on_crumb), " | dest (", (int) navdebug.navto_dest.x, ",", (int) navdebug.navto_dest.y, ",", (int) navdebug.navto_dest.z, ") rp:", repath_on_fail ? "1" : "0"));
+    lines.push_back(format("navTo: ", navdebug.navto_reason.empty() ? "ok" : navdebug.navto_reason, " ok:", navdebug.navto_ok, " fail:", navdebug.navto_fail));
+    lines.push_back(format("solve r:", navdebug.last_solve_result, " n:", navdebug.last_solve_nodes, " us:", navdebug.last_solve_ns / 1000, map ? format(" | bl:", map->free_blacklist.size(), map->free_blacklist_blocked ? "(B)" : "", " vc:", map->vischeck_cache.size(), " sc:", map->connection_stuck_time.size()) : ""));
+    lines.push_back(format("edge p:", navdebug.edge_pass, " cok:", navdebug.edge_cachedok, " | rej sb:", navdebug.edge_selfbl, " fb:", navdebug.edge_freebl, " h:", navdebug.edge_height, " cb:", navdebug.edge_cachedbad, " rf:", navdebug.edge_rayfail));
+    if (!navdebug.rayfail_detail.empty())
+        lines.push_back(format("rf: ", navdebug.rayfail_detail));
+    if (map && CE_GOOD(LOCAL_E))
+    {
+        auto *la = map->findClosestNavSquare(g_pLocalPlayer->v_Origin);
+        lines.push_back(la ? format("area #", la->m_id, " a:", la->m_attributeFlags, " tf:", la->m_TFattributeFlags, " c:", la->m_connections.size(), " | ab:", navdebug.abandons, " cc:", navdebug.cancels)
+                         : format("local area: NONE | ab:", navdebug.abandons, " cc:", navdebug.cancels));
+    }
+    else
+        lines.push_back(format("ab:", navdebug.abandons, " cc:", navdebug.cancels));
+    return lines;
+}
+
+void drawDebugInfo()
+{
+#if ENABLE_VISUALS
+    AddSideString("--- NavEngine ---", colors::gui);
+    for (auto &line : getDebugInfoLines())
+        AddSideString(line);
+#endif
 }
 
 #if ENABLE_VISUALS
@@ -1083,6 +1394,15 @@ static CatCommand nav_set("nav_set", "Debug nav find", []() { loc = g_pLocalPlay
 static CatCommand nav_path("nav_path", "Debug nav path", []() { NavEngine::navTo(loc, 20, true, true, false); });
 
 static CatCommand nav_path_noreapth("nav_path_norepath", "Debug nav path", []() { NavEngine::navTo(loc, 20, false, true, false); });
+
+static CatCommand nav_debug_dump("nav_debug_dump", "Dump navengine/navbot debug state to the log",
+                                 []()
+                                 {
+                                     for (auto &line : NavEngine::getDebugInfoLines())
+                                         logging::Info("navdbg: %s", line.c_str());
+                                     for (auto &line : hacks::tf2::NavBot::getDebugInfoLines())
+                                         logging::Info("navdbg: %s", line.c_str());
+                                 });
 
 static CatCommand nav_init("nav_init", "Reload nav mesh",
                            []()
