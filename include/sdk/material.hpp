@@ -7,7 +7,6 @@
 
 class KeyValues;
 
-// Live linux64 CMaterial. No extra dtor slots; slot 0 is GetName.
 class CMaterial
 {
 public:

@@ -429,7 +429,7 @@ Vector EnginePrediction(CachedEntity *entity, float time, Vector *vecVelocity)
 
     CUserCmd fakecmd{};
 
-    Vector vel /* = NET_VECTOR(ent, netvar.vVelocity) */;
+    Vector vel;
     velocity::EstimateAbsVelocity(RAW_ENT(entity), vel);
 
     Vector vel_angles;

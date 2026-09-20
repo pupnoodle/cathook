@@ -6,8 +6,6 @@
 #include "sdk/material.hpp"
 #include "sdk/texture.hpp"
 
-// Live linux64 CMatRenderContext. 2013 IMatRenderContext is off-by-one
-// from DrawScreenSpaceRectangle through the stencil block.
 class CMatRenderContext
 {
 public:

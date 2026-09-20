@@ -10,7 +10,6 @@ class ConVar;
 class ConCommand;
 class ConCommandBase;
 
-// Live linux64 CCvar. IAppSystem has no extra dtor slots.
 class CCvar
 {
 public:

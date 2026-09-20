@@ -28,6 +28,7 @@ static settings::Boolean escape_danger_ctf_cap("navbot.escape-danger.ctf-cap", "
 static settings::Boolean enable_slight_danger_when_capping("navbot.escape-danger.slight-danger.capping", "false");
 static settings::Boolean autojump("navbot.autojump.enabled", "false");
 static settings::Boolean primary_only("navbot.primary-only", "true");
+static settings::Boolean melee_mode("navbot.melee-mode", "false");
 static settings::Int force_slot("navbot.force-slot", "0");
 static settings::Float jump_distance("navbot.autojump.trigger-distance", "300");
 static settings::Int blacklist_delay("navbot.proximity-blacklist.delay", "500");
@@ -38,6 +39,11 @@ static settings::Boolean engie_mode("navbot.engineer-mode", "true");
 #if ENABLE_VISUALS
 static settings::Boolean draw_danger("navbot.draw-danger", "false");
 #endif
+
+bool isEnabled()
+{
+    return *enabled;
+}
 
 // Allow for custom danger configs, mainly for debugging purposes
 static settings::Boolean danger_config_custom("navbot.danger-config.enabled", "false");
@@ -124,7 +130,7 @@ std::vector<CachedEntity *> getDispensers()
 
         // This fixes the fact that players can just place dispensers in unreachable locations
         auto local_nav = navparser::NavEngine::findClosestNavSquare(ent->m_vecOrigin());
-        if (local_nav->getNearestPoint(ent->m_vecOrigin().AsVector2D()).DistTo(ent->m_vecOrigin()) > 300.0f || local_nav->getNearestPoint(ent->m_vecOrigin().AsVector2D()).z - ent->m_vecOrigin().z > navparser::PLAYER_JUMP_HEIGHT)
+        if (!local_nav || local_nav->getNearestPoint(ent->m_vecOrigin().AsVector2D()).DistTo(ent->m_vecOrigin()) > 300.0f || local_nav->getNearestPoint(ent->m_vecOrigin().AsVector2D()).z - ent->m_vecOrigin().z > navparser::PLAYER_JUMP_HEIGHT)
             continue;
         entities.push_back(ent);
     }
@@ -262,7 +268,7 @@ std::pair<CachedEntity *, float> getNearestPlayerDistance()
     for (auto const &ent: entity_cache::player_cache)
     {
         
-        if (CE_VALID(ent) && ent->m_vecDormantOrigin() && g_pPlayerResource->isAlive(ent->m_IDX) && ent->m_bEnemy() && g_pLocalPlayer->v_Origin.DistTo(ent->m_vecOrigin()) < distance && player_tools::shouldTarget(ent) && !IsPlayerInvisible(ent))
+        if (CE_VALID(ent) && ent->m_vecDormantOrigin() && g_pPlayerResource->isAlive(ent->m_IDX) && ent->m_bEnemy() && g_pLocalPlayer->v_Origin.DistTo(*ent->m_vecDormantOrigin()) < distance && player_tools::shouldTarget(ent) && !IsPlayerInvisible(ent))
         {
             distance = g_pLocalPlayer->v_Origin.DistTo(*ent->m_vecDormantOrigin());
             best_ent = ent;
@@ -608,7 +614,7 @@ void updateEnemyBlacklist(int slot)
 }
 
 // Check if an area is valid for stay near. the Third parameter is to save some performance.
-bool isAreaValidForStayNear(Vector ent_origin, CNavArea *area, bool fix_local_z = true)
+bool isAreaValidForStayNear(Vector ent_origin, CNavArea *area, bool fix_local_z = true, bool vischeck = true)
 {
     if (fix_local_z)
         ent_origin.z += navparser::PLAYER_JUMP_HEIGHT;
@@ -628,7 +634,7 @@ bool isAreaValidForStayNear(Vector ent_origin, CNavArea *area, bool fix_local_z 
     if (distance > selected_config.max * selected_config.max)
         return false;
     // Attempt to vischeck
-    if (!IsVectorVisibleNavigation(ent_origin, area_origin))
+    if (vischeck && !IsVectorVisibleNavigation(ent_origin, area_origin))
         return false;
     return true;
 }
@@ -651,8 +657,7 @@ bool stayNearTarget(CachedEntity *ent)
     {
         auto area_origin = area.m_center;
 
-        // Is this area valid for stay near purposes?
-        if (!isAreaValidForStayNear(*ent_origin, &area, false))
+        if (!isAreaValidForStayNear(*ent_origin, &area, false, false))
             continue;
 
         float distance = (*ent_origin).DistToSqr(area_origin);
@@ -665,10 +670,17 @@ bool stayNearTarget(CachedEntity *ent)
     else
         std::sort(good_areas.begin(), good_areas.end(), [](std::pair<CNavArea *, float> a, std::pair<CNavArea *, float> b) { return a.second < b.second; });
 
-    // Try to path to all the good areas, based on distance
-    if (std::ranges::any_of(good_areas, [](std::pair<CNavArea *, float> area) { return navparser::NavEngine::navTo(area.first->m_center, staynear, true, !navparser::NavEngine::isPathing()); }))
-        return true;
-
+    int vischecks = 0;
+    for (auto &area : good_areas)
+    {
+        if (vischecks >= 24)
+            break;
+        vischecks++;
+        if (!isAreaValidForStayNear(*ent_origin, area.first, false, true))
+            continue;
+        if (navparser::NavEngine::navTo(area.first->m_center, staynear, true, !navparser::NavEngine::isPathing()))
+            return true;
+    }
     return false;
 }
 
@@ -956,7 +968,7 @@ bool meleeAttack(int slot, std::pair<CachedEntity *, float> &nearest)
 }
 
 // Basically the same as isAreaValidForStayNear, but some restrictions lifted.
-bool isAreaValidForSnipe(Vector ent_origin, Vector area_origin, bool fix_sentry_z = true)
+bool isAreaValidForSnipe(Vector ent_origin, Vector area_origin, bool fix_sentry_z = true, bool vischeck = true)
 {
     if (fix_sentry_z)
         ent_origin.z += 40.0f;
@@ -967,7 +979,7 @@ bool isAreaValidForSnipe(Vector ent_origin, Vector area_origin, bool fix_sentry_
     if (distance <= (1100.0f + navparser::HALF_PLAYER_WIDTH) * (1100.0f + navparser::HALF_PLAYER_WIDTH))
         return false;
     // Fails vischeck, bad
-    if (!IsVectorVisibleNavigation(area_origin, ent_origin))
+    if (vischeck && !IsVectorVisibleNavigation(area_origin, ent_origin))
         return false;
     return true;
 }
@@ -983,8 +995,7 @@ bool tryToSnipe(CachedEntity *ent)
     std::vector<std::pair<CNavArea *, float>> good_areas;
     for (auto &area : navparser::NavEngine::getNavFile()->m_areas)
     {
-        // Not usable
-        if (!isAreaValidForSnipe(ent_origin, area.m_center, false))
+        if (!isAreaValidForSnipe(ent_origin, area.m_center, false, false))
             continue;
         good_areas.push_back(std::pair<CNavArea *, float>(&area, area.m_center.DistToSqr(ent_origin)));
     }
@@ -995,8 +1006,17 @@ bool tryToSnipe(CachedEntity *ent)
     else
         std::sort(good_areas.begin(), good_areas.end(), [](std::pair<CNavArea *, float> a, std::pair<CNavArea *, float> b) { return a.second < b.second; });
 
-    if (std::ranges::any_of(good_areas, [](std::pair<CNavArea *, float> area) { return navparser::NavEngine::navTo(area.first->m_center, snipe_sentry); }))
-        return true;
+    int vischecks = 0;
+    for (auto &area : good_areas)
+    {
+        if (vischecks >= 24)
+            break;
+        vischecks++;
+        if (!isAreaValidForSnipe(ent_origin, area.first->m_center, false, true))
+            continue;
+        if (navparser::NavEngine::navTo(area.first->m_center, snipe_sentry))
+            return true;
+    }
     return false;
 }
 
@@ -1204,8 +1224,6 @@ enum capture_type
 static capture_type current_capturetype = no_capture;
 // Overwrite to return true for payload carts as an example
 static bool overwrite_capture = false;
-// Doomsday is a ctf + payload map which breaks capturing...
-static bool is_doomsday = false;
 
 std::optional<Vector> getCtfGoal(int our_team, int enemy_team)
 {
@@ -1289,8 +1307,7 @@ bool captureObjectives()
 {
     static Timer capture_timer;
     static Vector previous_target(0.0f);
-    // Not active or on a doomsday map
-    if (!capture_objectives || is_doomsday || !capture_timer.check(2000))
+    if (!capture_objectives || !g_pGameRules->PointsMayBeCaptured() || g_pGameRules->RoundHasBeenWon() || g_pGameRules->IsPlayingSpecialDeliveryMode() || !capture_timer.check(2000))
         return false;
 
     // Priority too high, don't try
@@ -1468,6 +1485,8 @@ static void autoJump(std::pair<CachedEntity *, float> &nearest)
 
 static slots getBestSlot(slots active_slot, std::pair<CachedEntity *, float> &nearest)
 {
+    if (melee_mode)
+        return melee;
     if (force_slot)
         return (slots) *force_slot;
     switch (g_pLocalPlayer->clazz)
@@ -1548,7 +1567,7 @@ static slots getBestSlot(slots active_slot, std::pair<CachedEntity *, float> &ne
 static void updateSlot(std::pair<CachedEntity *, float> &nearest)
 {
     static Timer slot_timer{};
-    if ((!force_slot && !primary_only) || !slot_timer.test_and_set(300))
+    if ((!force_slot && !primary_only && !melee_mode) || !slot_timer.test_and_set(300))
         return;
     if (CE_GOOD(LOCAL_E) && !HasCondition<TFCond_HalloweenGhostMode>(LOCAL_E) && CE_GOOD(LOCAL_W) && LOCAL_E->m_bAlivePlayer())
     {
@@ -1642,14 +1661,12 @@ void LevelInit()
 {
     // Make it run asap
     refresh_sniperspots_timer.last -= std::chrono::seconds(60);
+    refresh_buildingspots_timer.last -= std::chrono::seconds(60);
     sniper_spots.clear();
-    is_doomsday = false;
-
-    // Doomsday sucks
-    // TODO: add proper doomsday implementation
-    auto map_name = std::string(g_IEngine->GetLevelName());
-    if (g_IEngine->GetLevelName() && map_name.find("sd_doomsday") != map_name.npos)
-        is_doomsday = true;
+    building_spots.clear();
+    mySentry    = nullptr;
+    myDispenser = nullptr;
+    current_building_spot.Invalidate();
 }
 #if ENABLE_VISUALS
 void Draw()

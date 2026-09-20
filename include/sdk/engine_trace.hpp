@@ -12,7 +12,6 @@ typedef CGameTrace trace_t;
 static_assert(offsetof(Ray_t, m_IsRay) == 0x40, "Ray_t m_IsRay must match linux64 TF2 (no world-axis transform pointer)");
 static_assert(sizeof(Ray_t) == 0x50, "Ray_t must be 0x50 on linux64 TF2");
 
-// Live linux64 CEngineTraceClient. No extra dtor slots.
 class CEngineTrace
 {
 public:

@@ -4,7 +4,6 @@
 #include "core/vtables.hpp"
 #include "materialsystem/itexture.h"
 
-// Live linux64 CTexture. No extra dtor slots; slot 0 is GetName.
 class CTexture
 {
 public:

@@ -21,7 +21,7 @@ namespace hooked_methods
 
 DEFINE_HOOKED_METHOD(Paint, void, IEngineVGui *this_, PaintMode_t mode)
 {
-    prof_arm_main_thread(); // TEMP: main-thread sampler
+    prof_arm_main_thread();
     if (!isHackActive())
     {
         return original::Paint(this_, mode);
@@ -94,7 +94,6 @@ DEFINE_HOOKED_METHOD(Paint, void, IEngineVGui *this_, PaintMode_t mode)
             last_stdin = std::chrono::system_clock::now();
         }
 #endif
-        // IMGUI is presented from SDL_GL_SwapWindow on the GL thread.
 #if ENABLE_GLEZ_DRAWING
         render_cheat_visuals();
 #endif

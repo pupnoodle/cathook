@@ -200,7 +200,6 @@ void gui::init()
     load();
     init_done = true;
 
-    // AddListener from the SDL swap thread can deadlock the engine.
     EC::Register(
         EC::CreateMove,
         []() {

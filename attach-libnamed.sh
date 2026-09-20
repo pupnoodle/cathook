@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# gdb inject libcathook.so into live linux64 tf_linux64.
 set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-LIB="${LIB:-$ROOT/bin/libcathook.so}"
+LIB="${LIB:-$ROOT/build/bin/libcathook.so}"
 GAME_BIN="${GAME_BIN:-tf_linux64}"
 
 if [ ! -f "$LIB" ]; then
@@ -11,7 +10,6 @@ if [ ! -f "$LIB" ]; then
     exit 1
 fi
 
-# Same-user gdb attach works; do not require root.
 
 PROCID="${1:-}"
 if [ -z "$PROCID" ]; then

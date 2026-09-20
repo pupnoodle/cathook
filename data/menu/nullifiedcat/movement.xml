@@ -41,6 +41,7 @@
             <AutoVariable width="fill" target="nav.look-at-path" label="Look at path"/>
             <AutoVariable width="fill" target="navbot.enabled" label="Enable NavBot"/>
             <AutoVariable width="fill" target="navbot.capture-objectives" label="Capture objectives" tooltip="Automatically capture objectives (CTF, CP, and PL only)."/>
+            <AutoVariable width="fill" target="nav.path-during-setup" label="Path during setup" tooltip="Path during setup. Will also path while the gates are closed."/>
             <AutoVariable width="fill" target="navbot.search-health" label="Search health"/>
             <AutoVariable width="fill" target="navbot.search-ammo" label="Search ammo"/>
             <AutoVariable width="fill" target="navbot.escape-danger" label="Escape danger"/>

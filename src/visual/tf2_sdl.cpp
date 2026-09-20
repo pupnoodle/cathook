@@ -1,8 +1,3 @@
-/*
- * Resolve SDL calls against TF2's already-mapped libSDL2-2.0.so.0.
- * Linking libcathook against the distro libSDL2 loads a second SDL instance
- * and crashes in SDL_CreateSystemCursor / GL context calls.
- */
 
 #include <cstdint>
 #include <cstring>

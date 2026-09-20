@@ -20,6 +20,7 @@
 #include "teamroundtimer.hpp"
 #include "Aimbot.hpp"
 #include "MiscAimbot.hpp"
+#include "NavBot.hpp"
 #include "navparser.hpp"
 #if ENABLE_VISUALS
 #include "drawing.hpp"
@@ -45,6 +46,7 @@ static settings::Int stuck_expire_time{ "nav.anti-stuck.expire-time", "10" };
 // How long we should blacklist the node after being stuck for too long?
 static settings::Int stuck_blacklist_time{ "nav.anti-stuck.blacklist-time", "120" };
 static settings::Int sticky_ignore_time{ "nav.ignore.sticky-time", "15" };
+static settings::Boolean path_during_setup{ "nav.path-during-setup", "false" };
 
 // Cast a Ray and return if it hit
 static bool CastRay(Vector origin, Vector endpos, unsigned mask, ITraceFilter *filter)
@@ -66,29 +68,24 @@ static bool CastRay(Vector origin, Vector endpos, unsigned mask, ITraceFilter *f
 // Vischeck that considers player width
 static bool IsPlayerPassableNavigation(Vector origin, Vector target, unsigned int mask = MASK_PLAYERSOLID)
 {
-    Vector tr = target - origin;
-    Vector angles;
-    VectorAngles(tr, angles);
+    Vector delta = target - origin;
+    delta.z    = 0.0f;
+    if (delta.Length() < 16.0f)
+        return true;
 
-    Vector forward, right, up;
-    AngleVectors3(VectorToQAngle(angles), &forward, &right, &up);
-    right.z = 0;
+    if (std::fabs(target.z - origin.z) <= PLAYER_JUMP_HEIGHT)
+        target.z = origin.z;
 
-    // We want to keep the same angle for these two bounding box traces
-    Vector relative_endpos = forward * tr.Length();
-
-    Vector left_ray_origin = origin - right * HALF_PLAYER_WIDTH;
-    Vector left_ray_endpos = left_ray_origin + relative_endpos;
+    Vector right(-delta.y, delta.x, 0.0f);
+    right.NormalizeInPlace();
+    Vector offset = right * HALF_PLAYER_WIDTH;
 
     // Left ray hit something
-    if (CastRay(left_ray_origin, left_ray_endpos, mask, &trace::filter_navigation))
+    if (CastRay(origin - offset, target - offset, mask, &trace::filter_navigation))
         return false;
 
-    Vector right_ray_origin = origin + right * HALF_PLAYER_WIDTH;
-    Vector right_ray_endpos = right_ray_origin + relative_endpos;
-
     // Return if the right ray hit something
-    return !CastRay(right_ray_origin, right_ray_endpos, mask, &trace::filter_navigation);
+    return !CastRay(origin + offset, target + offset, mask, &trace::filter_navigation);
 }
 
 enum class NavState
@@ -193,7 +190,11 @@ public:
     // When the local player stands on one of the nav squares the free blacklist should NOT run
     bool free_blacklist_blocked = false;
 
-    Map(const char *mapname) : navfile(mapname), mapname(mapname)
+    CNavArea *solve_start = nullptr;
+    CNavArea *solve_dest  = nullptr;
+    bool solve_in_setup   = false;
+
+    Map(const char *nav_path, std::string level_name) : navfile(nav_path), mapname(std::move(level_name))
     {
         if (!navfile.m_isOK)
             state = NavState::Unavailable;
@@ -207,10 +208,32 @@ public:
     void AdjacentCost(void *main, std::vector<micropather::StateCost> *adjacent) override
     {
         CNavArea &area = *reinterpret_cast<CNavArea *>(main);
+        int team       = g_pLocalPlayer->team;
         for (NavConnect &connection : area.m_connections)
         {
+            CNavArea *next_area = connection.area;
+            if (!next_area)
+                continue;
+
+            if (next_area->m_minZ - area.m_maxZ > PLAYER_JUMP_HEIGHT)
+                continue;
+            if (area.m_minZ - next_area->m_maxZ > PLAYER_DEATH_DROP_HEIGHT)
+                continue;
+
+            int tf_attributes = next_area->m_TFattributeFlags;
+            if ((tf_attributes & TF_NAV_BLOCKED) && !(tf_attributes & TF_NAV_UNBLOCKABLE))
+                continue;
+
+            if (solve_in_setup && next_area != solve_dest && (tf_attributes & (TF_NAV_BLUE_SETUP_GATE | TF_NAV_RED_SETUP_GATE)))
+                continue;
+
+            if (team == TEAM_RED && (tf_attributes & (TF_NAV_SPAWN_ROOM_BLUE | TF_NAV_BLUE_ONE_WAY_DOOR)))
+                continue;
+            if (team == TEAM_BLU && (tf_attributes & (TF_NAV_SPAWN_ROOM_RED | TF_NAV_RED_ONE_WAY_DOOR)))
+                continue;
+
             // An area being entered twice means it is blacklisted from entry entirely
-            auto connection_key    = std::pair<CNavArea *, CNavArea *>(connection.area, connection.area);
+            auto connection_key    = std::pair<CNavArea *, CNavArea *>(next_area, next_area);
             auto cached_connection = vischeck_cache.find(connection_key);
 
             // Entered and marked bad?
@@ -223,7 +246,7 @@ public:
             if (!free_blacklist_blocked)
                 for (auto const &entry : free_blacklist)
                 {
-                    if (entry.first == connection.area)
+                    if (entry.first == next_area)
                     {
                         is_blacklisted = true;
                         break;
@@ -232,7 +255,7 @@ public:
             if (is_blacklisted)
                 continue;
 
-            auto points = determinePoints(&area, connection.area);
+            auto points = determinePoints(&area, next_area);
 
             // Apply dropdown
             points.center = handleDropdown(points.center, points.next);
@@ -243,18 +266,26 @@ public:
             if (height_diff > PLAYER_JUMP_HEIGHT)
                 continue;
 
+            float cost_multiplier = 1.0f;
+            if (next_area->m_attributeFlags & NAV_MESH_AVOID)
+                cost_multiplier += 3.0f;
+            if (team == TEAM_RED && (tf_attributes & TF_NAV_BLUE_SENTRY_DANGER))
+                cost_multiplier += 1.0f;
+            else if (team == TEAM_BLU && (tf_attributes & TF_NAV_RED_SENTRY_DANGER))
+                cost_multiplier += 1.0f;
+
             points.current.z += PLAYER_JUMP_HEIGHT;
             points.center.z += PLAYER_JUMP_HEIGHT;
             points.next.z += PLAYER_JUMP_HEIGHT;
 
-            auto key    = std::pair<CNavArea *, CNavArea *>(&area, connection.area);
+            auto key    = std::pair<CNavArea *, CNavArea *>(&area, next_area);
             auto cached = vischeck_cache.find(key);
             if (cached != vischeck_cache.end())
             {
                 if (cached->second.vischeck_state)
                 {
-                    float cost = connection.area->m_center.DistTo(area.m_center);
-                    adjacent->push_back(micropather::StateCost{ reinterpret_cast<void *>(connection.area), cost });
+                    float cost = next_area->m_center.DistTo(area.m_center) * cost_multiplier;
+                    adjacent->push_back(micropather::StateCost{ reinterpret_cast<void *>(next_area), cost });
                 }
             }
             else
@@ -264,8 +295,8 @@ public:
                 {
                     vischeck_cache[key] = { TICKCOUNT_TIMESTAMP(60), true };
 
-                    float cost = points.next.DistTo(points.current);
-                    adjacent->push_back(micropather::StateCost{ reinterpret_cast<void *>(connection.area), cost });
+                    float cost = points.next.DistTo(points.current) * cost_multiplier;
+                    adjacent->push_back(micropather::StateCost{ reinterpret_cast<void *>(next_area), cost });
                 }
                 else
                 {
@@ -278,49 +309,64 @@ public:
     // Function for getting closest Area to player, aka "LocalNav"
     CNavArea *findClosestNavSquare(const Vector &vec)
     {
-        auto vec_corrected = vec;
-        vec_corrected.z += PLAYER_JUMP_HEIGHT;
-        float ovBestDist = FLT_MAX, bestDist = FLT_MAX;
-        // If multiple candidates for LocalNav have been found, pick the closest
-        CNavArea *ovBestSquare = nullptr, *bestSquare = nullptr;
+        float best_score      = FLT_MAX;
+        CNavArea *best_area   = nullptr;
+        bool is_local         = g_pLocalPlayer->v_Origin == vec;
+        float overlap_padding = is_local ? HALF_PLAYER_WIDTH : 0.0f;
+
         for (auto &i : navfile.m_areas)
         {
             // Marked bad, do not use if local origin
-            if (g_pLocalPlayer->v_Origin == vec)
+            if (is_local)
             {
-                auto key = std::pair<CNavArea *, CNavArea *>(&i, &i);
-                if (vischeck_cache.find(key) != vischeck_cache.end())
-                    if (!vischeck_cache[key].vischeck_state)
-                        continue;
+                auto key   = std::pair<CNavArea *, CNavArea *>(&i, &i);
+                auto found = vischeck_cache.find(key);
+                if (found != vischeck_cache.end() && !found->second.vischeck_state)
+                    continue;
             }
 
-            float dist = i.m_center.DistTo(vec);
-            if (dist < bestDist)
+            float nearest_x = std::clamp(vec.x, i.m_nwCorner.x, i.m_seCorner.x);
+            float nearest_y = std::clamp(vec.y, i.m_nwCorner.y, i.m_seCorner.y);
+            float surface_z = i.GetZ(nearest_x, nearest_y);
+
+            float dx              = nearest_x - vec.x;
+            float dy              = nearest_y - vec.y;
+            float planar_dist_sqr = dx * dx + dy * dy;
+
+            float vertical_to_surface = std::fabs(surface_z - vec.z);
+            float vertical_outside    = std::max(i.m_minZ - vec.z, 0.0f) + std::max(vec.z - i.m_maxZ, 0.0f);
+
+            float score = planar_dist_sqr + vertical_to_surface * vertical_to_surface * 6.0f + vertical_outside * vertical_outside * 10.0f;
+            if (i.IsOverlapping(vec, overlap_padding))
+                score *= is_local ? 0.45f : 0.7f;
+
+            if (is_local)
             {
-                bestDist   = dist;
-                bestSquare = &i;
+                float delta = vec.z - surface_z;
+                if (delta < -18.0f)
+                    score += delta * delta * 28.0f;
+                else if (delta < -6.0f)
+                    score += delta * delta * 10.0f;
             }
-            auto center_corrected = i.m_center;
-            center_corrected.z += PLAYER_JUMP_HEIGHT;
-            // Check if we are within x and y bounds of an area
-            if (ovBestDist < dist || !i.IsOverlapping(vec) || !IsVectorVisibleNavigation(vec_corrected, center_corrected))
+
+            if (score < best_score)
             {
-                continue;
+                best_score = score;
+                best_area  = &i;
             }
-            ovBestDist   = dist;
-            ovBestSquare = &i;
         }
-        if (!ovBestSquare)
-            ovBestSquare = bestSquare;
-
-        return ovBestSquare;
+        return best_area;
     }
-    std::vector<void *> findPath(CNavArea *local, CNavArea *dest)
+    std::vector<void *> findPath(CNavArea *local, CNavArea *dest, bool in_setup)
     {
         using namespace std::chrono;
 
         if (state != NavState::Active)
             return {};
+
+        solve_start     = local;
+        solve_dest      = dest;
+        solve_in_setup  = in_setup;
 
         if (log_pathing)
         {
@@ -365,6 +411,9 @@ public:
                 continue;
             if (is_sentry)
             {
+                if (CE_INT(ent, netvar.m_iSentryState) == 0)
+                    continue;
+
                 // Should we even ignore the sentry?
                 // Soldier/Heavy do not care about Level 1 or mini sentries
                 bool is_strong_class = g_pLocalPlayer->clazz == tf_soldier || g_pLocalPlayer->clazz == tf_heavy;
@@ -486,11 +535,93 @@ int current_priority    = 0;
 bool current_navtolocal = false;
 bool repath_on_fail     = false;
 Vector last_destination;
+Vector failed_destination;
+int failed_dest_expire_tick = 0;
+static bool map_dirty = true;
+
+static bool isSetupTime()
+{
+    if (path_during_setup)
+        return false;
+    if (GetLevelName() == "plr_pipeline")
+        return false;
+    if (g_pGameRules->InSetup() || g_pGameRules->RoundMode() == CGameRules::GR_STATE_PREROUND)
+        return true;
+    return g_pTeamRoundTimer->GetRoundState() == RT_STATE_SETUP;
+}
+
+static bool isPathingBlocked()
+{
+    if (GetLevelName() == "plr_pipeline")
+        return false;
+    std::string level_name = GetLevelName();
+    if (g_pGameRules->InWaitingForPlayers() && (level_name.starts_with("pl_") || level_name.starts_with("cp_")))
+        return true;
+    if (isSetupTime() && g_pLocalPlayer->team == TEAM_BLU)
+        return true;
+    return false;
+}
+
+static std::string resolveNavPath(const std::string &level_name)
+{
+    std::vector<std::string> candidates;
+    const char *game_dir = g_IEngine->GetGameDirectory();
+    if (game_dir)
+    {
+        candidates.emplace_back(std::string(game_dir) + "/maps/" + level_name + ".nav");
+        candidates.emplace_back(std::string(game_dir) + "/download/maps/" + level_name + ".nav");
+    }
+    char cwd[PATH_MAX + 1];
+    if (getcwd(cwd, sizeof(cwd)))
+        candidates.emplace_back(std::string(cwd) + "/tf/maps/" + level_name + ".nav");
+
+    for (auto &candidate : candidates)
+    {
+        std::ifstream fs(candidate, std::ios::binary);
+        if (fs.is_open())
+            return candidate;
+    }
+    return candidates.empty() ? "" : candidates.front();
+}
+
+void cancelPath();
+
+static void ensureMapLoaded()
+{
+    if (!map_dirty && map)
+        return;
+    if (!g_IEngine->IsInGame())
+        return;
+    std::string level_name = GetLevelName();
+    if (level_name.empty())
+        return;
+    if (map && map->mapname == level_name)
+    {
+        map->Reset();
+        map_dirty = false;
+        return;
+    }
+
+    crumbs.clear();
+    last_crumb.navarea   = nullptr;
+    current_priority     = 0;
+    repath_on_fail       = false;
+    failed_dest_expire_tick = 0;
+
+    std::string nav_path = resolveNavPath(level_name);
+    logging::Info("Pathing: Nav File location: %s", nav_path.c_str());
+    map       = std::make_unique<Map>(nav_path.c_str(), level_name);
+    map_dirty = false;
+}
 
 bool isReady()
 {
-    // F you Pipeline
-    return enabled && map && map->state == NavState::Active && (GetLevelName() == "plr_pipeline" || (g_pGameRules->RoundMode() > 3 && (g_pTeamRoundTimer->GetRoundState() != RT_STATE_SETUP || g_pLocalPlayer->team != TEAM_BLU)));
+    ensureMapLoaded();
+    if (!enabled && !hacks::tf2::NavBot::isEnabled())
+        return false;
+    if (!map || map->state != NavState::Active || !g_IEngine->IsInGame())
+        return false;
+    return !isPathingBlocked();
 }
 
 bool isPathing()
@@ -523,6 +654,21 @@ bool navTo(const Vector &destination, int priority, bool should_repath, bool nav
     // Don't path, priority is too low
     if (priority < current_priority)
         return false;
+
+    constexpr float REUSE_RADIUS_SQR = 160.0f * 160.0f;
+
+    if (isPathing() && priority == current_priority && repath_on_fail && last_destination.DistToSqr(destination) <= REUSE_RADIUS_SQR)
+    {
+        last_destination = destination;
+        if (!crumbs.empty())
+            crumbs.back().vec = destination;
+        inactivity.update();
+        return true;
+    }
+
+    if (failed_dest_expire_tick > g_GlobalVars->tickcount && failed_destination.DistToSqr(destination) <= REUSE_RADIUS_SQR)
+        return false;
+
     if (log_pathing)
         logging::Info("Priority: %d", priority);
 
@@ -531,34 +677,63 @@ bool navTo(const Vector &destination, int priority, bool should_repath, bool nav
 
     if (!start_area || !dest_area)
         return false;
-    auto path = map->findPath(start_area, dest_area);
+    auto path = map->findPath(start_area, dest_area, isSetupTime());
     if (path.empty())
+    {
+        failed_destination      = destination;
+        failed_dest_expire_tick = TICKCOUNT_TIMESTAMP(1.5f);
         return false;
+    }
 
     if (!nav_to_local)
         path.erase(path.begin());
     crumbs.clear();
 
-    for (size_t i = 0; i < path.size(); i++)
+    if (path.empty())
     {
-        CNavArea *area = reinterpret_cast<CNavArea *>(path.at(i));
-
-        // All entries besides the last need an extra crumb
-        if (i != path.size() - 1)
-        {
-            CNavArea *next_area = (CNavArea *) path.at(i + 1);
-
-            auto points = determinePoints(area, next_area);
-
-            points.center = handleDropdown(points.center, points.next);
-
-            crumbs.push_back({ area, std::move(points.current) });
-            crumbs.push_back({ area, std::move(points.center) });
-        }
-        else
-            crumbs.push_back({ area, area->m_center });
+        crumbs.push_back({ nullptr, destination });
+        inactivity.update();
+        current_priority   = priority;
+        current_navtolocal = nav_to_local;
+        repath_on_fail     = should_repath;
+        if (repath_on_fail)
+            last_destination = destination;
+        return true;
     }
 
+    constexpr float CRUMB_STEP = 128.0f;
+    Vector entry               = g_pLocalPlayer->v_Origin;
+
+    auto add_segment = [&](CNavArea *area, const Vector &to)
+    {
+        Vector delta = to - entry;
+        delta.z      = 0.0f;
+        int steps    = (int) std::ceil(delta.Length() / CRUMB_STEP);
+        for (int s = 1; s < steps; ++s)
+        {
+            Vector pos = entry + delta * ((float) s / (float) steps);
+            pos.z      = area->GetZ(pos.x, pos.y);
+            crumbs.push_back({ area, pos });
+        }
+        crumbs.push_back({ area, to });
+        entry = to;
+    };
+
+    for (size_t i = 0; i + 1 < path.size(); ++i)
+    {
+        CNavArea *area      = reinterpret_cast<CNavArea *>(path[i]);
+        CNavArea *next_area = reinterpret_cast<CNavArea *>(path[i + 1]);
+
+        auto points   = determinePoints(area, next_area);
+        points.center = handleDropdown(points.center, points.next);
+
+        add_segment(area, points.center);
+        entry = points.center_next;
+    }
+
+    CNavArea *last_area  = reinterpret_cast<CNavArea *>(path.back());
+    Vector last_waypoint = last_area->getNearestPoint(destination.AsVector2D());
+    add_segment(last_area, last_waypoint);
     crumbs.push_back({ nullptr, destination });
     inactivity.update();
 
@@ -676,9 +851,8 @@ static void followCrumbs()
     if (crumbs.size() > 1 && crumbs[1].vec.DistTo(g_pLocalPlayer->v_Origin) < 50)
     {
         last_crumb = crumbs[1];
-        crumbs.erase(crumbs.begin(), std::next(crumbs.begin()));
-        --crumbs_amount;
-        if (!--crumbs_amount)
+        crumbs.erase(crumbs.begin(), crumbs.begin() + 2);
+        if (crumbs.empty())
             return;
         inactivity.update();
     }
@@ -762,6 +936,8 @@ void vischeckPath()
     {
         auto current_crumb  = crumbs[i];
         auto next_crumb     = crumbs[i + 1];
+        if (!current_crumb.navarea || !next_crumb.navarea)
+            continue;
         auto current_center = current_crumb.vec;
         auto next_center    = next_crumb.vec;
 
@@ -774,6 +950,7 @@ void vischeckPath()
             // Mark as invalid for a while
             map->vischeck_cache[key] = { TICKCOUNT_TIMESTAMP(*vischeck_cache_time), false };
             abandonPath();
+            return;
         }
         // Else we can update the cache (if not marked bad before this)
         else if (map->vischeck_cache.find(key) == map->vischeck_cache.end() || map->vischeck_cache[key].vischeck_state)
@@ -838,12 +1015,15 @@ void updateStuckTime()
     // We're stuck, add time to connection
     if (inactivity.check(*stuck_time / 2))
     {
-        std::pair<CNavArea *, CNavArea *> key;
-        // last crumb is invalid
-        if (!last_crumb.navarea)
-            key = std::pair<CNavArea *, CNavArea *>(crumbs[0].navarea, crumbs[0].navarea);
-        else
-            key = std::pair<CNavArea *, CNavArea *>(last_crumb.navarea, crumbs[0].navarea);
+        CNavArea *from = last_crumb.navarea ? last_crumb.navarea : crumbs[0].navarea;
+        CNavArea *to   = crumbs[0].navarea;
+        if (!from || !to)
+        {
+            if (inactivity.check(*stuck_time))
+                abandonPath();
+            return;
+        }
+        auto key = std::pair<CNavArea *, CNavArea *>(from, to);
 
         // Expires in 10 seconds
         map->connection_stuck_time[key].expire_tick = TICKCOUNT_TIMESTAMP(*stuck_expire_time);
@@ -864,20 +1044,12 @@ void updateStuckTime()
 
 static void CreateMove()
 {
+    ensureMapLoaded();
     if (!isReady())
         return;
     if (CE_BAD(LOCAL_E) || !LOCAL_E->m_bAlivePlayer())
     {
         cancelPath();
-        return;
-    }
-    round_states round_state = g_pTeamRoundTimer->GetRoundState();
-    // Still in setuptime, if on fitting team, then do not path yet
-    // F you Pipeline
-    if (round_state == RT_STATE_SETUP && GetLevelName() != "plr_pipeline" && g_pLocalPlayer->team == TEAM_BLU)
-    {
-        if (navparser::NavEngine::isPathing())
-            navparser::NavEngine::cancelPath();
         return;
     }
 
@@ -892,34 +1064,8 @@ static void CreateMove()
 
 void LevelInit()
 {
-    auto level_name = g_IEngine->GetLevelName();
-    if (!map || map->mapname != level_name)
-    {
-        char *p, cwd[PATH_MAX + 1], nav_path[PATH_MAX + 1], lvl_name[256];
-
-        std::strncpy(lvl_name, level_name, 255);
-        lvl_name[255] = 0;
-        p             = std::strrchr(lvl_name, '.');
-        if (!p)
-        {
-            logging::Info("Failed to find dot in level name");
-            return;
-        }
-        *p = 0;
-        p  = getcwd(cwd, sizeof(cwd));
-        if (!p)
-        {
-            logging::Info("Failed to get current working directory: %s", strerror(errno));
-            return;
-        }
-        std::snprintf(nav_path, sizeof(nav_path), "%s/tf/%s.nav", cwd, lvl_name);
-        logging::Info("Pathing: Nav File location: %s", nav_path);
-        map = std::make_unique<Map>(nav_path);
-    }
-    else
-    {
-        map->Reset();
-    }
+    map_dirty = true;
+    cancelPath();
 }
 
 // Return the whole thing
@@ -989,6 +1135,8 @@ void Draw()
     if (draw_debug_areas && CE_GOOD(LOCAL_E) && LOCAL_E->m_bAlivePlayer())
     {
         auto area = map->findClosestNavSquare(g_pLocalPlayer->v_Origin);
+        if (!area)
+            return;
         auto edge = area->getNearestPoint(g_pLocalPlayer->v_Origin.AsVector2D());
         Vector scrEdge;
         edge.z += PLAYER_JUMP_HEIGHT;

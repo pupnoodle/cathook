@@ -211,7 +211,6 @@ public:
     lazy_netvar m_angEyeAngles{ "DT_TFPlayer", "tfnonlocaldata", "m_angEyeAngles[0]" };
     lazy_netvar m_bReadyToBackstab{ "DT_TFWeaponKnife", "m_bReadyToBackstab" };
     lazy_netvar m_Collision{ "DT_BaseEntity", "m_Collision" };
-    // Recv name "moveparent"; client CHandles immediately before it are 8-byte aligned.
     lazy_netvar moveparent{ "DT_BaseEntity", "moveparent" };
     lazy_netvar res_iTeam{ "DT_TFPlayerResource", "baseclass", "m_iTeam" };
     lazy_netvar res_iScore{ "DT_TFPlayerResource", "baseclass", "m_iScore" };
@@ -280,6 +279,9 @@ public:
     lazy_netvar m_Shared{ "DT_TFPlayer", "m_Shared" };
     lazy_netvar m_iCritMult{ "DT_TFPlayer", "m_Shared", "m_iCritMult" };
     lazy_netvar m_iRoundState{ "DT_TFGameRulesProxy", "m_iRoundState" };
+    lazy_netvar m_bInSetup{ "DT_TFGameRulesProxy", "m_bInSetup" };
+    lazy_netvar m_bInWaitingForPlayers{ "DT_TFGameRulesProxy", "m_bInWaitingForPlayers" };
+    lazy_netvar m_bPlayingSpecialDeliveryMode{ "DT_TFGameRulesProxy", "m_bPlayingSpecialDeliveryMode" };
     lazy_netvar m_iWinningTeam{ "DT_TFGameRulesProxy", "m_iWinningTeam" };
     lazy_netvar m_bPlayingMannVsMachine{ "DT_TFGameRulesProxy", "m_bPlayingMannVsMachine" };
     lazy_netvar m_halloweenScenario{ "DT_TFGameRulesProxy", "m_halloweenScenario" };

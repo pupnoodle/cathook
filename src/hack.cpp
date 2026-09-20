@@ -131,7 +131,6 @@ std::string getFileName(std::string filePath)
     return filePath;
 }
 
-// TEMP: in-process sampler to find the main-thread stall
 static pthread_t g_prof_main_thread;
 static void prof_dump_handler(int)
 {

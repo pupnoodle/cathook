@@ -8,7 +8,7 @@ set -e
 
 [[ ! -z "$SUDO_USER" ]] && RUNUSER="$SUDO_USER" || RUNUSER="$LOGNAME"
 
-line=$(pgrep -u $RUNUSER hl2_linux || true)
+line=$(pgrep -u $RUNUSER -x tf_linux64 || true)
 arr=($line)
 
 if [ $# == 1 ]; then

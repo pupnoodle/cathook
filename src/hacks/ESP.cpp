@@ -88,6 +88,7 @@ public:
 };
 
 boost::unordered_flat_map<u_int16_t, ESPData> data;
+static std::recursive_mutex esp_data_mutex;
 inline void AddEntityString(CachedEntity *entity, const std::string &string, const rgba_t &color = colors::empty)
 {
     ESPData &entity_data = data[entity->m_IDX];
@@ -98,6 +99,7 @@ inline void AddEntityString(CachedEntity *entity, const std::string &string, con
 // Sets an entitys esp color
 void SetEntityColor(CachedEntity *entity, const rgba_t &color)
 {
+    std::lock_guard<std::recursive_mutex> lock(esp_data_mutex);
     data[entity->m_IDX].color = color;
 }
 inline void repaintEnt(CachedEntity *ent, float distance)
@@ -330,6 +332,7 @@ static void Draw()
 {
     if (!enable)
         return;
+    std::lock_guard<std::recursive_mutex> lock(esp_data_mutex);
     PROF_SECTION(DRAW_ESP_PERFORMANCE);
     ProcessEntityPT();
 }
@@ -342,6 +345,7 @@ static void cm()
         return;
     if (CE_BAD(LOCAL_E))
         return;
+    std::lock_guard<std::recursive_mutex> lock(esp_data_mutex);
 
     // Update entites every 1/5s
     const bool entity_tick = g_GlobalVars->tickcount % TIME_TO_TICKS(0.20f) == 0;
@@ -1509,6 +1513,7 @@ void _FASTCALL Draw3DBox(CachedEntity *ent, const rgba_t &clr)
 }
 void Shutdown()
 {
+    std::lock_guard<std::recursive_mutex> lock(esp_data_mutex);
     data.clear();
 }
 // Draw a box around a player

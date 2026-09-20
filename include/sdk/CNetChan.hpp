@@ -5,11 +5,6 @@
 #include "core/vfunc.hpp"
 #include "core/vtables.hpp"
 
-// Live TF2 linux64 CNetChan. Method indices are from _ZTV8CNetChan
-// (INetChannelInfo first, no extra dtor slots at the front). Sequence ints
-// are recovered from unique engine GetSequenceData / SetChoked / GetReliable
-// bytes, not a baked padded struct. Do not call SendNetMsg/Transmit through
-// 2013 INetChannel MI — that header's virtual dtor shifts those slots.
 class CNetChan
 {
 public:

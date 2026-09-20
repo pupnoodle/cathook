@@ -9,7 +9,6 @@ class IAchievementMgr;
 class QAngle;
 struct player_info_s;
 
-// Live linux64 CEngineClient. Indices from _ZTV13CEngineClient (no dtor slots).
 class CEngineClient
 {
 public:
@@ -52,6 +51,10 @@ public:
     bool IsInGame()
     {
         return vfunc<bool (*)(CEngineClient *)>(this, vtables::engine_client::is_in_game)(this);
+    }
+    const char *GetGameDirectory()
+    {
+        return vfunc<const char *(*)(CEngineClient *)>(this, vtables::engine_client::get_game_directory)(this);
     }
     const char *GetLevelName()
     {

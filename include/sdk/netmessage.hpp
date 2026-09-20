@@ -115,6 +115,7 @@ public:
 protected:
     bool m_bReliable;          // true if message should be send reliable
     INetChannel *m_NetChannel; // netchannel this message is from/for
+    void *m_pUnknown;
 };
 
 #define net_NOP 0        // nop command used for padding
@@ -288,7 +289,7 @@ class SVC_Print : public CNetMessage
 
 public:
     const char unk_pad[4]{};
-    const char *m_szText; // show this text; linux64 CBaseClientState::ProcessPrint reads this at +0x28
+    const char *m_szText; // show this text
 
 private:
     char m_szTextBuffer[2048]; // buffer for received messages
@@ -315,6 +316,11 @@ public:
     bf_read m_DataIn;
     bf_write m_DataOut;
 };
+
+static_assert(offsetof(CLC_Move, m_nBackupCommands) == 0x28, "CLC_Move layout mismatch");
+static_assert(offsetof(CLC_Move, m_nNewCommands) == 0x2C, "CLC_Move layout mismatch");
+static_assert(offsetof(CLC_Move, m_DataIn) == 0x38, "CLC_Move layout mismatch");
+static_assert(offsetof(CLC_Move, m_DataOut) == 0x58, "CLC_Move layout mismatch");
 
 class CLC_VoiceData : public CNetMessage
 {

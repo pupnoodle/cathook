@@ -103,10 +103,6 @@ inline void* module_base(std::string_view module_name, bool prefix_match = false
   return reinterpret_cast<void*>(base);
 }
 
-// protection_at used to re-open and re-parse /proc/self/maps on every call,
-// which made each datamap readability probe cost a full file read plus ~1.5k
-// sscanf calls. The cache is rebuilt only when an address misses, so modules
-// loaded later (e.g. server.so at map start) still resolve correctly.
 inline int protection_at(const void* address)
 {
   static std::vector<entry> entries;

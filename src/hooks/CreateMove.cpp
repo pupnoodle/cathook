@@ -16,7 +16,6 @@
 #include "HookTools.hpp"
 #include "teamroundtimer.hpp"
 
-// CPrediction::StartCommand stores m_pCurrentCommand; resolved via datamap / m_hConstraintEntity.
 #include "HookedMethods.hpp"
 #include "nospread.hpp"
 #include "Warp.hpp"

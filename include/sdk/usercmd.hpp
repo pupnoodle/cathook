@@ -130,7 +130,6 @@ inline CRC32_t GetChecksum(CUserCmd *cmd)
     return cmd->GetChecksum();
 }
 
-// Live CTFInput::GetUserCmd (vtable[8]) loads m_pCommands with 48 8B 87 disp32.
 inline std::ptrdiff_t InputCommandsOffset(void *iinput)
 {
     static std::ptrdiff_t off = 0;

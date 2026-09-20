@@ -3,6 +3,7 @@
 #include "nav.h"
 #include <algorithm>
 #include <fstream>
+#include <unordered_map>
 
 class CNavFile
 {
@@ -76,7 +77,10 @@ public:
 
             CNavPlace place{};
 
-            fs.read((char *) &place.m_name, len);
+            uint16_t read_len = std::min<uint16_t>(len, sizeof(place.m_name) - 1);
+            fs.read((char *) &place.m_name, read_len);
+            if (len > read_len)
+                fs.ignore(len - read_len);
 
             m_places.push_back(place);
         }
@@ -215,20 +219,35 @@ public:
         // Fill connection for every area with their area ptrs instead of IDs
         // This will come in handy in path finding
 
+        std::unordered_map<uint32_t, CNavArea *> id_to_area;
+        id_to_area.reserve(m_areas.size());
+        for (auto &area : m_areas)
+            id_to_area[area.m_id] = &area;
+
         for (auto &area : m_areas)
         {
-            for (auto &connection: area.m_connections)
-                for (auto &connected_area: m_areas)
-                    if (connection.id == connected_area.m_id)
-                        connection.area = &connected_area;
+            for (auto &connection : area.m_connections)
+            {
+                auto found = id_to_area.find(connection.id);
+                if (found != id_to_area.end())
+                    connection.area = found->second;
+                else
+                    connection.area = nullptr;
+            }
 
             // Fill potentially visible areas as well
-            for (auto &bindinfo: area.m_potentiallyVisibleAreas)
-                for (auto &boundarea: m_areas)
-                    if (bindinfo.id == boundarea.m_id)
-                        bindinfo.area = &boundarea;
-
+            for (auto &bindinfo : area.m_potentiallyVisibleAreas)
+            {
+                auto found = id_to_area.find(bindinfo.id);
+                if (found != id_to_area.end())
+                    bindinfo.area = found->second;
+                else
+                    bindinfo.area = nullptr;
+            }
         }
+
+        for (auto &area : m_areas)
+            std::erase_if(area.m_connections, [](const NavConnect &connection) { return connection.area == nullptr; });
         m_isOK = true;
     }
 

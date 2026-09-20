@@ -4,7 +4,6 @@
 #include "core/vtables.hpp"
 #include "inputsystem/ButtonCode.h"
 
-// Live linux64 CInputSystem. IAppSystem, no extra dtor slots.
 class CInputSystem
 {
 public:

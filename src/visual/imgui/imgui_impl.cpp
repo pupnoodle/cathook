@@ -130,8 +130,6 @@ void ImGui_Impl_Render(ImDrawData *draw_data)
     if (fb_width == 0 || fb_height == 0)
         return;
 
-    // TF2's context still has a GLSL program bound. Fixed-pipeline imgui
-    // draws are discarded until that program is unbound.
     GLint last_program = 0;
     glGetIntegerv(GL_CURRENT_PROGRAM, &last_program);
     if (auto use_program = gl_use_program())
@@ -149,9 +147,6 @@ void ImGui_Impl_Render(ImDrawData *draw_data)
     // to read! Setup render state: alpha-blending enabled, no face culling, no
     // depth testing, scissor enabled, vertex/texcoord/color pointers, polygon
     // fill.
-    // ToGL keeps VBOs/VAOs bound. With GL_ARRAY_BUFFER bound, gl*Pointer
-    // arguments become byte offsets into the buffer, so our CPU pointers turn
-    // into huge offsets -> OOB reads -> driver abort at swap.
     GLint last_vao = 0;
     if (auto bind_vao = gl_bind_vertex_array())
     {
@@ -169,8 +164,6 @@ void ImGui_Impl_Render(ImDrawData *draw_data)
         if (last_element_array_buffer)
             bind_buffer(GL_ELEMENT_ARRAY_BUFFER, 0);
     }
-    // ToGL may leave an FBO bound on this thread; drawing then lands in an
-    // offscreen target and never reaches the backbuffer being swapped.
     GLint last_draw_fbo = 0, last_read_fbo = 0;
     glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &last_draw_fbo);
     glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &last_read_fbo);
@@ -204,21 +197,16 @@ void ImGui_Impl_Render(ImDrawData *draw_data)
     glDisable(GL_LIGHTING);
     glDisable(GL_COLOR_MATERIAL);
     glEnable(GL_SCISSOR_TEST);
-    // Leftover discard/mask state silently eats every pixel we emit.
     glDisable(GL_STENCIL_TEST);
     glDisable(GL_ALPHA_TEST);
     glDisable(GL_FOG);
     glDisable(GL_COLOR_LOGIC_OP);
     glDisable(GL_COLOR_SUM);
     glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
-    // ToGL leaves user clip planes enabled for water reflections/portals while
-    // in-game; they clip our overlay geometry away entirely.
     for (int i = 0; i < 6; i++)
         glDisable((GLenum) (GL_CLIP_PLANE0 + i));
-    // Enabled ARB programs completely bypass the fixed pipeline.
-    glDisable((GLenum) 0x8620); // GL_VERTEX_PROGRAM_ARB
-    glDisable((GLenum) 0x8804); // GL_FRAGMENT_PROGRAM_ARB
-    // Extra texture units left enabled modulate our output into nothing.
+    glDisable((GLenum) 0x8620);
+    glDisable((GLenum) 0x8804);
     for (int i = 7; i > 0; i--)
     {
         glActiveTexture((GLenum) (GL_TEXTURE0 + i));
@@ -229,16 +217,13 @@ void ImGui_Impl_Render(ImDrawData *draw_data)
     }
     glActiveTexture(GL_TEXTURE0);
     glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-    // Client-state leftovers either read stale pointers or poison our arrays.
     glClientActiveTexture(GL_TEXTURE0);
     glDisableClientState(GL_NORMAL_ARRAY);
     glDisableClientState(GL_INDEX_ARRAY);
     glDisableClientState(GL_EDGE_FLAG_ARRAY);
-    glDisableClientState((GLenum) 0x8457); // GL_FOG_COORD_ARRAY
-    glDisableClientState((GLenum) 0x845E); // GL_SECONDARY_COLOR_ARRAY
+    glDisableClientState((GLenum) 0x8457);
+    glDisableClientState((GLenum) 0x845E);
     {
-        // Enabled generic attrib arrays point at ToGL VBO state and break our
-        // draw call validation outright.
         using GlDisableVertexAttribArrayFn = void (*)(GLuint);
         static auto disable_attrib = reinterpret_cast<GlDisableVertexAttribArrayFn>(
             SDL_GL_GetProcAddress("glDisableVertexAttribArray"));
@@ -361,8 +346,6 @@ void ImGui_Impl_Render(ImDrawData *draw_data)
     glPolygonMode(GL_BACK, (GLenum) last_polygon_mode[1]);
     glViewport(last_viewport[0], last_viewport[1], (GLsizei) last_viewport[2], (GLsizei) last_viewport[3]);
     glScissor(last_scissor_box[0], last_scissor_box[1], (GLsizei) last_scissor_box[2], (GLsizei) last_scissor_box[3]);
-    // Rebind FBOs before restoring the draw buffer; FBO draw-buffer enums are
-    // invalid while the default framebuffer is bound.
     if (auto bind_fb = gl_bind_framebuffer())
     {
         bind_fb(GL_DRAW_FRAMEBUFFER, (GLuint) last_draw_fbo);
@@ -461,8 +444,6 @@ bool ImGui_Impl_CreateFontsTexture(ImFontAtlas *font)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    // ToGL may keep a pixel unpack buffer bound; with one bound, the pixels
-    // argument is a buffer offset, not a pointer, and the atlas uploads garbage.
     if (auto bind_buffer = gl_bind_buffer(); bind_buffer && last_unpack_buffer)
         bind_buffer(GL_PIXEL_UNPACK_BUFFER, 0);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
@@ -525,8 +506,6 @@ bool ImGui_ImplSdl_Init()
     io.GetClipboardTextFn = ImGui_ImplSdl_GetClipboardText;
     io.ClipboardUserData  = NULL;
 
-    // OS cursors unused (NewFrame path is commented out). Creating them through
-    // the wrong SDL instance (distro libSDL2 vs TF2's) SIGSEGVs in SDL_CreateSystemCursor.
     (void) g_MouseCursors;
 
     {

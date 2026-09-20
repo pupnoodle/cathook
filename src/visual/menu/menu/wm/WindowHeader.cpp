@@ -70,7 +70,10 @@ void zerokernel::WindowHeader::update()
 
     if (dragged)
     {
-        window.move(window.xOffset + Menu::instance->dx, window.yOffset + Menu::instance->dy);
+        if (!(SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON(SDL_BUTTON_LEFT)))
+            dragged = false;
+        else
+            window.move(window.xOffset + Menu::instance->dx, window.yOffset + Menu::instance->dy);
     }
 }
 

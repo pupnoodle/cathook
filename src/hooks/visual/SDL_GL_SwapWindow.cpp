@@ -39,8 +39,6 @@ DEFINE_HOOKED_METHOD(SDL_GL_SwapWindow, void, SDL_Window *window)
     if (!orig)
         return;
 
-    // Never skip the game's swap. A hang/exception in overlay code used to
-    // freeze TF2 because this hook never presented a frame.
     if (reentrant)
     {
         orig(window);
@@ -55,9 +53,6 @@ DEFINE_HOOKED_METHOD(SDL_GL_SwapWindow, void, SDL_Window *window)
     {
         try
         {
-            // Draw in whatever GL context is current for this swap. Creating a
-            // second SDL_GL context deadlocks NVIDIA on linux64. SDL's context
-            // pointer can be null even when the game's context is bound.
             int w = 0, h = 0;
             SDL_GetWindowSize(window, &w, &h);
             if (w > 0 && h > 0)

@@ -4,7 +4,6 @@
 #include "core/vtables.hpp"
 #include <vgui/ISurface.h>
 
-// Live linux64 CMatSystemSurface. IAppSystem 0-4, extra Shutdown overrides 4.
 class CMatSystemSurface
 {
 public:

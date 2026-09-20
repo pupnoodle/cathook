@@ -63,8 +63,6 @@ public:
             return nullptr;
         return g_IEntityList->GetClientEntity(HandleToIDX(handle));
     }
-    // linux64: m_pMoveChild / m_pMovePeer / m_pMoveParent sit 24/16/8 bytes before
-    // the moveparent netvar (8-byte-aligned CHandles).
     inline static IClientEntity *FirstMoveChild(IClientEntity *self)
     {
         const int off = netvar.moveparent;

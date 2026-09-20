@@ -441,7 +441,10 @@ bool canReachVector(Vector loc, Vector dest)
 
 std::string GetLevelName()
 {
-    std::string name(g_IEngine->GetLevelName());
+    const char *raw_name = g_IEngine->GetLevelName();
+    if (!raw_name)
+        return "";
+    std::string name(raw_name);
     size_t slash = name.find('/');
     if (slash == std::string::npos)
         slash = 0;

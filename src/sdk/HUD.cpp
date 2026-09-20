@@ -49,7 +49,7 @@ HudLayout &hud_layout()
     }();
     return layout;
 }
-} // namespace
+}
 
 CHudElement *CHud::FindElement(const char *name)
 {

@@ -72,4 +72,5 @@ struct bot_class_config
     float max;
 };*/
 std::pair<CachedEntity *, float> getNearestPlayerDistance();
+bool isEnabled();
 } // namespace hacks::tf2::NavBot

@@ -6,7 +6,6 @@
 class CViewSetup;
 class VMatrix;
 
-// Live linux64 CVRenderView. No extra dtor slots.
 class CRenderView
 {
 public:

@@ -4,8 +4,6 @@
 #include "core/vtables.hpp"
 #include <vgui/VGUI.h>
 
-// Live linux64 VPanelWrapper. IBaseInterface complete+deleting dtors occupy
-// slots 0-1; IPanel starts at 2. GetName body 35 -> slot 37.
 class CPanel
 {
 public:

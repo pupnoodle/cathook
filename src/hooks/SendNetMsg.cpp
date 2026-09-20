@@ -250,6 +250,18 @@ DEFINE_HOOKED_METHOD(SendNetMsg, bool, INetChannel *this_, INetMessage &msg, boo
     std::string newlines{};
     NET_StringCmd stringcmd;
 
+    if (msg.GetType() == clc_Move)
+    {
+        auto *movemsg = (CLC_Move *) &msg;
+        int declared  = movemsg->m_nNewCommands + movemsg->m_nBackupCommands;
+        if (declared > 0 && (movemsg->m_DataOut.IsOverflowed() || !movemsg->m_DataOut.GetNumBitsWritten()))
+        {
+            logging::Info("Dropping malformed clc_Move: new=%d backup=%d bits=%d overflowed=%d", movemsg->m_nNewCommands,
+                          movemsg->m_nBackupCommands, movemsg->m_DataOut.GetNumBitsWritten(), (int) movemsg->m_DataOut.IsOverflowed());
+            return false;
+        }
+    }
+
     // Do we have to force reliable state?
     if (hacks::tf2::nospread::SendNetMessage(&msg))
         force_reliable = true;

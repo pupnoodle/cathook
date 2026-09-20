@@ -6,7 +6,6 @@
 class ClientClass;
 class CViewSetup;
 
-// Live linux64 CHLClient. Indices from _ZTV9CHLClient (no extra dtor slots).
 class CHLClient
 {
 public:

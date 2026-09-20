@@ -9,7 +9,6 @@
 
 class KeyValues;
 
-// Live linux64 CMaterialSystem VMaterialSystem082. No extra dtor slots.
 class IMaterialSystemFixed
 {
 public:

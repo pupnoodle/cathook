@@ -7,6 +7,7 @@
 #include <hacks/hacklist.hpp>
 #include <settings/Bool.hpp>
 #include <hacks/Thirdperson.hpp>
+#include <hacks/Misc.hpp>
 #include "HookedMethods.hpp"
 #include "hacks/Backtrack.hpp"
 #include "AntiAntiAim.hpp"
@@ -208,6 +209,9 @@ DEFINE_HOOKED_METHOD(FrameStageNotify, void, void *this_, ClientFrameStage_t sta
             NET_VECTOR(RAW_ENT(LOCAL_E), netvar.vecPunchAngle) = { 0.0f, 0.0f, 0.0f };
         }
         hacks::tf::thirdperson::frameStageNotify();
+#if !ENFORCE_STREAM_SAFETY && ENABLE_VISUALS
+        hacks::shared::misc::forceLocalDrawFrameStage();
+#endif
     }
     original::FrameStageNotify(this_, stage);
     if (backup_punch)

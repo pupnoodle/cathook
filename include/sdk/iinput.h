@@ -16,7 +16,6 @@ struct CameraThirdData_t
     Vector m_vecHullMax;
 };
 
-// Live linux64 CTFInput / CInput. Indices from _ZTV8CTFInput (no extra dtor slots).
 class IInput
 {
 public:

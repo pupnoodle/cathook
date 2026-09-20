@@ -5,9 +5,6 @@
 
 class CNetChan;
 
-// Live linux64 CClientState. Fields are reached through named displacements
-// recovered from unique engine.so bytes (ForceFullUpdate, client_state lea,
-// CL_Move RIP stores). Do not bake a padded struct.
 class ClientState
 {
 public:

@@ -4,8 +4,6 @@
 #include "core/vtables.hpp"
 #include "materialsystem/imaterialvar.h"
 
-// Live linux64 CMaterialVar. No extra dtor slots. Slot 0 is GetTextureValue;
-// SetIntValue is 4; SetVecValue(x,y,z) is 11 (forwards to SetVecValue(float*, 3)).
 class CMaterialVar
 {
 public:

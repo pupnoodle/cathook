@@ -10,7 +10,6 @@ class IMoveHelper;
 class Vector;
 class QAngle;
 
-// Live linux64 CPrediction. Itanium dtors occupy slots 0-1; RunCommand is 18.
 class CPrediction
 {
 public:

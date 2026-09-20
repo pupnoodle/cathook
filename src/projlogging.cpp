@@ -49,7 +49,6 @@ void Update()
                 //				logging::Info("%d [%s]: CatVelocity: %.2f %.2f
                 //%.2f
                 //(%.2f) | EAV: %.2f %.2f %.2f (%.2f)", i,
-                // EntClientClass(RAW_ENT(ent))->GetName(), v.x, v.y, v.z,
                 // v.Length(), a.x, a.y, a.z);
                 ClientClass *cc = EntClientClass(RAW_ENT(ent));
                 logging::Info("%d [%s]: CatVelocity: %.2f %.2f %.2f (%.2f) | "

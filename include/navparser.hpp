@@ -28,6 +28,7 @@ namespace navparser
 constexpr float PLAYER_WIDTH       = 49;
 constexpr float HALF_PLAYER_WIDTH  = PLAYER_WIDTH / 2.0f;
 constexpr float PLAYER_JUMP_HEIGHT = 72.0f;
+constexpr float PLAYER_DEATH_DROP_HEIGHT = 1000.0f;
 
 #define TICKCOUNT_TIMESTAMP(seconds) (g_GlobalVars->tickcount + int(seconds / g_GlobalVars->interval_per_tick))
 

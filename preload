@@ -1,70 +1,56 @@
 #!/usr/bin/env bash
 
-if [ $EUID == 0 ]; then
+if [ "$EUID" == 0 ]; then
     echo "This script must not be run as root"
-    exit
-fi
-[[ ! -z "$SUDO_USER" ]] && RUNUSER=$SUDO_USER || RUNUSER=$LOGNAME
-line=$(pgrep -u $RUNUSER -x tf_linux64 || true)
-if [ -z "$line" ]; then
-    line=$(pgrep -u $RUNUSER hl2_linux || true)
-fi
-arr=($line)
-
-if [ ${#arr[@]} != 0 ]; then
-    echo TF2 Already Running!
-    exit
+    exit 1
 fi
 
-line=$(pgrep -u $RUNUSER steam)
-arr=($line)
+line=$(pgrep -x tf_linux64 || true)
+if [ -n "$line" ]; then
+    echo "TF2 already running!"
+    exit 1
+fi
 
-if [ ${#arr[@]} == 0 ]; then
-    echo Steam not running! Starting it.
+if ! pgrep -x steam >/dev/null; then
+    echo "Steam not running! Starting it."
     steam > /dev/null 2>&1 &
     sleep 30
-    echo Done starting Steam
+    echo "Done starting Steam"
+fi
+
+LIB="$(dirname "$(realpath "$0")")/build/bin/libcathook.so"
+if [ ! -f "$LIB" ]; then
+    echo "Missing $LIB — build first" >&2
+    exit 1
 fi
 
 FILENAME="/tmp/.gl$(head /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 6)"
-
-cp "bin/libcathook.so" "$FILENAME"
+cp "$LIB" "$FILENAME"
 chmod 0755 "$FILENAME"
 
-echo "Preloading cathook as $FILENAME!"
-TF2_PATH="${TF2_PATH:-/run/media/sex/tf/SteamLibrary/steamapps/common/Team Fortress 2}"
+echo "Preloading libcathook as $FILENAME!"
+if [ -z "$TF2_PATH" ]; then
+    for candidate in \
+        "/run/media/sex/tf/SteamLibrary/steamapps/common/Team Fortress 2" \
+        "$HOME/.steam/steam/steamapps/common/Team Fortress 2" \
+        "$HOME/.local/share/Steam/steamapps/common/Team Fortress 2"
+    do
+        if [ -x "$candidate/tf_linux64" ]; then
+            TF2_PATH="$candidate"
+            break
+        fi
+    done
+fi
 TF2_PATH="$(realpath "$TF2_PATH")"
-STEAM_ROOT="${STEAM_ROOT:-$HOME/.local/share/Steam}"
-STEAM_RUNTIME=""
-for candidate in \
-    "$STEAM_ROOT/ubuntu12_32/steam-runtime/run.sh" \
-    "$STEAM_ROOT/ubuntu12_64/steam-runtime/run.sh" \
-    "$HOME/.steam/steam/ubuntu12_32/steam-runtime/run.sh"
-do
-    if [ -x "$candidate" ]; then
-        STEAM_RUNTIME="$candidate"
-        break
-    fi
-done
 
 GAME_LIBRARY_PATH="./bin:./bin/linux64:./tf/bin:./tf/bin/linux64:./platform:./platform/bin:./platform/bin/linux64:."
-if [ -x "$TF2_PATH/tf_linux64" ]; then
-    GAME_BIN="./tf_linux64"
-else
-    GAME_BIN="./hl2_linux"
-fi
-
-RT_LD=""
-if [ -n "$STEAM_RUNTIME" ]; then
-    RT_LD="$("$STEAM_RUNTIME" printenv LD_LIBRARY_PATH 2>/dev/null || true)"
-fi
 
 pushd "$TF2_PATH" >/dev/null
 SteamAppId=440 SteamGameId=440 SteamOverlayGameId=440 SteamEnv=1 \
     LD_PRELOAD="$FILENAME" \
-    LD_LIBRARY_PATH="${RT_LD:+$RT_LD:}$GAME_LIBRARY_PATH" \
-    "$GAME_BIN" -steam -game tf -gl -sw -w 1280 -h 720 -novid -insecure >/dev/null 2>&1 &
-echo "Game preloading via steam-runtime!"
+    LD_LIBRARY_PATH="$GAME_LIBRARY_PATH" \
+    ./tf_linux64 -steam -game tf -sw -w 1280 -h 720 -novid -nomouse -insecure >/dev/null 2>&1 &
+echo "Game preloading!"
 popd >/dev/null
 sleep 10
 rm -f "$FILENAME"

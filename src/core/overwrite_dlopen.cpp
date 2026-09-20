@@ -10,8 +10,6 @@
 
 // This is specifically for preload, and removes the source lock from the launcher. The only other way is bytepatching hl2_linux directly...
 typedef void *(*dlopen_t)(const char *__file, int __mode);
-// Hidden: injecting this as RTLD_GLOBAL must not interpose libc dlopen.
-// TF2's Loader thread already holds the dynamic-linker lock.
 __attribute__((visibility("hidden"))) void *dlopen(const char *__file, int __mode) __THROWNL
 {
     dlopen_t dlopen_fn = (dlopen_t) dlsym(RTLD_NEXT, "dlopen");

@@ -6,7 +6,6 @@
 
 class IMaterial;
 
-// Live linux64 CModelRender. No extra dtor slots. ForcedMaterialOverride is slot 1.
 class CModelRender
 {
 public:

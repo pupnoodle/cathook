@@ -3,7 +3,13 @@
 set -e
 
 #
-# Build cathook
 #
 
-./scripts/updater false true true
+proccount=$(grep -c '^processor' /proc/cpuinfo)
+mkdir -p build
+pushd build >/dev/null
+cmake ..
+cmake --build . --target cathook -- -j"$proccount"
+popd >/dev/null
+
+./install-data

@@ -58,15 +58,42 @@ static ShouldDrawFn baseplayer_shoulddraw;
 
 static bool TFShouldDraw_hook(IClientEntity *self)
 {
-    if (render_zoomed && baseplayer_shoulddraw)
-        return baseplayer_shoulddraw(self);
     auto original = (ShouldDrawFn) tf_shoulddraw_detour.GetOriginalFunc();
     if (!original)
         return true;
+    if (render_zoomed && baseplayer_shoulddraw && CE_GOOD(LOCAL_E) && self == (IClientEntity *) RAW_ENT(LOCAL_E))
+    {
+        bool ret  = baseplayer_shoulddraw(self);
+        char flag = *((char *) self + 4979);
+        static int dbg = 0;
+        if (++dbg % 300 == 0)
+            logging::Info("SD local: zoomed=%d flag=%d ret=%d orig=%d", (int) g_pLocalPlayer->bZoomed, (int) flag, (int) ret, (int) original(self));
+        return ret;
+    }
     bool ret = original(self);
     tf_shoulddraw_detour.RestorePatch();
     return ret;
 }
+
+void forceLocalDrawFrameStage()
+{
+    static bool wrote_flag = false;
+    if (!CE_GOOD(LOCAL_E))
+        return;
+    auto flag = (char *) RAW_ENT(LOCAL_E) + 4979;
+    if (render_zoomed && g_pLocalPlayer->bZoomed)
+    {
+        *flag      = 1;
+        wrote_flag = true;
+    }
+    else if (wrote_flag)
+    {
+        *flag      = 0;
+        wrote_flag = false;
+    }
+}
+
+
 
 static void tryPatchLocalPlayerShouldDraw(bool after)
 {
@@ -308,10 +335,8 @@ static void CreateMove()
         }
     }
 
-    // Tauntslide needs improvement for movement but it mostly works
     if (tauntslide_tf2)
     {
-        // Check to prevent crashing
         if (CE_GOOD(LOCAL_E))
         {
             if (HasCondition<TFCond_Taunting>(LOCAL_E))
@@ -346,11 +371,9 @@ static void CreateMove()
         }
     }
 
-    // Spams infinite autobalance spam function
     if (auto_balance_spam && auto_balance_timer.test_and_set(150))
         SendAutoBalanceRequest();
 
-    // Simple No-Push through cvars
     if (teammatesPushaway)
     {
         if (*nopush_enabled == teammatesPushaway->GetBool())
@@ -359,7 +382,6 @@ static void CreateMove()
     else
         teammatesPushaway = g_ICvar->FindVar("tf_avoidteammates_pushaway");
 
-    // Ping Reducer
     if (ping_reducer && !hacks::tf2::antianticheat::enabled)
     {
         static ConVar *cmdrate = g_ICvar->FindVar("cl_cmdrate");

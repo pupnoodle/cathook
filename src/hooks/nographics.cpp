@@ -15,7 +15,6 @@ static settings::Boolean null_graphics("hack.nullgraphics", "true");
 typedef ITexture *(*FindTexture_t)(void *, const char *, const char *, bool, int);
 typedef IMaterial *(*FindMaterialEx_t)(void *, const char *, const char *, int, bool, const char *);
 typedef IMaterial *(*FindMaterial_t)(void *, const char *, const char *, bool, const char *);
-// live linux64 CMaterialSystem FindTexture = vtables::material_system::find_texture
 FindTexture_t FindTexture_Original;
 FindMaterialEx_t FindMaterialEx_Original;
 FindMaterial_t FindMaterial_Original;
@@ -26,14 +25,12 @@ ITexture *FindTexture_null_hook(void *this_, char const *pTextureName, const cha
     return st;
 }
 
-// live linux64 CMaterialSystem FindMaterialEx = vtables::material_system::find_material_ex
 IMaterial *FindMaterialEx_null_hook(void *this_, char const *pMaterialName, const char *pTextureGroupName, int nContext, bool complain, const char *pComplainPrefix)
 {
     static IMaterial *st = FindMaterialEx_Original(this_, pMaterialName, pTextureGroupName, nContext, complain, pComplainPrefix);
     return st;
 }
 
-// live linux64 CMaterialSystem FindMaterial = vtables::material_system::find_material
 IMaterial *FindMaterial_null_hook(void *this_, char const *pMaterialName, const char *pTextureGroupName, bool complain, const char *pComplainPrefix)
 {
     static IMaterial *st = FindMaterial_Original(this_, pMaterialName, pTextureGroupName, complain, pComplainPrefix);

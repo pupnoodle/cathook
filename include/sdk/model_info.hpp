@@ -7,7 +7,6 @@ struct model_t;
 struct studiohdr_t;
 struct vcollide_t;
 
-// Live linux64 CModelInfoClient. Itanium dtors occupy slots 0-1.
 class CModelInfoClient
 {
 public:

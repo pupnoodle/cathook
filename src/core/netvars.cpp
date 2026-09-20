@@ -254,8 +254,6 @@ int lazy_datamap::get() const
     int current = cached.load(std::memory_order_acquire);
     if (current >= 0)
         return current;
-    // Fields that don't exist in any datamap must not re-walk every entity's
-    // map on every call. Failed lookups retry at a low rate instead.
     const auto now =
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
     if (now < next_retry.load(std::memory_order_acquire))

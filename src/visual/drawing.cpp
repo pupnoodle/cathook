@@ -612,7 +612,6 @@ void InitGL()
     logging::Info("InitGL: gui...");
     gui::init();
     logging::Info("InitGL: gui ready");
-    // PlaySound from the SwapWindow thread can stall Source. Run it once from Paint.
     EC::Register(
         EC::Paint,
         []() {

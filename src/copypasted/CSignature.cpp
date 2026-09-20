@@ -76,8 +76,6 @@ uintptr_t CSignature::dwFindPattern(uintptr_t dwAddress, uintptr_t dwLength, con
             if (firstMatch == 0)
                 firstMatch = pos;
 
-            // Tokens are "HH" or "?". A trailing "?" used to read pattern[2] past the
-            // NUL into the next rodata string, so the match never completed.
             const char *next = pattern + (currentPattern == '\?' ? 1 : 2);
             if (*next == ' ')
                 ++next;

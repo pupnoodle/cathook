@@ -91,10 +91,8 @@ constexpr const char* ik_context_clear_targets =
   "8B 8F ? ? ? ? 48 8D 97 ? ? ? ? 31 C0 85 C9 7E ? 0F 1F 44 00 00 C7 02 F1 D8 FF FF 83 C0 01 48 81 C2 60 01 00 00 39 87 ? ? ? ? 7F ? C3 90";
 constexpr const char* base_animating_add_eflags =
   "09 B7 ? ? ? ? C3";
-// Unique C_BaseAnimating studiohdr load (disp32 is m_pStudioHdr, live 0xBE8).
 constexpr const char* base_animating_studio_hdr =
   "4C 8B BB ? ? ? ? 4D 85 FF 0F 84 ? ? ? ? 4C 89 FF";
-// C_BaseAnimating overlay Element: imul 44; add rax,[rdi+disp32]. disp is m_AnimOverlay (live 0xC10).
 constexpr const char* base_animating_anim_overlay =
   "89 F0 48 6B C0 2C 48 03 87 ? ? ? ? C3";
 constexpr const char* base_animating_bone_array =
@@ -121,7 +119,6 @@ constexpr const char* tf_gc_client_system_join_mm_match =
 
 constexpr const char* mut_local_group_criteria =
   "48 83 7F 30 00 74 06 80 7F 40 00 74 0B 48 8D 87 ? ? ? ? C3";
-// Adjacent int stores: [this+0x2C]=esi; ret; nop; [this+0x30]=esi; ret.
 constexpr const char* group_criteria_set_match_group =
   "89 77 2C C3 66 66 2E 0F 1F 84 00 00 00 00 00 90 89 77 30 C3";
 constexpr int group_criteria_set_match_group_offset = 16;
@@ -229,17 +226,12 @@ constexpr const char* mark_surrounding_bounds_dirty =
 constexpr const char* collision_update_partition =
   "55 48 89 E5 53 48 89 FB 48 83 EC 08 48 8B 7F 08 48 8B 07 FF 90 ? ? ? ? 85 C0 74 ? 48 8B 7B 08 8B 87 ? ? ? ? F6 C4 80 74 ?";
 
-// engine.so CL_SendMove @ 0x3B4300. Called from CL_Move when sending;
-// writes CLC_Move via WriteUsercmdDeltaToBuffer then SendNetMsg.
 constexpr const char* cl_sendmove =
   "55 66 0F EF C0 48 89 E5 41 57 41 56 48 8D BD E8 EF FF FF 41 55 41 54 53 48 81 EC 38 10 00 00 44 8B 2D ? ? ? ?";
-// CNetChan::GetSequenceData: mov eax,[rdi+disp]; store out/in/ack.
 constexpr const char* netchan_get_sequence_data =
   "8B 47 ? 89 06 8B 47 ? 89 02 8B 47 ? 89 01 C3";
-// CNetChan::SetChoked: add [rdi+out],1; add [rdi+choke],1; ret.
 constexpr const char* netchan_set_choked =
   "83 47 ? 01 83 47 ? 01 C3";
-// Copies out_reliable / in_reliable / choked to optional out-pointers.
 constexpr const char* netchan_get_reliable =
   "48 85 F6 74 05 8B 47 ? 89 06 48 85 D2 74 05 8B 47 ? 89 02 48 85 C9 74 05 8B 47 ? 89 01";
 constexpr const char* get_mm_ban_data =
@@ -271,7 +263,6 @@ constexpr const char* client_textmode_flag_store =
 
 constexpr const char* crafting_panel_craft =
   "55 48 8D 87 ? ? ? ? 48 89 E5 41 57 49 89 FF 41 56 41 55 4C 8D 6D 80 41 54 53 48 8D 9F ? ? ? ? 48 83 EC 68 48 C7 45 80 ? ? ? ?";
-// CTFWeaponInfo ctor zeros primary WeaponData_t::m_nDamage at this+disp32 (live 1828).
 constexpr const char* tf_weapon_info_primary_data =
   "48 C7 83 ? ? ? ? 00 00 00 00 48 89 03 B8 01 00 00 00 48 C7 83";
 constexpr const char* store_do_preview_item =
@@ -297,34 +288,24 @@ constexpr const char* hud_death_notice_draw_text =
 constexpr const char* can_report_player =
   "55 48 89 E5 41 54 48 83 EC 08 8B 15 ? ? ? ? 85 D2 0F 8E ? ? ? ? 48 8B 05 ? ? ? ? 83 EA 01 48 8D 14 52 48 8D 54 90 0C EB ? 0F 1F 00 48 83 C0 0C";
 
-// CTFPartyClient::BAllowedToPartyWith @ 0x1EAF170 — Steam friend-or-in-party check.
 constexpr const char* party_allowed_to_party_with =
   "55 48 89 E5 48 83 EC 10 48 8B 7F 30 48 89 75 F8 48 85 FF 74 ? 48 8B 07 48 8D 75 F8 FF 90 88 00 00 00 83 F8 FF 74 ? C9 31 C0 C3 0F 1F 44 00 00 48 8D 05 ? ? ? ? 48 8B 00 48 8B 78 10 48 85 FF 74 ? 48 8B 07 48 8B 75 F8 FF 50 28 C9 83 F8 03";
-// CTFPartyClient can-invite (leader + friend + party not full) @ 0x1EAFBC0.
 constexpr const char* party_can_invite =
   "55 48 89 E5 41 56 49 89 F6 41 55 41 54 49 89 FC 53 48 83 7F 30 00 74 ? 80 7F 40 00 75 ? 45 31 ED";
-// tf_party_incoming_invites_debug @ 0x1EADFA0. Count is parsed from the 4C 63 A0 disp32.
 constexpr const char* party_incoming_invites_debug =
   "83 3F 01 74 ? 48 8D 3D ? ? ? ? 31 C0 E9 ? ? ? ? 0F 1F 44 00 00 55 48 89 E5 41 56 41 55 41 54 53 48 83 EC 20 E8 ? ? ? ? 4C 63 A0 ? ? ? ?";
-// CTFGCClientSystem::BConnectedToMatchServer @ 0x1EA1AA0
 constexpr const char* gc_connected_to_match_server =
   "40 84 F6 0F 84 ? ? ? ? 0F B6 97 CE 07 00 00 31 C0 89 D1 81 E1 F0 00 00 00";
-// Msg("[SDR Ping] Forcing ping refresh"); movb $1, [this+disp32]
 constexpr const char* gc_force_ping_refresh =
   "55 31 C0 48 89 E5 41 55 41 54 4C 8D 65 B0 53 48 89 FB 48 8D 3D ? ? ? ? 48 83 EC 38 E8 ? ? ? ? 4C 89 E7 C6 83 ? ? ? ? 01";
-// CTFPartyClient::BInvitePlayerToParty @ 0x1EB05D0
 constexpr const char* party_invite_player =
   "55 48 89 E5 41 55 49 89 FD 41 54 53 89 D3 48 81 EC 28 01 00 00 48 89 B5 C8 FE FF FF E8 ? ? ? ? 84 C0 74 ?";
-// CTFPartyClient::BRequestJoinPlayer @ 0x1EB0850
 constexpr const char* party_request_join_player =
   "55 48 89 E5 41 55 41 89 D5 41 54 49 89 F4 53 48 89 FB 48 83 EC 48 48 89 75 A8 E8 ? ? ? ? 84 C0 0F 84";
 
-// G_MannVsMachineStats: xor-eax stub then mov rax,[rip]; ret @ 0x1E9C020.
-// Match starts at the xor stub; add mvm_stats_singleton_offset to reach the getter.
 constexpr const char* mvm_stats_singleton =
   "31 C0 C3 66 66 2E 0F 1F 84 00 00 00 00 00 66 90 48 8B 05 ? ? ? ? C3";
 constexpr int mvm_stats_singleton_offset = 16;
-// C_MannVsMachineStats::AddLocalPlayerUpgrade; CUtlVector size at this+0x8A8.
 constexpr const char* mvm_add_local_player_upgrade =
   "55 48 89 E5 41 57 41 89 F7 41 56 41 89 D6 41 55 41 54 53 48 89 FB 48 83 EC 08 44 8B A7 A8 08 00 00";
 

@@ -1,3 +1,11 @@
+# IMPORTANT NOTICE
+
+# This repository exists solely to **preserve the original Cat Hook code** as it was before its removal from GitHub, kept as close to the original as possible.
+
+# The only work done here are **fixes and updates for new versions of the game**.
+
+# For a proper, working, good cheat, visit the **[pupnoodle/nullhook](https://github.com/pupnoodle/nullhook)** fork.
+
 # Cathook Training Software
 ![banner](https://user-images.githubusercontent.com/13179138/134817300-d4865695-af33-4e83-a017-5ec0d31ea0a1.png)
 
