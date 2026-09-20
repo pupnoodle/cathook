@@ -4,7 +4,7 @@
 
 # The only work done here are **fixes and updates for new versions of the game**.
 
-# For a proper, working, good cheat, visit the **[pupnoodle/nullhook](https://github.com/pupnoodle/nullhook)** fork.
+# For a proper, working, good cheat, visit the **[sourceassembly/nullhook](https://github.com/sourceassembly/nullhook)** fork.
 
 # Cathook Training Software
 ![banner](https://user-images.githubusercontent.com/13179138/134817300-d4865695-af33-4e83-a017-5ec0d31ea0a1.png)
