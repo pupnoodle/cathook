@@ -173,6 +173,8 @@ public:
     lazy_netvar nTickBase{ "DT_BasePlayer", "localdata", "m_nTickBase" };
     lazy_netvar res_iMaxBuffedHealth{ "DT_TFPlayerResource", "m_iMaxBuffedHealth" };
     lazy_netvar iItemDefinitionIndex{ "DT_EconEntity", "m_AttributeManager", "m_Item", "m_iItemDefinitionIndex" };
+    lazy_netvar iEntityQuality{ "DT_EconEntity", "m_AttributeManager", "m_Item", "m_iEntityQuality" };
+    lazy_netvar bInitialized{ "DT_EconEntity", "m_AttributeManager", "m_Item", "m_bInitialized" };
     lazy_netvar AttributeList{ "DT_EconEntity", "m_AttributeManager", "m_Item", "m_AttributeList" };
 
     lazy_netvar vecPunchAngle{ "DT_BasePlayer", "localdata", "m_Local", "m_vecPunchAngle" };

@@ -69,12 +69,18 @@ public:
 
 enum class Attributes
 {
-    loot_rarity           = 2022,
-    is_australium_item    = 2027,
-    item_style_override   = 542,
-    sheen                 = 2014,
-    killstreak_tier       = 2025,
-    set_item_texture_wear = 725
+    loot_rarity            = 2022,
+    is_australium_item     = 2027,
+    item_style_override    = 542,
+    sheen                  = 2014,
+    killstreak_tier        = 2025,
+    set_item_texture_wear  = 725,
+    paintkit_proto_defidx  = 834,
+    custom_paintkit_seed   = 866,
+    custom_paintkit_seed_hi = 867,
+    inspect                = 731,
+    unusual_weapon_effect  = 370,
+    festive                = 2053
 };
 
 enum class UnusualEffects
@@ -96,43 +102,27 @@ enum class Sheens
     HOT_ROD
 };
 
-struct patched_weapon_cookie
-{
-    patched_weapon_cookie(int entity);
-    void Update(int entity);
-    bool Check();
-
-public:
-    int eidx{ 0 };
-    int defidx{ 0 };
-    int eclass{ 0 };
-    int attrs{ 0 };
-    bool valid{ false };
-};
-
 struct def_attribute_modifier
 {
     bool Default() const;
     void Apply(int entity);
     void Set(int id, float value);
     void Remove(int id);
+    bool HasAttr(int id) const;
     int defidx{ 0 };
     int defidx_redirect{ 0 };
+    int quality{ -1 };
     std::vector<attribute_s> modifiers{};
 };
 
 extern boost::unordered_flat_map<int, def_attribute_modifier> modifier_map;
-extern patched_weapon_cookie cookie;
-// extern boost::unordered_flat_map<int, patched_weapon_cookie> cookie_map;
 
 def_attribute_modifier &GetModifier(int idx);
-// patched_weapon_cookie& GetCookie(int idx);
 
-constexpr unsigned SERIALIZE_VERSION = 1;
+constexpr unsigned SERIALIZE_VERSION = 2;
 void Save(std::string filename);
 void Load(std::string filename, bool merge = false);
 
-void InvalidateCookie();
 void FrameStageNotify(int stage);
 void DrawText();
 } // namespace hacks::tf2::skinchanger

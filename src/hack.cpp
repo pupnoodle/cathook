@@ -20,6 +20,7 @@
 #include "hack.hpp"
 #include "common.hpp"
 #include "MiscTemporary.hpp"
+#include "DetourHook.hpp"
 #if ENABLE_GUI
 #include "menu/GuiInterface.hpp"
 #endif
@@ -181,7 +182,8 @@ void prof_arm_main_thread()
 void critical_error_handler(int signum)
 {
     namespace st = boost::stacktrace;
-    ::signal(signum, SIG_DFL);
+    ::signal(SIGSEGV, SIG_DFL);
+    ::signal(SIGABRT, SIG_DFL);
     passwd *pwd = getpwuid(getuid());
     std::ofstream out(strfmt("/tmp/cathook-%s-%d-segfault.log", pwd->pw_name, getpid()).get());
 
@@ -203,6 +205,80 @@ void critical_error_handler(int signum)
     ::raise(SIGABRT);
 }
 #endif
+
+namespace
+{
+constexpr const char *server_nav_collect_sig =
+    "55 48 89 E5 41 56 49 89 F6 41 55 41 54 53 48 8D 9F 60 0C 00 00 48 83 EC 10 83 FA 02 74 ? 83 FA 03 74 ? 48 83 C4 10 5B 41 5C 41 5D 41 5E 5D C3 48 8D 9F 80 0C 00 00";
+
+using NavVectorInsert_t = void (*)(uintptr_t vec, unsigned int index, uintptr_t *value);
+
+DetourHook server_nav_collect_detour;
+NavVectorInsert_t server_nav_insert = nullptr;
+uintptr_t server_nav_areas          = 0;
+bool server_nav_collect_hooked      = false;
+
+void NavCollectConnectedAreas(uintptr_t navmesh, uintptr_t out, int team)
+{
+    uintptr_t list;
+    if (team == 2)
+        list = navmesh + 0xC60;
+    else if (team == 3)
+        list = navmesh + 0xC80;
+    else
+        return;
+
+    auto areas = *reinterpret_cast<uintptr_t **>(server_nav_areas);
+    for (int i = 0; i < *reinterpret_cast<int *>(list + 0x10); ++i)
+    {
+        uintptr_t area  = areas[i];
+        uintptr_t best  = 0;
+        float best_score = 0.0f;
+        if (!area)
+            continue;
+        for (auto slot = reinterpret_cast<uintptr_t *>(area + 0x68); slot != reinterpret_cast<uintptr_t *>(area + 0x88); ++slot)
+        {
+            auto header = reinterpret_cast<int *>(*slot);
+            if (!header)
+                continue;
+            for (int j = 0; j < *header; ++j)
+            {
+                uintptr_t conn = *reinterpret_cast<uintptr_t *>(&header[4 * j + 2]);
+                if (conn < (uintptr_t(1) << 40))
+                    continue;
+                if (*reinterpret_cast<uint8_t *>(conn + 0x29C) & 0xE)
+                    continue;
+                float score = (*reinterpret_cast<float *>(conn + 0x18) - *reinterpret_cast<float *>(conn + 0xC)) *
+                              (*reinterpret_cast<float *>(conn + 0x14) - *reinterpret_cast<float *>(conn + 0x8));
+                if (score > best_score)
+                {
+                    best       = conn;
+                    best_score = score;
+                }
+            }
+        }
+        if (best)
+            server_nav_insert(out, *reinterpret_cast<unsigned int *>(out + 0x10), &best);
+    }
+}
+
+void InstallServerNavCrashFix()
+{
+    if (server_nav_collect_hooked)
+        return;
+    if (!sharedobj::server().Load(false))
+        return;
+    uintptr_t fn = gSignatures.GetServerSignature(server_nav_collect_sig);
+    if (!fn)
+        return;
+    server_nav_areas  = fn + 0x45 + *reinterpret_cast<int32_t *>(fn + 0x41);
+    server_nav_insert = reinterpret_cast<NavVectorInsert_t>(fn + 0xE1 + *reinterpret_cast<int32_t *>(fn + 0xDD));
+    server_nav_collect_detour.Init(fn, reinterpret_cast<void *>(&NavCollectConnectedAreas));
+    server_nav_collect_hooked = server_nav_collect_detour.GetOriginalFunc() != nullptr;
+    if (server_nav_collect_hooked)
+        logging::Info("Installed server nav crash fix at %p", reinterpret_cast<void *>(fn));
+}
+}
 
 static void InitRandom()
 {
@@ -407,6 +483,8 @@ free(logname);*/
     InitClassTable();
     EC::Register(EC::LevelInit, InitClassTable, "classinfo_levelinit", EC::very_early);
     EC::Register(EC::FirstCM, InitClassTable, "classinfo_firstcm", EC::very_early);
+    EC::Register(EC::LevelInit, InstallServerNavCrashFix, "server_nav_crashfix");
+    InstallServerNavCrashFix();
 
     BeginConVars();
     g_Settings.Init();

@@ -17,7 +17,6 @@
 #include "common.hpp"
 #include "micropather.h"
 #include "CNavFile.h"
-#include "teamroundtimer.hpp"
 #include "Aimbot.hpp"
 #include "MiscAimbot.hpp"
 #include "NavBot.hpp"
@@ -190,10 +189,6 @@ public:
     // When the local player stands on one of the nav squares the free blacklist should NOT run
     bool free_blacklist_blocked = false;
 
-    CNavArea *solve_start = nullptr;
-    CNavArea *solve_dest  = nullptr;
-    bool solve_in_setup   = false;
-
     Map(const char *nav_path, std::string level_name) : navfile(nav_path), mapname(std::move(level_name))
     {
         if (!navfile.m_isOK)
@@ -203,50 +198,27 @@ public:
     }
     float LeastCostEstimate(void *start, void *end) override
     {
-        return reinterpret_cast<CNavArea *>(start)->m_center.DistTo(reinterpret_cast<CNavArea *>(end)->m_center);
+        return reinterpret_cast<CNavArea *>(start)->m_center.DistToSqr(reinterpret_cast<CNavArea *>(end)->m_center);
     }
     void AdjacentCost(void *main, std::vector<micropather::StateCost> *adjacent) override
     {
         CNavArea &area = *reinterpret_cast<CNavArea *>(main);
-        int team       = g_pLocalPlayer->team;
         for (NavConnect &connection : area.m_connections)
         {
-            CNavArea *next_area = connection.area;
-            if (!next_area)
-                continue;
-
-            if (next_area->m_minZ - area.m_maxZ > PLAYER_JUMP_HEIGHT)
-                continue;
-            if (area.m_minZ - next_area->m_maxZ > PLAYER_DEATH_DROP_HEIGHT)
-                continue;
-
-            int tf_attributes = next_area->m_TFattributeFlags;
-            if ((tf_attributes & TF_NAV_BLOCKED) && !(tf_attributes & TF_NAV_UNBLOCKABLE))
-                continue;
-
-            if (solve_in_setup && next_area != solve_dest && (tf_attributes & (TF_NAV_BLUE_SETUP_GATE | TF_NAV_RED_SETUP_GATE)))
-                continue;
-
-            if (team == TEAM_RED && (tf_attributes & (TF_NAV_SPAWN_ROOM_BLUE | TF_NAV_BLUE_ONE_WAY_DOOR)))
-                continue;
-            if (team == TEAM_BLU && (tf_attributes & (TF_NAV_SPAWN_ROOM_RED | TF_NAV_RED_ONE_WAY_DOOR)))
-                continue;
-
             // An area being entered twice means it is blacklisted from entry entirely
-            auto connection_key    = std::pair<CNavArea *, CNavArea *>(next_area, next_area);
+            auto connection_key    = std::pair<CNavArea *, CNavArea *>(connection.area, connection.area);
             auto cached_connection = vischeck_cache.find(connection_key);
 
             // Entered and marked bad?
-            if (cached_connection != vischeck_cache.end())
-                if (!cached_connection->second.vischeck_state)
-                    continue;
+            if (cached_connection != vischeck_cache.end() && !cached_connection->second.vischeck_state)
+                continue;
 
             // If the extern blacklist is running, ensure we don't try to use a bad area
             bool is_blacklisted = false;
             if (!free_blacklist_blocked)
                 for (auto const &entry : free_blacklist)
                 {
-                    if (entry.first == next_area)
+                    if (entry.first == connection.area)
                     {
                         is_blacklisted = true;
                         break;
@@ -255,7 +227,7 @@ public:
             if (is_blacklisted)
                 continue;
 
-            auto points = determinePoints(&area, next_area);
+            auto points = determinePoints(&area, connection.area);
 
             // Apply dropdown
             points.center = handleDropdown(points.center, points.next);
@@ -266,26 +238,18 @@ public:
             if (height_diff > PLAYER_JUMP_HEIGHT)
                 continue;
 
-            float cost_multiplier = 1.0f;
-            if (next_area->m_attributeFlags & NAV_MESH_AVOID)
-                cost_multiplier += 3.0f;
-            if (team == TEAM_RED && (tf_attributes & TF_NAV_BLUE_SENTRY_DANGER))
-                cost_multiplier += 1.0f;
-            else if (team == TEAM_BLU && (tf_attributes & TF_NAV_RED_SENTRY_DANGER))
-                cost_multiplier += 1.0f;
-
             points.current.z += PLAYER_JUMP_HEIGHT;
             points.center.z += PLAYER_JUMP_HEIGHT;
             points.next.z += PLAYER_JUMP_HEIGHT;
 
-            auto key    = std::pair<CNavArea *, CNavArea *>(&area, next_area);
+            auto key    = std::pair<CNavArea *, CNavArea *>(&area, connection.area);
             auto cached = vischeck_cache.find(key);
             if (cached != vischeck_cache.end())
             {
                 if (cached->second.vischeck_state)
                 {
-                    float cost = next_area->m_center.DistTo(area.m_center) * cost_multiplier;
-                    adjacent->push_back(micropather::StateCost{ reinterpret_cast<void *>(next_area), cost });
+                    float cost = connection.area->m_center.DistToSqr(area.m_center);
+                    adjacent->push_back(micropather::StateCost{ reinterpret_cast<void *>(connection.area), cost });
                 }
             }
             else
@@ -295,8 +259,8 @@ public:
                 {
                     vischeck_cache[key] = { TICKCOUNT_TIMESTAMP(60), true };
 
-                    float cost = points.next.DistTo(points.current) * cost_multiplier;
-                    adjacent->push_back(micropather::StateCost{ reinterpret_cast<void *>(next_area), cost });
+                    float cost = points.next.DistToSqr(points.current);
+                    adjacent->push_back(micropather::StateCost{ reinterpret_cast<void *>(connection.area), cost });
                 }
                 else
                 {
@@ -306,18 +270,19 @@ public:
         }
     }
 
-    // Function for getting closest Area to player, aka "LocalNav"
+
     CNavArea *findClosestNavSquare(const Vector &vec)
     {
-        float best_score      = FLT_MAX;
-        CNavArea *best_area   = nullptr;
-        bool is_local         = g_pLocalPlayer->v_Origin == vec;
-        float overlap_padding = is_local ? HALF_PLAYER_WIDTH : 0.0f;
+        auto vec_corrected = vec;
+        vec_corrected.z += PLAYER_JUMP_HEIGHT;
+        float overall_best_dist = FLT_MAX, best_dist = FLT_MAX;
+
+        CNavArea *overall_best_square = nullptr, *best_square = nullptr;
 
         for (auto &i : navfile.m_areas)
         {
             // Marked bad, do not use if local origin
-            if (is_local)
+            if (g_pLocalPlayer->v_Origin == vec)
             {
                 auto key   = std::pair<CNavArea *, CNavArea *>(&i, &i);
                 auto found = vischeck_cache.find(key);
@@ -325,48 +290,39 @@ public:
                     continue;
             }
 
-            float nearest_x = std::clamp(vec.x, i.m_nwCorner.x, i.m_seCorner.x);
-            float nearest_y = std::clamp(vec.y, i.m_nwCorner.y, i.m_seCorner.y);
-            float surface_z = i.GetZ(nearest_x, nearest_y);
-
-            float dx              = nearest_x - vec.x;
-            float dy              = nearest_y - vec.y;
-            float planar_dist_sqr = dx * dx + dy * dy;
-
-            float vertical_to_surface = std::fabs(surface_z - vec.z);
-            float vertical_outside    = std::max(i.m_minZ - vec.z, 0.0f) + std::max(vec.z - i.m_maxZ, 0.0f);
-
-            float score = planar_dist_sqr + vertical_to_surface * vertical_to_surface * 6.0f + vertical_outside * vertical_outside * 10.0f;
-            if (i.IsOverlapping(vec, overlap_padding))
-                score *= is_local ? 0.45f : 0.7f;
-
-            if (is_local)
+            float dist = i.m_center.DistToSqr(vec);
+            if (dist < best_dist)
             {
-                float delta = vec.z - surface_z;
-                if (delta < -18.0f)
-                    score += delta * delta * 28.0f;
-                else if (delta < -6.0f)
-                    score += delta * delta * 10.0f;
+                best_dist   = dist;
+                best_square = &i;
             }
 
-            if (score < best_score)
-            {
-                best_score = score;
-                best_area  = &i;
-            }
+            if (overall_best_dist <= dist)
+                continue;
+
+            auto center_corrected = i.m_center;
+            center_corrected.z += PLAYER_JUMP_HEIGHT;
+
+
+            if (!i.IsOverlapping(vec) || !IsVectorVisibleNavigation(vec_corrected, center_corrected))
+                continue;
+
+            overall_best_dist   = dist;
+            overall_best_square = &i;
+
+
+            if (overall_best_dist == best_dist)
+                return overall_best_square;
         }
-        return best_area;
+
+        return overall_best_square ? overall_best_square : best_square;
     }
-    std::vector<void *> findPath(CNavArea *local, CNavArea *dest, bool in_setup)
+    std::vector<void *> findPath(CNavArea *local, CNavArea *dest)
     {
         using namespace std::chrono;
 
         if (state != NavState::Active)
             return {};
-
-        solve_start     = local;
-        solve_dest      = dest;
-        solve_in_setup  = in_setup;
 
         if (log_pathing)
         {
@@ -535,32 +491,7 @@ int current_priority    = 0;
 bool current_navtolocal = false;
 bool repath_on_fail     = false;
 Vector last_destination;
-Vector failed_destination;
-int failed_dest_expire_tick = 0;
 static bool map_dirty = true;
-
-static bool isSetupTime()
-{
-    if (path_during_setup)
-        return false;
-    if (GetLevelName() == "plr_pipeline")
-        return false;
-    if (g_pGameRules->InSetup() || g_pGameRules->RoundMode() == CGameRules::GR_STATE_PREROUND)
-        return true;
-    return g_pTeamRoundTimer->GetRoundState() == RT_STATE_SETUP;
-}
-
-static bool isPathingBlocked()
-{
-    if (GetLevelName() == "plr_pipeline")
-        return false;
-    std::string level_name = GetLevelName();
-    if (g_pGameRules->InWaitingForPlayers() && (level_name.starts_with("pl_") || level_name.starts_with("cp_")))
-        return true;
-    if (isSetupTime() && g_pLocalPlayer->team == TEAM_BLU)
-        return true;
-    return false;
-}
 
 static std::string resolveNavPath(const std::string &level_name)
 {
@@ -606,7 +537,6 @@ static void ensureMapLoaded()
     last_crumb.navarea   = nullptr;
     current_priority     = 0;
     repath_on_fail       = false;
-    failed_dest_expire_tick = 0;
 
     std::string nav_path = resolveNavPath(level_name);
     logging::Info("Pathing: Nav File location: %s", nav_path.c_str());
@@ -621,7 +551,10 @@ bool isReady()
         return false;
     if (!map || map->state != NavState::Active || !g_IEngine->IsInGame())
         return false;
-    return !isPathingBlocked();
+    if (path_during_setup)
+        return true;
+    std::string level_name = GetLevelName();
+    return level_name == "plr_pipeline" || g_pGameRules->RoundMode() > CGameRules::GR_STATE_PREROUND;
 }
 
 bool isPathing()
@@ -654,21 +587,6 @@ bool navTo(const Vector &destination, int priority, bool should_repath, bool nav
     // Don't path, priority is too low
     if (priority < current_priority)
         return false;
-
-    constexpr float REUSE_RADIUS_SQR = 160.0f * 160.0f;
-
-    if (isPathing() && priority == current_priority && repath_on_fail && last_destination.DistToSqr(destination) <= REUSE_RADIUS_SQR)
-    {
-        last_destination = destination;
-        if (!crumbs.empty())
-            crumbs.back().vec = destination;
-        inactivity.update();
-        return true;
-    }
-
-    if (failed_dest_expire_tick > g_GlobalVars->tickcount && failed_destination.DistToSqr(destination) <= REUSE_RADIUS_SQR)
-        return false;
-
     if (log_pathing)
         logging::Info("Priority: %d", priority);
 
@@ -677,63 +595,34 @@ bool navTo(const Vector &destination, int priority, bool should_repath, bool nav
 
     if (!start_area || !dest_area)
         return false;
-    auto path = map->findPath(start_area, dest_area, isSetupTime());
+    auto path = map->findPath(start_area, dest_area);
     if (path.empty())
-    {
-        failed_destination      = destination;
-        failed_dest_expire_tick = TICKCOUNT_TIMESTAMP(1.5f);
         return false;
-    }
 
     if (!nav_to_local)
         path.erase(path.begin());
     crumbs.clear();
 
-    if (path.empty())
+    for (size_t i = 0; i < path.size(); ++i)
     {
-        crumbs.push_back({ nullptr, destination });
-        inactivity.update();
-        current_priority   = priority;
-        current_navtolocal = nav_to_local;
-        repath_on_fail     = should_repath;
-        if (repath_on_fail)
-            last_destination = destination;
-        return true;
-    }
+        auto *area = reinterpret_cast<CNavArea *>(path[i]);
 
-    constexpr float CRUMB_STEP = 128.0f;
-    Vector entry               = g_pLocalPlayer->v_Origin;
 
-    auto add_segment = [&](CNavArea *area, const Vector &to)
-    {
-        Vector delta = to - entry;
-        delta.z      = 0.0f;
-        int steps    = (int) std::ceil(delta.Length() / CRUMB_STEP);
-        for (int s = 1; s < steps; ++s)
+        if (i != path.size() - 1)
         {
-            Vector pos = entry + delta * ((float) s / (float) steps);
-            pos.z      = area->GetZ(pos.x, pos.y);
-            crumbs.push_back({ area, pos });
+            auto *next_area = (CNavArea *) path[i + 1];
+
+            auto points = determinePoints(area, next_area);
+
+            points.center = handleDropdown(points.center, points.next);
+
+            crumbs.push_back({ area, points.current });
+            crumbs.push_back({ area, points.center });
         }
-        crumbs.push_back({ area, to });
-        entry = to;
-    };
-
-    for (size_t i = 0; i + 1 < path.size(); ++i)
-    {
-        CNavArea *area      = reinterpret_cast<CNavArea *>(path[i]);
-        CNavArea *next_area = reinterpret_cast<CNavArea *>(path[i + 1]);
-
-        auto points   = determinePoints(area, next_area);
-        points.center = handleDropdown(points.center, points.next);
-
-        add_segment(area, points.center);
-        entry = points.center_next;
+        else
+            crumbs.push_back({ area, area->m_center });
     }
 
-    CNavArea *last_area  = reinterpret_cast<CNavArea *>(path.back());
-    Vector last_waypoint = last_area->getNearestPoint(destination.AsVector2D());
-    add_segment(last_area, last_waypoint);
     crumbs.push_back({ nullptr, destination });
     inactivity.update();
 
@@ -832,8 +721,10 @@ static void followCrumbs()
     if (reset_z)
         current_vec.z = g_pLocalPlayer->v_Origin.z;
 
+    auto crumb_reach = [](const Crumb &crumb) { return crumb.navarea ? 50.0f : 20.0f; };
+
     // We are close enough to the crumb to have reached it
-    if (current_vec.DistTo(g_pLocalPlayer->v_Origin) < 50)
+    if (current_vec.DistTo(g_pLocalPlayer->v_Origin) < crumb_reach(crumbs[0]))
     {
         last_crumb = crumbs[0];
         crumbs.erase(crumbs.begin());
@@ -848,7 +739,7 @@ static void followCrumbs()
         current_vec.z = g_pLocalPlayer->v_Origin.z;
 
     // We are close enough to the second crumb, Skip both (This is espcially helpful with drop downs)
-    if (crumbs.size() > 1 && crumbs[1].vec.DistTo(g_pLocalPlayer->v_Origin) < 50)
+    if (crumbs.size() > 1 && crumbs[1].vec.DistTo(g_pLocalPlayer->v_Origin) < crumb_reach(crumbs[1]))
     {
         last_crumb = crumbs[1];
         crumbs.erase(crumbs.begin(), crumbs.begin() + 2);
@@ -1167,7 +1058,23 @@ void Draw()
     }
 }
 #endif
-}; // namespace NavEngine
+
+class CLocalPlayerRespawn : public IGameEventListener
+{
+public:
+    void FireGameEvent(KeyValues *event) override
+    {
+        if (map)
+            map->pather.Reset();
+    }
+};
+
+CLocalPlayerRespawn &listener()
+{
+    static CLocalPlayerRespawn l{};
+    return l;
+}
+}
 
 Vector loc;
 
@@ -1234,6 +1141,9 @@ static CatCommand nav_debug_blacklist("nav_debug_blacklist", "Blacklist connecti
 static InitRoutine init(
     []()
     {
+        g_IGameEventManager->AddListener(&NavEngine::listener(), "localplayer_respawn", false);
+        EC::Register(
+            EC::Shutdown, []() { g_IGameEventManager->RemoveListener(&NavEngine::listener()); }, "navengine_shutdown");
         EC::Register(EC::CreateMove_NoEnginePred, NavEngine::CreateMove, "navengine_cm");
         EC::Register(EC::LevelInit, NavEngine::LevelInit, "navengine_levelinit");
 #if ENABLE_VISUALS

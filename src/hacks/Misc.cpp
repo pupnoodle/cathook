@@ -56,7 +56,7 @@ static DetourHook tf_shoulddraw_detour{};
 static DetourHook tf_wearable_shoulddraw_detour{};
 static DetourHook econ_wearable_shoulddraw_detour{};
 typedef bool (*ShouldDrawFn)(IClientEntity *);
-static ShouldDrawFn baseentity_shoulddraw;
+static ShouldDrawFn baseplayer_shoulddraw;
 static ShouldDrawFn baseanimating_shoulddraw;
 
 constexpr ptrdiff_t wearable_owner_handle = 1876;
@@ -66,8 +66,8 @@ static bool TFShouldDraw_hook(IClientEntity *self)
     auto original = (ShouldDrawFn) tf_shoulddraw_detour.GetOriginalFunc();
     if (!original)
         return true;
-    if (render_zoomed && baseentity_shoulddraw && g_pLocalPlayer->bZoomed && CE_GOOD(LOCAL_E) && self == (IClientEntity *) RAW_ENT(LOCAL_E))
-        return baseentity_shoulddraw(self);
+    if (render_zoomed && baseplayer_shoulddraw && g_pLocalPlayer->bZoomed && CE_GOOD(LOCAL_E) && self == (IClientEntity *) RAW_ENT(LOCAL_E))
+        return baseplayer_shoulddraw(self);
     return original(self);
 }
 
@@ -75,12 +75,14 @@ static bool WearableShouldDraw(IClientEntity *self, ShouldDrawFn original)
 {
     if (!original)
         return false;
-    if (render_zoomed && baseanimating_shoulddraw && g_pLocalPlayer->bZoomed && CE_GOOD(LOCAL_E))
+    if (render_zoomed && baseanimating_shoulddraw && baseplayer_shoulddraw && g_pLocalPlayer->bZoomed && CE_GOOD(LOCAL_E))
     {
         int owner = *(int *) ((char *) self + wearable_owner_handle);
         if (owner != -1 && HandleToIDX(owner) == LOCAL_E->m_IDX)
         {
             if (vfunc<bool (*)(IClientEntity *)>(self, vtables::entity::is_viewmodel_wearable)(self))
+                return false;
+            if (!baseplayer_shoulddraw((IClientEntity *) RAW_ENT(LOCAL_E)))
                 return false;
             return baseanimating_shoulddraw(self);
         }
@@ -102,8 +104,8 @@ static void tryPatchLocalPlayerShouldDraw(bool after)
 {
     if (after)
     {
-        if (!baseentity_shoulddraw)
-            baseentity_shoulddraw = ShouldDrawFn(gSignatures.GetClientSignature(sigs::base_entity_should_draw));
+        if (!baseplayer_shoulddraw)
+            baseplayer_shoulddraw = ShouldDrawFn(gSignatures.GetClientSignature(sigs::base_player_should_draw));
         if (!baseanimating_shoulddraw)
             baseanimating_shoulddraw = ShouldDrawFn(gSignatures.GetClientSignature(sigs::base_animating_should_draw));
         auto tf = gSignatures.GetClientSignature(sigs::tf_player_should_draw);

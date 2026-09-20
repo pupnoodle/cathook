@@ -7,6 +7,7 @@
         <Include path="nullifiedcat/visuals/radar.xml"/>
         <Include path="nullifiedcat/visuals/colors.xml"/>
         <Include path="nullifiedcat/visuals/ui.xml"/>
+        <Include path="nullifiedcat/visuals/skinchanger.xml"/>
         <Include path="nullifiedcat/visuals/uicolors.xml"/>
         <Include path="nullifiedcat/visuals/world.xml"/>
     </TabContainer>
