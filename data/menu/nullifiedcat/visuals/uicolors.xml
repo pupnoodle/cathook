@@ -6,7 +6,7 @@
             <AutoVariable width="fill" target="zk.style.window.color.background.inactive" label="Inactive background"/>
         </List>
     </Box>
-    <Box padding="12 6 6 6" width="content" height="content" name="Window titlebars" y="73">
+    <Box padding="12 6 6 6" width="content" height="content" name="Window titlebars">
         <List width="150">
             <AutoVariable width="fill" target="zk.style.window-header.color.border.active" label="Active border"/>
             <AutoVariable width="fill" target="zk.style.window-header.color.border.inactive" label="Inactive border"/>
@@ -14,12 +14,12 @@
             <AutoVariable width="fill" target="zk.style.window-header.color.background.inactive" label="Inactive background"/>
         </List>
     </Box>
-    <Box padding="12 6 6 6" width="content" height="content" name="Window close button" y="164">
+    <Box padding="12 6 6 6" width="content" height="content" name="Window close button">
         <List width="150">
             <AutoVariable width="fill" target="zk.style.window-close-button.color.border" label="Border"/>
         </List>
     </Box>
-    <Box padding="12 6 6 6" width="content" height="content" name="Other container elements" y="203">
+    <Box padding="12 6 6 6" width="content" height="content" name="Other container elements">
         <List width="150">
             <AutoVariable width="fill" target="zk.style.box.color.border" label="Box border"/>
             <AutoVariable width="fill" target="zk.style.input.color.border" label="Color picker border"/>
@@ -39,7 +39,7 @@
             <AutoVariable width="fill" target="zk.style.option.color.hover" label="Hover background"/>
         </List>
     </Box>
-    <Box padding="12 6 6 6" width="content" height="content" name="Text input" x="170" y="56">
+    <Box padding="12 6 6 6" width="content" height="content" name="Text input" x="170">
         <List width="150">
             <AutoVariable width="fill" target="zk.style.input.text.color.border.active" label="Active border"/>
             <AutoVariable width="fill" target="zk.style.input.text.color.border.inactive" label="Inactive border"/>
@@ -47,20 +47,20 @@
             <AutoVariable width="fill" target="zk.style.input.text.color.text.inactive" label="Inactive text"/>
         </List>
     </Box>
-    <Box padding="12 6 6 6" width="content" height="content" name="Key input" x="170" y="146">
+    <Box padding="12 6 6 6" width="content" height="content" name="Key input" x="170">
         <List width="150">
             <AutoVariable width="fill" target="zk.style.input.key.color.border" label="Border"/>
             <AutoVariable width="fill" target="zk.style.input.key.color.background.capturing" label="Background"/>
         </List>
     </Box>
-    <Box padding="12 6 6 6" width="content" height="content" name="Slider" x="170" y="202">
+    <Box padding="12 6 6 6" width="content" height="content" name="Slider" x="170">
         <List width="150">
             <AutoVariable width="fill" target="zk.style.input.slider.color.handle_border" label="Handle border"/>
             <AutoVariable width="fill" target="zk.style.input.slider.color.handle_body" label="Handle body"/>
             <AutoVariable width="fill" target="zk.style.input.slider.color.bar" label="Bar"/>
         </List>
     </Box>
-    <Box padding="12 6 6 6" width="content" height="content" name="Checkbox" x="170" y="275">
+    <Box padding="12 6 6 6" width="content" height="content" name="Checkbox" x="170">
         <List width="150">
             <AutoVariable width="fill" target="zk.style.checkbox.color.border" label="Border"/>
             <AutoVariable width="fill" target="zk.style.checkbox.color.checked" label="Checked"/>
@@ -75,13 +75,13 @@
             <AutoVariable width="fill" target="zk.style.player-list.team.blue-dead" label="BLU team dead"/>
         </List>
     </Box>
-    <Box padding="12 6 6 6" width="content" height="content" name="Taskbar" x="340" y="91">
+    <Box padding="12 6 6 6" width="content" height="content" name="Taskbar" x="340">
         <List width="150">
             <AutoVariable width="fill" target="zk.style.taskbar.color.border" label="Border"/>
             <AutoVariable width="fill" target="zk.style.taskbar.color.background" label="Background"/>
         </List>
     </Box>
-    <Box padding="12 6 6 6" width="content" height="content" name="Task" x="340" y="148">
+    <Box padding="12 6 6 6" width="content" height="content" name="Task" x="340">
         <List width="150">
             <AutoVariable width="fill" target="zk.style.task.color.border" label="Border"/>
             <AutoVariable width="fill" target="zk.style.task.color.background.hover" label="Hover"/>
@@ -90,7 +90,7 @@
             <AutoVariable width="fill" target="zk.style.task.color.text.closed" label="Text closed"/>
         </List>
     </Box>
-    <Box padding="12 6 6 6" width="content" height="content" name="Tabs" x="340" y="256">
+    <Box padding="12 6 6 6" width="content" height="content" name="Tabs" x="340">
         <List width="150">
             <AutoVariable width="fill" target="zk.style.tab-selection.color.border" label="Tab selection border"/>
             <AutoVariable width="fill" target="zk.style.tab-button.color.separator" label="Tab separator"/>

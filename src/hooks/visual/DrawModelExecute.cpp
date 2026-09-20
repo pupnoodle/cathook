@@ -781,9 +781,6 @@ DEFINE_HOOKED_METHOD(DrawModelExecute, void, IVModelRender *this_, const DrawMod
                             // TODO: Allow for a fade between the entity's color and a specified color, it would look cool but i'm lazy
                             if (ent->m_bAlivePlayer() && (int) bt::bt_data.size() >= info.entity_index && info.entity_index > 0)
                             {
-                                // Get ticks
-                                auto ticks = bt::bt_data.at(info.entity_index - 1);
-
                                 auto good_ticks = bt::getGoodTicks(ENTITY(info.entity_index));
                                 if (good_ticks)
                                 {

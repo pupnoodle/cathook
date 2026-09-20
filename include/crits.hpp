@@ -12,4 +12,6 @@ extern bool calling_crithelper;
 extern bool isEnabled();
 extern bool force_crit_this_tick;
 void fixBucket(IClientEntity *weapon, CUserCmd *cmd);
+void SyncObservedChance(IClientEntity *weapon);
+float GetObservedCritChance();
 } // namespace criticals

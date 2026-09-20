@@ -14,7 +14,7 @@
             <AutoVariable width="fill" target="autoheal.friends-only" label="Only heal friends"/>
         </List>
     </Box>
-    <Box padding="12 6 6 6" width="content" height="content" name="Health priority" y="185">
+    <Box padding="12 6 6 6" width="content" height="content" name="Health priority">
         <List width="160">
             <AutoVariable width="fill" target="autoheal.priority-scout" label="Scout weight"/>
             <AutoVariable width="fill" target="autoheal.priority-soldier" label="Soldier weight"/>
@@ -53,7 +53,7 @@
                 <AutoVariable width="fill" target="autoheal.vacc.bullet.max-fov" label="Max enemy FOV" min="0" max="180"/>
             </List>
         </Box>
-        <Box padding="12 6 6 6" name="Blast" width="content" height="content" y="75">
+        <Box padding="12 6 6 6" name="Blast" width="content" height="content">
             <List width="150">
                 <AutoVariable width="fill" target="autoheal.vacc.blast.enable" label="Enable"/>
                 <AutoVariable width="fill" target="autoheal.vacc.blast.crit-pop" label="Pop on near crit"/>
@@ -62,7 +62,7 @@
                 <AutoVariable width="fill" target="autoheal.vacc.blast.min-charges" label="Min. charges" min="0" max="4"/>
             </List>
         </Box>
-        <Box padding="12 6 6 6" name="Fire" width="content" height="content" y="75" x="170">
+        <Box padding="12 6 6 6" name="Fire" width="content" height="content" x="170">
             <List width="150">
                 <AutoVariable width="fill" target="autoheal.vacc.fire.enable" label="Enable"/>
                 <AutoVariable width="fill" target="autoheal.vacc.fire.prevent-afterburn" label="Prevent afterburn"/>

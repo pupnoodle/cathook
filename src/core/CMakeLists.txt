@@ -1,5 +1,4 @@
 set(files "${CMAKE_CURRENT_LIST_DIR}/cvwrapper.cpp"
-    "${CMAKE_CURRENT_LIST_DIR}/entry.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/init.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/interfaces.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/logging.cpp"

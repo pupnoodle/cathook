@@ -70,6 +70,12 @@ constexpr const char* ctf_weapon_base_calc_is_attack_critical =
   "55 48 89 E5 41 57 41 56 41 55 41 54 49 89 FC 53 48 83 EC ? E8 ? ? ? ? 48 85 C0 0F 84 ? ? ? ? 48 8D 15 ? ? ? ? 31 C9 48 89 C7 48 8D 35 ? ? ? ? E8 ? ? ? ? 48 85 C0 49 89 C5 0F 84 ? ? ? ? 48 8B 00 4C 89 EF FF 90 ? ? ? ? 84 C0";
 constexpr const char* ctf_weapon_base_melee_calc_is_attack_critical =
   "55 48 89 E5 41 57 41 56 41 55 41 54 49 89 FC 53 48 83 EC ? E8 ? ? ? ? 48 85 C0 74 ? 48 89 C3 48 8B 00 48 89 DF FF 90 ? ? ? ? 84 C0 74 ? 49 8B 04 24 31 D2 31 F6 4C 89 E7 FF 90 ? ? ? ? 84 C0";
+constexpr const char* ctf_weapon_base_calc_is_attack_critical_outer =
+  "55 48 89 E5 41 55 41 54 53 48 89 FB 48 83 EC 08 E8 ? ? ? ? 48 85 C0 0F 84 ? ? ? ? 48 8D 15 ? ? ? ? 31 C9 48 89 C7 48 8D 35 ? ? ? ? E8 ? ? ? ? 48 85 C0 49 89 C4 74 ? 48 8B 00 4C 89 E7 FF 90 ? ? ? ? 84 C0 74 ? 48 8D 05 ? ? ? ? 48 8B 00 8B 40 04";
+constexpr const char* cinput_validate_usercmd =
+  "55 48 89 E5 41 56 41 89 D6 41 55 49 89 FD 41 54 4C 8D 65 DC 53 4C 89 E7 48 89 F3 48 83 EC 10 E8 ? ? ? ? 48 8D 73 08 BA 04 00 00 00 4C 89 E7 E8 ? ? ? ? 48 8D 73 0C BA 04 00 00 00 4C 89 E7";
+constexpr const char* ctf_weapon_base_can_fire_random_critical_shot =
+  "F3 0F 58 05 ? ? ? ? 0F 2F 87 ? ? 00 00 0F 93 C0 C3";
 constexpr const char* ctf_player_anim_state_store =
   "E8 ? ? ? ? 48 8B 7D ? 49 89 84 24 ? ? ? ? 4C 89 E6 E8 ? ? ? ? 49 8D B4 24 ? ? ? ?";
 
@@ -91,8 +97,10 @@ constexpr const char* ik_context_clear_targets =
   "8B 8F ? ? ? ? 48 8D 97 ? ? ? ? 31 C0 85 C9 7E ? 0F 1F 44 00 00 C7 02 F1 D8 FF FF 83 C0 01 48 81 C2 60 01 00 00 39 87 ? ? ? ? 7F ? C3 90";
 constexpr const char* base_animating_add_eflags =
   "09 B7 ? ? ? ? C3";
+constexpr const char* base_animating_ik =
+  "4C 8B 83 ? ? ? ? 72";
 constexpr const char* base_animating_studio_hdr =
-  "4C 8B BB ? ? ? ? 4D 85 FF 0F 84 ? ? ? ? 4C 89 FF";
+  "4C 8B BB ? ? ? ? 4D 85 FF 0F 84 ? ? ? ? 4C 89 FF E8";
 constexpr const char* base_animating_anim_overlay =
   "89 F0 48 6B C0 2C 48 03 87 ? ? ? ? C3";
 constexpr const char* base_animating_bone_array =
@@ -154,6 +162,8 @@ constexpr const char* promote_to_leader =
   "55 48 89 E5 41 56 41 55 41 54 53 48 89 FB 48 83 EC 40 48 8B 7F 30 48 89 75 A8 48 85 FF 74 ? 44 0F B6 63 40 45 84 E4 75 ? 48 83 C4 40 45 31 E4 5B 44 89 E0 41 5C 41 5D 41 5E 5D C3 0F 1F 40 00 48 8B 07 4C 8D 75 A8 4C 89 F6 FF 90 ? ? ? ? 83 F8 FF 74 ? 4C 8D 6D B0 BE AF 19 00 00";
 constexpr const char* report_player_account =
   "55 48 89 F8 48 89 E5 48 C1 E8 ? 41 57 41 56 41 55 41 54 53 48 83 EC ?";
+constexpr const char* report_player_recent_check =
+  "55 48 89 E5 41 54 48 83 EC ? 8B 15 ? ? ? ? 85 D2 0F 8E ? ? ? ? 48 8B 05 ? ? ? ?";
 constexpr const char* launcher_source_lock =
   "55 48 89 E5 41 55 41 54 4C 8D AD ? ? ? ? 48 81 EC ? ? ? ? E8 ? ? ? ?";
 constexpr const char* video_mode_setup_startup_graphic =
@@ -268,6 +278,12 @@ constexpr const char* match_desc_force_client_settings =
   "66 45 89 54 24 73";
 constexpr const char* client_textmode_flag_store =
   "FF 50 50 85 C0 74 ? C6 05";
+constexpr const char* load_white_list =
+  "55 48 89 E5 41 55 41 54 49 89 FC 48 83 EC ? 48 8B 07 FF 50";
+constexpr const char* allow_secure_servers_flag_ref =
+  "48 8D 05 ? ? ? ? 4C 89 E7 C6 00 00 4C 8B 65 ? C9 E9 ? ? ? ?";
+constexpr const char* host_is_secure_server_allowed =
+  "55 48 89 E5 E8 ? ? ? ? 48 8D 35 ? ? ? ? 48 89 C7 48 8B 00 FF 50 50 85 C0 74 ? 31 C0 5D C6 05 ? ? ? ? 00 C3 0F 1F 84 00 00 00 00 00 E8 ? ? ? ? 48 8D 35 ? ? ? ? 48 89 C7 48 8B 00 FF 50 50 85 C0 75 ? 0F B6 05 ? ? ? ? 5D C3";
 
 constexpr const char* crafting_panel_craft =
   "55 48 8D 87 ? ? ? ? 48 89 E5 41 57 49 89 FF 41 56 41 55 4C 8D 6D 80 41 54 53 48 8D 9F ? ? ? ? 48 83 EC 68 48 C7 45 80 ? ? ? ?";

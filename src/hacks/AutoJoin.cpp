@@ -13,6 +13,7 @@
 #include "hack.hpp"
 #include "MiscTemporary.hpp"
 #include "DetourHook.hpp"
+#include "hacks/AutoParty.hpp"
 
 namespace hacks::shared::autojoin
 {
@@ -56,6 +57,17 @@ void updateSearch()
 #if not ENABLE_VISUALS
         queue_time.update();
 #endif
+        return;
+    }
+
+    if (tfmm::shouldHoldQueueForMapLoad())
+    {
+#if not ENABLE_VISUALS
+        queue_time.update();
+#endif
+        re::CTFPartyClient *pc = re::CTFPartyClient::GTFPartyClient();
+        if (pc && (pc->BInQueueForMatchGroup(tfmm::getQueue()) || pc->BInQueueForStandby()))
+            tfmm::leaveQueue();
         return;
     }
 
@@ -122,7 +134,7 @@ static void update()
 
 void onShutdown()
 {
-    if (auto_queue)
+    if (auto_queue && !tfmm::shouldHoldQueueForMapLoad())
         tfmm::startQueue();
 }
 
@@ -168,7 +180,7 @@ static void intro_menu_on_tick_hook(void *me)
 
 static bool allowed_to_party_with_hook(re::CTFPartyClient *this_, uint64_t steamid)
 {
-    if (*partybypass)
+    if (*partybypass || hacks::tf2::autoparty::AllowPartyWithSteamID(steamid))
         return true;
     using Fn = bool (*)(re::CTFPartyClient *, uint64_t);
     auto orig = Fn(allowed_party_detour.GetOriginalFunc());
@@ -177,7 +189,7 @@ static bool allowed_to_party_with_hook(re::CTFPartyClient *this_, uint64_t steam
 
 static uint64_t can_invite_hook(re::CTFPartyClient *this_, uint64_t steamid)
 {
-    if (*partybypass)
+    if (*partybypass || hacks::tf2::autoparty::AllowPartyWithSteamID(steamid))
         return 1;
     using Fn = uint64_t (*)(re::CTFPartyClient *, uint64_t);
     auto orig = Fn(can_invite_detour.GetOriginalFunc());

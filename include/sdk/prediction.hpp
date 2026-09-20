@@ -25,4 +25,12 @@ public:
     {
         vfunc<void (*)(CPrediction *, IClientEntity *, CUserCmd *, CMoveData *)>(this, vtables::prediction::finish_move)(this, player, cmd, move);
     }
+    bool InPrediction()
+    {
+        return vfunc<bool (*)(CPrediction *)>(this, vtables::prediction::in_prediction)(this);
+    }
+    bool IsFirstTimePredicted()
+    {
+        return vfunc<bool (*)(CPrediction *)>(this, vtables::prediction::is_first_time_predicted)(this);
+    }
 };

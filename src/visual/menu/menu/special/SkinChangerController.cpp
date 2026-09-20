@@ -3,16 +3,11 @@
  */
 
 #include <menu/special/SkinChangerController.hpp>
-#include <menu/menu/Menu.hpp>
-#include <menu/Message.hpp>
 #include <menu/object/Text.hpp>
-#include <menu/object/Option.hpp>
 #include <menu/object/input/Select.hpp>
 #include <menu/object/input/Checkbox.hpp>
 #include <menu/object/input/Slider.hpp>
-#include <menu/object/container/Box.hpp>
 #include <menu/object/container/LabeledObject.hpp>
-#include <menu/object/container/ScrollableList.hpp>
 #include <menu/object/container/Container.hpp>
 #include <hacks/SkinChanger.hpp>
 #include <common.hpp>
@@ -87,8 +82,7 @@ SkinChangerController::SkinChangerController(Container &list) : list(list)
         auto lo = std::make_unique<LabeledObject>();
         lo->setObject(std::move(obj));
         lo->setLabel(title);
-        lo->bb.width.setFixed();
-        lo->bb.resize(300, -1);
+        lo->bb.width.setFill();
         this->list.addObject(std::move(lo));
     };
     auto select = [](settings::IVariable &var, const std::pair<int, const char *> *opts, size_t count)
@@ -103,17 +97,9 @@ SkinChangerController::SkinChangerController(Container &list) : list(list)
     status = text("Editing: -");
     labeled("Weapon", select(weapon, weapon_choices, std::size(weapon_choices)));
 
-    auto box     = std::make_unique<Box>();
-    kit_box      = box.get();
-    box->setTitle("Paint kit: None");
-    box->bb.setPadding(12, 4, 4, 4);
-    box->bb.width.setFixed();
-    box->bb.resize(300, -1);
-    auto kits    = std::make_unique<ScrollableList>();
-    kit_list     = kits.get();
-    kits->resize(284, 110);
-    box->addObject(std::move(kits));
-    list.addObject(std::move(box));
+    auto kits = select(kit, nullptr, 0);
+    kit_select = kits.get();
+    labeled("Paint kit", std::move(kits));
 
     auto wear_slider = std::make_unique<Slider<float>>(wear);
     wear_slider->min = 0.0f;
@@ -136,6 +122,10 @@ SkinChangerController::SkinChangerController(Container &list) : list(list)
 
     text("Right-click a slider to type a value.");
     text("Presets: skinchanger_save/load <name>");
+
+    list.onMove();
+    list.recursiveSizeUpdate();
+    list.reorder_needed = true;
 }
 
 int SkinChangerController::editingKey()
@@ -169,31 +159,16 @@ void SkinChangerController::commitSkin(skinchanger::SkinConfig skin)
     skinchanger::SetSkinConfig(editingKey(), skin);
 }
 
-void SkinChangerController::handleMessage(Message &msg, bool is_relayed)
-{
-    if (is_relayed || msg.name != "LeftClick")
-        return;
-    const auto *opt = dynamic_cast<Option *>(msg.sender);
-    if (opt)
-        kit = std::atoi(opt->value.c_str());
-}
-
 void SkinChangerController::rebuildKitList(int key)
 {
-    if (!kit_list)
+    if (!kit_select)
         return;
-    kit_list->reset();
-    kit_list->start_index = 0;
-    kit_list->end_index   = 0;
+    kit_select->options.clear();
     std::vector<const char *> names;
     std::vector<int> ids;
     skinchanger::get_kits(key, names, ids);
     for (size_t i = 0; i < ids.size(); ++i)
-    {
-        auto opt = std::make_unique<Option>(names[i], std::to_string(ids[i]));
-        opt->addMessageHandler(*this);
-        kit_list->addObject(std::move(opt));
-    }
+        kit_select->options.push_back(Select::option{ names[i], std::to_string(ids[i]), std::nullopt });
 }
 
 void SkinChangerController::syncVars(int key)
@@ -214,11 +189,6 @@ void SkinChangerController::syncVars(int key)
     if (status)
         status->set(key == skinchanger::defaults_key ? "Editing: All weapons (defaults)"
                                                      : format("Editing: ", skinchanger::weapon_label(key), "  #", key));
-    if (kit_box)
-    {
-        const char *name = skinchanger::kit_name(s.paintkit);
-        kit_box->setTitle(format("Paint kit: ", name ? name : "None"));
-    }
 }
 
 void SkinChangerController::update()

@@ -17,4 +17,6 @@ void disconnectAndAbandon();
 void abandon();
 bool isMMBanned();
 int getQueue();
+bool isLoadingMap();
+bool shouldHoldQueueForMapLoad();
 } // namespace tfmm

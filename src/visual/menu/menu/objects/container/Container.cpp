@@ -4,6 +4,7 @@
 
 #include <menu/object/container/Container.hpp>
 #include <iostream>
+#include <map>
 #include <menu/ObjectFactory.hpp>
 #include <menu/Menu.hpp>
 
@@ -13,6 +14,7 @@ namespace zerokernel
 void Container::loadFromXml(const tinyxml2::XMLElement *data)
 {
     BaseMenuObject::loadFromXml(data);
+    data->QueryIntAttribute("gap", &stack_gap);
 
     fillFromXml(data);
 }
@@ -110,13 +112,13 @@ void Container::render()
 void Container::update()
 {
     cleanupObjects();
+    for (auto &object : objects)
+        object->update();
     if (reorder_needed)
     {
         reorderElements();
         reorder_needed = false;
     }
-    for (auto &object : objects)
-        object->update();
 }
 
 void Container::addObject(std::unique_ptr<BaseMenuObject> &&object)
@@ -150,6 +152,20 @@ void Container::reset()
 
 void Container::reorderElements()
 {
+    if (!stack_columns)
+        return;
+
+    std::map<int, int> next_y;
+    for (auto &object : objects)
+    {
+        if (object->isHidden())
+            continue;
+        const int col = object->xOffset;
+        auto it       = next_y.find(col);
+        int y         = (it == next_y.end()) ? 0 : it->second + stack_gap;
+        object->move(col, y);
+        next_y[col] = y + object->getBoundingBox().getFullBox().height;
+    }
 }
 
 void Container::onMove()

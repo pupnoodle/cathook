@@ -61,6 +61,7 @@ constexpr std::size_t calc_is_attack_critical_helper          = 468;
 constexpr std::size_t calc_is_attack_critical_helper_no_crits = 469;
 constexpr std::size_t apply_fire_delay                        = 481;
 constexpr std::size_t can_fire_critical_shot                  = 497;
+constexpr std::size_t can_fire_random_critical_shot           = 498;
 }
 
 namespace melee
@@ -223,10 +224,12 @@ constexpr std::size_t cam_cap_yaw           = 51;
 
 namespace prediction
 {
-constexpr std::size_t update       = 4;
-constexpr std::size_t run_command  = 18;
-constexpr std::size_t setup_move   = 19;
-constexpr std::size_t finish_move  = 20;
+constexpr std::size_t update                     = 4;
+constexpr std::size_t in_prediction              = 15;
+constexpr std::size_t is_first_time_predicted    = 16;
+constexpr std::size_t run_command                = 18;
+constexpr std::size_t setup_move                 = 19;
+constexpr std::size_t finish_move                = 20;
 }
 
 namespace game_movement
@@ -352,6 +355,8 @@ constexpr std::size_t get_view_angles           = 19;
 constexpr std::size_t set_view_angles           = 20;
 constexpr std::size_t get_max_clients           = 21;
 constexpr std::size_t is_in_game                = 26;
+constexpr std::size_t is_connected              = 27;
+constexpr std::size_t is_drawing_loading_image  = 28;
 constexpr std::size_t get_game_directory        = 35;
 constexpr std::size_t get_level_name            = 51;
 constexpr std::size_t get_net_channel_info      = 72;

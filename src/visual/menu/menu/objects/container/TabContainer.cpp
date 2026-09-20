@@ -111,6 +111,7 @@ void TabContainer::addTab(std::string title)
     container->move(0, selection.getBoundingBox().getFullBox().height);
     container->getBoundingBox().width.mode  = BoundingBox::SizeMode::Mode::FILL;
     container->getBoundingBox().height.mode = BoundingBox::SizeMode::Mode::FILL;
+    container->stack_columns                = true;
 
     containers.push_back(std::move(container));
 }

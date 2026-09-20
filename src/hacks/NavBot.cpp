@@ -13,6 +13,12 @@
 #include "navparser.hpp"
 #include "MiscAimbot.hpp"
 #include "Misc.hpp"
+#include "helpers.hpp"
+
+#include <fstream>
+#include <unistd.h>
+#include <climits>
+#include <cstdio>
 
 namespace hacks::tf2::NavBot
 {
@@ -21,6 +27,7 @@ static settings::Boolean search_health("navbot.search-health", "true");
 static settings::Boolean search_ammo("navbot.search-ammo", "true");
 static settings::Boolean stay_near("navbot.stay-near", "true");
 static settings::Boolean capture_objectives("navbot.capture-objectives", "true");
+static settings::Boolean defend_while_patrolling("navbot.defend-while-patrolling", "false");
 static settings::Boolean snipe_sentries("navbot.snipe-sentries", "true");
 static settings::Boolean snipe_sentries_shortrange("navbot.snipe-sentries.shortrange", "false");
 static settings::Boolean escape_danger("navbot.escape-danger", "true");
@@ -68,177 +75,842 @@ constexpr bot_class_config CONFIG_ENGINEER            = { 200.0f, 500.0f, 3000.0
 constexpr bot_class_config CONFIG_GUNSLINGER_ENGINEER = { 50.0f, 300.0f, 2000.0f, false };
 bot_class_config selected_config                      = CONFIG_MID_RANGE;
 
-static Timer health_cooldown{};
-static Timer ammo_cooldown{};
-// Should we search health at all?
+enum SupplyFlags
+{
+    SupplyHealth = 1 << 0,
+    SupplyAmmo   = 1 << 1,
+    SupplyForced = 1 << 2,
+    SupplyLowPrio = 1 << 3
+};
+
+struct SupplyData
+{
+    bool dispenser           = false;
+    float respawn_time       = 0.0f;
+    Vector origin            = {};
+    SupplyData *original_ptr = nullptr;
+};
+
+constexpr int FILEWEAPONINFO_IMAXCLIP1 = 356;
+constexpr int PLAYER_M_IAMMO = 4240;
+constexpr int WEAPON_M_IPRIMARYAMMOTYPE = 3800;
+constexpr int VT_GETMAXCLIP1 = 390;
+constexpr int AMMO_INFINITE  = 999;
+constexpr int TF_AMMO_METAL  = 3;
+
+constexpr int TF_WEAPON_SHOTGUN_PRIMARY          = 12;
+constexpr int TF_WEAPON_SHOTGUN_SOLDIER          = 13;
+constexpr int TF_WEAPON_SHOTGUN_HWG              = 14;
+constexpr int TF_WEAPON_SHOTGUN_PYRO             = 15;
+constexpr int TF_WEAPON_SCATTERGUN               = 16;
+constexpr int TF_WEAPON_SNIPERRIFLE              = 17;
+constexpr int TF_WEAPON_MINIGUN                  = 18;
+constexpr int TF_WEAPON_SMG                      = 19;
+constexpr int TF_WEAPON_SYRINGEGUN_MEDIC         = 20;
+constexpr int TF_WEAPON_ROCKETLAUNCHER           = 22;
+constexpr int TF_WEAPON_GRENADELAUNCHER          = 23;
+constexpr int TF_WEAPON_PIPEBOMBLAUNCHER         = 24;
+constexpr int TF_WEAPON_FLAMETHROWER             = 25;
+constexpr int TF_WEAPON_PISTOL                   = 41;
+constexpr int TF_WEAPON_PISTOL_SCOUT             = 42;
+constexpr int TF_WEAPON_REVOLVER                 = 43;
+constexpr int TF_WEAPON_PDA                      = 45;
+constexpr int TF_WEAPON_PDA_ENGINEER_BUILD       = 46;
+constexpr int TF_WEAPON_PDA_ENGINEER_DESTROY     = 47;
+constexpr int TF_WEAPON_PDA_SPY                  = 48;
+constexpr int TF_WEAPON_BUILDER                  = 49;
+constexpr int TF_WEAPON_MEDIGUN                  = 50;
+constexpr int TF_WEAPON_INVIS                    = 57;
+constexpr int TF_WEAPON_FLAREGUN                 = 58;
+constexpr int TF_WEAPON_LUNCHBOX                 = 59;
+constexpr int TF_WEAPON_JAR                      = 60;
+constexpr int TF_WEAPON_JAR_MILK                 = 70;
+constexpr int TF_WEAPON_COMPOUND_BOW             = 61;
+constexpr int TF_WEAPON_BUFF_ITEM                = 62;
+constexpr int TF_WEAPON_ROCKETLAUNCHER_DIRECTHIT = 65;
+constexpr int TF_WEAPON_LASER_POINTER            = 67;
+constexpr int TF_WEAPON_SENTRY_REVENGE           = 69;
+constexpr int TF_WEAPON_HANDGUN_SCOUT_PRIMARY    = 71;
+constexpr int TF_WEAPON_CROSSBOW                 = 73;
+constexpr int TF_WEAPON_STICKBOMB                = 74;
+constexpr int TF_WEAPON_HANDGUN_SCOUT_SECONDARY  = 75;
+constexpr int TF_WEAPON_SODA_POPPER              = 76;
+constexpr int TF_WEAPON_SNIPERRIFLE_DECAP        = 77;
+constexpr int TF_WEAPON_RAYGUN                   = 78;
+constexpr int TF_WEAPON_PARTICLE_CANNON          = 79;
+constexpr int TF_WEAPON_MECHANICAL_ARM           = 80;
+constexpr int TF_WEAPON_DRG_POMSON               = 81;
+constexpr int TF_WEAPON_FLAREGUN_REVENGE         = 84;
+constexpr int TF_WEAPON_CLEAVER                  = 86;
+constexpr int TF_WEAPON_PEP_BRAWLER_BLASTER      = 85;
+constexpr int TF_WEAPON_STICKY_BALL_LAUNCHER     = 88;
+constexpr int TF_WEAPON_SHOTGUN_BUILDING_RESCUE  = 90;
+constexpr int TF_WEAPON_CANNON                   = 91;
+constexpr int TF_WEAPON_THROWABLE                = 92;
+constexpr int TF_WEAPON_PDA_SPY_BUILD            = 94;
+constexpr int TF_WEAPON_SPELLBOOK                = 97;
+constexpr int TF_WEAPON_SNIPERRIFLE_CLASSIC      = 99;
+constexpr int TF_WEAPON_PARACHUTE                = 100;
+constexpr int TF_WEAPON_GRAPPLINGHOOK            = 101;
+constexpr int TF_WEAPON_PASSTIME_GUN             = 102;
+constexpr int TF_WEAPON_CHARGED_SMG              = 103;
+constexpr int TF_WEAPON_ROCKETPACK               = 105;
+constexpr int TF_WEAPON_JAR_GAS                  = 107;
+constexpr int TF_WEAPON_FLAME_BALL               = 109;
+
+constexpr int DEF_FORCE_A_NATURE           = 45;
+constexpr int DEF_RAZORBACK                = 57;
+constexpr int DEF_BUFF_BANNER              = 129;
+constexpr int DEF_SCOTTISH_RESISTANCE      = 130;
+constexpr int DEF_CHARGIN_TARGE            = 131;
+constexpr int DEF_WRANGLER                 = 140;
+constexpr int DEF_BATTALIONS_BACKUP        = 226;
+constexpr int DEF_DARWINS_DANGER_SHIELD    = 231;
+constexpr int DEF_ROCKET_JUMPER            = 237;
+constexpr int DEF_STICKY_JUMPER            = 265;
+constexpr int DEF_CONCHEROR                = 354;
+constexpr int DEF_ALI_BABAS_WEE_BOOTIES    = 405;
+constexpr int DEF_SPLENDID_SCREEN          = 406;
+constexpr int DEF_WIDOWMAKER               = 527;
+constexpr int DEF_SHORT_CIRCUIT            = 528;
+constexpr int DEF_BOOTLEGGER               = 608;
+constexpr int DEF_COZY_CAMPER              = 642;
+constexpr int DEF_FESTIVE_BUFF_BANNER      = 1001;
+constexpr int DEF_FESTIVE_FORCE_A_NATURE   = 1078;
+constexpr int DEF_FESTIVE_WRANGLER         = 1086;
+constexpr int DEF_TIDE_TURNER              = 1099;
+constexpr int DEF_FESTIVE_TARGE            = 1144;
+constexpr int DEF_QUICKIEBOMB_LAUNCHER     = 1150;
+constexpr int DEF_THERMAL_THRUSTER         = 1179;
+constexpr int DEF_BACKCOUNTRY_BLASTER      = 15029;
+
+static std::vector<SupplyData> cached_health_origins;
+static std::vector<SupplyData> cached_ammo_origins;
+static std::vector<SupplyData> temp_dispensers;
+static std::vector<SupplyData> temp_main;
+
+static bool supply_was_force            = false;
+static bool has_remembered_dispenser    = false;
+static Vector remembered_dispenser      = {};
+static Timer remembered_dispenser_timer{};
+static Timer sticky_supply_lock_timer{};
+static Timer supply_cooldown_timer{};
+static Timer supply_repath_timer{};
+
+static void RelinkCachedSupplyPointers()
+{
+    for (auto &pack : cached_health_origins)
+        pack.original_ptr = &pack;
+    for (auto &pack : cached_ammo_origins)
+        pack.original_ptr = &pack;
+}
+
+static void AddCachedSupplyOrigin(Vector origin, bool is_health)
+{
+    SupplyData data;
+    data.origin = origin;
+    if (is_health)
+        cached_health_origins.push_back(data);
+    else
+        cached_ammo_origins.push_back(data);
+}
+
+static std::string resolveBspPath(const std::string &level_name)
+{
+    std::vector<std::string> candidates;
+    const char *game_dir = g_IEngine->GetGameDirectory();
+    if (game_dir)
+    {
+        candidates.emplace_back(std::string(game_dir) + "/maps/" + level_name + ".bsp");
+        candidates.emplace_back(std::string(game_dir) + "/download/maps/" + level_name + ".bsp");
+    }
+    char cwd[PATH_MAX + 1];
+    if (getcwd(cwd, sizeof(cwd)))
+        candidates.emplace_back(std::string(cwd) + "/tf/maps/" + level_name + ".bsp");
+    for (auto &candidate : candidates)
+    {
+        std::ifstream fs(candidate, std::ios::binary);
+        if (fs.is_open())
+            return candidate;
+    }
+    return "";
+}
+
+static void parseCachedSupplyOrigins()
+{
+    cached_health_origins.clear();
+    cached_ammo_origins.clear();
+    has_remembered_dispenser = false;
+
+    std::string level_name = GetLevelName();
+    if (level_name.empty())
+        return;
+    std::string bsp_path = resolveBspPath(level_name);
+    if (bsp_path.empty())
+        return;
+
+    std::ifstream fs(bsp_path, std::ios::binary);
+    if (!fs)
+        return;
+
+    struct BspLump
+    {
+        int fileofs;
+        int filelen;
+        int version;
+        char fourCC[4];
+    };
+    struct BspHeader
+    {
+        int ident;
+        int version;
+        BspLump lumps[64];
+    } header{};
+
+    fs.read(reinterpret_cast<char *>(&header), sizeof(header));
+    if (!fs || header.ident != 0x50534256)
+        return;
+
+    const BspLump &ents = header.lumps[0];
+    if (ents.filelen <= 0 || ents.filelen > 8 * 1024 * 1024)
+        return;
+
+    std::string lump(static_cast<size_t>(ents.filelen), '\0');
+    fs.seekg(ents.fileofs);
+    fs.read(lump.data(), ents.filelen);
+    if (!fs)
+        return;
+
+    size_t i = 0;
+    while (i < lump.size())
+    {
+        if (lump[i] != '{')
+        {
+            ++i;
+            continue;
+        }
+        size_t end = lump.find('}', i);
+        if (end == std::string::npos)
+            break;
+        std::string block = lump.substr(i + 1, end - i - 1);
+        i                 = end + 1;
+
+        std::string classname, origin;
+        size_t p = 0;
+        while (p < block.size())
+        {
+            size_t q1 = block.find('"', p);
+            if (q1 == std::string::npos)
+                break;
+            size_t q2 = block.find('"', q1 + 1);
+            if (q2 == std::string::npos)
+                break;
+            size_t q3 = block.find('"', q2 + 1);
+            if (q3 == std::string::npos)
+                break;
+            size_t q4 = block.find('"', q3 + 1);
+            if (q4 == std::string::npos)
+                break;
+            std::string key = block.substr(q1 + 1, q2 - q1 - 1);
+            std::string val = block.substr(q3 + 1, q4 - q3 - 1);
+            p               = q4 + 1;
+            if (key == "classname")
+                classname = val;
+            else if (key == "origin")
+                origin = val;
+        }
+
+        const bool is_health = classname == "item_healthkit_full" || classname == "item_healthkit_medium" || classname == "item_healthkit_small";
+        const bool is_ammo   = classname == "item_ammopack_full" || classname == "item_ammopack_medium" || classname == "item_ammopack_small";
+        if (!is_health && !is_ammo)
+            continue;
+        Vector vec{};
+        if (sscanf(origin.c_str(), "%f %f %f", &vec.x, &vec.y, &vec.z) != 3)
+            continue;
+        AddCachedSupplyOrigin(vec, is_health);
+    }
+    RelinkCachedSupplyPointers();
+}
+
+static bool WeaponDoesNotUseAmmo(int weapon_id, int defidx, bool include_infinite = true)
+{
+    switch (defidx)
+    {
+    case DEF_BUFF_BANNER:
+    case DEF_FESTIVE_BUFF_BANNER:
+    case DEF_BATTALIONS_BACKUP:
+    case DEF_CONCHEROR:
+    case DEF_TIDE_TURNER:
+    case DEF_CHARGIN_TARGE:
+    case DEF_SPLENDID_SCREEN:
+    case DEF_FESTIVE_TARGE:
+    case DEF_BOOTLEGGER:
+    case DEF_ALI_BABAS_WEE_BOOTIES:
+    case DEF_WRANGLER:
+    case DEF_FESTIVE_WRANGLER:
+    case DEF_COZY_CAMPER:
+    case DEF_DARWINS_DANGER_SHIELD:
+    case DEF_RAZORBACK:
+    case DEF_THERMAL_THRUSTER:
+        return true;
+    default:
+        switch (weapon_id)
+        {
+        case TF_WEAPON_PARTICLE_CANNON:
+        case TF_WEAPON_RAYGUN:
+        case TF_WEAPON_DRG_POMSON:
+        case TF_WEAPON_PASSTIME_GUN:
+        case TF_WEAPON_SPELLBOOK:
+            return include_infinite;
+        case TF_WEAPON_FLAREGUN_REVENGE:
+        case TF_WEAPON_MEDIGUN:
+        case TF_WEAPON_BUFF_ITEM:
+        case TF_WEAPON_LASER_POINTER:
+        case TF_WEAPON_PDA:
+        case TF_WEAPON_PDA_ENGINEER_BUILD:
+        case TF_WEAPON_PDA_ENGINEER_DESTROY:
+        case TF_WEAPON_PDA_SPY:
+        case TF_WEAPON_PDA_SPY_BUILD:
+        case TF_WEAPON_BUILDER:
+        case TF_WEAPON_INVIS:
+        case TF_WEAPON_LUNCHBOX:
+        case TF_WEAPON_THROWABLE:
+        case TF_WEAPON_CLEAVER:
+        case TF_WEAPON_JAR:
+        case TF_WEAPON_JAR_GAS:
+        case TF_WEAPON_JAR_MILK:
+        case TF_WEAPON_PARACHUTE:
+        case TF_WEAPON_ROCKETPACK:
+        case TF_WEAPON_GRAPPLINGHOOK:
+            return true;
+        default:
+            return false;
+        }
+    }
+}
+
+static int GetWeaponMaxReserveAmmo(int weapon_id, int defidx)
+{
+    switch (defidx)
+    {
+    case DEF_WIDOWMAKER:
+    case DEF_SHORT_CIRCUIT:
+        return 200;
+    case DEF_FORCE_A_NATURE:
+    case DEF_FESTIVE_FORCE_A_NATURE:
+    case DEF_BACKCOUNTRY_BLASTER:
+        return 32;
+    case DEF_QUICKIEBOMB_LAUNCHER:
+        return 24;
+    case DEF_SCOTTISH_RESISTANCE:
+        return 36;
+    case DEF_STICKY_JUMPER:
+        return 72;
+    case DEF_ROCKET_JUMPER:
+        return 60;
+    default:
+        switch (weapon_id)
+        {
+        case TF_WEAPON_MINIGUN:
+        case TF_WEAPON_PISTOL:
+        case TF_WEAPON_FLAMETHROWER:
+        case TF_WEAPON_MECHANICAL_ARM:
+            return 200;
+        case TF_WEAPON_SYRINGEGUN_MEDIC:
+            return 150;
+        case TF_WEAPON_SMG:
+        case TF_WEAPON_CHARGED_SMG:
+            return 75;
+        case TF_WEAPON_FLAME_BALL:
+            return 40;
+        case TF_WEAPON_CROSSBOW:
+            return 38;
+        case TF_WEAPON_HANDGUN_SCOUT_SECONDARY:
+        case TF_WEAPON_PISTOL_SCOUT:
+        case TF_WEAPON_HANDGUN_SCOUT_PRIMARY:
+            return 36;
+        case TF_WEAPON_SCATTERGUN:
+        case TF_WEAPON_PEP_BRAWLER_BLASTER:
+        case TF_WEAPON_SODA_POPPER:
+        case TF_WEAPON_SENTRY_REVENGE:
+        case TF_WEAPON_SHOTGUN_HWG:
+        case TF_WEAPON_SHOTGUN_PRIMARY:
+        case TF_WEAPON_SHOTGUN_PYRO:
+        case TF_WEAPON_SHOTGUN_SOLDIER:
+            return 32;
+        case TF_WEAPON_SNIPERRIFLE:
+        case TF_WEAPON_SNIPERRIFLE_CLASSIC:
+        case TF_WEAPON_SNIPERRIFLE_DECAP:
+            return 25;
+        case TF_WEAPON_STICKBOMB:
+        case TF_WEAPON_STICKY_BALL_LAUNCHER:
+        case TF_WEAPON_PIPEBOMBLAUNCHER:
+        case TF_WEAPON_REVOLVER:
+            return 24;
+        case TF_WEAPON_ROCKETLAUNCHER:
+        case TF_WEAPON_ROCKETLAUNCHER_DIRECTHIT:
+            return 20;
+        case TF_WEAPON_CANNON:
+        case TF_WEAPON_SHOTGUN_BUILDING_RESCUE:
+        case TF_WEAPON_GRENADELAUNCHER:
+        case TF_WEAPON_FLAREGUN:
+            return 16;
+        case TF_WEAPON_COMPOUND_BOW:
+            return 12;
+        default:
+            break;
+        }
+        break;
+    }
+    return 0;
+}
+
+static int GetWeaponMaxClip1(IClientEntity *weapon)
+{
+    if (!weapon)
+        return 0;
+    typedef int (*fn_t)(IClientEntity *);
+    int max_clip = vfunc<fn_t>(weapon, VT_GETMAXCLIP1, 0)(weapon);
+    if (max_clip != 0)
+        return max_clip;
+    if (!netvar.m_pWeaponInfo)
+        return 0;
+    auto *info = *reinterpret_cast<std::uint8_t **>(uintptr_t(weapon) + netvar.m_pWeaponInfo);
+    if (!info)
+        return 0;
+    return *reinterpret_cast<int *>(info + FILEWEAPONINFO_IMAXCLIP1);
+}
+
+static int GetPrimaryAmmoType(IClientEntity *weapon)
+{
+    if (!weapon)
+        return -1;
+    if (netvar.m_iPrimaryAmmoType)
+        return NET_INT(weapon, netvar.m_iPrimaryAmmoType);
+    return *reinterpret_cast<int *>(uintptr_t(weapon) + WEAPON_M_IPRIMARYAMMOTYPE);
+}
+
+static int GetWeaponClip1(IClientEntity *weapon)
+{
+    if (!weapon)
+        return 0;
+    if (netvar.m_iClip1)
+        return NET_INT(weapon, netvar.m_iClip1);
+    return 0;
+}
+
+static int GetPlayerAmmoCount(IClientEntity *player, int ammo_type)
+{
+    if (!player || ammo_type < 0 || ammo_type > 31)
+        return 0;
+    const uintptr_t off = netvar.m_iAmmo ? uintptr_t(netvar.m_iAmmo) : uintptr_t(PLAYER_M_IAMMO);
+    return reinterpret_cast<int *>(uintptr_t(player) + off)[ammo_type];
+}
+
+static bool IsEnergyAmmoWeapon(IClientEntity *weapon, int weapon_id)
+{
+    switch (weapon_id)
+    {
+    case TF_WEAPON_PARTICLE_CANNON:
+    case TF_WEAPON_RAYGUN:
+    case TF_WEAPON_DRG_POMSON:
+    case TF_WEAPON_FLAREGUN_REVENGE:
+    case TF_WEAPON_PASSTIME_GUN:
+    case TF_WEAPON_SPELLBOOK:
+        return true;
+    default:
+        break;
+    }
+    int eid = weapon ? EntIndex(weapon) : -1;
+    if (!IDX_GOOD(eid))
+        return false;
+    CachedEntity *ent = ENTITY(eid);
+    if (CE_INVALID(ent))
+        return false;
+    const int cid = ent->m_iClassID();
+    return cid == CL_CLASS(CTFParticleCannon) || cid == CL_CLASS(CTFRaygun) || cid == CL_CLASS(CTFDRGPomson) || cid == CL_CLASS(CTFFlareGun_Revenge) || cid == CL_CLASS(CTFSpellBook);
+}
+
+static bool IsSniperRifleWeapon(IClientEntity *weapon, int weapon_id)
+{
+    if (weapon_id == TF_WEAPON_SNIPERRIFLE || weapon_id == TF_WEAPON_SNIPERRIFLE_CLASSIC || weapon_id == TF_WEAPON_SNIPERRIFLE_DECAP)
+        return true;
+    int eid = weapon ? EntIndex(weapon) : -1;
+    if (!IDX_GOOD(eid))
+        return false;
+    CachedEntity *ent = ENTITY(eid);
+    if (CE_INVALID(ent))
+        return false;
+    const int cid = ent->m_iClassID();
+    return cid == CL_CLASS(CTFSniperRifle) || cid == CL_CLASS(CTFSniperRifleDecap) || cid == CL_CLASS(CTFSniperRifleClassic);
+}
+
+static void SortSuppliesByDistance(std::vector<SupplyData> &supplies, const Vector &local_origin)
+{
+    std::sort(supplies.begin(), supplies.end(), [&](const SupplyData &a, const SupplyData &b) { return a.origin.DistTo(local_origin) < b.origin.DistTo(local_origin); });
+}
+
+static Priority_list GetSupplyPriority(int flags)
+{
+    if (flags & SupplyHealth)
+        return flags & SupplyLowPrio ? lowprio_health : health;
+    return ammo;
+}
+
+static SupplyData BuildRememberedDispenser(const Vector &origin)
+{
+    SupplyData remembered{};
+    remembered.dispenser = true;
+    remembered.origin    = origin;
+    return remembered;
+}
+
+static bool GetSuppliesData(bool &closest_taken, bool is_ammo)
+{
+    temp_main.clear();
+    if (is_ammo)
+    {
+        for (auto const &ent : entity_cache::valid_ents)
+        {
+            if (CE_BAD(ent))
+                continue;
+            auto type = ent->m_ItemType();
+            if (type != ITEM_AMMO_SMALL && type != ITEM_AMMO_MEDIUM && type != ITEM_AMMO_LARGE)
+                continue;
+            SupplyData data;
+            data.origin = ent->m_vecOrigin();
+            temp_main.push_back(data);
+        }
+        temp_main.reserve(temp_main.size() + cached_ammo_origins.size());
+        temp_main.insert(temp_main.end(), cached_ammo_origins.begin(), cached_ammo_origins.end());
+    }
+    else
+        temp_main = cached_health_origins;
+
+    if (temp_main.empty())
+        return false;
+    SortSuppliesByDistance(temp_main, g_pLocalPlayer->v_Origin);
+    closest_taken = temp_main.front().respawn_time != 0.0f;
+    return true;
+}
+
+static bool GetDispensersData()
+{
+    temp_dispensers.clear();
+    const int highest = g_IEntityList->GetHighestEntityIndex();
+    for (int i = 1; i <= highest; ++i)
+    {
+        CachedEntity *ent = ENTITY(i);
+        if (CE_INVALID(ent) || ent->m_iClassID() != CL_CLASS(CObjectDispenser) || ent->m_iTeam() != g_pLocalPlayer->team)
+            continue;
+        if (CE_BYTE(ent, netvar.m_bCarryDeploy) || CE_BYTE(ent, netvar.m_bHasSapper) || CE_BYTE(ent, netvar.m_bBuilding))
+            continue;
+        auto origin = ent->m_vecDormantOrigin();
+        if (!origin)
+            continue;
+
+        auto *closest_area = navparser::NavEngine::findClosestNavSquare(*origin);
+        if (!closest_area)
+            continue;
+        Vector nearest = closest_area->getNearestPoint(origin->AsVector2D());
+        if (nearest.DistTo(*origin) > 300.0f || origin->z - nearest.z > navparser::PLAYER_JUMP_HEIGHT)
+            continue;
+
+        SupplyData data;
+        data.dispenser = true;
+        data.origin    = *origin;
+        temp_dispensers.push_back(data);
+    }
+    if (temp_dispensers.empty())
+        return false;
+    SortSuppliesByDistance(temp_dispensers, g_pLocalPlayer->v_Origin);
+    return true;
+}
+
 bool shouldSearchHealth(bool low_priority = false)
 {
     if (!search_health)
         return false;
-    // Check if being gradually healed in any way
-    if (HasCondition<TFCond_Healing>(LOCAL_E))
-        return false;
-
-    // Priority too high
     if (navparser::NavEngine::current_priority > health)
         return false;
-    float health_percent = LOCAL_E->m_iHealth() / (float) g_pPlayerResource->GetMaxHealth(LOCAL_E);
-    // Get health when below 65%, or below 80% and just patroling
+
+    float health_percent          = LOCAL_E->m_iHealth() / (float) g_pPlayerResource->GetMaxHealth(LOCAL_E);
+    bool already_getting_health = navparser::NavEngine::current_priority == health || navparser::NavEngine::current_priority == lowprio_health;
+    if (already_getting_health)
+        return health_percent < (low_priority ? 0.92f : 0.9f);
+    if (HasCondition<TFCond_Healing>(LOCAL_E))
+        return false;
     return health_percent < 0.64f || (low_priority && (navparser::NavEngine::current_priority <= patrol || navparser::NavEngine::current_priority == lowprio_health) && health_percent <= 0.80f);
 }
 
-// Should we search ammo at all?
 bool shouldSearchAmmo()
 {
     if (!search_ammo)
         return false;
-    if (CE_BAD(LOCAL_W))
+    if (CE_BAD(LOCAL_E) || CE_BAD(LOCAL_W))
         return false;
-    // Priority too high
     if (navparser::NavEngine::current_priority > ammo)
         return false;
 
-    int *weapon_list = (int *) ((uint64_t) (RAW_ENT(LOCAL_E)) + netvar.hMyWeapons);
+    bool already_getting_ammo = navparser::NavEngine::current_priority == ammo;
+    int *weapon_list          = (int *) ((uint64_t) (RAW_ENT(LOCAL_E)) + netvar.hMyWeapons);
     if (!weapon_list)
         return false;
-    if (g_pLocalPlayer->holding_sniper_rifle && CE_INT(LOCAL_E, netvar.m_iAmmo + 4) <= 5)
-        return true;
-    for (int i = 0; weapon_list[i]; ++i)
+
+    for (int i = 0; i <= 4; ++i)
     {
         int handle = weapon_list[i];
         int eid    = HandleToIDX(handle);
-        if (eid > MAX_PLAYERS && eid <= HIGHEST_ENTITY)
+        if (eid <= 0 || eid > HIGHEST_ENTITY)
+            continue;
+        IClientEntity *weapon = g_IEntityList->GetClientEntity(eid);
+        if (!weapon || !re::C_BaseCombatWeapon::IsBaseCombatWeapon(weapon))
+            continue;
+        int slot = re::C_BaseCombatWeapon::GetSlot(weapon);
+        if (slot != 0 && slot != 1)
+            continue;
+        int defidx    = NET_INT(weapon, netvar.iItemDefinitionIndex);
+        int weapon_id = re::C_TFWeaponBase::GetWeaponID(weapon);
+        if (WeaponDoesNotUseAmmo(weapon_id, defidx, true) || IsEnergyAmmoWeapon(weapon, weapon_id))
+            continue;
+
+        int ammo_type = GetPrimaryAmmoType(weapon);
+        int reserve   = GetPlayerAmmoCount(RAW_ENT(LOCAL_E), ammo_type);
+        if (ammo_type < 0 || reserve == AMMO_INFINITE)
+            continue;
+
+        int clip      = GetWeaponClip1(weapon);
+        int max_clip  = GetWeaponMaxClip1(weapon);
+        bool uses_clip = clip >= 0 && max_clip > 0;
+        int max_reserve = GetWeaponMaxReserveAmmo(weapon_id, defidx);
+        if (ammo_type == TF_AMMO_METAL && max_reserve <= 0)
+            max_reserve = 200;
+
+        const int shot_low                     = already_getting_ammo ? 10 : 5;
+        const float clip_threshold             = already_getting_ammo ? 0.35f : 0.25f;
+        const float reserve_critical_threshold = already_getting_ammo ? 0.35f : 0.25f;
+        const float reserve_skip_threshold     = already_getting_ammo ? 0.75f : 0.6f;
+        const float reserve_search_threshold   = already_getting_ammo ? 0.45f : (1.f / 3.f);
+
+        if (IsSniperRifleWeapon(weapon, weapon_id))
         {
-            IClientEntity *weapon = g_IEntityList->GetClientEntity(eid);
-            if (weapon and re::C_BaseCombatWeapon::IsBaseCombatWeapon(weapon) && re::C_TFWeaponBase::UsesPrimaryAmmo(weapon) && !re::C_TFWeaponBase::HasPrimaryAmmo(weapon))
+            if (uses_clip && clip > shot_low)
+                continue;
+            int pool = (uses_clip ? clip : 0) + (reserve > 0 ? reserve : 0);
+            if (pool <= shot_low)
                 return true;
+            continue;
         }
+
+        if (!uses_clip)
+        {
+            if (max_reserve <= 0)
+            {
+                if (reserve > 0 && reserve <= shot_low)
+                    return true;
+                continue;
+            }
+            if (reserve >= max_reserve * reserve_skip_threshold)
+                continue;
+            if (reserve <= max_reserve * reserve_search_threshold)
+                return true;
+            continue;
+        }
+
+        const bool reserve_pool = max_reserve > 0 && (reserve > 0 || clip <= 0);
+        if (!reserve_pool)
+        {
+            if (clip <= max_clip * clip_threshold)
+                return true;
+            continue;
+        }
+
+        if (clip <= max_clip * clip_threshold && reserve <= max_reserve * reserve_critical_threshold)
+            return true;
+        if (reserve >= max_reserve * reserve_skip_threshold)
+            continue;
+        if (reserve <= max_reserve * reserve_search_threshold)
+            return true;
     }
     return false;
 }
 
-// Get Valid Dispensers (Used for health/ammo)
-std::vector<CachedEntity *> getDispensers()
+static bool GetSupply(SupplyData *supply, int priority)
 {
-    std::vector<CachedEntity *> entities;
-    for (auto const &ent : entity_cache::valid_ents)
+    float dist                     = supply->origin.DistTo(g_pLocalPlayer->v_Origin);
+    const auto e_priority          = static_cast<Priority_list>(priority);
+    if (!supply->dispenser)
     {
-        if (ent->m_iClassID() != CL_CLASS(CObjectDispenser) || ent->m_iTeam() != g_pLocalPlayer->team)
-            continue;
-        if (CE_BYTE(ent, netvar.m_bCarryDeploy) || CE_BYTE(ent, netvar.m_bHasSapper) || CE_BYTE(ent, netvar.m_bBuilding))
-            continue;
-
-        // This fixes the fact that players can just place dispensers in unreachable locations
-        auto local_nav = navparser::NavEngine::findClosestNavSquare(ent->m_vecOrigin());
-        if (!local_nav || local_nav->getNearestPoint(ent->m_vecOrigin().AsVector2D()).DistTo(ent->m_vecOrigin()) > 300.0f || local_nav->getNearestPoint(ent->m_vecOrigin().AsVector2D()).z - ent->m_vecOrigin().z > navparser::PLAYER_JUMP_HEIGHT)
-            continue;
-        entities.push_back(ent);
+        if (dist < 75.0f)
+        {
+            CNavArea *local_area = navparser::NavEngine::findClosestNavSquare(g_pLocalPlayer->v_Origin);
+            if (!local_area)
+                return false;
+            Vector path_point = local_area->getNearestPoint(supply->origin.AsVector2D());
+            path_point.z      = supply->origin.z;
+            if (supply->original_ptr && !supply->respawn_time && dist <= 20.0f)
+                supply->original_ptr->respawn_time = g_GlobalVars->curtime + 10.0f;
+            WalkTo(path_point);
+            return true;
+        }
     }
-    // Sort by distance, closer is better
-    std::sort(entities.begin(), entities.end(), [](CachedEntity *a, CachedEntity *b) { return a->m_flDistance() < b->m_flDistance(); });
-    return entities;
+    else if (dist <= 150.0f)
+    {
+        if (navparser::NavEngine::current_priority != e_priority)
+        {
+            if (!navparser::NavEngine::navTo(supply->origin, e_priority))
+                navparser::NavEngine::current_priority = e_priority;
+        }
+        return true;
+    }
+    return navparser::NavEngine::navTo(supply->origin, e_priority);
 }
 
-// Get entities of given itemtypes (Used for health/ammo)
-std::vector<CachedEntity *> getEntities(const std::vector<k_EItemType> &itemtypes)
+static void UpdateTakenState()
 {
-    std::vector<CachedEntity *> entities;
-    for (auto const &ent : entity_cache::valid_ents)
+    float now = g_GlobalVars->curtime;
+    for (auto &pack : cached_health_origins)
     {
-        for (auto &itemtype : itemtypes)
+        if (pack.respawn_time < now)
+            pack.respawn_time = 0.0f;
+    }
+    for (auto &pack : cached_ammo_origins)
+    {
+        if (pack.respawn_time < now)
+            pack.respawn_time = 0.0f;
+    }
+}
+
+static bool RunSupply(int flags)
+{
+    temp_main.clear();
+    temp_dispensers.clear();
+    bool low_prio             = flags & SupplyLowPrio;
+    const auto e_priority     = GetSupplyPriority(flags);
+    bool should_force         = flags & SupplyForced;
+    bool is_ammo              = e_priority == ammo;
+    const int current_prio    = navparser::NavEngine::current_priority;
+    const bool active_health  = current_prio == health || current_prio == lowprio_health;
+    const bool active_supply  = is_ammo ? current_prio == ammo : active_health;
+    const float health_percent = LOCAL_E->m_iHealth() / (float) g_pPlayerResource->GetMaxHealth(LOCAL_E);
+    const bool needs_health   = health_percent < (low_prio ? 0.92f : 0.9f);
+    const bool can_keep_lock  = is_ammo || needs_health;
+
+    if (!should_force && !(is_ammo ? shouldSearchAmmo() : shouldSearchHealth(low_prio)))
+    {
+        if (!is_ammo && has_remembered_dispenser && needs_health && !remembered_dispenser_timer.check(2000))
         {
-            if (ent->m_ItemType() == itemtype)
+            auto remembered = BuildRememberedDispenser(remembered_dispenser);
+            if (GetSupply(&remembered, e_priority))
+                return true;
+        }
+        if (active_supply && can_keep_lock && !sticky_supply_lock_timer.check(1250))
+            return true;
+        if (active_supply && (!is_ammo || !supply_was_force))
+            navparser::NavEngine::cancelPath();
+        return false;
+    }
+    sticky_supply_lock_timer.update();
+
+    if (!should_force && !supply_cooldown_timer.check(1000))
+        return active_supply;
+    if (active_supply && !supply_repath_timer.test_and_set(2000))
+        return true;
+
+    UpdateTakenState();
+    supply_was_force            = false;
+    bool closest_taken          = false;
+    bool got_supplies           = GetSuppliesData(closest_taken, is_ammo);
+    bool got_dispensers         = GetDispensersData();
+    if (!is_ammo)
+    {
+        if (got_dispensers && !temp_dispensers.empty())
+        {
+            has_remembered_dispenser = true;
+            remembered_dispenser     = temp_dispensers.front().origin;
+            remembered_dispenser_timer.update();
+        }
+        else if (has_remembered_dispenser && needs_health && !remembered_dispenser_timer.check(2000))
+        {
+            auto remembered = BuildRememberedDispenser(remembered_dispenser);
+            if (GetSupply(&remembered, e_priority))
+                return true;
+        }
+        else if (has_remembered_dispenser && (remembered_dispenser_timer.check(2000) || !needs_health))
+            has_remembered_dispenser = false;
+    }
+    if (!got_supplies && !got_dispensers)
+    {
+        if (active_supply && can_keep_lock && !sticky_supply_lock_timer.check(1250))
+            return true;
+        supply_cooldown_timer.update();
+        return false;
+    }
+
+    const Vector local_origin = g_pLocalPlayer->v_Origin;
+    bool has_close_dispenser  = false;
+    if (got_dispensers)
+    {
+        has_close_dispenser = true;
+        temp_main.reserve(temp_main.size() + temp_dispensers.size());
+        temp_main.insert(temp_main.end(), temp_dispensers.begin(), temp_dispensers.end());
+        SortSuppliesByDistance(temp_main, local_origin);
+    }
+
+    SupplyData *best = nullptr, *second = nullptr;
+    if (closest_taken)
+    {
+        for (auto &data : temp_main)
+        {
+            if (data.respawn_time)
+                continue;
+            if (best)
             {
-                entities.push_back(ent);
+                second = &data;
                 break;
             }
+            best = &data;
         }
     }
-    // Sort by distance, closer is better
-    std::sort(entities.begin(), entities.end(), [](CachedEntity *a, CachedEntity *b) { return a->m_flDistance() < b->m_flDistance(); });
-    return entities;
+    if (!best)
+    {
+        best = &temp_main.front();
+        if (has_close_dispenser)
+        {
+            if (closest_taken)
+                best = &temp_dispensers.front();
+        }
+        else if (temp_main.size() > 1)
+            second = &temp_main.at(1);
+    }
+
+    if (second)
+    {
+        float first_cost  = navparser::NavEngine::getPathCost(local_origin, best->origin);
+        float second_cost = navparser::NavEngine::getPathCost(local_origin, second->origin);
+        if (second_cost < first_cost)
+            best = second;
+    }
+
+    if (best && GetSupply(best, e_priority))
+    {
+        supply_was_force = should_force;
+        sticky_supply_lock_timer.update();
+        return true;
+    }
+
+    supply_cooldown_timer.update();
+    return false;
 }
 
-// Find health if needed
 bool getHealth(bool low_priority = false)
 {
-    Priority_list priority = low_priority ? lowprio_health : health;
-    if (!health_cooldown.check(1000))
-        return navparser::NavEngine::current_priority == priority;
-    if (shouldSearchHealth(low_priority))
-    {
-        // Already pathing, only try to repath every 2s
-        if (navparser::NavEngine::current_priority == priority)
-        {
-            static Timer repath_timer;
-            if (!repath_timer.test_and_set(2000))
-                return true;
-        }
-        auto healthpacks = getEntities({ ITEM_HEALTH_SMALL, ITEM_HEALTH_MEDIUM, ITEM_HEALTH_LARGE });
-        auto dispensers  = getDispensers();
-
-        auto total_ents = healthpacks;
-
-        // Add dispensers and sort list again
-        if (!dispensers.empty())
-        {
-            total_ents.reserve(healthpacks.size() + dispensers.size());
-            total_ents.insert(total_ents.end(), dispensers.begin(), dispensers.end());
-            std::sort(total_ents.begin(), total_ents.end(), [](CachedEntity *a, CachedEntity *b) { return a->m_flDistance() < b->m_flDistance(); });
-        }
-
-        for (auto healthpack : total_ents)
-            // If we succeeed, don't try to path to other packs
-            if (navparser::NavEngine::navTo(healthpack->m_vecOrigin(), priority, true, healthpack->m_vecOrigin().DistToSqr(g_pLocalPlayer->v_Origin) > 200.0f * 200.0f))
-                return true;
-        health_cooldown.update();
-    }
-    else if (navparser::NavEngine::current_priority == priority)
-        navparser::NavEngine::cancelPath();
-    return false;
+    return RunSupply(SupplyHealth | (low_priority ? SupplyLowPrio : 0));
 }
 
-static bool was_force = false;
-// Find ammo if needed
 bool getAmmo(bool force = false)
 {
-    if (!force && !ammo_cooldown.check(1000))
-        return navparser::NavEngine::current_priority == ammo;
-    if (force || shouldSearchAmmo())
-    {
-        // Already pathing, only try to repath every 2s
-        if (navparser::NavEngine::current_priority == ammo)
-        {
-            static Timer repath_timer;
-            if (!repath_timer.test_and_set(2000))
-                return true;
-        }
-        else
-            was_force = false;
-        auto ammopacks  = getEntities({ ITEM_AMMO_SMALL, ITEM_AMMO_MEDIUM, ITEM_AMMO_LARGE });
-        auto dispensers = getDispensers();
-
-        auto total_ents = ammopacks;
-
-        // Add dispensers and sort list again
-        if (!dispensers.empty())
-        {
-            total_ents.reserve(ammopacks.size() + dispensers.size());
-            total_ents.insert(total_ents.end(), dispensers.begin(), dispensers.end());
-            std::sort(total_ents.begin(), total_ents.end(), [](CachedEntity *a, CachedEntity *b) { return a->m_flDistance() < b->m_flDistance(); });
-        }
-        for (auto ammopack : total_ents)
-            // If we succeeed, don't try to path to other packs
-            if (navparser::NavEngine::navTo(ammopack->m_vecOrigin(), ammo, true, ammopack->m_vecOrigin().DistToSqr(g_pLocalPlayer->v_Origin) > 200.0f * 200.0f))
-            {
-                was_force = force;
-                return true;
-            }
-        ammo_cooldown.update();
-    }
-    else if (navparser::NavEngine::current_priority == ammo && !was_force)
-        navparser::NavEngine::cancelPath();
-    return false;
+    return RunSupply(SupplyAmmo | (force ? SupplyForced : 0));
 }
 
 // Vector of sniper spot positions we can nav to
@@ -1376,22 +2048,24 @@ bool doRoam()
     if (!roam_timer.test_and_set(2000))
         return false;
 
-    // Defend our objective if possible
-    int enemy_team = g_pLocalPlayer->team == TEAM_BLU ? TEAM_RED : TEAM_BLU;
-
-    std::optional<Vector> target;
-    target = getPayloadGoal(enemy_team);
-    if (!target)
-        target = getControlPointGoal(enemy_team);
-    if (target)
+    if (defend_while_patrolling)
     {
-        if ((*target).DistTo(g_pLocalPlayer->v_Origin) <= 250.0f)
+        int enemy_team = g_pLocalPlayer->team == TEAM_BLU ? TEAM_RED : TEAM_BLU;
+
+        std::optional<Vector> target;
+        target = getPayloadGoal(enemy_team);
+        if (!target)
+            target = getControlPointGoal(enemy_team);
+        if (target)
         {
-            navparser::NavEngine::cancelPath();
-            return true;
+            if ((*target).DistTo(g_pLocalPlayer->v_Origin) <= 250.0f)
+            {
+                navparser::NavEngine::cancelPath();
+                return true;
+            }
+            if (navparser::NavEngine::navTo(*target, patrol, true, navparser::NavEngine::current_priority != patrol))
+                return true;
         }
-        if (navparser::NavEngine::navTo(*target, patrol, true, navparser::NavEngine::current_priority != patrol))
-            return true;
     }
 
     // No sniper spots :shrug:
@@ -1603,6 +2277,8 @@ static void CreateMove()
 #endif
     if (!enabled)
     {
+        if (navparser::NavEngine::current_priority >= patrol && navparser::NavEngine::current_priority <= danger && navparser::NavEngine::current_priority != followbot)
+            navparser::NavEngine::cancelPath();
         active_task = "disabled";
         return;
     }
@@ -1697,6 +2373,11 @@ void LevelInit()
     mySentry    = nullptr;
     myDispenser = nullptr;
     current_building_spot.Invalidate();
+    parseCachedSupplyOrigins();
+    supply_was_force         = false;
+    has_remembered_dispenser = false;
+    temp_main.clear();
+    temp_dispensers.clear();
 }
 
 std::vector<std::string> getDebugInfoLines()
@@ -1707,7 +2388,7 @@ std::vector<std::string> getDebugInfoLines()
     {
         auto nearest = getNearestPlayerDistance();
         lines.push_back(format("enemy ", nearest.first ? format("#", nearest.first->m_IDX) : std::string("none"), " d:", (int) nearest.second, " | hp:", LOCAL_E->m_iHealth(), "/", g_pPlayerResource->GetMaxHealth(LOCAL_E), " mtl:", CE_INT(LOCAL_E, netvar.m_iAmmo + 12), " s:", slot, " z:", g_pLocalPlayer->bZoomed ? "1" : "0"));
-        lines.push_back(format("srch h:", shouldSearchHealth() ? "y" : "n", "/", shouldSearchHealth(true) ? "y" : "n", " a:", shouldSearchAmmo() ? "y" : "n", " | cfg ", (int) selected_config.min_full_danger, "/", (int) selected_config.min_slight_danger, "/", (int) selected_config.max, selected_config.prefer_far ? " far" : ""));
+        lines.push_back(format("srch h:", shouldSearchHealth() ? "y" : "n", "/", shouldSearchHealth(true) ? "y" : "n", " a:", shouldSearchAmmo() ? "y" : "n", " packs h:", cached_health_origins.size(), " a:", cached_ammo_origins.size(), " | cfg ", (int) selected_config.min_full_danger, "/", (int) selected_config.min_slight_danger, "/", (int) selected_config.max, selected_config.prefer_far ? " far" : ""));
     }
     lines.push_back(format("spots sn:", sniper_spots.size(), " b:", building_spots.size(), " cap:", (int) current_capturetype, " ow:", overwrite_capture ? "1" : "0"));
     lines.push_back(format("engie m:", isEngieMode() ? "1" : "0", " s:", CE_GOOD(mySentry) ? "y" : "n", " d:", CE_GOOD(myDispenser) ? "y" : "n", " at:", build_attempts, " (", (int) current_building_spot.x, ",", (int) current_building_spot.y, ",", (int) current_building_spot.z, ")"));

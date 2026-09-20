@@ -7,6 +7,7 @@
 #include <menu/object/input/Checkbox.hpp>
 #include <menu/object/input/ColorSelector.hpp>
 #include <menu/object/input/Select.hpp>
+#include <menu/object/input/MultiSelect.hpp>
 #include <menu/object/input/Slider.hpp>
 #include <menu/object/input/InputKey.hpp>
 #include <menu/object/input/StringInput.hpp>
@@ -42,6 +43,8 @@ std::unique_ptr<BaseMenuObject> ObjectFactory::createObjectFromXml(const tinyxml
         result = createAutoVariable(element);
     else if (type == "Select")
         result = std::make_unique<Select>();
+    else if (type == "MultiSelect")
+        result = std::make_unique<MultiSelect>();
     else if (type == "Table")
         result = std::make_unique<Table>();
     else if (type == "TRow")

@@ -13,6 +13,8 @@ namespace hooked_methods
 
 DEFINE_HOOKED_METHOD(FireGameEvent, void, void *this_, IGameEvent *event)
 {
+    if (!event)
+        return;
     const char *name = event->GetName();
     if (name)
     {

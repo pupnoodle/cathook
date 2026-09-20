@@ -270,6 +270,7 @@ public:
     lazy_netvar m_vCPPositions{ "DT_BaseTeamObjectiveResource", "m_vCPPositions[0]" };
     lazy_netvar m_iOwningTeam{ "DT_BaseTeamObjectiveResource", "m_iOwner" };
     lazy_netvar m_bCPLocked{ "DT_BaseTeamObjectiveResource", "m_bCPLocked" };
+    lazy_netvar m_bCPIsVisible{ "DT_BaseTeamObjectiveResource", "m_bCPIsVisible" };
     lazy_netvar m_bPlayingMiniRounds{ "DT_BaseTeamObjectiveResource", "m_bPlayingMiniRounds" };
     lazy_netvar m_bInMiniRound{ "DT_BaseTeamObjectiveResource", "m_bInMiniRound" };
     lazy_netvar m_iPreviousPoints{ "DT_BaseTeamObjectiveResource", "m_iPreviousPoints" };

@@ -158,12 +158,17 @@ matrix3x4_t *EntityHitboxCache::GetBones(int numbones)
             bool overlay_ok    = true;
             if (overlay > 0 && raw)
             {
-                auto *mem = *reinterpret_cast<void **>(uintptr_t(raw) + overlay);
-                int n     = *reinterpret_cast<int *>(uintptr_t(raw) + overlay + 16);
+                auto *mem  = *reinterpret_cast<void **>(uintptr_t(raw) + overlay);
+                int n      = *reinterpret_cast<int *>(uintptr_t(raw) + overlay + 16);
                 overlay_ok = mem && n >= 0 && n <= 15;
             }
-            if (overlay_ok)
-                bones_setup = EntSetupBones(raw, bones.data(), numbones, 0x7FF00, bones_setup_time);
+            if (raw)
+            {
+                if (overlay_ok)
+                    bones_setup = EntSetupBones(raw, bones.data(), numbones, 0x7FF00, bones_setup_time);
+                if (!bones_setup && parent_ref->m_Type() == ENTITY_PLAYER)
+                    bones_setup = setupbones_reconst::SetupBones(raw, bones.data(), 0x7FF00);
+            }
         }
     }
     return bones.data();

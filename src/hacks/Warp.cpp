@@ -476,14 +476,22 @@ int GetWarpAmount(bool finalTick)
 DetourHook cl_move_detour;
 typedef void (*CL_Move_t)(float accumulated_extra_samples, bool bFinalTick);
 
-// Warping part, uses CL_Move
+constexpr int kMaxNewCommands = 15;
+
 void Warp(float accumulated_extra_samples, bool finalTick)
 {
     auto ch = g_IEngine->GetNetChannelInfo();
-    if (!ch)
+    CL_Move_t original = (CL_Move_t) cl_move_detour.GetOriginalFunc();
+    if (!original)
         return;
+    if (!ch)
+    {
+        original(accumulated_extra_samples, finalTick);
+        return;
+    }
     if (!should_warp)
     {
+        original(accumulated_extra_samples, finalTick);
         if (finalTick)
             should_warp = true;
         return;
@@ -495,47 +503,36 @@ void Warp(float accumulated_extra_samples, bool finalTick)
     if (warp_amount_override)
         warp_ticks = warp_amount_override;
 
-    CL_Move_t original = (CL_Move_t) cl_move_detour.GetOriginalFunc();
+    int extra      = GetWarpAmount(finalTick);
+    int extra_calls = extra ? std::min(warp_ticks, extra) : 0;
+    int total       = extra_calls + 1;
+    int queued      = 0;
 
-    // Call CL_Move once for every warp tick
-    int warp_amnt = GetWarpAmount(finalTick);
-    if (warp_amnt)
+    for (int i = 0; i < total; ++i)
     {
-        int calls = std::min(warp_ticks, warp_amnt);
+        first_warp_tick = (i == 0);
+        ++queued;
+        const bool last  = (i == total - 1);
+        const bool flush = last || queued >= kMaxNewCommands;
+        choke_packet     = !flush;
 
-        // Starts at 1 for the previous packet we already stored
-        int packets_sent = 1;
-        for (int i = 0; i < calls; ++i)
+        if (!flush)
+            hooked_methods::UpdatePred();
+
+        if (in_rapidfire)
+            hacks::shared::aimbot::last_target_ignore_timer = tickcount + 12;
+
+        original(accumulated_extra_samples, flush);
+
+        if (finalTick && i > 0)
         {
-            if (!i)
-                first_warp_tick = true;
-            else
-                first_warp_tick = false;
-            // Choke unless we sent too many already
-            choke_packet = true;
-
-            // We are sending the last one that fits in this clc_move, stop choking and send them all off
-            if (packets_sent == 21 || i == calls - 1)
-            {
-                choke_packet = false;
-                packets_sent = -1;
-            }
-            else
-                hooked_methods::UpdatePred();
-
-            if (in_rapidfire)
-                hacks::shared::aimbot::last_target_ignore_timer = tickcount + 12;
-            original(accumulated_extra_samples, finalTick);
-            // Only decrease ticks for the final CL_Move tick
-            if (finalTick)
-            {
-                warp_amount--;
-                warp_ticks--;
-            }
-            packets_sent++;
+            warp_amount--;
+            warp_ticks--;
         }
-        ticks_to_add = 0;
+        if (flush)
+            queued = 0;
     }
+    ticks_to_add = 0;
     cl_move_detour.RestorePatch();
 
     if (warp_amount_override)
@@ -686,13 +683,11 @@ void handleMinigun()
 // This is called first, it subsequently calls all the CreateMove functions.
 void CL_Move_hook(float accumulated_extra_samples, bool bFinalTick)
 {
-
     CL_Move_t original = (CL_Move_t) cl_move_detour.GetOriginalFunc();
-    original(accumulated_extra_samples, bFinalTick);
-    cl_move_detour.RestorePatch();
+    if (!original)
+        return;
 
-    // Should we warp?
-    if (shouldWarp(true))
+    if (bFinalTick && shouldWarp(true))
     {
         in_warp = true;
         if (shouldRapidfire())
@@ -709,7 +704,12 @@ void CL_Move_hook(float accumulated_extra_samples, bool bFinalTick)
         in_rapidfire      = false;
         in_rapidfire_zoom = false;
         was_in_warp       = true;
+        cl_move_detour.RestorePatch();
+        return;
     }
+
+    original(accumulated_extra_samples, bFinalTick);
+    cl_move_detour.RestorePatch();
 }
 
 // Run before we call the original, we need to adjust the tickcount on the command
@@ -1057,69 +1057,11 @@ void warpLogic()
     was_hurt_last_tick = was_hurt;
 }
 
-// The second to last thing that gets called, its only job is to write the commands locally and then queue for sending.
-// We simply make the "backup" command buffer accessible which allows us to send more at once.
-//
-// Only called if *bSendPackets is true.
 void CL_SendMove_hook()
 {
-    if (!enabled)
-    {
-        auto orig = CL_SendMove_t(cl_sendmove_detour.GetOriginalFunc());
-        if (orig)
-            orig();
-        return;
-    }
-    byte data[4000];
-
-    // the +4 one is choked commands
-    int nextcommandnr = g_IBaseClientState->lastoutgoingcommand() + g_IBaseClientState->chokedcommands() + 1;
-
-    // send the client update packet
-
-    CLC_Move moveMsg;
-
-    moveMsg.m_DataOut.StartWriting(data, sizeof(data));
-
-    // Determine number of backup commands to send along
-    int cl_cmdbackup = 2;
-
-    // How many real new commands have queued up
-    moveMsg.m_nNewCommands = 1 + g_IBaseClientState->chokedcommands();
-    moveMsg.m_nNewCommands = std::clamp(moveMsg.m_nNewCommands, 0, 15);
-
-    // Excessive commands (Used for longer fakelag, credits to https://www.unknowncheats.me/forum/source-engine/370916-23-tick-guwop-fakelag-break-lag-compensation-running.html)
-    int extra_commands        = g_IBaseClientState->chokedcommands() + 1 - moveMsg.m_nNewCommands;
-    cl_cmdbackup              = std::max(2, extra_commands);
-    moveMsg.m_nBackupCommands = std::clamp(cl_cmdbackup, 0, 7);
-
-    int numcmds = moveMsg.m_nNewCommands + moveMsg.m_nBackupCommands;
-
-    int from = -1; // first command is deltaed against zeros
-
-    bool bOK = true;
-
-    for (int to = nextcommandnr - numcmds + 1; to <= nextcommandnr; to++)
-    {
-        bool isnewcmd = to >= (nextcommandnr - moveMsg.m_nNewCommands + 1);
-
-        // Call the write to buffer
-        typedef bool (*WriteUsercmdDeltaToBuffer_t)(CHLClient *, bf_write *, int, int, bool);
-
-        // first valid command number is 1
-        bOK  = bOK && vfunc<WriteUsercmdDeltaToBuffer_t>(g_IBaseClient, vtables::client_dll::write_usercmd_delta, 0)(g_IBaseClient, &moveMsg.m_DataOut, from, to, isnewcmd);
-        from = to;
-    }
-
-    if (bOK)
-    {
-        // Make fakelag work as we want it to
-        if (extra_commands > 0)
-            g_IEngine->GetNetChannelInfo()->m_nChokedPackets() -= extra_commands;
-
-        // only write message if all usercmds were written correctly, otherwise parsing would fail
-        g_IEngine->GetNetChannelInfo()->SendNetMsg(moveMsg);
-    }
+    auto orig = CL_SendMove_t(cl_sendmove_detour.GetOriginalFunc());
+    if (orig)
+        orig();
 }
 
 // Called after CL_SendMove to transmit the clc_move message. We choke it if we want to charge warp.

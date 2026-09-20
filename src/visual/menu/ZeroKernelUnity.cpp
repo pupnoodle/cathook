@@ -18,6 +18,7 @@
 #include "./menu/objects/Tooltip.cpp"
 #include "./menu/objects/Option.cpp"
 #include "./menu/objects/input/Select.cpp"
+#include "./menu/objects/input/MultiSelect.cpp"
 #include "./menu/objects/input/Checkbox.cpp"
 #include "./menu/objects/input/TextInput.cpp"
 #include "./menu/objects/input/ColorSelector.cpp"

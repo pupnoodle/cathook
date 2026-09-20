@@ -26,14 +26,16 @@ void zerokernel::ModalSelect::handleMessage(zerokernel::Message &msg, bool is_re
         Message os{ "OptionSelected" };
         os.kv["value"] = option->value;
         emit(os, false);
-        modal.close();
+        if (!stay_open)
+            modal.close();
     }
 }
 
-void zerokernel::ModalSelect::addOption(std::string name, std::string value, std::optional<std::string> tooltip)
+void zerokernel::ModalSelect::addOption(std::string name, std::string value, std::optional<std::string> tooltip, settings::IVariable *toggle)
 {
     auto option     = std::make_unique<Option>(name, value);
     option->tooltip = std::move(tooltip);
+    option->toggle  = toggle;
     option->addMessageHandler(*this);
     addObject(std::move(option));
 }

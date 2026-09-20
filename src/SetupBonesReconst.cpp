@@ -1,7 +1,10 @@
 #include "common.hpp"
+#include "MiscTemporary.hpp"
 #include "bone_setup.h"
 #include "animationlayer.h"
-#include <boost/algorithm/string.hpp>
+#include "sdk/client_entity.hpp"
+
+static_assert(sizeof(C_AnimationLayer) == 0x2C, "TF2 linux64 C_AnimationLayer is 0x2C");
 
 namespace setupbones_reconst
 {
@@ -37,126 +40,135 @@ static std::vector<int> ignore_sequences{
 };
 //clang-format on
 
+static QAngle YawOnly(QAngle angles)
+{
+    angles.x = 0;
+    angles.z = 0;
+    return angles;
+}
+
+static Vector PlayerOrigin(IClientEntity *ent)
+{
+    const Vector abs = re::C_BaseEntity::GetAbsOrigin(ent);
+    Vector net{};
+    if (netvar.m_vecOrigin)
+        net = NET_VECTOR(ent, netvar.m_vecOrigin);
+    if (!nolerp && !abs.IsZero())
+        return abs;
+    if (!net.IsZero())
+        return net;
+    return abs;
+}
+
+static QAngle PlayerAngles(IClientEntity *ent)
+{
+    if (!nolerp)
+        return YawOnly(re::C_BaseEntity::GetAbsAngles(ent));
+    if (netvar.m_angRotation)
+        return YawOnly(VectorToQAngle(NET_VECTOR(ent, netvar.m_angRotation)));
+    return YawOnly(re::C_BaseEntity::GetAbsAngles(ent));
+}
+
+static const float *PoseParameters(IClientEntity *ent)
+{
+    static float dummy[MAXSTUDIOPOSEPARAM];
+    if (netvar.m_flPoseParameter)
+        return &NET_FLOAT(ent, netvar.m_flPoseParameter);
+    return dummy;
+}
+
 void GetSkeleton(IClientEntity *ent, CStudioHdr *pStudioHdr, Vector pos[], Quaternion q[], int boneMask)
 {
     if (!pStudioHdr)
         return;
 
-    if (!pStudioHdr->SequencesAvailable())
-    {
-        return;
-    }
-
-    CIKContext **m_pIk = netvar.m_pIk ? reinterpret_cast<CIKContext **>(reinterpret_cast<uint64_t>(ent) + netvar.m_pIk) : nullptr;
-
-    CUtlVector<C_AnimationLayer> empty_overlay{};
-    CUtlVector<C_AnimationLayer> &m_AnimOverlay = netvar.m_AnimOverlay ? NET_VAR(ent, netvar.m_AnimOverlay, CUtlVector<C_AnimationLayer>) : empty_overlay;
-
-    IBoneSetup boneSetup(pStudioHdr, boneMask, &NET_FLOAT(ent, netvar.m_flPoseParameter));
+    IBoneSetup boneSetup(pStudioHdr, boneMask, PoseParameters(ent));
     boneSetup.InitPose(pos, q);
 
-    CIKContext *ik = m_pIk ? *m_pIk : nullptr;
-    boneSetup.AccumulatePose(pos, q, NET_INT(ent, netvar.m_nSequence), NET_FLOAT(ent, netvar.m_flCycle), 1.0, g_GlobalVars->curtime, ik);
+    if (!pStudioHdr->SequencesAvailable())
+        return;
 
-    int overlay_count = m_AnimOverlay.Count();
-    if (overlay_count < 0 || overlay_count > MAX_OVERLAYS)
-        overlay_count = 0;
+    const int sequence = NET_INT(ent, netvar.m_nSequence);
+    if (sequence >= 0 && sequence < pStudioHdr->GetNumSeq())
+        boneSetup.AccumulatePose(pos, q, sequence, NET_FLOAT(ent, netvar.m_flCycle), 1.0, g_GlobalVars->curtime, nullptr);
 
-    int layer[MAX_OVERLAYS] = {};
-    int i;
-    for (i = 0; i < overlay_count; i++)
-        layer[i] = MAX_OVERLAYS;
-    for (i = 0; i < overlay_count; i++)
+    int overlay_count = 0;
+    C_AnimationLayer *layers = nullptr;
+    if (netvar.m_AnimOverlay)
     {
-        CAnimationLayer &pLayer = m_AnimOverlay[i];
-        if ((pLayer.m_flWeight > 0) && pLayer.IsActive() && pLayer.m_nOrder >= 0 && pLayer.m_nOrder < overlay_count)
-            layer[pLayer.m_nOrder] = i;
-    }
-    for (i = 0; i < overlay_count; i++)
-    {
-        if (layer[i] >= 0 && layer[i] < overlay_count)
+        layers        = *reinterpret_cast<C_AnimationLayer **>(uintptr_t(ent) + netvar.m_AnimOverlay);
+        overlay_count = *reinterpret_cast<int *>(uintptr_t(ent) + netvar.m_AnimOverlay + 16);
+        if (!layers || overlay_count < 0 || overlay_count > MAX_OVERLAYS)
         {
-            CAnimationLayer &pLayer = m_AnimOverlay[layer[i]];
-
-            // UNDONE: Is it correct to use overlay weight for IK too?
-            if (!remove_taunts || std::find(ignore_sequences.begin(), ignore_sequences.end(), pLayer.m_nSequence) == ignore_sequences.end())
-                boneSetup.AccumulatePose(pos, q, pLayer.m_nSequence, pLayer.m_flCycle, pLayer.m_flWeight, g_GlobalVars->curtime, ik);
+            layers        = nullptr;
+            overlay_count = 0;
         }
     }
 
-    if (m_pIk)
+    int layer[MAX_OVERLAYS];
+    int i;
+    for (i = 0; i < MAX_OVERLAYS; i++)
+        layer[i] = MAX_OVERLAYS;
+    for (i = 0; i < overlay_count; i++)
     {
-        CIKContext auto_ik;
-        QAngle angles = VectorToQAngle(re::C_BasePlayer::GetEyeAngles(ent));
-        auto_ik.Init(pStudioHdr, angles, re::C_BaseEntity::GetAbsOrigin(ent), g_GlobalVars->curtime, 0, boneMask);
-        boneSetup.CalcAutoplaySequences(pos, q, g_GlobalVars->curtime, &auto_ik);
+        C_AnimationLayer &pLayer = layers[i];
+        const int order          = pLayer.m_nOrder;
+        if (order >= 0 && order < MAX_OVERLAYS && layer[order] == MAX_OVERLAYS)
+            layer[order] = i;
     }
-    else
+    for (i = 0; i < MAX_OVERLAYS; i++)
     {
-        boneSetup.CalcAutoplaySequences(pos, q, g_GlobalVars->curtime, NULL);
+        if (layer[i] < 0 || layer[i] >= overlay_count)
+            continue;
+        C_AnimationLayer pLayer = layers[layer[i]];
+        if (pLayer.m_flWeight <= 0)
+            continue;
+        const int layer_seq = pLayer.m_nSequence;
+        if (layer_seq < 0 || layer_seq >= pStudioHdr->GetNumSeq())
+            continue;
+        if (!remove_taunts || std::find(ignore_sequences.begin(), ignore_sequences.end(), layer_seq) == ignore_sequences.end())
+            boneSetup.AccumulatePose(pos, q, layer_seq, pLayer.m_flCycle, pLayer.m_flWeight, g_GlobalVars->curtime, nullptr);
     }
 
-    boneSetup.CalcBoneAdj(pos, q, &NET_FLOAT(ent, netvar.m_flEncodedController));
+    CIKContext auto_ik;
+    auto_ik.Init(pStudioHdr, PlayerAngles(ent), PlayerOrigin(ent), g_GlobalVars->curtime, 0, boneMask);
+    boneSetup.CalcAutoplaySequences(pos, q, g_GlobalVars->curtime, &auto_ik);
+
+    if (netvar.m_flEncodedController)
+        boneSetup.CalcBoneAdj(pos, q, &NET_FLOAT(ent, netvar.m_flEncodedController));
 }
 
 bool SetupBones(IClientEntity *ent, matrix3x4_t *pBoneToWorld, int boneMask)
 {
-    CStudioHdr *pStudioHdr = netvar.m_pStudioHdr ? NET_VAR(ent, netvar.m_pStudioHdr, CStudioHdr *) : nullptr;
-
-    if (!pStudioHdr)
+    if (!ent || !pBoneToWorld || !g_IModelInfo)
         return false;
 
-    if (pBoneToWorld == nullptr)
-    {
-        pBoneToWorld = new matrix3x4_t[sizeof(matrix3x4_t) * MAXSTUDIOBONES];
-    }
+    const model_t *model = EntGetModel(ent);
+    if (!model)
+        return false;
+    studiohdr_t *raw = g_IModelInfo->GetStudiomodel(model);
+    if (!raw)
+        return false;
 
-    if (netvar.m_iEFlags)
-        NET_INT(ent, netvar.m_iEFlags) |= 1 << 3;
+    CStudioHdr studioHdr(raw, g_IMDLCache);
+    if (!studioHdr.IsValid())
+        return false;
 
     Vector pos[MAXSTUDIOBONES];
     Quaternion q[MAXSTUDIOBONES];
 
-    Vector adjOrigin = re::C_BaseEntity::GetAbsOrigin(ent);
+    const Vector adjOrigin = PlayerOrigin(ent);
+    const QAngle angles2   = PlayerAngles(ent);
 
-    CIKContext **m_pIk = netvar.m_pIk ? reinterpret_cast<CIKContext **>(reinterpret_cast<uint64_t>(ent) + netvar.m_pIk) : nullptr;
-    QAngle angles = VectorToQAngle(re::C_BasePlayer::GetEyeAngles(ent));
+    GetSkeleton(ent, &studioHdr, pos, q, boneMask);
 
-    // One function seems to have pitch as it will do weird stuff with the bones, so we just do this as a fix
-    QAngle angles2 = angles;
-    angles2.x      = 0;
-    angles2.z      = 0;
+    float scale = 1.0f;
+    if (netvar.m_flModelScale)
+        scale = NET_FLOAT(ent, netvar.m_flModelScale);
+    if (scale <= 0.0f)
+        scale = 1.0f;
 
-    if (m_pIk && *m_pIk)
-    {
-        // FIXME: pass this into Studio_BuildMatrices to skip transforms
-        CBoneBitList boneComputed;
-        // m_iIKCounter++;
-        (*m_pIk)->Init(pStudioHdr, angles, adjOrigin, g_GlobalVars->curtime, 0 /*m_iIKCounter*/, boneMask);
-        GetSkeleton(ent, pStudioHdr, pos, q, boneMask);
-
-        typedef void (*IKLocksFn)(IClientEntity *, float);
-        auto *UpdateIKLocks    = vfunc<IKLocksFn>(ent, vtables::entity::update_ik_locks, 0);
-        auto *CalculateIKLocks = vfunc<IKLocksFn>(ent, vtables::entity::calculate_ik_locks, 0);
-        if (UpdateIKLocks)
-            UpdateIKLocks(ent, g_GlobalVars->curtime);
-        (*m_pIk)->UpdateTargets(pos, q, pBoneToWorld, boneComputed);
-        if (CalculateIKLocks)
-            CalculateIKLocks(ent, g_GlobalVars->curtime);
-        (*m_pIk)->SolveDependencies(pos, q, pBoneToWorld, boneComputed);
-    }
-    else
-    {
-        GetSkeleton(ent, pStudioHdr, pos, q, boneMask);
-    }
-
-    // m_flModelScale
-    Studio_BuildMatrices(pStudioHdr, angles2, adjOrigin, pos, q, -1, NET_FLOAT(ent, netvar.m_flModelScale), // Scaling
-                         pBoneToWorld, boneMask);
-
-    if (netvar.m_iEFlags)
-        NET_INT(ent, netvar.m_iEFlags) &= ~(1 << 3);
-
+    Studio_BuildMatrices(&studioHdr, angles2, adjOrigin, pos, q, -1, scale, pBoneToWorld, boneMask);
     return true;
 }
 } // namespace setupbones_reconst

@@ -33,5 +33,6 @@ public:
     Text text{};
     const std::string name;
     const std::string value;
+    settings::IVariable *toggle{ nullptr };
 };
 } // namespace zerokernel

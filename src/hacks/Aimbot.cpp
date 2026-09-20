@@ -34,6 +34,9 @@ static settings::Int hitbox_mode{ "aimbot.hitbox-mode", "0" };
 static settings::Float normal_fov{ "aimbot.fov", "0" };
 static settings::Int priority_mode{ "aimbot.priority-mode", "0" };
 static settings::Boolean wait_for_charge{ "aimbot.wait-for-charge", "0" };
+static settings::Boolean wait_for_headshot{ "aimbot.wait-for-headshot", "0" };
+static settings::Boolean extinguish_team{ "aimbot.extinguish-team", "0" };
+static settings::Boolean prefer_medics{ "aimbot.prefer-medics", "0" };
 
 static settings::Boolean silent{ "aimbot.silent", "1" };
 static settings::Boolean target_lock{ "aimbot.lock-target", "false" };
@@ -145,7 +148,11 @@ inline bool isHitboxMedium(int hitbox)
 inline bool playerTeamCheck(CachedEntity *entity)
 
 {
-    return (int) teammates == 2 || (entity->m_bEnemy() && !teammates) || (!entity->m_bEnemy() && teammates) || (CE_GOOD(LOCAL_W) && LOCAL_W->m_iClassID() == CL_CLASS(CTFCrossbow) && entity->m_iHealth() < entity->m_iMaxHealth());
+    if ((int) teammates == 2 || (entity->m_bEnemy() && !teammates) || (!entity->m_bEnemy() && teammates) || (CE_GOOD(LOCAL_W) && LOCAL_W->m_iClassID() == CL_CLASS(CTFCrossbow) && entity->m_iHealth() < entity->m_iMaxHealth()))
+        return true;
+    if (extinguish_team && !entity->m_bEnemy() && HasCondition<TFCond_OnFire>(entity) && CE_GOOD(LOCAL_W) && ATTRIB_HOOK_FLOAT(0.0f, "jarate_duration", RAW_ENT(LOCAL_W), nullptr, true) > 0.0f)
+        return true;
+    return false;
 }
 // Am I holding Hitman's Heatmaker ?
 inline bool CarryingHeatmaker()
@@ -206,6 +213,121 @@ inline bool shouldBacktrack(CachedEntity *ent)
         return false;
     return true;
 }
+
+static bool HitscanPointVisible(CachedEntity *ent, const Vector &point)
+{
+    return IsEntityVectorVisible(ent, point, true, MASK_SHOT_HULL, nullptr, true);
+}
+
+static bool HitscanBestPoint(CachedEntity *ent, int hitbox, Vector &out)
+{
+    auto *hb = ent->hitboxes.GetHitbox(hitbox);
+    if (!hb)
+        return false;
+
+    if (!*multipoint)
+    {
+        if (!HitscanPointVisible(ent, hb->center))
+            return false;
+        out = hb->center;
+        return true;
+    }
+
+    matrix3x4_t *bones = ent->hitboxes.GetBones();
+    if (!bones || !hb->bbox)
+        return false;
+    const int bone = hb->bbox->bone;
+    if (bone < 0)
+        return false;
+
+    const Vector local_center = (hb->bbox->bbmin + hb->bbox->bbmax) * 0.5f;
+    const Vector half         = (hb->bbox->bbmax - hb->bbox->bbmin) * 0.5f * 0.85f;
+    Vector points[8];
+    int n = 0;
+    auto add = [&](float x, float y, float z) {
+        Vector local(local_center.x + x, local_center.y + y, local_center.z + z);
+        VectorTransform(local, bones[bone], points[n++]);
+    };
+    add(0, 0, 0);
+    add(half.x, 0, 0);
+    add(-half.x, 0, 0);
+    add(0, 0, half.z);
+    add(0, 0, -half.z);
+    add(0, half.y, 0);
+    add(0, -half.y, 0);
+
+    float best = FLT_MAX;
+    bool found = false;
+    for (int i = 0; i < n; ++i)
+    {
+        if (!HitscanPointVisible(ent, points[i]))
+            continue;
+        const float dist = points[i].DistToSqr(points[0]);
+        if (!found || dist < best)
+        {
+            best = dist;
+            out  = points[i];
+            found = true;
+            if (dist < 0.01f)
+                return true;
+        }
+    }
+    return found;
+}
+
+static bool HitscanResolve(AimbotTarget_t &t)
+{
+    CachedEntity *ent = t.ent;
+    if (!ent)
+        return false;
+
+    if (ent->m_Type() == ENTITY_PLAYER)
+    {
+        int boxes[6];
+        int count = 0;
+        auto add  = [&](int hb) {
+            if (hb < 0)
+                return;
+            for (int i = 0; i < count; ++i)
+            {
+                if (boxes[i] == hb)
+                    return;
+            }
+            boxes[count++] = hb;
+        };
+
+        add(t.hitbox);
+        add(hitbox_t::spine_1);
+        add(hitbox_t::pelvis);
+        add(hitbox_t::spine_0);
+        add(hitbox_t::spine_2);
+        add(hitbox_t::spine_3);
+
+        for (int i = 0; i < count; ++i)
+        {
+            Vector point;
+            if (!HitscanBestPoint(ent, boxes[i], point))
+                continue;
+
+            t.hitbox        = boxes[i];
+            t.aim_position  = point;
+            t.visible       = true;
+            t.predict_tick  = tickcount;
+            t.fov           = GetFov(g_pLocalPlayer->v_OrigViewangles, g_pLocalPlayer->v_Eye, point);
+            return true;
+        }
+        return false;
+    }
+
+    const Vector point = PredictEntity(t);
+    if (!HitscanPointVisible(ent, point))
+        return false;
+
+    t.aim_position = point;
+    t.visible      = true;
+    return true;
+}
+
 void spectatorUpdate()
 {
     switch (*specmode)
@@ -862,6 +984,8 @@ AimbotTarget_t RetrieveBestTarget(bool aimkey_state)
             {
                 scr = ((ent->m_iMaxHealth() - ent->m_iHealth()) / ent->m_iMaxHealth()) * (*priority_mode == 2 ? 16384.0f : 2000.0f);
             }
+            if (prefer_medics && ent->m_bEnemy() && ent->m_Type() == ENTITY_PLAYER && CE_INT(ent, netvar.iClass) == tf_medic)
+                scr += 40.0f;
             // Compare the top score to our current ents score
             if (scr > target_highest_score)
             {
@@ -996,7 +1120,7 @@ AimbotTarget_t GetTarget(CachedEntity *entity)
 
         t.hitbox = BestHitbox(entity);
         // ngl i would love to avoid nesting this many ifs by using a goto but i have morals.
-        if (*vischeck_hitboxes && !*multipoint && is_player)
+        if (*vischeck_hitboxes && !*multipoint && is_player && GetWeaponMode() != weapon_hitscan)
         {
             if (!(*vischeck_hitboxes == 1 && playerlist::AccessData(entity).state != playerlist::k_EState::RAGE || (projectileAimbotRequired && 0.01f < cur_proj_grav)))
             {
@@ -1129,6 +1253,16 @@ AimbotTarget_t GetTarget(CachedEntity *entity)
 
     if (t.valid)
     {
+        if (GetWeaponMode() == weapon_hitscan)
+        {
+            if (!HitscanResolve(t))
+            {
+                t.valid = false;
+                return t;
+            }
+        }
+        else
+        {
         Vector is_it_good = PredictEntity(t);
         if (!projectileAimbotRequired)
         {
@@ -1192,6 +1326,7 @@ AimbotTarget_t GetTarget(CachedEntity *entity)
                 t.valid = false;
                 return t;
             }
+        }
         }
         if (fov > 0 && t.fov > fov)
             t.valid = false;
@@ -1299,6 +1434,16 @@ void DoAutoshoot(AimbotTarget_t target)
         {
             if (zoomed_only && !CanHeadshot())
                 attack = false;
+            if (wait_for_headshot && target.valid && target.ent->m_Type() == ENTITY_PLAYER && CE_INT(LOCAL_W, netvar.iItemDefinitionIndex) != 230)
+            {
+                if (LOCAL_W->m_iClassID() == CL_CLASS(CTFSniperRifleClassic))
+                {
+                    if (!CanHeadshot())
+                        attack = false;
+                }
+                else if (g_pLocalPlayer->bZoomed && !CanHeadshot())
+                    attack = false;
+            }
         }
     }
 
@@ -1307,7 +1452,7 @@ void DoAutoshoot(AimbotTarget_t target)
     else if (IsAmbassador(g_pLocalPlayer->weapon()))
     {
         // Check if ambasador can headshot
-        if (!AmbassadorCanHeadshot() && wait_for_charge)
+        if (!AmbassadorCanHeadshot() && (wait_for_charge || wait_for_headshot))
             attack = false;
     }
 
@@ -1431,7 +1576,8 @@ int autoHitbox(CachedEntity *target)
     int target_health = target->m_iHealth(); // This was used way too many times. Due to how pointers work (defrencing)+the compiler already dealing with tons of AIDS global variables it likely derefrenced it every time it was called.
     int ci            = LOCAL_W->m_iClassID();
 
-    if (CanHeadshot()) // Nothing else zooms in this game you have to be holding a rifle for this to be true.
+    const bool wait_hs_sniper = wait_for_headshot && g_pLocalPlayer->holding_sniper_rifle && g_pLocalPlayer->bZoomed && CE_INT(LOCAL_W, netvar.iItemDefinitionIndex) != 230;
+    if (CanHeadshot() || wait_hs_sniper)
     {
         float cdmg = CE_FLOAT(LOCAL_W, netvar.flChargedDamage);
         float bdmg = 50;
@@ -1497,7 +1643,7 @@ int autoHitbox(CachedEntity *target)
 
         if (target_health <= 18 || IsPlayerCritBoosted(g_pLocalPlayer->entity) || target->m_flDistance() > 1200)
             return hitbox_t::spine_1;
-        else if (AmbassadorCanHeadshot())
+        else if (AmbassadorCanHeadshot() || wait_for_headshot)
             return hitbox_t::head;
     }
 

@@ -21,6 +21,8 @@ zerokernel::Option::Option(std::string name, std::string value) : BaseMenuObject
 
 void zerokernel::Option::render()
 {
+    if (toggle)
+        text.set((toggle->toString() == "true" ? "[x] " : "[ ] ") + name);
     if (isHovered())
         renderBackground(*color_hovered);
     text.render();

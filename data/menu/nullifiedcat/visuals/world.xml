@@ -5,13 +5,13 @@
             <AutoVariable width="fill" target="remove.zoom" label="Apply if zoomed"/>
         </List>
     </Box>
-    <Box padding="12 6 6 6" width="content" height="content" name="Freecam" y="55">
+    <Box padding="12 6 6 6" width="content" height="content" name="Freecam">
         <List width="180">
             <AutoVariable width="fill" target="visual.freecam-button" label="Freecam button" tooltip="Press this button to toggle freecam."/>
             <AutoVariable width="fill" target="visual.freecam-speed" label="Freecam speed (HU/s)"/>
         </List>
     </Box>
-    <Box padding="12 6 6 6" width="content" height="content" name="Thirdperson" y="110">
+    <Box padding="12 6 6 6" width="content" height="content" name="Thirdperson">
         <List width="180">
             <AutoVariable width="fill" target="visual.thirdperson.enable" label="Enable thirdperson"/>
             <AutoVariable width="fill" target="visual.thirdperson-button" label="Thirdperson button" tooltip="Set a button to toggle thirdperson."/>
@@ -19,7 +19,7 @@
             <AutoVariable width="fill" target="visual.thirdperson.disable-zoomed" label="Disable when zoomed" tooltip="Disables thirdperson when zoomed in."/>
         </List>
     </Box>
-    <Box padding="12 6 6 6" width="content" height="content" name="Zooming" y="190">
+    <Box padding="12 6 6 6" width="content" height="content" name="Zooming">
         <List width="180">
             <AutoVariable width="fill" target="visual.zoom-key" label="Zoom key" tooltip="Hold down this key to override your FOV to the one set below."/>
             <AutoVariable width="fill" target="visual.zoom-key.fov" label="Zoom FOV"/>
@@ -27,17 +27,21 @@
     </Box>
     <Box padding="12 6 6 6" width="content" height="content" name="Remove" x="195">
         <List width="180">
-            <AutoVariable width="fill" target="remove.arms" label="Remove arms"/>
-            <AutoVariable width="fill" target="remove.cloak" label="Remove cloak"/>
-            <AutoVariable width="fill" target="remove.disguise" label="Remove disguise"/>
-            <AutoVariable width="fill" target="remove.taunts" label="Remove taunts"/>
-            <AutoVariable width="fill" target="remove.hats" label="Remove hats"/>
-            <AutoVariable width="fill" target="remove.contracker" label="Remove contracker"/>
-            <AutoVariable width="fill" target="remove.scope" label="Remove scope"/>
-            <AutoVariable width="fill" target="remove.zoom" label="Remove zoom/keep rifle" tooltip="Disables scope zoom and keeps the sniper rifle. Enabling Remove scope as well will set zoom_sensitivity_ratio to 4 when zooming in."/>
+            <LabeledObject width="fill" label="Remove">
+                <MultiSelect>
+                    <Option name="Arms" target="remove.arms"/>
+                    <Option name="Cloak" target="remove.cloak"/>
+                    <Option name="Disguise" target="remove.disguise"/>
+                    <Option name="Taunts" target="remove.taunts"/>
+                    <Option name="Hats" target="remove.hats"/>
+                    <Option name="Contracker" target="remove.contracker"/>
+                    <Option name="Scope" target="remove.scope"/>
+                    <Option name="Zoom / keep rifle" target="remove.zoom"/>
+                </MultiSelect>
+            </LabeledObject>
         </List>
     </Box>
-    <Box padding="12 6 6 6" width="content" height="content" name="Misc" x="195" y="135">
+    <Box padding="12 6 6 6" width="content" height="content" name="Misc" x="195">
         <List width="180">
             <AutoVariable width="fill" target="visual.night-mode.gui" label="Nightmode (GUI)" min="0" max="100" step="0.1"/>
             <AutoVariable width="fill" target="visual.night-mode.world" label="Nightmode (world)" min="0" max="100" step="0.1"/>

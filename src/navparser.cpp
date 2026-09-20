@@ -30,6 +30,9 @@
 #include <unordered_set>
 #include <boost/container_hash/hash.hpp>
 
+extern settings::Boolean roll_speedhack;
+extern settings::Boolean roll_speedhack_navbot;
+
 namespace navparser
 {
 static settings::Boolean enabled("nav.enabled", "false");
@@ -161,6 +164,7 @@ struct CachedConnection
 {
     int expire_tick;
     bool vischeck_state;
+    bool stuck = false;
 };
 
 struct CachedStucktime
@@ -273,9 +277,11 @@ static std::string NavEdgeFailDetail(CNavArea *from, CNavArea *to, const navPoin
     int idx = -1, cid = -1;
     if (tr.m_pEnt)
     {
-        idx       = EntIndex(reinterpret_cast<IClientEntity *>(tr.m_pEnt));
-        auto *cc  = EntClientClass(reinterpret_cast<IClientEntity *>(tr.m_pEnt));
-        if (cc)
+        auto *hit = reinterpret_cast<IClientEntity *>(tr.m_pEnt);
+        idx       = EntIndex(hit);
+        if (!IDX_GOOD(idx) || g_IEntityList->GetClientEntity(idx) != hit)
+            idx = -1;
+        else if (auto *cc = EntClientClass(hit))
             cid = cc->m_ClassID;
     }
     return format("e", (int) from->m_id, ">", (int) to->m_id, " ", seg, " ray", ray, " frac:", tr.fraction, " ss:", (int) tr.startsolid, " as:", (int) tr.allsolid, " ent:", idx, " cid:", cid, " at ", (int) tr.endpos.x, ",", (int) tr.endpos.y, ",", (int) tr.endpos.z);
@@ -286,7 +292,7 @@ class Map : public micropather::Graph
 public:
     CNavFile navfile;
     NavState state;
-    micropather::MicroPather pather{ this, 3000, 6, false };
+    micropather::MicroPather pather{ this, 3000, 6, true };
     std::string mapname;
     std::unordered_map<std::pair<CNavArea *, CNavArea *>, CachedConnection, boost::hash<std::pair<CNavArea *, CNavArea *>>> vischeck_cache;
     std::unordered_map<std::pair<CNavArea *, CNavArea *>, CachedStucktime, boost::hash<std::pair<CNavArea *, CNavArea *>>> connection_stuck_time;
@@ -374,6 +380,8 @@ public:
         CNavArea &area = *reinterpret_cast<CNavArea *>(main);
         for (NavConnect &connection : area.m_connections)
         {
+            if (!connection.area)
+                continue;
             // An area being entered twice means it is blacklisted from entry entirely
             auto connection_key    = std::pair<CNavArea *, CNavArea *>(connection.area, connection.area);
             auto cached_connection = vischeck_cache.find(connection_key);
@@ -527,8 +535,30 @@ public:
         navdebug.edge_pass = navdebug.edge_cachedok = navdebug.edge_selfbl = navdebug.edge_freebl = navdebug.edge_height = navdebug.edge_cachedbad = navdebug.edge_rayfail = 0;
         navdebug.rayfail_detail.clear();
 
+        auto purgeTransientVischeck = [this]() {
+            bool erased = false;
+            for (auto it = vischeck_cache.begin(); it != vischeck_cache.end();)
+            {
+                if (!it->second.vischeck_state && !it->second.stuck)
+                {
+                    it     = vischeck_cache.erase(it);
+                    erased = true;
+                }
+                else
+                    ++it;
+            }
+            if (erased)
+                pather.Reset();
+            return erased;
+        };
+
         time_point begin_pathing = high_resolution_clock::now();
         int result               = pather.Solve(reinterpret_cast<void *>(local), reinterpret_cast<void *>(dest), &pathNodes, &cost);
+        if (result != micropather::MicroPather::SOLVED && result != micropather::MicroPather::START_END_SAME && purgeTransientVischeck())
+        {
+            pathNodes.clear();
+            result = pather.Solve(reinterpret_cast<void *>(local), reinterpret_cast<void *>(dest), &pathNodes, &cost);
+        }
         long long timetaken      = duration_cast<nanoseconds>(high_resolution_clock::now() - begin_pathing).count();
         navdebug.last_solve_result = result;
         navdebug.last_solve_nodes  = pathNodes.size();
@@ -788,6 +818,8 @@ bool isReady()
         navdebug.ready_reason.clear();
         return true;
     }
+    if (g_pGameRules->InWaitingForPlayers())
+        return fail("waiting for players");
     std::string level_name = GetLevelName();
     if (level_name == "plr_pipeline" || g_pGameRules->RoundMode() > CGameRules::GR_STATE_PREROUND)
     {
@@ -795,6 +827,12 @@ bool isReady()
         return true;
     }
     return fail("waiting for round start (preround/setup)");
+}
+
+bool hasNavMesh()
+{
+    ensureMapLoaded();
+    return map && map->state == NavState::Active;
 }
 
 bool isPathing()
@@ -894,6 +932,27 @@ bool navTo(const Vector &destination, int priority, bool should_repath, bool nav
     return true;
 }
 
+float getPathCost(const Vector &start, const Vector &dest)
+{
+    if (!isReady() || !map)
+        return FLT_MAX;
+    CNavArea *start_area = map->findClosestNavSquare(start);
+    CNavArea *dest_area  = map->findClosestNavSquare(dest);
+    if (!start_area || !dest_area)
+        return FLT_MAX;
+    if (start_area == dest_area)
+        return start.DistTo(dest);
+
+    std::vector<void *> path_nodes;
+    float cost = FLT_MAX;
+    int result = map->pather.Solve(reinterpret_cast<void *>(start_area), reinterpret_cast<void *>(dest_area), &path_nodes, &cost);
+    if (result == micropather::MicroPather::START_END_SAME)
+        return start.DistTo(dest);
+    if (result != micropather::MicroPather::SOLVED)
+        return FLT_MAX;
+    return cost;
+}
+
 // Use when something unexpected happens, e.g. vischeck fails
 void abandonPath()
 {
@@ -919,6 +978,7 @@ void cancelPath()
     crumbs.clear();
     last_crumb.navarea = nullptr;
     current_priority   = 0;
+    repath_on_fail     = false;
 }
 
 static Timer last_jump{};
@@ -975,7 +1035,9 @@ static void followCrumbs()
         ray.Init(g_pLocalPlayer->v_Origin, end, EntOBBMins(RAW_ENT(LOCAL_E)), EntOBBMaxs(RAW_ENT(LOCAL_E)));
         g_ITrace->TraceRay(ray, MASK_PLAYERSOLID, &trace::filter_default, &trace);
         // Only reset if we are standing on a building
-        if (trace.DidHit() && trace.m_pEnt && ENTITY(EntIndex((IClientEntity *) trace.m_pEnt))->m_Type() == ENTITY_BUILDING)
+        int ground_idx       = trace.m_pEnt ? EntIndex((IClientEntity *) trace.m_pEnt) : -1;
+        CachedEntity *ground = ENTITY(ground_idx);
+        if (trace.DidHit() && ground && ground->m_Type() == ENTITY_BUILDING)
             reset_z = true;
     }
 
@@ -1055,6 +1117,9 @@ static void followCrumbs()
         }
     }
 
+    if (roll_speedhack && roll_speedhack_navbot && !g_pLocalPlayer->bZoomed && !(current_user_cmd->buttons & IN_JUMP))
+        current_user_cmd->buttons |= IN_DUCK;
+
     /*if (inactivity.check(*stuck_time) || (inactivity.check(*unreachable_time) && !IsVectorVisible(g_pLocalPlayer->v_Origin, *crumb_vec + Vector(.0f, .0f, 41.5f), false, LOCAL_E, MASK_PLAYERSOLID)))
     {
         if (crumbs[0].navarea)
@@ -1101,7 +1166,7 @@ void vischeckPath()
         if (!IsPlayerPassableNavigation(current_center, next_center))
         {
             // Mark as invalid for a while
-            map->vischeck_cache[key] = { TICKCOUNT_TIMESTAMP(*vischeck_cache_time), false };
+            map->vischeck_cache[key] = { TICKCOUNT_TIMESTAMP(*vischeck_cache_time), false, true };
             abandonPath();
             return;
         }
@@ -1188,6 +1253,7 @@ void updateStuckTime()
         {
             map->vischeck_cache[key].expire_tick    = TICKCOUNT_TIMESTAMP(*stuck_blacklist_time);
             map->vischeck_cache[key].vischeck_state = false;
+            map->vischeck_cache[key].stuck          = true;
             if (log_pathing)
                 logging::Info("Blackisted connection %d->%d", key.first->m_id, key.second->m_id);
             abandonPath();
@@ -1206,6 +1272,13 @@ static void CreateMove()
 #if ENABLE_VISUALS
     updateDrawSnapshot();
 #endif
+    const bool hard_unavailable = !g_IEngine->IsInGame() || !map || map->state != NavState::Active || (!enabled && !hacks::tf2::NavBot::isEnabled());
+    if (hard_unavailable)
+    {
+        if (isPathing() || current_priority)
+            cancelPath();
+        return;
+    }
     if (!isReady())
         return;
     if (CE_BAD(LOCAL_E) || !LOCAL_E->m_bAlivePlayer())
@@ -1492,6 +1565,7 @@ static CatCommand nav_debug_blacklist("nav_debug_blacklist", "Blacklist connecti
                                           std::pair<CNavArea *, CNavArea *> key(current, next);
                                           NavEngine::map->vischeck_cache[key].expire_tick    = TICKCOUNT_TIMESTAMP(30);
                                           NavEngine::map->vischeck_cache[key].vischeck_state = false;
+                                          NavEngine::map->vischeck_cache[key].stuck          = true;
                                           NavEngine::map->pather.Reset();
                                           logging::Info("Nav: Connection %d->%d Blacklisted.", current->m_id, next->m_id);
                                       });

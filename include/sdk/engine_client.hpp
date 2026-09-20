@@ -52,6 +52,14 @@ public:
     {
         return vfunc<bool (*)(CEngineClient *)>(this, vtables::engine_client::is_in_game)(this);
     }
+    bool IsConnected()
+    {
+        return vfunc<bool (*)(CEngineClient *)>(this, vtables::engine_client::is_connected)(this);
+    }
+    bool IsDrawingLoadingImage()
+    {
+        return vfunc<bool (*)(CEngineClient *)>(this, vtables::engine_client::is_drawing_loading_image)(this);
+    }
     const char *GetGameDirectory()
     {
         return vfunc<const char *(*)(CEngineClient *)>(this, vtables::engine_client::get_game_directory)(this);

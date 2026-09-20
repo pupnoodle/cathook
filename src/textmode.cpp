@@ -7,17 +7,6 @@
 
 #include "common.hpp"
 
-bool *allowSecureServers{ nullptr };
-
-// valve pls no ban
-
-void EXPOSED_Epic_VACBypass_1337_DoNotSteal_xXx_$1_xXx_MLG()
-{
-    logging::Info("VAC bypass is disabled");
-}
-
-CatCommand fixvac("fixvac", "Lemme in to secure servers", []() { EXPOSED_Epic_VACBypass_1337_DoNotSteal_xXx_$1_xXx_MLG(); });
-
 static InitRoutine init_textmode([]() {
 #if ENABLE_TEXTMODE_STDIN
     logging::Info("[TEXTMODE] Setting up input handling");
@@ -25,9 +14,6 @@ static InitRoutine init_textmode([]() {
     flags |= O_NONBLOCK;
     fcntl(0, F_SETFL, flags);
     logging::Info("[TEXTMODE] stdin is now non-blocking");
-#endif
-#if ENABLE_VAC_BYPASS
-    EXPOSED_Epic_VACBypass_1337_DoNotSteal_xXx_$1_xXx_MLG();
 #endif
 });
 

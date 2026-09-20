@@ -9,8 +9,8 @@
             <AutoVariable width="fill" target="autoparty.auto-lock" label="Autolock party" tooltip="Lock the party when max party size is reached."/>
             <AutoVariable width="fill" target="autoparty.auto-unlock" label="Auto unlock party" tooltip="Unlock the party when max party size has not been reached."/>
             <AutoVariable width="fill" target="autoparty.party-hosts" label="Party hosts" tooltip="Comma-separated list of Steam32 IDs to use as party hosts."/>
-            <AutoVariable width="fill" target="autoparty.ipc_mode" label="IPC mode" tooltip="Use IPC members as party hosts instead."/>
-            <AutoVariable width="fill" target="autoparty.ipc_count" label="IPC host count" tooltip="How many IPC members to use as party hosts."/>
+            <AutoVariable width="fill" target="autoparty.ipc-mode" label="IPC mode" tooltip="Use IPC members as party hosts instead. Works without Steam friendship."/>
+            <AutoVariable width="fill" target="autoparty.ipc-count" label="IPC host count" tooltip="How many IPC members to use as party hosts."/>
             <AutoVariable width="fill" target="autoparty.log" label="Log party leaves and kicks"/>
             <AutoVariable width="fill" target="autoparty.message-kicks" label="Log to chat" tooltip="Log kick notifications to party chat."/>
             <AutoVariable width="fill" target="autoparty.kick-bypass" label="Party kick bypass" tooltip="Makes your party unkickable ingame (with autovote no enabled), also allows you to nullify any vote with f1/f2."/>

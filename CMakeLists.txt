@@ -133,7 +133,8 @@ if(EnableVisuals)
 endif()
 
 configure_file(include/config.h.in ${CMAKE_SOURCE_DIR}/include/config.h @ONLY)
-configure_file(include/version.h.in ${CMAKE_SOURCE_DIR}/include/version.h @ONLY)
+configure_file(include/version.h.in ${CMAKE_BINARY_DIR}/include/version.h @ONLY)
+target_include_directories(cathook BEFORE PRIVATE ${CMAKE_BINARY_DIR}/include)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_CXX_FLAGS "-fexceptions -fno-gnu-unique -fpermissive")
@@ -216,6 +217,7 @@ add_subdirectory(src)
 add_subdirectory(include)
 add_subdirectory(external)
 add_subdirectory(modules)
+target_sources(cathook PRIVATE "${CMAKE_SOURCE_DIR}/src/core/entry.cpp")
 
 set_source_files_properties(
         src/classinfo/classinfo.cpp

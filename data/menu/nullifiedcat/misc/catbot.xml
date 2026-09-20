@@ -36,13 +36,17 @@
             <AutoVariable width="fill" target="autojoin.team" label="Autojoin team" tooltip="Automatically join a team."/>
         </List>
     </Box>
-    <Box padding="12 6 6 6" width="content" height="content" name="Engineer-Bot" y="165">
+    <Box padding="12 6 6 6" width="content" height="content" name="Engineer-Bot">
         <List width="200">
-            <AutoVariable width="fill" target="autorepair.enabled" label="Enable auto repair"/> 
-            <AutoVariable width="fill" target="autorepair.silent" label="Silent"/> 
-            <AutoVariable width="fill" target="autorepair.sentry" label="Repair sentry"/> 
-            <AutoVariable width="fill" target="autorepair.dispenser" label="Repair dispenser"/> 
-            <AutoVariable width="fill" target="autorepair.teleport" label="Repair teleporter"/> 
+            <AutoVariable width="fill" target="autorepair.enabled" label="Enable auto repair"/>
+            <AutoVariable width="fill" target="autorepair.silent" label="Silent"/>
+            <LabeledObject width="fill" label="Repair">
+                <MultiSelect>
+                    <Option name="Sentry" target="autorepair.sentry"/>
+                    <Option name="Dispenser" target="autorepair.dispenser"/>
+                    <Option name="Teleporter" target="autorepair.teleport"/>
+                </MultiSelect>
+            </LabeledObject> 
             <LabeledObject width="fill" label="Priority"> 
                 <Select target="autorepair.priority"> 
                     <Option name="None" value="0"/> 
@@ -51,12 +55,16 @@
                     <Option name="Teleport" value="3"/> 
                 </Select> 
             </LabeledObject> 
-            <AutoVariable width="fill" target="autoupgrade.enabled" label="Enable auto upgrade"/> 
-            <AutoVariable width="fill" target="autoupgrade.sentry" label="Upgrade sentry"/> 
-            <AutoVariable width="fill" target="autoupgrade.sentry.level" label="Upgrade sentry level" min="1" max="3"/> 
-            <AutoVariable width="fill" target="autoupgrade.dispenser" label="Upgrade dispenser"/> 
-            <AutoVariable width="fill" target="autoupgrade.dispenser.level" label="Upgrade dispenser level" min="1" max="3"/> 
-            <AutoVariable width="fill" target="autoupgrade.teleport" label="Upgrade teleporter"/> 
+            <AutoVariable width="fill" target="autoupgrade.enabled" label="Enable auto upgrade"/>
+            <LabeledObject width="fill" label="Upgrade">
+                <MultiSelect>
+                    <Option name="Sentry" target="autoupgrade.sentry"/>
+                    <Option name="Dispenser" target="autoupgrade.dispenser"/>
+                    <Option name="Teleporter" target="autoupgrade.teleport"/>
+                </MultiSelect>
+            </LabeledObject>
+            <AutoVariable width="fill" target="autoupgrade.sentry.level" label="Upgrade sentry level" min="1" max="3"/>
+            <AutoVariable width="fill" target="autoupgrade.dispenser.level" label="Upgrade dispenser level" min="1" max="3"/>
             <AutoVariable width="fill" target="autoupgrade.teleport.level" label="Upgrade teleporter level" min="1" max="3"/> 
         </List>
     </Box>

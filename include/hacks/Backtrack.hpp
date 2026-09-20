@@ -1,6 +1,7 @@
 #pragma once
 #include "common.hpp"
 #include "entityhitboxcache.hpp"
+#include <deque>
 
 namespace hacks::tf2::backtrack
 {
@@ -48,7 +49,7 @@ bool hasData();
 std::optional<BacktrackData> getData();
 std::optional<std::vector<BacktrackData>> getGoodTicks(CachedEntity *ent);
 
-extern std::vector<std::vector<BacktrackData>> bt_data;
+extern std::vector<std::deque<BacktrackData>> bt_data;
 
 #if ENABLE_VISUALS
 extern settings::Boolean chams;

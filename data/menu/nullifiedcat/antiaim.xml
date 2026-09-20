@@ -9,7 +9,7 @@
             <AutoVariable width="fill" target="misc.fakelag-midair-only" label="Fakelag midair only"/>
             <AutoVariable width="fill" target="antiaim.spin-speed" label="Spin speed" tooltip="Speed for yaw spin." min="-45" max="45" step="0.1"/>
             <AutoVariable width="fill" target="antiaim.roll" label="Roll"/>
-            <Box padding="12 6 6 6" width="content" height="content" name="Pitch" y="90">
+            <Box padding="12 6 6 6" width="content" height="content" name="Pitch">
 				<List width="138">
 					<LabeledObject width="fill" label="Fake Pitch">
 						<Select target="antiaim.pitch.fake">
@@ -34,7 +34,7 @@
 					<AutoVariable width="fill" target="antiaim.pitch.static" label="Custom" tooltip="Used when 'Real Pitch' is set to 'Custom'."/>
 				</List>
 			</Box>
-			<Box padding="12 6 6 6" width="content" height="content" name="Yaw" y="120">
+			<Box padding="12 6 6 6" width="content" height="content" name="Yaw">
 				<List width="138">
 					<LabeledObject width="fill" label="Fake Yaw">
 						<Select target="antiaim.yaw.fake">

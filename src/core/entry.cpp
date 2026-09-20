@@ -60,14 +60,6 @@ void *MainThread(void *arg)
     return nullptr;
 }
 
-void __attribute__((constructor)) attach()
-{
-    // std::string test_str = "test";
-    pthread_mutex_init(&mutex_quit, 0);
-    pthread_mutex_lock(&mutex_quit);
-    pthread_create(&thread_main, 0, MainThread, &mutex_quit);
-}
-
 void detach()
 {
     static bool detached = false;
@@ -88,3 +80,17 @@ CatCommand cat_detach("detach", "Detach cathook from TF2", []() {
     hack::game_shutdown = false;
     detach();
 });
+
+namespace
+{
+struct Boot
+{
+    Boot()
+    {
+        pthread_mutex_init(&mutex_quit, 0);
+        pthread_mutex_lock(&mutex_quit);
+        pthread_create(&thread_main, 0, MainThread, &mutex_quit);
+    }
+};
+Boot boot;
+}

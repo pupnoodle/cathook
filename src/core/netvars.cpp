@@ -261,6 +261,11 @@ int lazy_datamap::get() const
     int off = DatamapFieldAny(name);
     if (off <= 0 && name && !std::strcmp(name, "m_pIk"))
         off = DatamapFieldAny("m_pIK");
+    if (off <= 0 && name && !std::strcmp(name, "m_pIk"))
+    {
+        if (uintptr_t insn = gSignatures.GetClientSignature(sigs::base_animating_ik))
+            off = *reinterpret_cast<int *>(insn + 3);
+    }
     if (off <= 0 && name && !std::strcmp(name, "m_pCurrentCommand"))
     {
         const int constraint = netvar.m_hConstraintEntity;

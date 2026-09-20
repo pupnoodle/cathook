@@ -1,7 +1,6 @@
 #pragma once
 
 #include <limits>
-#include <menu/interface/IMessageHandler.hpp>
 #include <settings/Settings.hpp>
 
 namespace hacks::tf2::skinchanger
@@ -13,21 +12,18 @@ namespace zerokernel
 {
 class Container;
 class Text;
-class Box;
-class ScrollableList;
+class Select;
 } // namespace zerokernel
 
 namespace zerokernel::special
 {
 
-class SkinChangerController : public IMessageHandler
+class SkinChangerController
 {
 public:
     explicit SkinChangerController(Container &list);
 
     void update();
-
-    void handleMessage(Message &msg, bool is_relayed) override;
 
 private:
     int editingKey();
@@ -51,8 +47,7 @@ private:
     settings::Variable<int> unusual{};
 
     Text *status{ nullptr };
-    Box *kit_box{ nullptr };
-    ScrollableList *kit_list{ nullptr };
+    Select *kit_select{ nullptr };
     int last_key{ std::numeric_limits<int>::min() };
     bool syncing{ false };
     bool sync_needed{ true };

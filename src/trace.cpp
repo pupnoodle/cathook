@@ -284,13 +284,12 @@ void trace::FilterNoTeammates::SetSelf(IClientEntity *self)
 
 bool trace::FilterNoTeammates::ShouldHitEntity(IHandleEntity *handle, int mask)
 {
-    IClientEntity *entity;
-    ClientClass *clazz;
-
     if (!handle)
         return false;
-    entity = (IClientEntity *) handle;
-    if (ENTITY(EntIndex(entity))->m_iTeam() == ENTITY(EntIndex(m_pSelf))->m_iTeam())
+    auto *entity       = (IClientEntity *) handle;
+    CachedEntity *hit  = ENTITY(EntIndex(entity));
+    CachedEntity *self = ENTITY(EntIndex(m_pSelf));
+    if (hit && self && hit->m_iTeam() == self->m_iTeam())
         return false;
     return true;
 }

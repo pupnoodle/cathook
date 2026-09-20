@@ -17,6 +17,20 @@
 static settings::Boolean tcm{ "debug.tcm", "true" };
 static settings::Boolean should_correct_punch{ "debug.correct-punch", "true" };
 
+float ClientInterpAmount()
+{
+    float interp = 0.0152f;
+    if (cl_interp)
+        interp = cl_interp->GetFloat();
+    if (g_ICvar && cl_interp_ratio)
+    {
+        const ConVar *updaterate = g_ICvar->FindVar("cl_updaterate");
+        if (updaterate && updaterate->GetFloat() > 0.0f)
+            interp = std::max(interp, cl_interp_ratio->GetFloat() / updaterate->GetFloat());
+    }
+    return std::max(0.0f, interp);
+}
+
 std::vector<ConVar *> &RegisteredVarsList()
 {
     static std::vector<ConVar *> list{};
@@ -885,10 +899,9 @@ void AngleVectors3(const QAngle &angles, Vector *forward, Vector *right, Vector 
 
 bool isRapidFire(IClientEntity *wep)
 {
-    weapon_info info(wep);
     bool ret        = GetWeaponData(wep)->m_bUseRapidFireCrits;
     ClientClass *cc = EntClientClass(wep);
-    return ret || (cc && cc->m_ClassID == CL_CLASS(CTFMinigun));
+    return ret || (cc && (cc->m_ClassID == CL_CLASS(CTFMinigun) || cc->m_ClassID == CL_CLASS(CTFFlameThrower)));
 }
 
 char GetUpperChar(ButtonCode_t button)
@@ -1834,13 +1847,20 @@ int SharedRandomInt(unsigned iseed, const char *sharedname, int iMinVal, int iMa
 
 int GetPlayerForUserID(int userID)
 {
+    if (userID && g_IEngine)
+    {
+        int idx = g_IEngine->GetPlayerForUserID(userID);
+        if (idx > 0)
+            return idx;
+    }
     for (auto const &ent : entity_cache::player_cache)
     {
+        if (!ent || !ent->player_info)
+            continue;
         player_info_s player_info;
         int i = ent->m_IDX;
         if (!GetPlayerInfo(i, &player_info))
             continue;
-        // Found player
         if (player_info.userID == userID)
             return i;
     }

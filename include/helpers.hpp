@@ -43,6 +43,8 @@ constexpr float RADPI = 57.295779513082f;
 #define TICKS_TO_TIME(t) (TICK_INTERVAL * (t))
 #define ROUND_TO_TICKS(t) (TICK_INTERVAL * TIME_TO_TICKS(t))
 
+float ClientInterpAmount();
+
 // typedef void ( *FnCommandCallback_t )( const CCommand &command );
 
 template <typename Iter, typename RandomGenerator> Iter select_randomly(Iter start, Iter end, RandomGenerator &g)

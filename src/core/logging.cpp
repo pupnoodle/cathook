@@ -18,7 +18,7 @@
 static settings::Boolean log_to_console{ "hack.log-console", "false" };
 
 static bool shut_down = false;
-std::ofstream logging::handle{ nullptr };
+std::ofstream logging::handle;
 
 #if ENABLE_LOGGING
 void logging::Initialize()

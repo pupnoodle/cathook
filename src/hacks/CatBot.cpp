@@ -15,6 +15,7 @@
 #include "navparser.hpp"
 #include "SettingCommands.hpp"
 #include "glob.h"
+#include "DetourHook.hpp"
 
 namespace hacks::shared::catbot
 {
@@ -23,6 +24,7 @@ static settings::Boolean auto_disguise{ "misc.autodisguise", "true" };
 static settings::Int abandon_if_ipc_bots_gte{ "cat-bot.abandon-if.ipc-bots-gte", "0" };
 static settings::Int abandon_if_humans_lte{ "cat-bot.abandon-if.humans-lte", "0" };
 static settings::Int abandon_if_players_lte{ "cat-bot.abandon-if.players-lte", "0" };
+static settings::Boolean abandon_if_no_navmesh{ "cat-bot.abandon-if.no-navmesh", "false" };
 
 static settings::Boolean micspam{ "cat-bot.micspam.enable", "false" };
 static settings::Int micspam_on{ "cat-bot.micspam.interval-on", "3" };
@@ -34,6 +36,9 @@ static settings::Boolean random_votekicks{ "cat-bot.votekicks", "false" };
 static settings::Boolean votekick_rage_only{ "cat-bot.votekicks.rage-only", "false" };
 static settings::Boolean autoReport{ "cat-bot.autoreport", "true" };
 static settings::Boolean autovote_map{ "cat-bot.autovote-map", "true" };
+static settings::Boolean autoreport_bypass_cooldown{ "cat-bot.autoreport.bypass-cooldown", "false" };
+
+static settings::Boolean autoqueue_report{ "cat-bot.autoqueue-report", "false" };
 
 static settings::Boolean mvm_autoupgrade{ "mvm.autoupgrade", "false" };
 
@@ -585,6 +590,16 @@ void reportall()
     can_report = true;
 }
 
+static DetourHook report_recent_check_detour;
+static char report_recent_check_hook(uint64_t steamid64, char warn)
+{
+    if (*autoreport_bypass_cooldown)
+        return 1;
+    using Fn  = char (*)(uint64_t, char);
+    auto orig = Fn(report_recent_check_detour.GetOriginalFunc());
+    return orig ? orig(steamid64, warn) : 1;
+}
+
 CatCommand report("report_all", "Report all players", []() { reportall(); });
 CatCommand report_uid("report_steamid", "Report with steamid",
                       [](const CCommand &args)
@@ -614,6 +629,154 @@ CatCommand report_uid("report_steamid", "Report with steamid",
                           CSteamID id(steamid, EUniverse::k_EUniversePublic, EAccountType::k_EAccountTypeIndividual);
                           ReportPlayer_fn(id.ConvertToUint64(), 1);
                       });
+
+namespace autoqueue_report_state
+{
+enum class State
+{
+    Idle,
+    Queueing,
+    WaitingForClass,
+    SettlingIn,
+    Reporting,
+    Abandoning,
+    PostAbandonCooldown,
+};
+
+static State state = State::Idle;
+static Timer state_timer{};
+
+static void startCasualQueue()
+{
+    re::CTFPartyClient *client = re::CTFPartyClient::GTFPartyClient();
+    if (!client)
+    {
+        logging::Info("autoqueue-report: CTFPartyClient == null!");
+        return;
+    }
+    if (auto *criteria = client->MutLocalGroupCriteria(client))
+        re::ITFGroupMatchCriteria::SetMatchGroup(criteria, 7);
+    client->LoadSavedCasualCriteria();
+    client->RequestQueueForMatch(7);
+}
+
+static void reset()
+{
+    state = State::Idle;
+}
+
+void update()
+{
+    if (!*autoqueue_report)
+    {
+        if (state != State::Idle)
+            reset();
+        return;
+    }
+
+    re::CTFGCClientSystem *gc = re::CTFGCClientSystem::GTFGCClientSystem();
+    re::CTFPartyClient *pc    = re::CTFPartyClient::GTFPartyClient();
+    bool in_game               = g_IEngine->IsInGame();
+
+    switch (state)
+    {
+    case State::Idle:
+        if (in_game)
+        {
+            state = State::WaitingForClass;
+            break;
+        }
+        if (tfmm::shouldHoldQueueForMapLoad())
+            break;
+        if (!pc || !gc)
+            break;
+        if (gc->BConnectedToMatchServer(false) || gc->BHaveLiveMatch())
+            break;
+        if (pc->BInQueueForMatchGroup(7) || pc->BInQueueForStandby())
+            break;
+        if (pc->GetPendingInvites())
+            break;
+        if (state_timer.test_and_set(5000))
+        {
+            logging::Info("autoqueue-report: queueing for Casual 12v12");
+            startCasualQueue();
+            state = State::Queueing;
+        }
+        break;
+
+    case State::Queueing:
+        if (in_game)
+            state = State::WaitingForClass;
+        break;
+
+    case State::WaitingForClass:
+        if (!in_game)
+        {
+            reset();
+            break;
+        }
+        if (CE_BAD(LOCAL_E))
+            break;
+        if (g_pLocalPlayer->team == TEAM_UNK || g_pLocalPlayer->team == TEAM_SPEC)
+        {
+            hack::ExecuteCommand("autoteam");
+            break;
+        }
+        if (g_pLocalPlayer->clazz == 0)
+            break;
+        logging::Info("autoqueue-report: class chosen, settling in before reporting");
+        state_timer.update();
+        state = State::SettlingIn;
+        break;
+
+    case State::SettlingIn:
+        if (!in_game)
+        {
+            reset();
+            break;
+        }
+        if (state_timer.test_and_set(4000))
+        {
+            reportall();
+            state = State::Reporting;
+        }
+        break;
+
+    case State::Reporting:
+        if (!in_game)
+        {
+            reset();
+            break;
+        }
+        if (!can_report && to_report.empty())
+        {
+            logging::Info("autoqueue-report: done reporting, abandoning match");
+            tfmm::disconnectAndAbandon();
+            state_timer.update();
+            state = State::Abandoning;
+        }
+        break;
+
+    case State::Abandoning:
+        if (!in_game && !(gc && gc->BConnectedToMatchServer(false)))
+        {
+            state_timer.update();
+            state = State::PostAbandonCooldown;
+        }
+        else if (state_timer.test_and_set(15000))
+        {
+            tfmm::disconnectAndAbandon();
+        }
+        break;
+
+    case State::PostAbandonCooldown:
+        if (state_timer.test_and_set(5000))
+            state = State::Idle;
+        break;
+    }
+}
+}
+
 
 Timer crouchcdr{};
 void smart_crouch()
@@ -904,6 +1067,12 @@ void update()
                 return;
             }
         }
+        if (*abandon_if_no_navmesh && !tfmm::isLoadingMap() && !navparser::NavEngine::hasNavMesh())
+        {
+            logging::Info("Abandoning because the current map has no navmesh.");
+            tfmm::abandon();
+            return;
+        }
     }
 }
 
@@ -942,11 +1111,14 @@ static InitRoutine runinit(
     {
         EC::Register(EC::CreateMove, cm, "cm_catbot", EC::average);
         EC::Register(EC::CreateMove, update, "cm2_catbot", EC::average);
+        EC::Register(EC::CreateMove, autoqueue_report_state::update, "cm_autoqueue_report", EC::average);
         EC::Register(EC::LevelInit, level_init, "levelinit_catbot", EC::average);
         EC::Register(EC::Shutdown, shutdown, "shutdown_catbot", EC::average);
 #if ENABLE_VISUALS
         EC::Register(EC::Draw, draw, "draw_catbot", EC::average);
 #endif
+        if (auto addr = gSignatures.GetClientSignature(sigs::report_player_recent_check))
+            report_recent_check_detour.Init(addr, (void *) report_recent_check_hook);
         init();
     });
 } // namespace hacks::shared::catbot

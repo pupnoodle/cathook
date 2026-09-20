@@ -5,6 +5,7 @@
  *      Author: nullifiedcat
  */
 
+#include <settings/Bool.hpp>
 #include <settings/Int.hpp>
 #include "common.hpp"
 #include "hacks/AutoJoin.hpp"
@@ -12,6 +13,7 @@
 
 static settings::Boolean auto_party{ "player-tools.set-party-state", "true" };
 settings::Int queue{ "autoqueue.mode", "7" };
+static settings::Boolean no_queue_while_loading{ "autojoin.no-queue-while-loading", "true" };
 
 CatCommand cmd_queue_start("mm_queue_casual", "Start casual queue", []() { tfmm::startQueue(); });
 CatCommand queue_party("mm_queue_party", "Queue for Party", []() {
@@ -164,15 +166,27 @@ void disconnectAndAbandon()
 void abandon()
 {
     re::CTFGCClientSystem *gc = re::CTFGCClientSystem::GTFGCClientSystem();
-    if (gc && gc->BConnectedToMatchServer(false))
-        gc->AbandonCurrentMatch();
-    else if (!gc)
-        logging::Info("abandon: CTFGCClientSystem == null!");
-    else
+    if (!gc)
     {
-        logging::Info("Not connected to a Match server. Disconnecting normally");
+        logging::Info("abandon: CTFGCClientSystem == null!");
         hack::ExecuteCommand("disconnect");
+        return;
     }
+    gc->AbandonCurrentMatch();
+}
+
+bool isLoadingMap()
+{
+    if (!g_IEngine)
+        return false;
+    if (g_IEngine->IsDrawingLoadingImage())
+        return true;
+    return g_IEngine->IsConnected() && !g_IEngine->IsInGame();
+}
+
+bool shouldHoldQueueForMapLoad()
+{
+    return *no_queue_while_loading && isLoadingMap();
 }
 
 static Timer friend_party_t{};

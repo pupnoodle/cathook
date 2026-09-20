@@ -82,6 +82,7 @@ namespace NavEngine
 
 // Is the Nav engine ready to run?
 bool isReady();
+bool hasNavMesh();
 // Are we currently pathing?
 bool isPathing();
 CNavFile *getNavFile();
@@ -90,6 +91,7 @@ CNavArea *findClosestNavSquare(const Vector origin);
 // Get the path nodes
 std::vector<Crumb> *getCrumbs();
 bool navTo(const Vector &destination, int priority = 5, bool should_repath = true, bool nav_to_local = true, bool is_repath = true);
+float getPathCost(const Vector &start, const Vector &dest);
 // Use when something unexpected happens, e.g. vischeck fails
 void abandonPath();
 // Use to cancel pathing completely

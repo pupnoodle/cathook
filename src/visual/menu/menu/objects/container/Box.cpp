@@ -66,6 +66,7 @@ void zerokernel::Box::setTitle(const std::string &string)
 
 zerokernel::Box::Box() : Container{}
 {
+    stack_columns = true;
     title.setParent(this);
     title.getBoundingBox().setFloating(true);
 }

@@ -16,17 +16,21 @@
     </Box>
     <Box padding="12 6 6 6" width="content" height="content" name="Targets" x="170">
         <List width="150">
-            <AutoVariable width="fill" target="glow.show.players" label="Players"/>
-            <AutoVariable width="fill" target="glow.show.teammates" label="Teammates"/>
-            <AutoVariable width="fill" target="glow.show.disguised" label="Disguised"/>
-            <AutoVariable width="fill" target="glow.self" label="Local player"/>
-            <AutoVariable width="fill" target="glow.show.buildings" label="Buildings"/>
-            <AutoVariable width="fill" target="glow.show.teammate-buildings" label="Team buildings"/>
-            <AutoVariable width="fill" target="glow.show.powerups" label="Powerups"/>
-            <AutoVariable width="fill" target="glow.show.stickies" label="Stickies"/>
-            <AutoVariable width="fill" target="glow.show.ammoboxes" label="Ammo boxes"/>
-            <AutoVariable width="fill" target="glow.show.medkits" label="Health packs"/>
-            <AutoVariable width="fill" target="glow.white-weapons" label="Weapons"/>
+            <LabeledObject width="fill" label="Targets">
+                <MultiSelect>
+                    <Option name="Players" target="glow.show.players"/>
+                    <Option name="Teammates" target="glow.show.teammates"/>
+                    <Option name="Disguised" target="glow.show.disguised"/>
+                    <Option name="Local player" target="glow.self"/>
+                    <Option name="Buildings" target="glow.show.buildings"/>
+                    <Option name="Team buildings" target="glow.show.teammate-buildings"/>
+                    <Option name="Powerups" target="glow.show.powerups"/>
+                    <Option name="Stickies" target="glow.show.stickies"/>
+                    <Option name="Ammo" target="glow.show.ammoboxes"/>
+                    <Option name="Health packs" target="glow.show.medkits"/>
+                    <Option name="Weapons" target="glow.white-weapons"/>
+                </MultiSelect>
+            </LabeledObject>
         </List>
     </Box>
 </Tab>

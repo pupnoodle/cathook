@@ -61,13 +61,20 @@ CatCommand debug_ammo("debug_ammo", "Debug ammo",
 bool resolve_soon[PLAYER_ARRAY_SIZE];
 std::array<Timer, PLAYER_ARRAY_SIZE> resolve_timer{};
 
-int aimbot_target_idx   = 0;
+int aimbot_target_idx   = -1;
 bool aimbot_target_body = false;
 Timer aimbot_shot{};
+
+static bool ValidPlayerIdx(int idx)
+{
+    return idx > 0 && idx < PLAYER_ARRAY_SIZE;
+}
 
 void OnShot()
 {
     ++count_shots;
+    if (!ValidPlayerIdx(aimbot_target_idx))
+        return;
     resolve_soon[aimbot_target_idx] = true;
     resolve_timer[aimbot_target_idx].update();
 }
@@ -80,18 +87,15 @@ void OnHit(bool crit, int idx, bool is_sniper)
         count_hits_sniper++;
     if (crit)
         count_hits_head++;
-    if (crit || aimbot_target_body)
-    {
-        if (idx == aimbot_target_idx)
-        {
-            auto ent = ENTITY(idx);
-            if (CE_GOOD(ent))
-            {
-                hacks::shared::anti_anti_aim::resolver_map[ent->player_info->friendsID].hits_in_a_row++;
-                resolve_soon[idx] = false;
-            }
-        }
-    }
+    if (!(crit || aimbot_target_body))
+        return;
+    if (!ValidPlayerIdx(idx) || idx != aimbot_target_idx)
+        return;
+    auto ent = ENTITY(idx);
+    if (CE_BAD(ent) || !ent->player_info || !ent->player_info->friendsID)
+        return;
+    hacks::shared::anti_anti_aim::resolver_map[ent->player_info->friendsID].hits_in_a_row++;
+    resolve_soon[idx] = false;
 }
 
 void AimbotShot(int idx, bool target_body)
@@ -109,7 +113,7 @@ void Update()
     {
 
         int ammo = CE_INT(LOCAL_E, netvar.m_iAmmo + 4);
-        if (ammo < lastammo && !aimbot_shot.check(500) && !aimbot_target_idx)
+        if (ammo < lastammo && !aimbot_shot.check(500) && aimbot_target_idx <= 0)
             OnShot();
         lastammo = ammo;
         // Resolver
@@ -138,7 +142,10 @@ class HurtListener : public IGameEventListener
 public:
     virtual void FireGameEvent(KeyValues *event)
     {
-        if (strcmp("player_hurt", event->GetName()))
+        if (!event)
+            return;
+        const char *name = event->GetName();
+        if (!name || strcmp("player_hurt", name))
             return;
         if (GetPlayerForUserID(event->GetInt("attacker")) == g_IEngine->GetLocalPlayer())
         {

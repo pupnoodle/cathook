@@ -48,16 +48,14 @@ static void request_update()
 
 ItemSchemaPtr_t GetItemSchema(void)
 {
-    static void *schema = nullptr;
-    if (!schema)
+    static ItemSystem_t fn = nullptr;
+    if (!fn)
     {
-        auto insn = gSignatures.GetClientSignature(sigs::item_schema_lookup_map);
-        if (!insn)
+        fn = reinterpret_cast<ItemSystem_t>(gSignatures.GetClientSignature(sigs::item_schema_lookup_map));
+        if (!fn)
             return nullptr;
-        auto **slot = reinterpret_cast<void **>(cathook::core::memory::resolve_rip_relative(reinterpret_cast<void *>(insn), 3, 7));
-        schema      = slot ? *slot : nullptr;
     }
-    return schema;
+    return fn();
 }
 
 CAttribute::CAttribute(uint16_t iAttributeDefinitionIndex, float flValue)

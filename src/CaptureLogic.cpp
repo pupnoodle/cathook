@@ -255,6 +255,7 @@ void UpdateObjectiveResource()
 #define GET_OWNING_TEAM(index) ((&CE_INT(objective_resource, netvar.m_iOwningTeam))[index])
 #define GET_BASE_CONTROL_POINT_FOR_TEAM(team) ((&CE_INT(objective_resource, netvar.m_iBaseControlPoints))[team])
 #define GET_CP_LOCKED(index) ((&CE_VAR(objective_resource, netvar.m_bCPLocked, bool))[index])
+#define GET_CP_VISIBLE(index) ((&CE_VAR(objective_resource, netvar.m_bCPIsVisible, bool))[index])
 #define IN_MINI_ROUND(index) ((&CE_VAR(objective_resource, netvar.m_bInMiniRound, bool))[index])
 
 bool TeamCanCapPoint(int index, int team)
@@ -301,6 +302,13 @@ int GetFarthestOwnedControlPoint(int team)
 // Can we cap this point?
 bool isPointUseable(int index, int team)
 {
+    int num_cp = GET_NUM_CONTROL_POINTS();
+    if (index < 0 || index >= num_cp || index >= MAX_CONTROL_POINTS)
+        return false;
+
+    if (!GET_CP_VISIBLE(index))
+        return false;
+
     // We Own it, can't cap it
     if (GET_OWNING_TEAM(index) == team)
         return false;
@@ -361,8 +369,6 @@ bool isPointUseable(int index, int team)
     return true;
 }
 
-// Don't constantly update the cap status
-static Timer capstatus_update{};
 // Update the control points
 void UpdateControlPoints()
 {
@@ -373,10 +379,11 @@ void UpdateControlPoints()
     // No control points
     if (!num_cp)
         return;
+    if (num_cp > MAX_CONTROL_POINTS)
+        num_cp = MAX_CONTROL_POINTS;
     // Clear the invalid controlpoints
-    if (num_cp <= MAX_CONTROL_POINTS)
-        for (int i = num_cp; i < MAX_CONTROL_POINTS; i++)
-            controlpoint_data[i] = cp_info();
+    for (int i = num_cp; i < MAX_CONTROL_POINTS; i++)
+        controlpoint_data[i] = cp_info();
 
     for (int i = 0; i < num_cp; i++)
     {
@@ -385,16 +392,9 @@ void UpdateControlPoints()
 
         // Update position (m_vCPPositions[index])
         data.position = (&CE_VAR(objective_resource, netvar.m_vCPPositions, Vector))[i];
+        data.can_cap.at(0) = isPointUseable(i, TEAM_RED);
+        data.can_cap.at(1) = isPointUseable(i, TEAM_BLU);
     }
-
-    if (capstatus_update.test_and_set(1000))
-        for (int i = 0; i < num_cp; i++)
-        {
-            auto &data = controlpoint_data[i];
-            // Check accessibility for both teams, requires alot of checks
-            data.can_cap.at(0) = isPointUseable(i, TEAM_RED);
-            data.can_cap.at(1) = isPointUseable(i, TEAM_BLU);
-        }
 }
 
 // Get the closest controlpoint to cap
@@ -437,11 +437,13 @@ std::optional<Vector> getClosestControlPoint(Vector source, int team)
     float best_distance = FLT_MAX;
     for (auto &cp : controlpoint_data)
     {
+        if (cp.cp_index < 0)
+            continue;
         // Ignore this point
         if (cp.cp_index == ignore_index)
             continue;
         // They can cap
-        if (cp.can_cap.at(team_idx))
+        if (isPointUseable(cp.cp_index, team))
         {
             // Is it closer?
             if (cp.position && (*cp.position).DistTo(source) < best_distance)
@@ -464,8 +466,8 @@ void LevelInit()
 
 void Update()
 {
-    UpdateControlPoints();
     UpdateObjectiveResource();
+    UpdateControlPoints();
 }
 } // namespace cpcontroller
 

@@ -4,6 +4,9 @@
             <AutoVariable width="fill" target="misc.anti-afk" label="Enable antiafk"/>
             <AutoVariable width="fill" target="misc.auto-abandon" label="Enable auto abandon"/>
             <AutoVariable width="fill" target="misc.auto-balance-spam" label="Enable auto balance spam"/>
+            <AutoVariable width="fill" target="misc.pure-bypass" label="Bypass sv_pure" tooltip="Skip loading the server's PureServerWhitelist so custom files are not forced off."/>
+            <AutoVariable width="fill" target="misc.cheats-bypass" label="Cheats bypass" tooltip="Force client sv_cheats to 1 so FCVAR_CHEAT commands work locally."/>
+            <AutoVariable width="fill" target="misc.insecure-bypass" label="Bypass -insecure" tooltip="Allow VAC/secure servers even if the process was started with -insecure or -textmode."/>
             <AutoVariable width="fill" target="misc.die-if-vac" label="Crash on VAC"/>
             <AutoVariable width="fill" target="misc.disconnect-reason" label="Disconnect reason"/>
             <AutoVariable width="fill" target="misc.engine-prediction" label="Engine prediction"/>
@@ -32,7 +35,7 @@
             <AutoVariable width="fill" target="misc.random-name" label="Random name"/>
         </List>
     </Box>
-    <Box height="content" width="content" padding="12 6 6 6" name="Extra" x="215" y="115">
+    <Box height="content" width="content" padding="12 6 6 6" name="Extra" x="215">
         <List width="200">
             <AutoVariable width="fill" target="noisemaker-spam.enable" label="Noisemaker spam"/>
             <AutoVariable width="fill" target="player-tools.betrayal-limit" label="Betrayal limit"/>

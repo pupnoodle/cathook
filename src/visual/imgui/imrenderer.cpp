@@ -110,6 +110,21 @@ void font::rebuild()
     font_config->RasterizerMultiply = 2.f;
     font_config->RasterizerFlags    = 0;
     ImGuiFreeType::BuildFontAtlas(font_new->ContainerAtlas, 0);
+    {
+        const float min_space = float(new_size) * 0.33f;
+        if (font_new->IndexAdvanceX.Size > int(' ') && font_new->IndexAdvanceX[' '] < min_space)
+            font_new->IndexAdvanceX[' '] = min_space;
+        if (ImFontGlyph *space = const_cast<ImFontGlyph *>(font_new->FindGlyphNoFallback(ImWchar(' '))))
+        {
+            if (space->AdvanceX < min_space)
+                space->AdvanceX = min_space;
+        }
+        else
+        {
+            font_new->AddGlyph(ImWchar(' '), 0, 0, 0, 0, 0, 0, 0, 0, min_space);
+            font_new->BuildLookupTable();
+        }
+    }
     ImGui_Impl_CreateFontsTexture(font_new->ContainerAtlas);
     needs_rebuild = false;
     size          = new_size;

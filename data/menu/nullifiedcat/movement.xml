@@ -34,13 +34,14 @@
             <AutoVariable width="fill" target="follow-bot.draw-crumbs" label="Draw crumbs" tooltip="Draw follow path"/>
         </List>
     </Box>
-    <Box padding="12 6 6 6" width="content" height="content" name="NavBot" y="65">
+    <Box padding="12 6 6 6" width="content" height="content" name="NavBot">
         <List width="150">
             <AutoVariable width="fill" target="nav.enabled" label="Enable pathing"/>
             <AutoVariable width="fill" target="nav.draw" label="Draw path"/>
             <AutoVariable width="fill" target="nav.look-at-path" label="Look at path"/>
             <AutoVariable width="fill" target="navbot.enabled" label="Enable NavBot"/>
             <AutoVariable width="fill" target="navbot.capture-objectives" label="Capture objectives" tooltip="Automatically capture objectives (CTF, CP, and PL only)."/>
+            <AutoVariable width="fill" target="navbot.defend-while-patrolling" label="Defend while patrolling" tooltip="When roaming, stand on our control point or payload. Off by default."/>
             <AutoVariable width="fill" target="nav.path-during-setup" label="Path during setup" tooltip="Path during setup. Will also path while the gates are closed."/>
             <AutoVariable width="fill" target="navbot.search-health" label="Search health"/>
             <AutoVariable width="fill" target="navbot.search-ammo" label="Search ammo"/>
@@ -67,7 +68,7 @@
             <!-- <!AutoVariable width="fill" target="navbot.take-teleporters" label="take teleporters"/> -->
         </List>
     </Box>
-    <Box padding="12 6 6 6" width="content" height="content" name="Anti-backstab" x="170" y="300">
+    <Box padding="12 6 6 6" width="content" height="content" name="Anti-backstab" x="170">
         <List width="180">
             <AutoVariable width="fill" target="antibackstab.enable" label="Enable anti-backstab"/>
             <AutoVariable width="fill" target="antibackstab.angle" label="Detection angle"/>
@@ -82,11 +83,16 @@
             <AutoVariable width="fill" target="chargeaim.key" label="Key to hold"/>
         </List>
     </Box>
-    <Box padding="12 6 6 6" width="content" height="content" name="Misc" x="370" y="50">
+    <Box padding="12 6 6 6" width="content" height="content" name="Misc" x="370">
         <List width="150">
             <AutoVariable width="fill" target="misc.no-push" label="Nopush"/>
-            <AutoVariable width="fill" target="misc.roll-speedhack" label="Moonwalk" tooltip="Increase crouched movement speed."/>
-            <AutoVariable width="fill" target="misc.roll-speedhack.forward" label="Moonwalk forwards"/>
+            <LabeledObject width="fill" label="Moonwalk">
+                <MultiSelect>
+                    <Option name="Enable" target="misc.roll-speedhack" tooltip="Increase crouched movement speed."/>
+                    <Option name="Forwards" target="misc.roll-speedhack.forward"/>
+                    <Option name="Navbot" target="misc.roll-speedhack.navbot" tooltip="Crouch-walk while pathing so moonwalk speed applies to the navbot."/>
+                </MultiSelect>
+            </LabeledObject>
         </List>
     </Box>
 </Tab>

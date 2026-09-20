@@ -68,7 +68,7 @@ static float latency_rampup = 0.0f;
 static std::vector<Vector> draw_positions;
 static std::optional<Vector> red_position;
 
-std::vector<std::vector<BacktrackData>> bt_data;
+std::vector<std::deque<BacktrackData>> bt_data;
 // Update our sequences
 void updateDatagram()
 {
@@ -80,9 +80,9 @@ void updateDatagram()
         if (m_nInSequenceNr > lastincomingsequence)
         {
             lastincomingsequence = m_nInSequenceNr;
-            sequences.insert(sequences.begin(), CIncomingSequence(instate, m_nInSequenceNr, g_GlobalVars->realtime));
+            sequences.emplace_front(instate, m_nInSequenceNr, g_GlobalVars->realtime);
         }
-        if (sequences.size() > 2048)
+        if (sequences.size() > 67)
             sequences.pop_back();
     }
 }
@@ -287,27 +287,32 @@ static void CreateMoveEarly()
             ent_data.clear();
             continue;
         }
-        BacktrackData data{};
-        data.entidx      = i;
-        data.m_vecAngles = ent->m_vecAngle();
-        data.m_vecOrigin = ent->m_vecOrigin();
-        data.tickcount   = current_user_cmd->tick_count;
+        const float simtime = CE_FLOAT(ent, netvar.m_flSimulationTime);
+        if (ent_data.empty() || simtime > ent_data.front().simtime + 0.0001f)
+        {
+            BacktrackData data{};
+            data.entidx      = i;
+            data.m_vecAngles = ent->m_vecAngle();
+            data.m_vecOrigin = ent->m_vecOrigin();
+            data.tickcount   = current_user_cmd->tick_count;
+            data.simtime     = simtime;
+            data.animtime    = CE_FLOAT(ent, netvar.m_flAnimTime);
+            data.cycle       = CE_FLOAT(ent, netvar.m_flCycle);
+            data.sequence    = CE_INT(ent, netvar.m_nSequence);
 
-        data.simtime  = CE_FLOAT(ent, netvar.m_flSimulationTime);
-        data.animtime = CE_FLOAT(ent, netvar.m_flAnimTime);
-        data.cycle    = CE_FLOAT(ent, netvar.m_flCycle);
-        data.sequence = CE_INT(ent, netvar.m_nSequence);
+            ent->hitboxes.GetHitbox(0);
+            data.bones = ent->hitboxes.bones;
 
-        ent->hitboxes.GetHitbox(0);
-        // Copy bones (for chams/glow)
-        data.bones = ent->hitboxes.bones;
+            for (int hb = head; hb <= foot_R; ++hb)
+            {
+                if (auto *box = ent->hitboxes.GetHitbox(hb))
+                    data.hitboxes.at(hb) = *box;
+            }
 
-        for (int i = head; i <= foot_R; ++i)
-            data.hitboxes.at(i) = *ent->hitboxes.GetHitbox(i);
-
-        ent_data.insert(ent_data.begin(), data);
-        if (ent_data.size() > MAX_BACKTRACK_TICKS)
-            ent_data.pop_back();
+            ent_data.push_front(std::move(data));
+            if (ent_data.size() > MAX_BACKTRACK_TICKS)
+                ent_data.pop_back();
+        }
 
         for (auto &tick : ent_data)
         {

@@ -7,6 +7,6 @@
         </List>
     </Box>
     <Box padding="12 6 6 6" width="content" height="content" name="Weapon skin" x="245">
-        <ScrollableList id="skinchanger-controls" width="320" height="390"/>
+        <List id="skinchanger-controls" width="280"/>
     </Box>
 </Tab>

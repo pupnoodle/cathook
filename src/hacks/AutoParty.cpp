@@ -52,6 +52,7 @@
 
 #include "common.hpp"
 #include "hack.hpp"
+#include "hacks/AutoParty.hpp"
 #include "ipc.hpp"
 
 namespace hacks::tf2::autoparty
@@ -162,6 +163,44 @@ void repopulate(std::string str)
     }
 }
 
+static uint32 steamid_account(uint64_t steamid)
+{
+    return static_cast<uint32>(steamid);
+}
+
+static CSteamID account_steamid(uint32 account)
+{
+    return CSteamID(account, EUniverse::k_EUniversePublic, EAccountType::k_EAccountTypeIndividual);
+}
+
+bool AllowPartyWithSteamID(uint64_t steamid)
+{
+    if (!*enabled)
+        return false;
+    const uint32 account = steamid_account(steamid);
+    if (!account)
+        return false;
+    for (uint32 host : party_hosts)
+    {
+        if (host == account)
+            return true;
+    }
+#if ENABLE_IPC
+    if (ipc::peer)
+    {
+        auto *mem = ipc::peer->memory;
+        for (int i = 0; i < cat_ipc::max_peers; ++i)
+        {
+            if (mem->peer_data[i].free)
+                continue;
+            if (mem->peer_user_data[i].friendid == account)
+                return true;
+        }
+    }
+#endif
+    return false;
+}
+
 // Is this bot a designated party host?
 bool is_host()
 {
@@ -180,11 +219,37 @@ bool is_host()
 void find_party()
 {
     log_debug("No party members and not a party host; requesting to join with each party host");
-    for (int i = 0; i < party_hosts.size(); ++i)
+    re::CTFPartyClient *client = re::CTFPartyClient::GTFPartyClient();
+    for (uint32 host : party_hosts)
     {
-        hack::ExecuteCommand("tf_party_request_join_user " + std::to_string(party_hosts[i]));
+        if (!host)
+            continue;
+        CSteamID id = account_steamid(host);
+        if (client)
+            client->BRequestJoinPlayer(id);
+        else
+            hack::ExecuteCommand("tf_party_request_join_user " + std::to_string(id.ConvertToUint64()));
     }
 }
+
+#if ENABLE_IPC
+void invite_ipc_peers(re::CTFPartyClient *client)
+{
+    if (!client || !ipc::peer)
+        return;
+    const uint32 self = g_ISteamUser->GetSteamID().GetAccountID();
+    auto *mem         = ipc::peer->memory;
+    for (int i = 0; i < cat_ipc::max_peers; ++i)
+    {
+        if (mem->peer_data[i].free)
+            continue;
+        const uint32 fid = mem->peer_user_data[i].friendid;
+        if (!fid || fid == self)
+            continue;
+        client->BInvitePlayerToParty(account_steamid(fid));
+    }
+}
+#endif
 
 // Locks the party, prevents more members from joining
 void lock_party()
@@ -251,6 +316,9 @@ void party_routine()
                     log_debug("No members; unlocking the party");
                     unlock_party();
                 }
+#if ENABLE_IPC
+                invite_ipc_peers(client);
+#endif
             }
             else
             {
@@ -328,6 +396,10 @@ void party_routine()
                     // Unlock the party if it's not full
                     if (*auto_unlock and members.size() < *max_size)
                         unlock_party();
+#if ENABLE_IPC
+                    if (members.size() < *max_size)
+                        invite_ipc_peers(client);
+#endif
                 }
                 else
                 {

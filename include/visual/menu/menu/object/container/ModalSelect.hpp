@@ -25,6 +25,8 @@ public:
 
     //
 
-    void addOption(std::string name, std::string value, std::optional<std::string> tooltip);
+    void addOption(std::string name, std::string value, std::optional<std::string> tooltip, settings::IVariable *toggle = nullptr);
+
+    bool stay_open{ false };
 };
 } // namespace zerokernel

@@ -44,6 +44,43 @@ public:
         typedef int (*fn_t)(IClientEntity *);
         return vfunc<fn_t>(self, vtables::weapon::get_weapon_id, 0)(self);
     }
+    inline static bool IsMeleeWeapon(IClientEntity *self)
+    {
+        if (!self)
+            return false;
+        if (re::C_BaseCombatWeapon::GetSlot(self) == 2)
+            return true;
+        switch (GetWeaponID(self))
+        {
+        case 1:
+        case 2:
+        case 3:
+        case 4:
+        case 5:
+        case 6:
+        case 7:
+        case 8:
+        case 9:
+        case 10:
+        case 11:
+        case 64:
+        case 72:
+        case 74:
+        case 82:
+        case 86:
+        case 96:
+        case 104:
+        case 106:
+            return true;
+        default:
+            break;
+        }
+        auto **vt = *reinterpret_cast<void ***>(self);
+        if (!vt)
+            return false;
+        static void *melee_helper = reinterpret_cast<void *>(gSignatures.GetClientSignature(sigs::ctf_weapon_base_melee_calc_is_attack_critical));
+        return melee_helper && vt[vtables::weapon::calc_is_attack_critical_helper] == melee_helper;
+    }
     inline static bool IsViewModelFlipped(IClientEntity *self)
     {
         static lazy_netvar flip{ "DT_TFWeaponBase", "m_bFlipViewModel" };
@@ -85,7 +122,7 @@ public:
             return false;
         static ConVar *tf_weapon_criticals       = g_ICvar->FindVar("tf_weapon_criticals");
         static ConVar *tf_weapon_criticals_melee = g_ICvar->FindVar("tf_weapon_criticals_melee");
-        if (self && re::C_BaseCombatWeapon::GetSlot(self) == 2)
+        if (self && IsMeleeWeapon(self))
         {
             int melee = tf_weapon_criticals_melee ? tf_weapon_criticals_melee->GetInt() : 1;
             if (melee == 0)
@@ -171,15 +208,17 @@ public:
 
         return 0;
     }
-    inline static uint16_t &weapon_info_handle_(IClientEntity *self)
+    inline static int &weapon_info_handle_(IClientEntity *self)
     {
-        static uint16_t dummy;
-        return netvar.m_iWeaponMode ? *(uint16_t *) (uintptr_t(self) + netvar.m_iWeaponMode) : dummy;
+        static int dummy;
+        const int off = netvar.m_iWeaponMode ? int(netvar.m_iWeaponMode) : 3952;
+        return self ? *(int *) (uintptr_t(self) + off) : dummy;
     }
     inline static float &crit_bucket_(IClientEntity *self)
     {
         static float dummy;
-        return netvar.m_flCritTokenBucket ? *(float *) (uintptr_t(self) + netvar.m_flCritTokenBucket) : dummy;
+        const int off = netvar.m_flCritTokenBucket ? int(netvar.m_flCritTokenBucket) : 3716;
+        return self ? *(float *) (uintptr_t(self) + off) : dummy;
     }
 };
 } // namespace re

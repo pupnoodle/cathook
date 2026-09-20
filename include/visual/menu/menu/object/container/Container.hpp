@@ -62,5 +62,7 @@ public:
 public:
     bool reorder_needed{ true };
     std::vector<std::unique_ptr<BaseMenuObject>> objects{};
+    bool stack_columns{ false };
+    int stack_gap{ 6 };
 };
 } // namespace zerokernel
