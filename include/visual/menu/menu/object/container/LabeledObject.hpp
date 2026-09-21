@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <string>
 #include <menu/BaseMenuObject.hpp>
 #include <menu/object/Text.hpp>
 #include <menu/ObjectFactory.hpp>
@@ -32,5 +33,6 @@ public:
     void createLabel();
 
     Text *label{ nullptr };
+    std::string full_label{};
 };
 } // namespace zerokernel

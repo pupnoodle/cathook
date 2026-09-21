@@ -119,7 +119,7 @@ bool Menu::handleSdlEvent(SDL_Event *event)
     if (!ready)
         return false;
 
-    if (!modal_stack.empty())
+    if (!in_game && !modal_stack.empty())
         return modal_stack.back()->handleSdlEvent(event);
 
     if (wm)
@@ -134,10 +134,10 @@ void Menu::render()
     wm->render();
     wm->renderDebugOverlay();
 
-    // TODO maybe move these into WM...
-    for (auto &m : modal_stack)
+    if (!in_game)
     {
-        m->render();
+        for (auto &m : modal_stack)
+            m->render();
     }
 
     if (tooltip.shown)
@@ -170,9 +170,10 @@ void Menu::update()
 
     wm->update();
 
-    for (auto &m : modal_stack)
+    if (!in_game)
     {
-        m->update();
+        for (auto &m : modal_stack)
+            m->update();
     }
 
     if (tooltip.shown)
@@ -245,13 +246,16 @@ void Menu::handleMessage(Message &msg, bool is_relayed)
 
 void Menu::updateHovered()
 {
-    for (auto i = 0; i < modal_stack.size(); ++i)
+    if (!in_game)
     {
-        auto &m = modal_stack[modal_stack.size() - 1 - i];
-        if (m->containsMouse())
+        for (auto i = 0; i < modal_stack.size(); ++i)
         {
-            m->updateIsHovered();
-            return;
+            auto &m = modal_stack[modal_stack.size() - 1 - i];
+            if (m->containsMouse())
+            {
+                m->updateIsHovered();
+                return;
+            }
         }
     }
     wm->updateIsHovered();
@@ -285,6 +289,14 @@ bool Menu::isInGame()
 void Menu::setInGame(bool flag)
 {
     in_game = flag;
+    if (in_game)
+        closeAllModals();
+}
+
+void Menu::closeAllModals()
+{
+    modal_stack.clear();
+    modal_close_next_frame = 0;
 }
 
 void Menu::loadFromFile(std::string directory, std::string path)

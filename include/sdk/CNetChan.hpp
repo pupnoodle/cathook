@@ -84,6 +84,22 @@ public:
     {
         return vfunc<bool (*)(CNetChan *, bool)>(this, vtables::netchan::transmit)(this, only_reliable);
     }
+    bool IsLoopback() const
+    {
+        return vfunc<bool (*)(const CNetChan *)>(const_cast<CNetChan *>(this), vtables::netchan::is_loopback)(this);
+    }
+    void SetChoked()
+    {
+        vfunc<void (*)(CNetChan *)>(this, vtables::netchan::set_choked)(this);
+    }
+    int SendDatagram(bf_write *data)
+    {
+        return vfunc<int (*)(CNetChan *, bf_write *)>(this, vtables::netchan::send_datagram)(this, data);
+    }
+    bool CanPacket() const
+    {
+        return vfunc<bool (*)(const CNetChan *)>(const_cast<CNetChan *>(this), vtables::netchan::can_packet)(this);
+    }
     INetChannel *AsINetChannel()
     {
         return reinterpret_cast<INetChannel *>(this);

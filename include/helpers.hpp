@@ -21,8 +21,29 @@ void SetCVarInterface(ICvar *iface);
 
 constexpr float PI    = 3.14159265358979323846f;
 constexpr float RADPI = 57.295779513082f;
+
+inline float AngleNormalizeTF(float angle)
+{
+    angle = fmodf(angle, 360.0f);
+    if (angle > 180.0f)
+        angle -= 360.0f;
+    if (angle < -180.0f)
+        angle += 360.0f;
+    return angle;
+}
+
+inline float AngleNormalizePitchVisual(float pitch)
+{
+    pitch = AngleNormalizeTF(pitch);
+    if (pitch > 90.0f)
+        pitch = 90.0f;
+    if (pitch < -90.0f)
+        pitch = -90.0f;
+    return pitch;
+}
 // #define DEG2RAD(x) (float)(x) * (float)(PI / 180.0f)
 
+#include <cmath>
 #include <enums.hpp>
 #include <conditions.hpp>
 #include <entitycache.hpp>

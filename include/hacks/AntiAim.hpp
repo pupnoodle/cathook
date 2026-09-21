@@ -14,6 +14,7 @@ namespace hacks::shared::antiaim
 {
 extern bool force_fakelag;
 extern float used_yaw;
+extern float used_fake_yaw;
 void SetSafeSpace(int safespace);
 bool ShouldAA(CUserCmd *cmd);
 void ProcessUserCmd(CUserCmd *cmd);

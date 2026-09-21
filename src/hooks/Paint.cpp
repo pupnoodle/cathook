@@ -14,14 +14,12 @@
 #include "drawmgr.hpp"
 #endif
 extern settings::Boolean die_if_vac;
-void prof_arm_main_thread();
 static Timer checkmmban{};
 namespace hooked_methods
 {
 
 DEFINE_HOOKED_METHOD(Paint, void, IEngineVGui *this_, PaintMode_t mode)
 {
-    prof_arm_main_thread();
     if (!isHackActive())
     {
         return original::Paint(this_, mode);
@@ -44,39 +42,18 @@ DEFINE_HOOKED_METHOD(Paint, void, IEngineVGui *this_, PaintMode_t mode)
 #endif
     }
 
+    hack::PumpEngine();
+
+#if ENABLE_TEXTMODE
+    (void) mode;
+#endif
+#if ENABLE_TEXTMODE
+    if (true)
+#else
     if (mode & PaintMode_t::PAINT_UIPANELS)
+#endif
     {
         hitrate::Update();
-#if ENABLE_IPC
-        static Timer nametimer{};
-        if (nametimer.test_and_set(1000 * 10))
-        {
-            if (ipc::peer)
-            {
-                ipc::StoreClientData();
-            }
-        }
-        static Timer ipc_timer{};
-        if (ipc_timer.test_and_set(1000))
-        {
-            if (ipc::peer)
-            {
-                if (ipc::peer->HasCommands())
-                {
-                    ipc::peer->ProcessCommands();
-                }
-                ipc::Heartbeat();
-                ipc::UpdateTemporaryData();
-            }
-        }
-#endif
-        if (!hack::command_stack().empty())
-        {
-            PROF_SECTION(PT_command_stack);
-            std::lock_guard<std::mutex> guard(hack::command_stack_mutex);
-            g_IEngine->ClientCmd_Unrestricted(hack::command_stack().top().c_str());
-            hack::command_stack().pop();
-        }
 #if !ENABLE_VISUALS
         if (*die_if_vac && checkmmban.test_and_set(1000))
         {
@@ -97,7 +74,6 @@ DEFINE_HOOKED_METHOD(Paint, void, IEngineVGui *this_, PaintMode_t mode)
 #if ENABLE_GLEZ_DRAWING
         render_cheat_visuals();
 #endif
-        // Call all paint functions
         EC::run(EC::Paint);
     }
 

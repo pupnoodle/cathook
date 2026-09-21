@@ -276,10 +276,22 @@ static void UnHookFs()
 static InitRoutineEarly nullify_textmode(
     []()
     {
+        std::vector<unsigned char> nop5 = { 0x90, 0x90, 0x90, 0x90, 0x90 };
+        static BytePatch sdl_hidden(gSignatures.GetLauncherSignature, sigs::sdl_create_window_flags, 0x2, { 0x08 });
+        static BytePatch sdl_skip_vk(gSignatures.GetLauncherSignature, sigs::sdl_create_window_flags, 0x9, { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 });
+        static BytePatch sdl_show_resize(gSignatures.GetLauncherSignature, sigs::sdl_show_window_resize, 0x4, nop5);
+        static BytePatch sdl_show_create(gSignatures.GetLauncherSignature, sigs::sdl_show_window_after_create, 0x7, nop5);
+        static BytePatch sdl_show_present(gSignatures.GetLauncherSignature, sigs::sdl_show_window_present, 0x4, nop5);
+
         ReduceRamUsage();
         static BytePatch patch5(gSignatures.GetEngineSignature(sigs::video_mode_setup_startup_graphic), { 0xC3 });
         static BytePatch patch6(gSignatures.GetEngineSignature, sigs::material_system_swap_buffers, 0x0, { 0x31, 0xC0, 0x40, 0xC3 });
         static BytePatch patch7(gSignatures.GetEngineSignature, sigs::v_render_view, 0x0, { 0xC3 });
+        sdl_hidden.Patch();
+        sdl_skip_vk.Patch();
+        sdl_show_resize.Patch();
+        sdl_show_create.Patch();
+        sdl_show_present.Patch();
         patch5.Patch();
         patch6.Patch();
         patch7.Patch();

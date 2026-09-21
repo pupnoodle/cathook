@@ -15,6 +15,11 @@ struct brutedata
     int hits_in_a_row{ 0 };
     Vector original_angle{};
     Vector new_angle{};
+    float yaw_history[8]{};
+    int yaw_hist_count{ 0 };
+    int yaw_hist_index{ 0 };
+    bool has_attacker_hint{ false };
+    float attacker_hint_yaw{ 0.0f };
 };
 
 namespace hacks::shared::anti_anti_aim

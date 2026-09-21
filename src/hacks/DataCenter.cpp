@@ -55,42 +55,52 @@ static boost::unordered_flat_map<std::string,std::string> dc_name_map{
     {"ams", "Amsterdam"},
     {"atl", "Atlanta"},
     {"bom", "Mumbai"},
+    {"bom2", "Mumbai"},
+    {"dfw", "Dallas"},
     {"dxb", "Dubai"},
-    {"eat", "Moses Lake/Washington"},
-    {"mwh", "Moses Lake/Washington"},
+    {"eat", "Wenatchee"},
+    {"eze", "Buenos Aires"},
     {"fra", "Frankfurt"},
+    {"fsn", "Falkenstein"},
     {"gnrt", "Tokyo (gnrt)"},
     {"gru", "Sao Paulo"},
-    {"hkg", "Honk Kong"},
-    {"iad", "Sterling/Virginia"},
+    {"gum", "Guam"},
+    {"hel", "Helsinki"},
+    {"helm", "Helsinki"},
+    {"hkg", "Hong Kong"},
+    {"iad", "Sterling"},
     {"jnb", "Johannesburg"},
-    {"lax", "Los Angelos"},
+    {"lax", "Los Angeles"},
     {"lhr", "London"},
     {"lim", "Lima"},
     {"lux", "Luxembourg"},
     {"maa", "Chennai"},
+    {"maa2", "Chennai"},
     {"mad", "Madrid"},
-    {"man", "Manilla"},
+    {"man", "Manila"},
+    {"mwh", "Wenatchee"},
     {"okc", "Oklahoma City"},
     {"ord", "Chicago"},
     {"par", "Paris"},
     {"scl", "Santiago"},
-    {"sea", "Seaattle"},
+    {"sea", "Seattle"},
+    {"seo", "Seoul"},
     {"sgp", "Singapore"},
     {"sto", "Stockholm (Kista)"},
     {"sto2", "Stockholm (Bromma)"},
     {"syd", "Sydney"},
-    {"tyo", "Tokyo (North)"},
-    {"tyo2", "Tokyo (North)"},
-    {"tyo1", "Tokyo (South)"},
+    {"tyo", "Tokyo"},
+    {"tyo1", "Tokyo"},
+    {"tyo2", "Tokyo"},
+    {"tyo3", "Tokyo"},
     {"vie", "Vienna"},
     {"waw", "Warsaw"}};
 // clang-format on
-static std::vector<std::string> eu_datacenters            = { { "ams" }, { "fra" }, { "lhr" }, { "mad" }, { "par" }, { "sto" }, { "sto2" }, { "waw" }, { "lux" }, { "lux1" }, { "lux2" } };
-static std::vector<std::string> north_america_datacenters = { { "atl" }, { "eat" }, { "mwh" }, { "iad" }, { "lax" }, { "okc" }, { "ord" }, { "sea" } };
-static std::vector<std::string> south_america_datacenters = { { "gru" }, { "lim" }, { "scl" } };
-static std::vector<std::string> asia_datacenters          = { { "bom" }, { "dxb" }, { "gnrt" }, { "hkg" }, { "maa" }, { "man" }, { "sgp" }, { "tyo" }, { "tyo2" }, { "tyo1" } };
-static std::vector<std::string> oceana_datacenters        = { { "syd" }, { "vie" } };
+static std::vector<std::string> eu_datacenters            = { { "ams" }, { "fra" }, { "fsn" }, { "hel" }, { "lhr" }, { "mad" }, { "par" }, { "sto" }, { "sto2" }, { "vie" }, { "waw" } };
+static std::vector<std::string> north_america_datacenters = { { "atl" }, { "dfw" }, { "eat" }, { "iad" }, { "lax" }, { "ord" }, { "sea" } };
+static std::vector<std::string> south_america_datacenters = { { "eze" }, { "gru" }, { "lim" }, { "scl" } };
+static std::vector<std::string> asia_datacenters          = { { "bom2" }, { "dxb" }, { "gum" }, { "hkg" }, { "maa2" }, { "seo" }, { "sgp" }, { "tyo" } };
+static std::vector<std::string> oceana_datacenters        = { { "syd" } };
 static std::vector<std::string> africa_datacenters        = { { "jnb" } };
 
 static CatCommand print("dc_print", "Print codes of all available data centers",
@@ -162,6 +172,9 @@ static void OnRegionsUpdate(std::string regions)
 }
 
 static int (*o_GetDirectPingToPOP)(void *self, SteamNetworkingPOPID_decl cid);
+static int (*o_GetRelayNetworkStatus)(void *self, void *details);
+static bool (*o_CheckPingDataUpToDate)(void *self, float max_age);
+
 static int h_GetDirectPingToPOP(void *self, SteamNetworkingPOPID_decl cid)
 {
     CidStr_t cidStr;
@@ -177,6 +190,24 @@ static int h_GetDirectPingToPOP(void *self, SteamNetworkingPOPID_decl cid)
     return *restrict ? UniformRandomInt(500, 800) : o_GetDirectPingToPOP(self, cid);
 }
 
+static int h_GetRelayNetworkStatus(void *self, void *details)
+{
+    if (details)
+    {
+        auto *d = reinterpret_cast<int *>(details);
+        d[0] = 100;
+        d[1] = 0;
+        d[2] = 100;
+        d[3] = 100;
+    }
+    return 100;
+}
+
+static bool h_CheckPingDataUpToDate(void *, float)
+{
+    return true;
+}
+
 static void Hook(bool on)
 {
     static hooks::VMTHook v;
@@ -184,8 +215,11 @@ static void Hook(bool on)
     if (on)
     {
         v.Set(g_ISteamNetworkingUtils);
+        v.HookMethod(h_GetRelayNetworkStatus, 1, &o_GetRelayNetworkStatus);
+        v.HookMethod(h_CheckPingDataUpToDate, 7, &o_CheckPingDataUpToDate);
         v.HookMethod(h_GetDirectPingToPOP, 9, &o_GetDirectPingToPOP);
         v.Apply();
+        logging::Info("DataCenter: hooked SteamNetworkingUtils relay+ping");
     }
     else
         v.Release();

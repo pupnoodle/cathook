@@ -12,7 +12,6 @@
             <AutoVariable width="fill" target="misc.flashlight-spam" label="Flashlight spam" tooltip="Used in Half Life Death Match."/>
             <AutoVariable width="fill" target="misc.force-halloween" label="Force halloween"/>
             <AutoVariable width="fill" target="misc.no-lerp" label="Nolerp"/>
-            <AutoVariable width="fill" target="misc.full-auto" label="Fully automated firing"/>
             <AutoVariable width="fill" target="misc.show-spectators" label="Show spectators"/>
             <AutoVariable width="fill" target="misc.tauntslide" label="Tauntslide"/>
             <AutoVariable width="fill" target="announcer" label="Enable announcer"/>
@@ -40,7 +39,7 @@
             <AutoVariable width="fill" target="player-tools.betrayal-limit" label="Betrayal limit"/>
             <AutoVariable width="fill" target="player-tools.ignore.hoovy" label="Ignore hoovies"/>
             <AutoVariable width="fill" target="player-tools.ignore.taunting" label="Ignore taunting players"/>
-            <AutoVariable width="fill" target="player-tools.auto-party" label="Automatically add party state"/>
+            <AutoVariable width="fill" target="player-tools.set-party-state" label="Automatically add party state"/>
             <AutoVariable width="fill" target="killstreak.enable" label="Enable killstreak"/>
             <AutoVariable width="fill" target="misc.backpack-expander.enabled" label="Expand backpack"/>
             <AutoVariable width="fill" target="misc.backpack-expander.slot-count" label="Backpack slots" min="1" max="3000"/>

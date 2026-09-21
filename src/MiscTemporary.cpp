@@ -52,14 +52,6 @@ static bool send_packets{ true };
 
 static void CL_SendMove_dispatch()
 {
-    if (bSendPackets && !*bSendPackets)
-    {
-        *bSendPackets = true;
-        auto *info    = g_IEngine ? g_IEngine->GetNetChannelInfo() : nullptr;
-        if (info)
-            info->m_nChokedPackets()++;
-        return;
-    }
     hacks::tf2::nospread::CL_SendMove_hook();
 }
 

@@ -5,7 +5,7 @@
             <Include path="nullifiedcat/crits.xml"/>
             <Include path="nullifiedcat/visuals.xml"/>
             <Include path="nullifiedcat/antiaim.xml"/>
-            <Include path="nullifiedcat/warp.xml"/>
+            <Include path="nullifiedcat/ticks.xml"/>
             <Include path="nullifiedcat/movement.xml"/>
             <Include path="nullifiedcat/misc.xml"/>
             <Include path="nullifiedcat/chat.xml"/>

@@ -19,13 +19,13 @@
 #include "HookedMethods.hpp"
 #include "nospread.hpp"
 #include "Warp.hpp"
+#include "Tickbase.hpp"
 
 settings::Boolean roll_speedhack{ "misc.roll-speedhack", "false" };
 settings::Boolean roll_speedhack_navbot{ "misc.roll-speedhack.navbot", "false" };
 static settings::Boolean forward_speedhack{ "misc.roll-speedhack.forward", "false" };
 settings::Boolean engine_pred{ "misc.engine-prediction", "true" };
 static settings::Boolean debug_projectiles{ "debug.projectiles", "false" };
-static settings::Int fullauto{ "misc.full-auto", "0" };
 static settings::Boolean fuckmode{ "misc.fuckmode", "false" };
 
 class CMoveData;
@@ -35,6 +35,10 @@ static Vector original_origin;
 static Vector original_net_origin;
 static Vector original_velocity;
 static int original_tickbase;
+static int original_flags;
+static bool original_ducked;
+static bool have_flags;
+static bool have_ducked;
 
 void RunEnginePrediction(IClientEntity *ent, CUserCmd *ucmd)
 {
@@ -52,6 +56,12 @@ void RunEnginePrediction(IClientEntity *ent, CUserCmd *ucmd)
     original_net_origin = netvar.m_vecOrigin ? NET_VECTOR(ent, netvar.m_vecOrigin) : original_origin;
     original_velocity   = NET_VECTOR(ent, netvar.vVelocity);
     original_tickbase   = NET_INT(ent, netvar.nTickBase);
+    have_flags = netvar.iFlags;
+    if (have_flags)
+        original_flags = NET_INT(ent, netvar.iFlags);
+    have_ducked = netvar.m_bDucked;
+    if (have_ducked)
+        original_ducked = NET_BYTE(ent, netvar.m_bDucked);
 
     CUserCmd defaultCmd{};
     if (ucmd == nullptr)
@@ -95,6 +105,10 @@ void FinishEnginePrediction(IClientEntity *ent, CUserCmd *ucmd)
         NET_VECTOR(ent, netvar.m_vecOrigin) = original_net_origin;
     re::C_BaseEntity::SetAbsOrigin(ent, original_origin);
     NET_INT(ent, netvar.nTickBase) = original_tickbase;
+    if (have_flags)
+        NET_INT(ent, netvar.iFlags) = original_flags;
+    if (have_ducked)
+        NET_BYTE(ent, netvar.m_bDucked) = original_ducked;
     original_origin.Invalidate();
 }
 } // namespace engine_prediction
@@ -130,7 +144,6 @@ void PrecalculateCanShoot()
     calculated_can_shoot = next_attack <= server_time;
 }
 
-static int attackticks = 0;
 namespace hooked_methods
 {
 bool speedHack(CUserCmd *cmd, bool &ret)
@@ -159,7 +172,7 @@ bool speedHack(CUserCmd *cmd, bool &ret)
     {
         cmd->forwardmove *= -1.0f;
         cmd->sidemove *= -1.0f;
-        cmd->viewangles.x = 91;
+        cmd->viewangles.x = 91.0f;
     }
     float reverse_yaw = RAD2DEG(atan2f(-cmd->sidemove, -cmd->forwardmove));
     float boost       = maxspeed > 1.0f ? fmaxf(move_length, maxspeed) : move_length;
@@ -259,7 +272,7 @@ DEFINE_HOOKED_METHOD(CreateMove, bool, void *this_, float input_sample_time, CUs
         entity_cache::Invalidate();
     //	PROF_BEGIN();
     // Do not update if in warp, since the entities will stay identical either way
-    if (!hacks::tf2::warp::in_warp)
+    if (!hacks::tf2::warp::in_warp && !hacks::tf2::tickbase::shifting)
     {
         PROF_SECTION(EntityCache);
         entity_cache::Update();
@@ -272,29 +285,6 @@ DEFINE_HOOKED_METHOD(CreateMove, bool, void *this_, float input_sample_time, CUs
     {
         PROF_SECTION(CM_LocalPlayer);
         g_pLocalPlayer->Update();
-    }
-    {
-        static int cm_logs = 0;
-        if (cm_logs < 8)
-        {
-            IClientEntity *lp = CE_GOOD(g_pLocalPlayer->entity) ? RAW_ENT(g_pLocalPlayer->entity) : nullptr;
-            logging::Info("CreateMove #%d in_game=%d invalid=%d idx=%d", cm_logs, (int) g_IEngine->IsInGame(), (int) g_Settings.bInvalid, lp ? EntIndex(lp) : -1);
-            if (lp)
-            {
-                const Vector &o = re::C_BaseEntity::GetAbsOrigin(lp);
-                Vector eye      = re::C_BasePlayer::GetEyePosition(lp);
-                Vector &ang     = re::C_BasePlayer::GetEyeAngles(lp);
-                auto *cc        = EntClientClass(lp);
-                logging::Info("  class=%s origin=%.1f %.1f %.1f eye=%.1f %.1f %.1f ang=%.1f %.1f dormant=%d", cc && cc->GetName() ? cc->GetName() : "?", o.x, o.y, o.z, eye.x, eye.y, eye.z, ang.x, ang.y, (int) EntIsDormant(lp));
-            }
-            if (CE_GOOD(LOCAL_W))
-            {
-                IClientEntity *w = RAW_ENT(LOCAL_W);
-                auto *wcc        = EntClientClass(w);
-                logging::Info("  weapon class=%s id=%d slot=%d", wcc && wcc->GetName() ? wcc->GetName() : "?", re::C_TFWeaponBase::GetWeaponID(w), re::C_BaseCombatWeapon::GetSlot(w));
-            }
-            cm_logs++;
-        }
     }
     PrecalculateCanShoot();
     if (firstcm)
@@ -319,14 +309,6 @@ DEFINE_HOOKED_METHOD(CreateMove, bool, void *this_, float input_sample_time, CUs
                 g_Settings.is_create_move = false;
                 return ret;
             }
-            if (current_user_cmd->buttons & IN_ATTACK)
-                ++attackticks;
-            else
-                attackticks = 0;
-            if (fullauto)
-                if (current_user_cmd->buttons & IN_ATTACK)
-                    if (attackticks % *fullauto + 1 < *fullauto)
-                        current_user_cmd->buttons &= ~IN_ATTACK;
             g_pLocalPlayer->isFakeAngleCM = false;
             static int fakelag_queue      = 0;
             if (CE_GOOD(LOCAL_E))
@@ -386,7 +368,7 @@ DEFINE_HOOKED_METHOD(CreateMove, bool, void *this_, float input_sample_time, CUs
             g_pLocalPlayer->UpdateEye();
         }
 
-        if (hacks::tf2::warp::in_warp)
+        if (hacks::tf2::warp::in_warp || hacks::tf2::tickbase::shifting)
             EC::run(EC::CreateMoveWarp);
         else
             EC::run(EC::CreateMove);
@@ -401,6 +383,9 @@ DEFINE_HOOKED_METHOD(CreateMove, bool, void *this_, float input_sample_time, CUs
 
     // TODO Auto Steam Friend
 
+#if ENABLE_TEXTMODE
+    hack::PumpEngine();
+#endif
 #if ENABLE_IPC
     {
         PROF_SECTION(CM_playerlist);

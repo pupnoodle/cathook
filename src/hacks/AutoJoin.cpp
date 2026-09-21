@@ -66,20 +66,37 @@ void updateSearch()
         return;
     }
 
+    static Timer stuck_connect{};
+    static bool tracking_stuck = false;
+    re::CTFGCClientSystem *gc = re::CTFGCClientSystem::GTFGCClientSystem();
+    re::CTFPartyClient *pc    = re::CTFPartyClient::GTFPartyClient();
+    const bool live_match     = gc && gc->BHaveLiveMatch();
+    if (g_IEngine->IsConnected() && !tfmm::isLoadingMap() && !live_match)
+    {
+        if (!tracking_stuck)
+        {
+            stuck_connect.update();
+            tracking_stuck = true;
+        }
+        else if (stuck_connect.test_and_set(25000))
+        {
+            logging::Info("autojoin: stuck connecting (FakeIP/SDR), disconnecting");
+            g_IEngine->ClientCmd_Unrestricted("disconnect");
+            tracking_stuck = false;
+        }
+    }
+    else
+        tracking_stuck = false;
+
     if (tfmm::shouldHoldQueueForMapLoad())
     {
 #if not ENABLE_VISUALS
         queue_time.update();
 #endif
-        re::CTFPartyClient *pc = re::CTFPartyClient::GTFPartyClient();
-        if (pc && (pc->BInQueueForMatchGroup(tfmm::getQueue()) || pc->BInQueueForStandby()))
-            tfmm::leaveQueue();
         return;
     }
 
-    re::CTFGCClientSystem *gc = re::CTFGCClientSystem::GTFGCClientSystem();
-    re::CTFPartyClient *pc    = re::CTFPartyClient::GTFPartyClient();
-    int invites               = pc ? pc->GetPendingInvites() : 0;
+    int invites = pc ? pc->GetPendingInvites() : 0;
 
     if (current_user_cmd && gc && gc->BConnectedToMatchServer(false) && gc->BHaveLiveMatch())
     {
@@ -93,9 +110,9 @@ void updateSearch()
     //            !gc->BHaveLiveMatch())
     //        tfmm::leaveQueue();
 
-    if (auto_requeue)
+    if (auto_requeue && !*auto_queue)
     {
-        if (startqueue_timer.check(5000) && gc && !gc->BConnectedToMatchServer(false) && !gc->BHaveLiveMatch() && !invites)
+        if (startqueue_timer.check(15000) && gc && !gc->BConnectedToMatchServer(false) && !gc->BHaveLiveMatch() && !invites)
             if (pc && !(pc->BInQueueForMatchGroup(tfmm::getQueue()) || pc->BInQueueForStandby()))
             {
                 logging::Info("Starting queue for standby, Invites %d", invites);
@@ -105,15 +122,36 @@ void updateSearch()
 
     if (auto_queue)
     {
-        if (startqueue_timer.check(5000) && gc && !gc->BConnectedToMatchServer(false) && !gc->BHaveLiveMatch() && !invites)
-            if (pc && !(pc->BInQueueForMatchGroup(tfmm::getQueue()) || pc->BInQueueForStandby()))
+        if (gc && gc->BHaveLiveMatch() && !g_IEngine->IsInGame() && !tfmm::isLoadingMap())
+        {
+            static Timer abandon_stuck{};
+            static bool tracking_abandon = false;
+            if (!tracking_abandon)
             {
-                logging::Info("Starting queue, Invites %d", invites);
-                tfmm::startQueue();
+                abandon_stuck.update();
+                tracking_abandon = true;
             }
+            else if (abandon_stuck.test_and_set(45000))
+            {
+                logging::Info("autojoin: abandoning stuck live match");
+                tfmm::abandon();
+                tracking_abandon = false;
+            }
+        }
+        const bool in_queue = pc && (pc->BInQueueForMatchGroup(tfmm::getQueue()) || pc->BInQueueForStandby());
+        static Timer last_queue_sent{};
+        static Timer queue_status{};
+        if (queue_status.test_and_set(15000))
+            logging::Info("autojoin: inqueue=%d live=%d invites=%d", (int) in_queue, (int) live_match, invites);
+        if (in_queue)
+            last_queue_sent.update();
+        else if (last_queue_sent.check(180000) && gc && !gc->BConnectedToMatchServer(false) && !gc->BHaveLiveMatch() && !invites)
+        {
+            logging::Info("Starting queue, Invites %d", invites);
+            tfmm::startQueue();
+            last_queue_sent.update();
+        }
     }
-    
-    startqueue_timer.test_and_set(5000);
 #if not ENABLE_VISUALS
     if (queue_time.test_and_set(1200000))
     {

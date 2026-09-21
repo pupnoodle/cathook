@@ -7,9 +7,11 @@
 
 #define __USE_GNU
 #include <execinfo.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 #include <dlfcn.h>
 #include <pthread.h>
 #include <atomic>
@@ -111,6 +113,61 @@ void hack::ExecuteCommand(const std::string &command)
     hack::command_stack().push(command);
 }
 
+namespace hack
+{
+void PumpEngine()
+{
+    if (!initialized || !g_IEngine)
+        return;
+
+#if ENABLE_IPC
+    CNetChan *ch = g_IEngine->GetNetChannelInfo();
+    if (ch && !hooks::netchannel.IsHooked(reinterpret_cast<void *>(ch)))
+    {
+        hooks::netchannel.Set(ch);
+        hooks::netchannel.HookMethod(HOOK_ARGS(SendDatagram));
+        hooks::netchannel.HookMethod(HOOK_ARGS(CanPacket));
+        hooks::netchannel.HookMethod(HOOK_ARGS(SendNetMsg));
+        hooks::netchannel.HookMethod(HOOK_ARGS(Shutdown));
+        hooks::netchannel.Apply();
+        ipc::UpdateServerAddress();
+    }
+    static Timer nametimer{};
+    if (nametimer.test_and_set(1000 * 10) && ipc::peer)
+        ipc::StoreClientData();
+    static Timer ipc_timer{};
+    if (ipc_timer.test_and_set(1000) && ipc::peer)
+    {
+        if (ipc::peer->HasCommands())
+            ipc::peer->ProcessCommands();
+        ipc::Heartbeat();
+        ipc::UpdateTemporaryData();
+    }
+#endif
+
+    if (!command_stack().empty() && g_IEngine)
+    {
+        std::string cmd;
+        {
+            std::lock_guard<std::mutex> guard(command_stack_mutex);
+            if (!command_stack().empty())
+            {
+                cmd = command_stack().top();
+                command_stack().pop();
+            }
+        }
+        if (!cmd.empty())
+            g_IEngine->ClientCmd_Unrestricted(cmd.c_str());
+    }
+
+#if ENABLE_TEXTMODE
+    static Timer paint_timer{};
+    if (paint_timer.test_and_set(50))
+        EC::run(EC::Paint);
+#endif
+}
+}
+
 extern "C" __attribute__((visibility("default"))) void ch_exec(const char *cmd)
 {
     if (cmd && *cmd)
@@ -132,77 +189,65 @@ std::string getFileName(std::string filePath)
     return filePath;
 }
 
-static pthread_t g_prof_main_thread;
-static void prof_dump_handler(int)
-{
-    void *bt[32];
-    int n = backtrace(bt, 32);
-    char hdr[64];
-    int hl = snprintf(hdr, sizeof(hdr), "===STACK===\n");
-    write(2, hdr, hl);
-    for (int i = 0; i < n; ++i)
-    {
-        Dl_info di;
-        char buf[256];
-        if (dladdr(bt[i], &di) && di.dli_fname)
-        {
-            uintptr_t off   = uintptr_t(bt[i]) - uintptr_t(di.dli_fbase);
-            const char *bas = strrchr(di.dli_fname, '/');
-            int len         = snprintf(buf, sizeof(buf), "%s+0x%lx\n", bas ? bas + 1 : di.dli_fname, (unsigned long) off);
-            write(2, buf, len);
-        }
-    }
-}
-
-void prof_arm_main_thread()
-{
-    static std::atomic<bool> armed{ false };
-    if (armed.exchange(true))
-        return;
-    g_prof_main_thread = pthread_self();
-    struct sigaction sa
-    {
-    };
-    sa.sa_handler = prof_dump_handler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    sigaction(SIGUSR2, &sa, nullptr);
-    std::thread(
-        []
-        {
-            while (true)
-            {
-                usleep(300000);
-                pthread_kill(g_prof_main_thread, SIGUSR2);
-            }
-        })
-        .detach();
-}
-
 void critical_error_handler(int signum)
 {
     namespace st = boost::stacktrace;
     ::signal(SIGSEGV, SIG_DFL);
     ::signal(SIGABRT, SIG_DFL);
     passwd *pwd = getpwuid(getuid());
-    std::ofstream out(strfmt("/tmp/cathook-%s-%d-segfault.log", pwd->pw_name, getpid()).get());
-    out << std::unitbuf;
-
-    Dl_info info;
-    if (!dladdr(reinterpret_cast<void *>(hack::ExecuteCommand), &info))
-        return;
-
-    for (auto i : st::stacktrace())
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/cathook-%s-%d-segfault.log", pwd ? pwd->pw_name : "unknown", getpid());
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd >= 0)
     {
-        Dl_info info2;
-        if (dladdr(i.address(), &info2))
+        char hdr[64];
+        int n = snprintf(hdr, sizeof(hdr), "signal %d\n", signum);
+        if (n > 0)
+            (void) write(fd, hdr, (size_t) n);
+        void *bt[32];
+        int frames = backtrace(bt, 32);
+        for (int i = 0; i < frames; ++i)
         {
-            uintptr_t offset = uintptr_t(i.address()) - uintptr_t(info2.dli_fbase);
-            out << (!strcmp(info2.dli_fname, info.dli_fname) ? "cathook" : info2.dli_fname) << '\t' << (void *) offset << std::endl;
+            Dl_info di{};
+            char line[256];
+            int len = 0;
+            if (dladdr(bt[i], &di) && di.dli_fname)
+            {
+                const char *bas = strrchr(di.dli_fname, '/');
+                len = snprintf(line, sizeof(line), "%s\t0x%lx\n", bas ? bas + 1 : di.dli_fname, (unsigned long) (uintptr_t(bt[i]) - uintptr_t(di.dli_fbase)));
+            }
+            else
+                len = snprintf(line, sizeof(line), "%p\n", bt[i]);
+            if (len > 0)
+                (void) write(fd, line, (size_t) len);
         }
+        close(fd);
     }
 
-    out.close();
+    try
+    {
+        std::ofstream out(path, std::ios::app);
+        out << std::unitbuf;
+
+        Dl_info info;
+        if (dladdr(reinterpret_cast<void *>(hack::ExecuteCommand), &info))
+        {
+            for (auto i : st::stacktrace())
+            {
+                Dl_info info2;
+                if (dladdr(i.address(), &info2) && info2.dli_fname)
+                {
+                    uintptr_t offset = uintptr_t(i.address()) - uintptr_t(info2.dli_fbase);
+                    out << (!strcmp(info2.dli_fname, info.dli_fname) ? "cathook" : info2.dli_fname) << '\t' << (void *) offset << std::endl;
+                }
+            }
+        }
+        out.close();
+    }
+    catch (...)
+    {
+    }
+
     ::raise(SIGABRT);
 }
 #endif

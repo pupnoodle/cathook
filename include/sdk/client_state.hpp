@@ -16,6 +16,7 @@ public:
         std::uint32_t lastoutgoingcommand  = uint32_t(vtables::client_state::lastoutgoingcommand);
         std::uint32_t chokedcommands       = uint32_t(vtables::client_state::chokedcommands);
         std::uint32_t last_command_ack     = uint32_t(vtables::client_state::last_command_ack);
+        std::uint32_t m_flNextCmdTime      = uint32_t(vtables::client_state::signon_state) + 4;
     };
 
     static Layout &layout()
@@ -54,6 +55,10 @@ public:
     int &last_command_ack()
     {
         return at<int>(layout().last_command_ack);
+    }
+    double &m_flNextCmdTime()
+    {
+        return at<double>(layout().m_flNextCmdTime);
     }
 };
 

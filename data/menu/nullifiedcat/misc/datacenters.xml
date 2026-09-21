@@ -3,11 +3,12 @@
         <List width="250">
             <AutoVariable width="fill" target="dc.enable" label="Enable datacenter selector"/>
             <AutoVariable width="fill" target="dc.restrict" label="Find only selected regions"/>
-            <AutoVariable width="fill" target="dc.toggle-europe" label="Toggle Europe"/>
-            <AutoVariable width="fill" target="dc.toggle-north-america" label="Toggle North America"/>
-            <AutoVariable width="fill" target="dc.toggle-south-america" label="Toggle South America"/>
-            <AutoVariable width="fill" target="dc.toggle-asia" label="Toggle Asia"/>
-            <AutoVariable width="fill" target="dc.toggle-oceania" label="Toggle Oceania"/>
+            <AutoVariable width="fill" target="dc.toggle-europe" label="Toggle Europe" tooltip="ams, fra, fsn, hel, lhr, mad, par, sto, sto2, vie, waw"/>
+            <AutoVariable width="fill" target="dc.toggle-north-america" label="Toggle North America" tooltip="atl, dfw, eat, iad, lax, ord, sea"/>
+            <AutoVariable width="fill" target="dc.toggle-south-america" label="Toggle South America" tooltip="eze, gru, lim, scl"/>
+            <AutoVariable width="fill" target="dc.toggle-asia" label="Toggle Asia" tooltip="bom2, dxb, gum, hkg, maa2, seo, sgp, tyo"/>
+            <AutoVariable width="fill" target="dc.toggle-oceania" label="Toggle Oceania" tooltip="syd"/>
+            <AutoVariable width="fill" target="dc.toggle-africa" label="Toggle Africa" tooltip="jnb"/>
             <AutoVariable width="fill" target="dc.regions" label="Region list (advanced users only)"/>
         </List>
     </Box>

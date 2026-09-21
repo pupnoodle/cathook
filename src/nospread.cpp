@@ -23,11 +23,18 @@
 #include "DetourHook.hpp"
 #include <regex>
 #include <boost/algorithm/string.hpp>
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <deque>
+#include <limits>
+#include <vector>
 #include "usercmd.hpp"
 #include "MiscTemporary.hpp"
 #include "AntiAim.hpp"
 #include "WeaponData.hpp"
 #include "Warp.hpp"
+#include "sdk/CNetChan.hpp"
 
 namespace hacks::tf2::nospread
 {
@@ -41,12 +48,17 @@ static settings::Int specmode("nospread.spectator-mode", "1");
 settings::Boolean bullet("nospread.bullet", "false");
 settings::Int debug_nospread("nospread.debug", "0");
 settings::Boolean center_cone{ "nospread.center-cone", "true" };
+static settings::Boolean tightest_pellet{ "nospread.tightest-pellet", "true" };
 settings::Boolean draw{ "nospread.draw-info", "true" };
 settings::Boolean draw_mantissa{ "nospread.draw-info.mantissa", "false" };
 settings::Boolean correct_ping{ "nospread.correct-ping", "true" };
 settings::Boolean use_avg_latency{ "nospread.use-average-latency", "false" };
 settings::Boolean extreme_accuracy{ "nospread.use-extreme-accuracy", "false" };
+static settings::Int sync_samples{ "nospread.sync-samples", "12" };
+static settings::Float resync_interval{ "nospread.resync-interval", "2" };
 bool is_syncing = false;
+
+static constexpr std::size_t k_delta_history_max = 24;
 
 bool shouldNoSpread(bool _projectile)
 {
@@ -69,6 +81,57 @@ bool shouldNoSpread(bool _projectile)
     return _projectile ? *projectile : *bullet;
 }
 
+static bool IsLoopbackNet()
+{
+    auto *ch = g_IEngine ? g_IEngine->GetNetChannelInfo() : nullptr;
+    return ch && NetChan(ch)->IsLoopback();
+}
+
+static float AimFireDistance(const Vector &view)
+{
+    Vector eye = g_pLocalPlayer->v_Eye;
+    Vector fwd;
+    AngleVectors2(VectorToQAngle(view), &fwd);
+    Vector end = eye + fwd * 8192.0f;
+
+    trace_t tr{};
+    Ray_t ray;
+    ray.Init(eye, end);
+    if (CE_GOOD(LOCAL_E))
+        trace::filter_no_player.SetSelf(RAW_ENT(LOCAL_E));
+    g_ITrace->TraceRay(ray, MASK_SOLID, &trace::filter_no_player, &tr);
+
+    float dist = (tr.endpos - eye).Length();
+    if (!std::isfinite(dist) || dist < 32.0f)
+        return 8192.0f;
+    return dist;
+}
+
+static Vector ProjectileMuzzleOffset(int class_id)
+{
+    if (class_id == CL_CLASS(CTFCompoundBow) || class_id == CL_CLASS(CTFCrossbow) || class_id == CL_CLASS(CTFShotgunBuildingRescue))
+        return Vector(23.5f, 8.0f, -3.0f);
+    return Vector(23.5f, 12.0f, -3.0f);
+}
+
+static void ApplyGrenadeVelocitySpread(Vector &angles, IClientEntity *)
+{
+    float speed = 0.0f, grav = 0.0f, start_vel = 0.0f;
+    if (!GetProjectileData(LOCAL_W, speed, grav, start_vel) || speed <= 0.0f)
+        return;
+    if (GetPowerupOnPlayer(LOCAL_E) == precision)
+        speed = 3000.0f;
+
+    Vector fwd, right, up;
+    AngleVectors3(VectorToQAngle(angles), &fwd, &right, &up);
+    Vector velocity = fwd * speed + up * 200.0f;
+    Vector adjusted = velocity + up * RandomFloat(-10.0f, 10.0f) + right * RandomFloat(-10.0f, 10.0f);
+    Vector vel_ang, adj_ang;
+    VectorAngles(velocity, vel_ang);
+    VectorAngles(adjusted, adj_ang);
+    angles -= (adj_ang - vel_ang);
+}
+
 static void CreateMove()
 {
     if (CE_BAD(LOCAL_E) || CE_BAD(LOCAL_W))
@@ -77,9 +140,6 @@ static void CreateMove()
     if (!shouldNoSpread(true))
         return;
 
-    // Credits to https://www.unknowncheats.me/forum/team-fortress-2-a/139094-projectile-nospread.html
-
-    // Set up Random Seed
     int cmd_num = current_late_user_cmd->command_number;
     RandomSeed(MD5_PseudoRandom(cmd_num) & 0x7FFFFFFF);
     SharedRandomInt(MD5_PseudoRandom(cmd_num) & 0x7FFFFFFF, "SelectWeightedSequence", 0, 0, 0);
@@ -93,60 +153,43 @@ static void CreateMove()
     // Beggars check
     if (CE_INT(LOCAL_W, netvar.iItemDefinitionIndex) == 730)
     {
-        // Player has 0 loaded rockets and reload mode is not 2 (reloading and ready to release)
         bool no_loaded_rockets = CE_INT(LOCAL_W, netvar.m_iClip1) == 0 && CE_INT(LOCAL_W, netvar.iReloadMode) != 2;
-        // Player is attacking and reload is not 0 (not reloading)
-        bool loading_rockets = current_late_user_cmd->buttons & IN_ATTACK && CE_INT(LOCAL_W, netvar.iReloadMode) != 0;
+        bool loading_rockets   = current_late_user_cmd->buttons & IN_ATTACK && CE_INT(LOCAL_W, netvar.iReloadMode) != 0;
         if (no_loaded_rockets || loading_rockets)
             return;
     }
-    // Huntsman check
     else if (LOCAL_W->m_iClassID() == CL_CLASS(CTFCompoundBow))
     {
         if (current_late_user_cmd->buttons & IN_ATTACK || CE_FLOAT(LOCAL_W, netvar.flChargeBeginTime) == 0)
             return;
     }
-    // Rest of weapons
     else if (!(current_late_user_cmd->buttons & IN_ATTACK))
         return;
 
-    int wid = LOCAL_W->m_iClassID();
-    if (wid == CL_CLASS(CTFSyringeGun))
+    if (g_pLocalPlayer->v_OrigViewangles == current_late_user_cmd->viewangles)
+        g_pLocalPlayer->bUseSilentAngles = true;
+
+    IClientEntity *weapon = RAW_ENT(LOCAL_W);
+    IClientEntity *player = RAW_ENT(LOCAL_E);
+    const int class_id    = LOCAL_W->m_iClassID();
+    Vector view           = re::C_BasePlayer::GetLocalEyeAngles(player);
+    Vector &out           = current_late_user_cmd->viewangles;
+
+    if (class_id == CL_CLASS(CTFCompoundBow) || class_id == CL_CLASS(CTFCrossbow) || class_id == CL_CLASS(CTFShotgunBuildingRescue))
     {
-        if (g_pLocalPlayer->v_OrigViewangles == current_late_user_cmd->viewangles)
-            g_pLocalPlayer->bUseSilentAngles = true;
-        float spread = 1.5f;
-        current_late_user_cmd->viewangles.x -= RandomFloat(-spread, spread);
-        current_late_user_cmd->viewangles.y -= RandomFloat(-spread, spread);
-        fClampAngle(current_late_user_cmd->viewangles);
-    }
-    else if (wid == CL_CLASS(CTFCompoundBow))
-    {
-        Vector view = re::C_BasePlayer::GetLocalEyeAngles(RAW_ENT(LOCAL_E));
-        if (g_pLocalPlayer->v_OrigViewangles == current_late_user_cmd->viewangles)
-            g_pLocalPlayer->bUseSilentAngles = true;
-
-        Vector spread;
-        Vector src;
-
-        re::C_TFWeaponBase::GetProjectileFireSetupHuntsman(RAW_ENT(LOCAL_W), RAW_ENT(LOCAL_E), Vector(23.5f, -8.f, 8.f), &src, &spread, false, 2000.0f);
-
-        spread -= view;
-        current_late_user_cmd->viewangles -= spread;
-        fClampAngle(current_late_user_cmd->viewangles);
+        Vector src, fired;
+        re::C_TFWeaponBase::GetProjectileFireSetup(weapon, player, ProjectileMuzzleOffset(class_id), &src, &fired, false, AimFireDistance(out));
+        out -= (fired - view);
     }
     else
     {
-        Vector view = re::C_BasePlayer::GetLocalEyeAngles(RAW_ENT(LOCAL_E));
-        if (g_pLocalPlayer->v_OrigViewangles == current_late_user_cmd->viewangles)
-            g_pLocalPlayer->bUseSilentAngles = true;
-
-        Vector spread = re::C_TFWeaponBase::GetSpreadAngles(RAW_ENT(LOCAL_W));
-
-        spread -= view;
-        current_late_user_cmd->viewangles -= spread;
-        fClampAngle(current_late_user_cmd->viewangles);
+        Vector spread = re::C_TFWeaponBase::GetSpreadAngles(weapon);
+        out -= (spread - view);
+        if (class_id == CL_CLASS(CTFGrenadeLauncher) || class_id == CL_CLASS(CTFCannon) || class_id == CL_CLASS(CTFPipebombLauncher))
+            ApplyGrenadeVelocitySpread(out, weapon);
     }
+
+    fClampAngle(out);
 }
 
 static InitRoutine init([]() { EC::Register(EC::CreateMoveLate, CreateMove, "nospread_cm", EC::very_late); });
@@ -176,6 +219,7 @@ static double sent_client_floattime          = 0.0;
 static double last_correction                = 0.0;
 static double write_usercmd_correction       = 0.0;
 static double last_sync_delta_time           = 0.0;
+static std::deque<double> time_deltas{};
 static float prediction_seed                 = 0.0;
 static bool use_usercmd_seed                 = false;
 static float current_weapon_spread           = 0.0;
@@ -186,101 +230,151 @@ static CUserCmd user_cmd_backup;
 
 static float CalculateMantissaStep(float flValue)
 {
-    int iRawValue = reinterpret_cast<int &>(flValue);
-    int iExponent = (iRawValue >> 23) & 0xFF;
-    return powf(2, iExponent - (127 + 23));
+    if (!std::isfinite(flValue))
+        return 0.0f;
+    const float next = std::nextafter(flValue, std::numeric_limits<float>::infinity());
+    const float step = (next - flValue) * 1000.0f;
+    if (!std::isfinite(step) || step <= 0.0f)
+        return 0.0f;
+    return powf(2.0f, ceilf(logf(step) / logf(2.0f)));
+}
+
+static double MedianDelta()
+{
+    if (time_deltas.empty())
+        return float_time_delta;
+    std::vector<double> sorted(time_deltas.begin(), time_deltas.end());
+    std::sort(sorted.begin(), sorted.end());
+    const std::size_t n = sorted.size();
+    if (n % 2u)
+        return sorted[n / 2];
+    return 0.5 * (sorted[n / 2 - 1] + sorted[n / 2]);
+}
+
+static void PushTimeDelta(double sample)
+{
+    if (!std::isfinite(sample))
+        return;
+    time_deltas.push_back(sample);
+    const std::size_t cap = std::clamp(std::size_t(std::max(1, int(*sync_samples))), std::size_t(1), k_delta_history_max);
+    while (time_deltas.size() > cap)
+        time_deltas.pop_front();
+    float_time_delta = MedianDelta();
 }
 
 float GetServerCurTime()
 {
-    // Calculate on our own accord
-    float server_time = g_GlobalVars->interval_per_tick * CE_INT(LOCAL_E, netvar.nTickBase);
-    return server_time;
+    if (g_GlobalVars && g_GlobalVars->curtime > 0.0f)
+        return g_GlobalVars->curtime;
+    return g_GlobalVars->interval_per_tick * CE_INT(LOCAL_E, netvar.nTickBase);
 }
 
-// Does the shot have any spread in general?
-bool IsPerfectShot(IClientEntity *weapon, float provided_time = 0.0 /*used for optimization*/)
+static int BulletsPerShot(IClientEntity *weapon)
+{
+    int n = GetWeaponData(weapon)->m_nBulletsPerShot;
+    if (n >= 1)
+        n = int(ATTRIB_HOOK_FLOAT(float(n), "mult_bullets_per_shot", weapon, nullptr, true));
+    return n >= 1 ? n : 1;
+}
+
+bool IsPerfectShot(IClientEntity *weapon, float provided_time = 0.0)
 {
     float server_time       = provided_time == 0.0 ? GetServerCurTime() : provided_time;
     float time_since_attack = server_time - NET_FLOAT(weapon, netvar.flLastFireTime);
-
-    int nBulletsPerShot = GetWeaponData(weapon)->m_nBulletsPerShot;
-    if (nBulletsPerShot >= 1)
-        nBulletsPerShot = ATTRIB_HOOK_FLOAT(nBulletsPerShot, "mult_bullets_per_shot", weapon, 0x0, true);
-    else
-        nBulletsPerShot = 1;
-    if ((nBulletsPerShot == 1 && time_since_attack > 1.25) || (nBulletsPerShot > 1 && time_since_attack > 0.25))
-        return true;
-    return false;
+    const int n             = BulletsPerShot(weapon);
+    if (!((n == 1 && time_since_attack > 1.25f) || (n > 1 && time_since_attack > 0.25f)))
+        return false;
+    return ATTRIB_HOOK_FLOAT(0.0f, "mult_spread_scale_first_shot", weapon, nullptr, true) == 0.0f;
 }
 
-// Applies nospread
 void ApplySpreadCorrection(Vector &angles, int seed, float spread)
 {
     if (CE_BAD(LOCAL_E) || !LOCAL_E->m_bAlivePlayer() || CE_BAD(LOCAL_W))
         return;
     IClientEntity *weapon = RAW_ENT(LOCAL_W);
 
-    bool is_first_shot_perfect = IsPerfectShot(weapon);
+    const bool is_first_shot_perfect = IsPerfectShot(weapon);
+    int nBulletsPerShot              = BulletsPerShot(weapon);
+    const float first_shot_scale     = ATTRIB_HOOK_FLOAT(0.0f, "mult_spread_scale_first_shot", weapon, nullptr, true);
 
-    int nBulletsPerShot = GetWeaponData(weapon)->m_nBulletsPerShot;
-    if (nBulletsPerShot >= 1)
-        nBulletsPerShot = ATTRIB_HOOK_FLOAT(nBulletsPerShot, "mult_bullets_per_shot", RAW_ENT(LOCAL_W), 0x0, true);
-    else
-        nBulletsPerShot = 1;
-
-    // We only have one shot or we do not want to center the cone or it's perfect, so no need to adjust
-    if ((nBulletsPerShot == 1 || !center_cone) && is_first_shot_perfect)
+    if ((nBulletsPerShot == 1 || (!center_cone && !tightest_pellet)) && is_first_shot_perfect)
         return;
 
-    // We only correct one bullet in this case
-    if (!center_cone)
+    if (!center_cone && !tightest_pellet)
         nBulletsPerShot = 1;
 
-    std::vector<Vector> bullet_corrections;
+    struct Pellet
+    {
+        Vector dir;
+        float radial;
+    };
+    std::vector<Pellet> pellets;
+    pellets.reserve(nBulletsPerShot);
     Vector average_spread(0.0f);
+    fClampAngle(angles);
+
+    Vector vShootForward, vShootRight, vShootUp;
+    AngleVectors3(VectorToQAngle(angles), &vShootForward, &vShootRight, &vShootUp);
 
     for (int i = 0; i < nBulletsPerShot; i++)
     {
         RandomSeed(seed + i);
-        float flX = RandomFloat(-0.5, 0.5) + RandomFloat(-0.5, 0.5);
-        float flY = RandomFloat(-0.5, 0.5) + RandomFloat(-0.5, 0.5);
-
-        // This is our perfect shot, do not adjust
+        float flX, flY;
         if (is_first_shot_perfect && !i)
         {
             flX = 0.0f;
             flY = 0.0f;
         }
-        fClampAngle(angles);
-        Vector vShootForward, vShootRight, vShootUp;
-        AngleVectors3(VectorToQAngle(angles), &vShootForward, &vShootRight, &vShootUp);
+        else if (!i && first_shot_scale != 0.0f)
+        {
+            flX = RandomFloat(-first_shot_scale, first_shot_scale) + RandomFloat(-first_shot_scale, first_shot_scale);
+            flY = RandomFloat(-first_shot_scale, first_shot_scale) + RandomFloat(-first_shot_scale, first_shot_scale);
+        }
+        else
+        {
+            flX = RandomFloat(-0.5f, 0.5f) + RandomFloat(-0.5f, 0.5f);
+            flY = RandomFloat(-0.5f, 0.5f) + RandomFloat(-0.5f, 0.5f);
+        }
 
         Vector fixed_spread = vShootForward + (vShootRight * flX * spread) + (vShootUp * flY * spread);
         fixed_spread.NormalizeInPlace();
-        // Add to the average
         average_spread += fixed_spread;
-        // Add to Bullet spread vector
-        bullet_corrections.push_back(fixed_spread);
+        pellets.push_back({ fixed_spread, flX * flX + flY * flY });
     }
-    // Turn it into an actual average
-    average_spread /= nBulletsPerShot;
+    if (pellets.empty())
+        return;
+    average_spread /= float(nBulletsPerShot);
 
-    // What we set our Vector to, start with FLT_MAX as deviation
-    Vector fixed_spread(FLT_MAX);
-
-    // Get the bullet closest to the average
-    for (auto &spread : bullet_corrections)
+    Vector chosen = pellets.front().dir;
+    if (tightest_pellet)
     {
-        // Is it closer to the average spread? if yes, use it
-        if (spread.DistTo(average_spread) < fixed_spread.DistTo(average_spread))
-            fixed_spread = spread;
+        float best = pellets.front().radial;
+        for (const auto &p : pellets)
+        {
+            if (p.radial < best)
+            {
+                best   = p.radial;
+                chosen = p.dir;
+            }
+        }
+    }
+    else
+    {
+        float best = chosen.DistToSqr(average_spread);
+        for (const auto &p : pellets)
+        {
+            const float d = p.dir.DistToSqr(average_spread);
+            if (d < best)
+            {
+                best   = d;
+                chosen = p.dir;
+            }
+        }
     }
 
     Vector fixed_angles;
-    VectorAngles(fixed_spread, fixed_angles);
-    Vector vCorrection = (angles - fixed_angles);
-    angles += vCorrection;
+    VectorAngles(chosen, fixed_angles);
+    angles += (angles - fixed_angles);
     fClampAngle(angles);
 }
 
@@ -379,36 +473,32 @@ bool SendNetMessage(INetMessage *data)
 
 static Timer wait_perf{};
 
-// We send the playerperf in here to be (mostly) sure that it's sent along with the clc_move.
+static void SendPlayerPerf(bool force_reliable)
+{
+    auto *ch = g_IEngine ? g_IEngine->GetNetChannelInfo() : nullptr;
+    if (!ch)
+        return;
+    NET_StringCmd sCmd("playerperf");
+    ch->SendNetMsg(sCmd, force_reliable);
+    if (force_reliable)
+        ch->Transmit();
+    sent_client_floattime = Plat_FloatTime();
+    if (use_avg_latency)
+        ping_at_send = ch->GetAvgLatency(FLOW_OUTGOING);
+    else
+        ping_at_send = ch->GetLatency(FLOW_OUTGOING);
+    waiting_perf_data = true;
+    wait_perf.update();
+}
+
 void SendNetMessagePost()
 {
     if (!waiting_for_post_SNM || !bullet || (waiting_perf_data && !wait_perf.test_and_set(1000)))
         return;
 
     waiting_for_post_SNM = false;
-
-    // Create playerperf
-    NET_StringCmd sCmd("playerperf");
-
-    // And send it along with our clc_move. Yes, we are calling SendNetMsg from inside SendNetMsg
-    g_IEngine->GetNetChannelInfo()->SendNetMsg(sCmd, true);
-
-    // remember client float time
-    should_update_time = false;
-    // Only set when not syncing
-    if (no_spread_synced == NOT_SYNCED)
-        sent_client_floattime = Plat_FloatTime();
-
-    // force transmit now
-    g_IEngine->GetNetChannelInfo()->Transmit();
-
-    if (use_avg_latency)
-        ping_at_send = g_IEngine->GetNetChannelInfo()->GetAvgLatency(FLOW_OUTGOING);
-    else
-        ping_at_send = g_IEngine->GetNetChannelInfo()->GetLatency(FLOW_OUTGOING);
-
-    waiting_perf_data = true;
-    wait_perf.update();
+    should_update_time   = false;
+    SendPlayerPerf(true);
 }
 
 CatCommand debug_flows("debug_flows", "debug", []() {
@@ -442,8 +532,6 @@ bool DispatchUserMessage(bf_read *buf, int type)
         return should_call_original;
     }
 
-    double start_time = Plat_FloatTime();
-
     char msg_str[256];
     buf->ReadString(msg_str, sizeof(msg_str));
     buf->Seek(0);
@@ -455,44 +543,39 @@ bool DispatchUserMessage(bf_read *buf, int type)
     static std::regex primary_regex("^(([0-9]+\\.[0-9]+) ([0-9]{1,2}) ([0-9]{1,2}))$");
 
     std::vector<double> vData;
+    static const std::regex long_regex(R"((\d+\.\d+)\s+\d+\s+\d+\s+\d+\.\d+\s+\d+\.\d+\s+vel\s+\d+\.\d+)");
+    static const std::regex short_regex(R"(^(\d+\.\d+)\s+\d{1,2}\s+\d{1,2}$)");
 
     for (auto sStr : lines)
     {
         std::smatch sMatch;
-
-        if (!std::regex_match(sStr, sMatch, primary_regex) || sMatch.size() != 5)
+        if (std::regex_search(sStr, sMatch, long_regex) && sMatch.size() >= 2)
         {
-            static std::regex backup_regex("^(([0-9]+\\.[0-9]+) ([0-9]{1,2}) ([0-9]{1,2}) ([0-9]+\\.[0-9]+) ([0-9]+\\.[0-9]+) vel ([0-9]+\\.[0-9]+))$");
-            std::smatch sMatch2;
-            if (std::regex_match(sStr, sMatch2, backup_regex) && sMatch2.size() > 5)
-            {
-                last_was_player_perf = true;
-                should_call_original = false;
-            }
+            last_was_player_perf = true;
+            should_call_original = false;
+            char *tmp            = nullptr;
+            vData.push_back(std::strtod(sMatch[1].str().c_str(), &tmp));
             continue;
         }
-
-        std::string server_time = sMatch[2].str();
-
-        char *tmp;
-        try
+        if (std::regex_match(sStr, sMatch, primary_regex) && sMatch.size() >= 3)
         {
-            vData.push_back(std::strtod(server_time.c_str(), &tmp));
+            char *tmp = nullptr;
+            vData.push_back(std::strtod(sMatch[2].str().c_str(), &tmp));
+            continue;
         }
-        // Shouldn't happen
-        catch (const std::invalid_argument &)
+        if (std::regex_match(sStr, sMatch, short_regex) && sMatch.size() >= 2)
         {
+            char *tmp = nullptr;
+            vData.push_back(std::strtod(sMatch[1].str().c_str(), &tmp));
+            continue;
         }
     }
 
-    if (vData.size() < 2)
+    if (vData.empty())
     {
-        if (!vData.size())
-            last_was_player_perf = false;
-        // Still do not call original, we don't want the playerperf spewing everywhere
-        else
-            return false;
-        return should_call_original; // not our case, just return
+        if (!last_was_player_perf)
+            return should_call_original;
+        return false;
     }
 
     // Less than 1 in step size is literally impossible to predict, although 1 is already pushing it
@@ -518,71 +601,51 @@ bool DispatchUserMessage(bf_read *buf, int type)
     if (!waiting_perf_data)
         return should_call_original;
 
-    if (no_spread_synced == NOT_SYNCED)
+    if (IsLoopbackNet())
     {
-        // first, compensate procession time and latency between us and server
-        double client_time   = Plat_FloatTime();
-        double total_latency = (client_time - (client_time - start_time)) - sent_client_floattime;
-
-        // Second compensate latency and get delta time (this might be negative, so be careful!)
-        float_time_delta = vData[0] - sent_client_floattime;
-
-        // We got time with latency included, but only outgoing, so compensate
-        float_time_delta -= (total_latency / 2.0);
-
+        time_deltas.clear();
+        float_time_delta     = 0.0;
+        last_correction      = 0.0;
+        waiting_perf_data    = false;
+        resync_needed        = false;
+        no_spread_synced     = SYNCED;
+        is_syncing           = false;
         if (debug_nospread)
-            g_ICvar->ConsoleColorPrintf(MENU_COLOR, "Assumed delta time: %.10f calculated based on %i entries.\n", float_time_delta, (int) vData.size() - 1);
-
-        // we need only first output which is latest
-        waiting_perf_data = false;
-
-        // and now collect history
-        no_spread_synced = CORRECTING;
-        is_syncing       = true;
+            g_ICvar->ConsoleColorPrintf(MENU_COLOR, "Nospread loopback: seed is local Plat_FloatTime.\n");
+        return should_call_original;
     }
-    else if (no_spread_synced != SYNCED)
+
+    const double tick = (g_GlobalVars && g_GlobalVars->interval_per_tick > 0.0f) ? double(g_GlobalVars->interval_per_tick) : (1.0 / 66.0);
+    PushTimeDelta(vData[0] - sent_client_floattime + tick);
+
+    const double mantissa_step = CalculateMantissaStep(float(vData[0] * 1000.0));
+    last_correction            = (Plat_FloatTime() + float_time_delta) - vData[0];
+    waiting_perf_data          = false;
+
+    if (debug_nospread)
+        g_ICvar->ConsoleColorPrintf(MENU_COLOR, "Nospread sample: server=%.6f delta=%.10f residual=%.10f samples=%zu\n", vData[0], float_time_delta, last_correction, time_deltas.size());
+
+    if (no_spread_synced != SYNCED)
     {
-        // Now sync and Correct
-        double time_difference = sent_client_floattime - vData[0];
-
-        double mantissa_step = CalculateMantissaStep(sent_client_floattime * 1000.0);
-        // Apply correction
-        // We must try to be super accurate if the rvar is set, else base on mantissa step
-        double correction_threshhold = extreme_accuracy ? 0.001 : (mantissa_step / 1000.0 / 2.0);
-
-        // Check if we are not precise enough or snapped too hard for it to actually be synced
-        if (abs(time_difference) > correction_threshhold || abs(last_correction) > mantissa_step / 1000.0)
+        const bool tight_enough = extreme_accuracy ? (fabs(last_correction) <= 0.001) : true;
+        if (tight_enough || time_deltas.size() >= 2)
         {
-            float_time_delta -= time_difference;
-            // it will auto resync it
-            resync_needed = true;
-            // Print debug if desired
-            if (debug_nospread)
-                g_ICvar->ConsoleColorPrintf(MENU_COLOR, "Applied correction: %.10f\n", time_difference);
+            g_ICvar->ConsoleColorPrintf(MENU_COLOR, "Nospread successfully synced. Mantissa step: %.2f\n", mantissa_step);
+            no_spread_synced = SYNCED;
+            is_syncing       = false;
+            resync_needed    = false;
         }
-        // We synced successfully
         else
         {
-            if (debug_nospread)
-                g_ICvar->ConsoleColorPrintf(MENU_COLOR, "Nospread successfully synced. Possible precision loss: %.10f Mantissa step: %.2f\n", time_difference, mantissa_step);
-            else
-                g_ICvar->ConsoleColorPrintf(MENU_COLOR, "Nospread successfully synced. Mantissa step: %.2f\n", mantissa_step);
-            resync_needed = false;
+            no_spread_synced = CORRECTING;
+            is_syncing       = true;
+            resync_needed    = true;
         }
-        last_correction = time_difference;
-
-        // We need only first output which is latest
-        waiting_perf_data = false;
-
-        // We are synced.
-        if (!resync_needed)
-            no_spread_synced = SYNCED;
     }
-    // May happen when dead
     else
     {
-        resync_needed     = false;
-        waiting_perf_data = false;
+        resync_needed = false;
+        is_syncing    = false;
     }
     return should_call_original;
 };
@@ -615,29 +678,25 @@ void CL_SendMove_hook()
 
     int new_packets = 1 + *choked_packets;
 
-    auto RecheckIfresync_needed = [&new_packets](double asumed_time) -> void
+    auto RecheckIfresync_needed = [&new_packets]() -> void
     {
         static Timer s_NextCheck;
-        // we use it as 1 sec delay
-        if (s_NextCheck.check(1000) && new_packets == 1 && (no_spread_synced != SYNCED || !LOCAL_E->m_bAlivePlayer()) && !waiting_perf_data)
+        const int interval_ms = std::max(250, int(float(*resync_interval) * 1000.0f));
+        if (s_NextCheck.check(interval_ms) && new_packets == 1 && !waiting_perf_data)
         {
             s_NextCheck.update();
-            // request playerperf once again here, and this time we don't care if it will be sent with clc_move
-            // reuse this variable, this time we store here predicted time here
-            sent_client_floattime = asumed_time;
-            // set it to true to send playerperf with this cmd
+            if (no_spread_synced == SYNCED && LOCAL_E->m_bAlivePlayer())
+            {
+                SendPlayerPerf(false);
+                return;
+            }
             should_update_time = true;
-
-            // Incase we are dead sync too, unless we already are doing so
             if (!LOCAL_E->m_bAlivePlayer() && no_spread_synced != CORRECTING)
             {
-                // Backup data
                 last_sync_delta_time = float_time_delta;
                 last_ping_at_send    = ping_at_send;
-                // We now start syncing
-                no_spread_synced = DEAD_SYNC;
+                no_spread_synced     = DEAD_SYNC;
             }
-            // We always set this, and change it later in CL_SendMove if we aren't dead
             resynced_this_death = true;
         }
     };
@@ -650,9 +709,9 @@ void CL_SendMove_hook()
     double predicted_time   = asumed_real_time;
 
     predicted_time += write_usercmd_correction * new_packets;
-    double ping = g_IEngine->GetNetChannelInfo()->GetLatency(FLOW_OUTGOING);
-    if (use_avg_latency)
-        ping = g_IEngine->GetNetChannelInfo()->GetAvgLatency(FLOW_OUTGOING);
+    double ping = 0.0;
+    if (auto *ch = g_IEngine->GetNetChannelInfo())
+        ping = use_avg_latency ? ch->GetAvgLatency(FLOW_OUTGOING) : ch->GetLatency(FLOW_OUTGOING);
 
     if (correct_ping)
         // Ping changed, adjust (Provided we are not fakelagging)
@@ -660,7 +719,7 @@ void CL_SendMove_hook()
             predicted_time += ping - ping_at_send;
 
     // Check if we need to sync
-    RecheckIfresync_needed(asumed_real_time);
+    RecheckIfresync_needed();
 
     // If we're dead just return original
     if (!LOCAL_E->m_bAlivePlayer())
@@ -686,7 +745,7 @@ void CL_SendMove_hook()
     }
 
     // Bad weapon
-    if ((g_pLocalPlayer->weapon_mode != weapon_hitscan && LOCAL_W->m_iClassID() != CL_CLASS(CTFCompoundBow)))
+    if (CE_BAD(LOCAL_W) || (g_pLocalPlayer->weapon_mode != weapon_hitscan && LOCAL_W->m_iClassID() != CL_CLASS(CTFCompoundBow)))
     {
         hacks::tf2::warp::CL_SendMove_hook();
         return;
@@ -795,7 +854,7 @@ void WriteUserCmd_hook(bf_write *buf, CUserCmd *to, CUserCmd *from)
 void FX_FireBullets_hook(IClientEntity *weapon, int player, Vector *origin, Vector *angles, int weapon_idx, int bullet_mode, int seed, float spread, float damage, bool is_critical)
 {
     // Not synced/weapon bad
-    if (!weapon || (no_spread_synced != SYNCED && !resync_needed) || !bullet || (IsPerfectShot(weapon) && !center_cone))
+    if (!weapon || (no_spread_synced != SYNCED && !resync_needed) || !bullet || (IsPerfectShot(weapon) && !center_cone && !tightest_pellet))
     {
         FX_FireBullets_t original = (FX_FireBullets_t) fx_firebullets_detour.GetOriginalFunc();
         original(weapon, player, origin, angles, weapon_idx, bullet_mode, seed, spread, damage, is_critical);
@@ -839,6 +898,13 @@ static void CreateMove2()
         // Normal server
         else
             use_usercmd_seed = false;
+
+        if (IsLoopbackNet() || use_usercmd_seed)
+        {
+            no_spread_synced = SYNCED;
+            is_syncing       = false;
+            bad_mantissa     = false;
+        }
 
         // Synced, mark as such to other modules
         if (no_spread_synced == SYNCED)
@@ -935,6 +1001,8 @@ static InitRoutine init_bulletnospread(
                 last_was_player_perf = false;
                 bad_mantissa         = false;
                 waiting_perf_data    = false;
+                time_deltas.clear();
+                float_time_delta = 0.0;
             },
             "nospread_levelinit");
 
@@ -946,6 +1014,8 @@ static InitRoutine init_bulletnospread(
                 last_was_player_perf = false;
                 bad_mantissa         = false;
                 waiting_perf_data    = false;
+                time_deltas.clear();
+                float_time_delta = 0.0;
             },
             "nospread_levelshutdown");
         EC::Register(

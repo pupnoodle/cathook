@@ -1,4 +1,5 @@
-#include "HookedMethods.hpp"
+#include "common.hpp"
+#include "hack.hpp"
 
 extern settings::Boolean engine_pred;
 namespace hooked_methods
@@ -15,6 +16,9 @@ void UpdatePred()
 DEFINE_HOOKED_METHOD(Think, void, IToolFrameworkInternal *_this, bool finaltick)
 {
     UpdatePred();
+#if ENABLE_TEXTMODE
+    hack::PumpEngine();
+#endif
     return original::Think(_this, finaltick);
 }
 

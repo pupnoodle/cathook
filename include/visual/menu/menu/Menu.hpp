@@ -61,6 +61,8 @@ public:
 
     void setInGame(bool flag);
 
+    void closeAllModals();
+
     void resize(int x, int y);
 
     BoundingBox &wmRootBoundingBox();

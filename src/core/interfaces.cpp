@@ -194,6 +194,7 @@ void ClientState::InitLayout(void *self, const std::uint8_t *lea, const std::uin
                 if (off > 0 && off < 0x400)
                 {
                     live.m_nSignonState = uint32_t(off);
+                    live.m_flNextCmdTime = uint32_t(off + 4);
                     break;
                 }
             }

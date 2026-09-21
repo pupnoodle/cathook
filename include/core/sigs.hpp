@@ -168,6 +168,14 @@ constexpr const char* report_player_recent_check =
   "55 48 89 E5 41 54 48 83 EC ? 8B 15 ? ? ? ? 85 D2 0F 8E ? ? ? ? 48 8B 05 ? ? ? ?";
 constexpr const char* launcher_source_lock =
   "55 48 89 E5 41 55 41 54 4C 8D AD ? ? ? ? 48 81 EC ? ? ? ? E8 ? ? ? ?";
+constexpr const char* sdl_create_window_flags =
+  "41 B9 0A 00 00 00 45 84 E4 0F 84 ? ? ? ? 4C 89 FF 45 89 E8 44 89 F1 BA 00 00 FF 2F BE 00 00 FF 2F E8";
+constexpr const char* sdl_show_window_resize =
+  "48 8B 7B 28 E8 ? ? ? ? 48 8B 7B 28 E8 ? ? ? ? C6 43 45 01 48 83 C4 08";
+constexpr const char* sdl_show_window_after_create =
+  "48 8B 7B 28 88 45 BC E8 ? ? ? ? 0F B6 45 BC";
+constexpr const char* sdl_show_window_present =
+  "48 8B 7B 28 E8 ? ? ? ? 48 8B 7B 28 E8 ? ? ? ? C6 43 45 01 E9";
 constexpr const char* video_mode_setup_startup_graphic =
   "55 31 C0 48 89 E5 41 57 41 56 4C 8D B5 ? ? ? ? 41 55 41 54 4C 8D A5 ? ? ? ? 53 48 89 FB 48 8D 3D ? ? ? ? 48 81 EC ? ? ? ? E8 ? ? ? ? 31 D2 BE ? ? ? ? 4C 89 F7";
 constexpr const char* client_file_system =

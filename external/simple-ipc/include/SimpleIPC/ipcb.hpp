@@ -93,9 +93,7 @@ public:
                 memory = nullptr;
             }
 
-            // Delete the shared memory object
-            if (shm_unlink(name.c_str()) == -1)
-                throw std::runtime_error("Failed to unlink shared memory: " + std::string(strerror(errno)));
+            shm_unlink(name.c_str());
         }
 
         if (is_ghost)

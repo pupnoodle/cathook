@@ -774,18 +774,9 @@ bool hitscanSpecialCases(AimbotTarget_t target_entity, int weapon_case)
     }
     return false;
 }
-// Just hold m1 if we were aiming at something before and are in rapidfire
 static void CreateMoveWarp()
 {
-    if (hacks::tf2::warp::in_rapidfire && aimed_this_tick)
-    {
-        current_user_cmd->viewangles     = viewangles_this_tick;
-        g_pLocalPlayer->bUseSilentAngles = *silent;
-        current_user_cmd->buttons |= IN_ATTACK;
-    }
-    // Warp should call aimbot normally
-    else if (!hacks::tf2::warp::in_rapidfire)
-        CreateMove();
+    CreateMove();
 }
 
 #if ENABLE_VISUALS

@@ -15,29 +15,45 @@ namespace re
 class C_TFWeaponBase : public re::C_BaseCombatWeapon
 {
 public:
+    struct SpreadPitchYaw
+    {
+        float pitch;
+        float yaw;
+    };
+
     inline static void GetProjectileFireSetup(IClientEntity *weapon, IClientEntity *pPlayer, Vector vecOffset, Vector *vecSrc, Vector *angForward, bool bHitTeammates, float flEndDist)
     {
         typedef void (*GetProjectileFireSetup_t)(IClientEntity * weapon, IClientEntity * pPlayer, Vector vecOffset, Vector * vecSrc, Vector * angForward, bool bHitTeammates, float flEndDist);
+        if (!weapon || !pPlayer || !vecSrc || !angForward)
+            return;
         static auto signature                                     = gSignatures.GetClientSignature(sigs::get_projectile_fire_setup);
         static GetProjectileFireSetup_t GetProjectileFireSetup_fn = (GetProjectileFireSetup_t) signature;
         if (GetProjectileFireSetup_fn)
             GetProjectileFireSetup_fn(weapon, pPlayer, vecOffset, vecSrc, angForward, bHitTeammates, flEndDist);
     }
-    // Need a seperate one for the Huntsman
     inline static void GetProjectileFireSetupHuntsman(IClientEntity *weapon, IClientEntity *pPlayer, Vector vecOffset, Vector *vecSrc, Vector *angForward, bool bHitTeammates, float flEndDist)
     {
-        typedef void (*GetProjectileFireSetupHuntsman_t)(IClientEntity * weapon, IClientEntity * pPlayer, Vector vecOffset, Vector * vecSrc, Vector * angForward, bool bHitTeammates, float flEndDist);
-        static auto signature                                                     = gSignatures.GetClientSignature(sigs::get_projectile_fire_setup);
-        static GetProjectileFireSetupHuntsman_t GetProjectileFireSetupHuntsman_fn = (GetProjectileFireSetupHuntsman_t) signature;
-        if (GetProjectileFireSetupHuntsman_fn)
-            GetProjectileFireSetupHuntsman_fn(weapon, pPlayer, vecOffset, vecSrc, angForward, bHitTeammates, flEndDist);
+        GetProjectileFireSetup(weapon, pPlayer, vecOffset, vecSrc, angForward, bHitTeammates, flEndDist);
     }
     inline static Vector GetSpreadAngles(IClientEntity *self)
     {
-        typedef Vector (*GetSpreadAngles_t)(IClientEntity *);
+        if (!self)
+            return {};
+        typedef SpreadPitchYaw (*GetSpreadAngles_t)(IClientEntity *);
+        static int slot = -1;
+        if (slot < 0)
+            slot = WeaponVtableSlot(self, sigs::get_spread_angles, -1);
+        if (slot >= 0)
+        {
+            SpreadPitchYaw py = vfunc<GetSpreadAngles_t>(self, slot, 0)(self);
+            return Vector{ py.pitch, py.yaw, 0.0f };
+        }
         static auto signature                       = gSignatures.GetClientSignature(sigs::get_spread_angles);
         static GetSpreadAngles_t GetSpreadAngles_fn = (GetSpreadAngles_t) signature;
-        return GetSpreadAngles_fn ? GetSpreadAngles_fn(self) : Vector{};
+        if (!GetSpreadAngles_fn)
+            return {};
+        SpreadPitchYaw py = GetSpreadAngles_fn(self);
+        return Vector{ py.pitch, py.yaw, 0.0f };
     }
     inline static int GetWeaponID(IClientEntity *self)
     {

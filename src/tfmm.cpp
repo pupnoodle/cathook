@@ -129,8 +129,9 @@ void startQueue()
             re::ITFGroupMatchCriteria::SetMatchGroup(criteria, (int) queue);
         if (*queue == 7)
             client->LoadSavedCasualCriteria();
-        client->RequestQueueForMatch((int) queue);
-        // client->RequestQueueForStandby();
+        const char ret = client->RequestQueueForMatch((int) queue);
+        logging::Info("queue_start: type=%d ret=%d inqueue=%d standby=%d", (int) queue, (int) (unsigned char) ret,
+                      (int) client->BInQueueForMatchGroup((int) queue), (int) client->BInQueueForStandby());
         queuecount++;
     }
     else
@@ -181,7 +182,12 @@ bool isLoadingMap()
         return false;
     if (g_IEngine->IsDrawingLoadingImage())
         return true;
-    return g_IEngine->IsConnected() && !g_IEngine->IsInGame();
+    if (g_IEngine->IsInGame())
+        return false;
+    if (!g_IBaseClientState)
+        return false;
+    const int signon = g_IBaseClientState->m_nSignonState();
+    return signon >= 3 && signon < 6;
 }
 
 bool shouldHoldQueueForMapLoad()

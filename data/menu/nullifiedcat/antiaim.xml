@@ -1,91 +1,124 @@
 <Tab name="HvH" padding="4 4 4 4">
     <Box padding="12 6 6 6" width="content" height="content" name="Anti-aim">
-        <List width="150">
+        <List width="168">
             <AutoVariable width="fill" target="antiaim.enable" label="Enable"/>
             <AutoVariable width="fill" target="antiaim.draw-fakes" label="Draw fakes"/>
-            <AutoVariable width="fill" target="antiaim.crouch" label="Fake crouch"/>
             <AutoVariable width="fill" target="antiaim.no-clamp" label="No clamping" tooltip="Don't clamp angles (keep pitch within ±89° and yaw within ±180°)."/>
             <AutoVariable width="fill" target="misc.fakelag" label="Fakelag" min="0" max="22"/>
             <AutoVariable width="fill" target="misc.fakelag-midair-only" label="Fakelag midair only"/>
             <AutoVariable width="fill" target="antiaim.spin-speed" label="Spin speed" tooltip="Speed for yaw spin." min="-45" max="45" step="0.1"/>
+            <AutoVariable width="fill" target="antiaim.yaw.offset" label="Yaw offset" tooltip="Added after the yaw mode." min="-180" max="180" step="1"/>
+            <AutoVariable width="fill" target="antiaim.yaw.jitter-offset" label="Jitter offset" min="0" max="180" step="1"/>
+            <AutoVariable width="fill" target="antiaim.yaw.jitter-ticks" label="Jitter ticks" min="1" max="16"/>
+            <AutoVariable width="fill" target="antiaim.yaw.distort" label="Distort range" min="0" max="180" step="1"/>
+            <AutoVariable width="fill" target="antiaim.yaw.at-target-offset" label="At-target offset" tooltip="Added to yaw toward the closest enemy." min="-180" max="180" step="1"/>
+            <AutoVariable width="fill" target="antiaim.pitch.jitter" label="Pitch jitter" min="0" max="89" step="1"/>
             <AutoVariable width="fill" target="antiaim.roll" label="Roll"/>
-            <Box padding="12 6 6 6" width="content" height="content" name="Pitch">
-				<List width="138">
-					<LabeledObject width="fill" label="Fake Pitch">
-						<Select target="antiaim.pitch.fake">
-							<Option name="Disable" value="0"/>
-							<Option name="Up" value="1"/>
-							<Option name="Down" value="2"/>
-							<Option name="Inverse" value="3"/>
-						</Select>
-					</LabeledObject>
-					<LabeledObject width="fill" label="Real Pitch">
-						<Select target="antiaim.pitch.real">
-							<Option name="Disable" value="0"/>
-							<Option name="Custom" value="1"/>
-							<Option name="Up" value="2"/>
-							<Option name="Down" value="3"/>
-							<Option name="Jitter" value="4"/>
-							<Option name="Random" value="5"/>
-							<Option name="Flip" value="6"/>
-							<Option name="Heck" value="7"/>
-						</Select>
-					</LabeledObject>
-					<AutoVariable width="fill" target="antiaim.pitch.static" label="Custom" tooltip="Used when 'Real Pitch' is set to 'Custom'."/>
-				</List>
-			</Box>
-			<Box padding="12 6 6 6" width="content" height="content" name="Yaw">
-				<List width="138">
-					<LabeledObject width="fill" label="Fake Yaw">
-						<Select target="antiaim.yaw.fake">
-							<Option name="Disable" value="0"/>
-							<Option name="Custom" value="1"/>
-							<Option name="Custom Offset" value="2"/>
-							<Option name="Left" value="3"/>
-							<Option name="Right" value="4"/>
-							<Option name="Back" value="5"/>
-							<Option name="Spin" value="6"/>
-							<Option name="Edge" value="7"/>
-							<Option name="Sideways" value="8"/>
-							<Option name="Heck" value="9"/>
-							<Option name="Omega" value="10"/>
-							<Option name="Random" value="11"/>
-							<Option name="Random Clamped" value="12"/>
-						</Select>
-					</LabeledObject>
-					<LabeledObject width="fill" label="Real Yaw">
-						<Select target="antiaim.yaw.real">
-							<Option name="Disable" value="0"/>
-							<Option name="Custom" value="1"/>
-							<Option name="Custom Offset" value="2"/>
-							<Option name="Left" value="3"/>
-							<Option name="Right" value="4"/>
-							<Option name="Back" value="5"/>
-							<Option name="Spin" value="6"/>
-							<Option name="Edge" value="7"/>
-							<Option name="Sideways" value="8"/>
-							<Option name="Heck" value="9"/>
-							<Option name="Omega" value="10"/>
-							<Option name="Random" value="11"/>
-							<Option name="Random Clamped" value="12"/>
-						</Select>
-					</LabeledObject>
-					<AutoVariable width="fill" target="antiaim.yaw.fake.static" label="Custom Fake" tooltip="Used when 'Fake Yaw' is set to 'Custom'."/>
-					<AutoVariable width="fill" target="antiaim.yaw.real.static" label="Custom Real" tooltip="Used when 'Real Yaw' is set to 'Custom'."/>
-				</List>
-			</Box>
         </List>
     </Box>
-    <Box padding="12 6 6 6" width="content" height="content" name="Resolver" x="170">
-        <List width="150">
-            <AutoVariable width="fill" target="anti-anti-aim.enable" label="Enable" tooltip="Attempt to bruteforce enemy antiaim."/>
+    <Box padding="12 6 6 6" width="content" height="content" name="Pitch" x="188">
+        <List width="160">
+            <LabeledObject width="fill" label="Fake Pitch">
+                <Select target="antiaim.pitch.fake">
+                    <Option name="Disable" value="0"/>
+                    <Option name="Up (+/-360)" value="1"/>
+                    <Option name="Down (+/-360)" value="2"/>
+                    <Option name="Inverse" value="3"/>
+                    <Option name="Fake up (-271)" value="4"/>
+                    <Option name="Fake down (271)" value="5"/>
+                    <Option name="Fake zero" value="6"/>
+                    <Option name="Fake jitter" value="7"/>
+                </Select>
+            </LabeledObject>
+            <LabeledObject width="fill" label="Real Pitch">
+                <Select target="antiaim.pitch.real">
+                    <Option name="Disable" value="0"/>
+                    <Option name="Custom" value="1"/>
+                    <Option name="Up" value="2"/>
+                    <Option name="Down" value="3"/>
+                    <Option name="Jitter" value="4"/>
+                    <Option name="Random" value="5"/>
+                    <Option name="Flip" value="6"/>
+                    <Option name="Heck" value="7"/>
+                    <Option name="Half-up" value="8"/>
+                    <Option name="Zero" value="9"/>
+                </Select>
+            </LabeledObject>
+            <AutoVariable width="fill" target="antiaim.pitch.static" label="Custom" tooltip="Used when 'Real Pitch' is set to 'Custom'."/>
         </List>
     </Box>
-    <Box padding="12 6 6 6" name="Anti-resolver" width="content" height="content" x="340">
-        <List width="150">
+    <Box padding="12 6 6 6" width="content" height="content" name="Yaw" x="188">
+        <List width="160">
+            <LabeledObject width="fill" label="Fake Yaw">
+                <Select target="antiaim.yaw.fake">
+                    <Option name="Disable" value="0"/>
+                    <Option name="Custom" value="1"/>
+                    <Option name="Custom Offset" value="2"/>
+                    <Option name="Left" value="3"/>
+                    <Option name="Right" value="4"/>
+                    <Option name="Back" value="5"/>
+                    <Option name="Spin" value="6"/>
+                    <Option name="Edge" value="7"/>
+                    <Option name="Sideways" value="8"/>
+                    <Option name="Heck" value="9"/>
+                    <Option name="Omega" value="10"/>
+                    <Option name="Random" value="11"/>
+                    <Option name="Random Clamped" value="12"/>
+                    <Option name="At target" value="13"/>
+                    <Option name="Jitter" value="14"/>
+                    <Option name="Freestand" value="15"/>
+                    <Option name="Distort" value="16"/>
+                </Select>
+            </LabeledObject>
+            <LabeledObject width="fill" label="Real Yaw">
+                <Select target="antiaim.yaw.real">
+                    <Option name="Disable" value="0"/>
+                    <Option name="Custom" value="1"/>
+                    <Option name="Custom Offset" value="2"/>
+                    <Option name="Left" value="3"/>
+                    <Option name="Right" value="4"/>
+                    <Option name="Back" value="5"/>
+                    <Option name="Spin" value="6"/>
+                    <Option name="Edge" value="7"/>
+                    <Option name="Sideways" value="8"/>
+                    <Option name="Heck" value="9"/>
+                    <Option name="Omega" value="10"/>
+                    <Option name="Random" value="11"/>
+                    <Option name="Random Clamped" value="12"/>
+                    <Option name="At target" value="13"/>
+                    <Option name="Jitter" value="14"/>
+                    <Option name="Freestand" value="15"/>
+                    <Option name="Distort" value="16"/>
+                </Select>
+            </LabeledObject>
+            <AutoVariable width="fill" target="antiaim.yaw.fake.static" label="Custom Fake" tooltip="Used when 'Fake Yaw' is set to 'Custom'."/>
+            <AutoVariable width="fill" target="antiaim.yaw.real.static" label="Custom Real" tooltip="Used when 'Real Yaw' is set to 'Custom'."/>
+        </List>
+    </Box>
+    <Box padding="12 6 6 6" width="content" height="content" name="Manual" x="188">
+        <List width="160">
+            <AutoVariable width="fill" target="antiaim.manual.left" label="Left"/>
+            <AutoVariable width="fill" target="antiaim.manual.right" label="Right"/>
+            <AutoVariable width="fill" target="antiaim.manual.back" label="Back"/>
+            <AutoVariable width="fill" target="antiaim.manual.forward" label="Forward"/>
+        </List>
+    </Box>
+    <Box padding="12 6 6 6" width="content" height="content" name="Resolver" x="364">
+        <List width="160">
+            <AutoVariable width="fill" target="anti-anti-aim.enable" label="Enable" tooltip="Resolve enemy antiaim using game angle wrap, sniper dots, and yaw brute."/>
+            <AutoVariable width="fill" target="anti-anti-aim.pitch" label="Resolve pitch" tooltip="Unwrap networked pitch the same way anim state does (AngleNormalize, then ±90)."/>
+            <AutoVariable width="fill" target="anti-anti-aim.yaw" label="Resolve yaw" tooltip="Brute common fake-yaw offsets and classify spin/jitter."/>
+            <AutoVariable width="fill" target="anti-anti-aim.brute-on-miss" label="Brute on miss"/>
+            <AutoVariable width="fill" target="anti-anti-aim.sniper-dot" label="Use sniper dots"/>
+            <AutoVariable width="fill" target="anti-anti-aim.attacker-hint" label="Attacker hint" tooltip="When someone damages you, treat their aim as toward you."/>
+            <AutoVariable width="fill" target="anti-anti-aim.debug.enable" label="Debug log"/>
+        </List>
+    </Box>
+    <Box padding="12 6 6 6" name="Anti-resolver" width="content" height="content" x="364">
+        <List width="160">
             <AutoVariable width="fill" target="antiaim.aaaa.enable" label="Enable"/>
             <AutoVariable width="fill" target="antiaim.aaaa.flip-key" label="Flip key"/>
-            <AutoVariable width="fill" target="antiaim.aaaa.interval.seconds" label="Enable"/>
+            <AutoVariable width="fill" target="antiaim.aaaa.interval.seconds" label="Interval" tooltip="Fixed flip interval. 0 = use random range."/>
             <AutoVariable width="fill" target="antiaim.aaaa.interval.random-low" label="Random low"/>
             <AutoVariable width="fill" target="antiaim.aaaa.interval.random-high" label="Random high"/>
             <LabeledObject width="fill" label="Mode">
