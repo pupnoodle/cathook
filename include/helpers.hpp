@@ -276,6 +276,7 @@ bool isTruce();
 
 void setTruce(bool status);
 int GetPlayerForUserID(int userID);
+int MaxClientIndex();
 
 inline bool GetPlayerInfo(int idx, player_info_s *info)
 {
@@ -296,4 +297,22 @@ inline bool GetPlayerInfo(int idx, player_info_s *info)
         info->friendsID = g_pPlayerResource->GetAccountID(idx);
     }
     return res;
+}
+
+template <typename Fn>
+inline void ForEachConnectedPlayer(Fn &&fn)
+{
+    const int maxc = MaxClientIndex();
+    for (int i = 1; i <= maxc; ++i)
+    {
+        player_info_s info{};
+        unsigned id = 0;
+        if (g_IEngine && GetPlayerInfo(i, &info) && info.friendsID)
+            id = info.friendsID;
+        else if (g_pPlayerResource)
+            id = g_pPlayerResource->GetAccountID(i);
+        if (!id)
+            continue;
+        fn(i, id, info);
+    }
 }

@@ -232,22 +232,22 @@ void Draw()
     if (enemies_over_teammates)
         enemies.clear();
     std::vector<CachedEntity *> sentries;
-    for (auto const &ent : entity_cache::valid_ents)
+    auto consider = [&](CachedEntity *ent)
     {
         if (CE_INVALID(ent))
-            continue;
+            return;
         if (ent->m_iTeam() == 0)
-            continue;
+            return;
         if (!ent->m_bAlivePlayer())
-            continue;
+            return;
         if (ent->m_IDX == g_IEngine->GetLocalPlayer())
-            continue;
+            return;
         if (!show_enemybuildings && ent->m_Type() == ENTITY_BUILDING && ent->m_bEnemy())
-            continue;
+            return;
         if (!show_teammates && ent->m_Type() == ENTITY_PLAYER && !ent->m_bEnemy())
-            continue;
+            return;
         if (!show_teambuildings && ent->m_Type() == ENTITY_BUILDING && !ent->m_bEnemy())
-            continue;
+            return;
         if (ent->m_iClassID() == CL_CLASS(CObjectSentrygun))
             sentries.push_back(ent);
         else if (!enemies_over_teammates || !show_teammates || ent->m_Type() != ENTITY_PLAYER)
@@ -256,6 +256,14 @@ void Draw()
             enemies.push_back(ent);
         else
             DrawEntity(x, y, ent);
+    };
+    for (auto const &ent : entity_cache::player_cache)
+        consider(ent);
+    for (auto const &ent : entity_cache::valid_ents)
+    {
+        if (ent->m_Type() == ENTITY_PLAYER)
+            continue;
+        consider(ent);
     }
     if (enemies_over_teammates && show_teammates)
         for (auto enemy : enemies)

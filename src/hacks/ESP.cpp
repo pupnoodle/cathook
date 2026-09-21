@@ -368,15 +368,11 @@ static void cm()
 
             for (auto const &ent : entity_cache::player_cache)
             {
-                // Get an entity from the loop tick and process it
-
                 ProcessEntity(ent);
                 ESPData &ent_dat = data.try_emplace(ent->m_IDX, ESPData{}).first->second;
-
                 if (ent_dat.needs_paint)
                 {
-                    // Checking this every tick is a waste of nanoseconds
-                    if (vischeck_tick && vischeck)
+                    if (vischeck_tick && vischeck && !EntIsDormant(RAW_ENT(ent)))
                         ent_dat.transparent = !ent->IsVisible();
                     entities_need_repaint.push_back({ ent, ent->m_vecOrigin().DistToSqr(g_pLocalPlayer->v_Origin) });
                 }
@@ -387,27 +383,29 @@ static void cm()
     {
         { // Prof section ends when out of scope, these brackets here.
             PROF_SECTION(CM_ESP_EntityLoop);
-            // Loop through entities
+            for (auto const &ent : entity_cache::player_cache)
+            {
+                ProcessEntity(ent);
+                ESPData &ent_data = data.try_emplace(ent->m_IDX, ESPData{}).first->second;
+                if (ent_data.needs_paint)
+                {
+                    if (vischeck_tick && vischeck && !EntIsDormant(RAW_ENT(ent)))
+                        ent_data.transparent = !ent->IsVisible();
+                    entities_need_repaint.push_back({ ent, ent->m_vecOrigin().DistToSqr(g_pLocalPlayer->v_Origin) });
+                }
+            }
             for (auto const &ent_index : entity_cache::valid_ents)
             {
-                // Get an entity from the loop tick and process it
+                if (ent_index->m_Type() == ENTITY_PLAYER)
+                    continue;
                 if (!ent_index->m_bAlivePlayer())
                     continue;
-
-                bool player = ent_index->m_Type() == ENTITY_PLAYER;
-
-                if (player)
-                {
-                    ProcessEntity(ent_index);
-                }
-                else if (entity_tick)
+                if (entity_tick)
                     ProcessEntity(ent_index);
                 ESPData &ent_data = data.try_emplace(ent_index->m_IDX, ESPData{}).first->second;
 
                 if (ent_data.needs_paint)
                 {
-                    // Checking this every tick is a waste of nanoseconds
-                    // Get an entity from the loop tick and process iProcessEntityPT nanoseconds
                     if (vischeck_tick && vischeck)
                         ent_data.transparent = !ent_index->IsVisible();
                     entities_need_repaint.push_back({ ent_index, ent_index->m_vecOrigin().DistToSqr(g_pLocalPlayer->v_Origin) });

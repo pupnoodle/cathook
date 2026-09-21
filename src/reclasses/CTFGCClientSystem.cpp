@@ -30,18 +30,32 @@ static gc_layout live_gc_layout()
             int universe_byte = *reinterpret_cast<int *>(code + 12);
             out.match_id_off  = universe_byte - 6;
         }
-        for (int i = 0; i < 0x180; ++i)
-        {
-            if (code[i] == 0x0F && code[i + 1] == 0xB6 && code[i + 2] == 0x87)
+        auto *join       = reinterpret_cast<uint8_t *>(gSignatures.GetClientSignature(sigs::tf_gc_client_system_join_mm_match));
+        bool found_ended = false;
+        auto find_ended  = [&](uint8_t *fn) {
+            if (!fn)
+                return;
+            for (int i = 0; i < 0x180; ++i)
             {
-                int disp = *reinterpret_cast<int *>(code + i + 3);
-                if (disp > out.match_id_off && disp < out.match_id_off + 16)
+                int disp = 0;
+                if (fn[i] == 0x41 && fn[i + 1] == 0x80 && fn[i + 2] == 0xBC && fn[i + 3] == 0x24 && fn[i + 8] == 0)
+                    disp = *reinterpret_cast<int *>(fn + i + 4);
+                else if (fn[i] == 0x80 && fn[i + 1] == 0xBF && fn[i + 6] == 0)
+                    disp = *reinterpret_cast<int *>(fn + i + 2);
+                else
+                    continue;
+                if (disp > out.match_id_off + 7 && disp <= out.match_id_off + 16)
                 {
                     out.match_ended_off = disp;
-                    break;
+                    found_ended         = true;
+                    return;
                 }
             }
-        }
+        };
+        find_ended(join);
+        if (!found_ended)
+            find_ended(code);
+        logging::Info("CTFGCClientSystem layout match_id=%x ended=%x", out.match_id_off, out.match_ended_off);
         auto *force = reinterpret_cast<uint8_t *>(gSignatures.GetClientSignature(sigs::gc_force_ping_refresh));
         if (force)
         {
@@ -99,17 +113,12 @@ bool CTFGCClientSystem::BConnectedToMatchServer(bool flag)
 
 bool CTFGCClientSystem::BHaveLiveMatch()
 {
-    using Fn = char (*)(CTFGCClientSystem *, char);
-    static auto fn = Fn(gSignatures.GetClientSignature(sigs::gc_connected_to_match_server));
-    if (fn && fn(this, 1))
-        return true;
     if (!this)
         return false;
     const auto layout = live_gc_layout();
     auto *base        = reinterpret_cast<uint8_t *>(this);
-    uint64_t match_id = *reinterpret_cast<uint64_t *>(base + layout.match_id_off);
-    bool ended        = base[layout.match_ended_off] != 0;
-    return match_id != 0 && !ended;
+    const uint32_t account = *reinterpret_cast<uint32_t *>(base + layout.match_id_off);
+    return account != 0 && base[layout.match_ended_off] == 0;
 }
 
 CTFParty *CTFGCClientSystem::GetParty()

@@ -377,4 +377,4 @@ static InitRoutine init(
             },
             "tickbase_shutdown");
     });
-} // namespace hacks::tf2::tickbase
+}

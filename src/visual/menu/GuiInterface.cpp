@@ -20,18 +20,21 @@ static bool listener_added{ false };
 static std::unique_ptr<zerokernel::special::PlayerListController> controller{ nullptr };
 static std::unique_ptr<zerokernel::special::SkinChangerController> skin_controller{ nullptr };
 
-static zerokernel::special::PlayerListData createPlayerListData(int userid)
+static zerokernel::special::PlayerListData createPlayerListData(int idx, const player_info_s &info)
 {
     zerokernel::special::PlayerListData data{};
-    auto idx = GetPlayerForUserID(userid);
-    player_info_s info{};
-    GetPlayerInfo(idx, &info);
-    data.classId = g_pPlayerResource->getClass(idx);
-    data.teamId  = g_pPlayerResource->getTeam(idx) - 1;
-    data.dead    = !g_pPlayerResource->isAlive(idx);
-    data.steam   = info.friendsID;
-    data.state   = playerlist::k_pszNames[static_cast<int>(playerlist::AccessData(info.friendsID).state)];
-    data.name    = info.name;
+    unsigned steam = info.friendsID;
+    if (g_pPlayerResource)
+    {
+        data.classId = g_pPlayerResource->getClass(idx);
+        data.teamId  = g_pPlayerResource->getTeam(idx) - 1;
+        data.dead    = !g_pPlayerResource->isAlive(idx);
+        if (!steam)
+            steam = g_pPlayerResource->GetAccountID(idx);
+    }
+    data.steam = steam;
+    data.state = playerlist::k_pszNames[static_cast<int>(playerlist::AccessData(steam).state)];
+    data.name  = info.name;
     return data;
 }
 
@@ -74,42 +77,36 @@ static void initPlayerlist()
 
 void sortPList()
 {
-    for (auto i = 1; i <= MAX_PLAYERS; ++i)
+    if (!controller)
+        return;
+
+    struct Slot
     {
-        player_info_s info{};
-        if (GetPlayerInfo(i, &info))
+        int idx;
+        int team;
+        player_info_s info;
+    };
+    std::vector<Slot> slots;
+    ForEachConnectedPlayer(
+        [&](int i, unsigned, const player_info_s &info)
         {
-            auto idx = GetPlayerForUserID(info.userID);
-            if (g_pPlayerResource->getTeam(idx) == 2)
-            {
-                controller->addPlayer(info.userID, createPlayerListData(info.userID));
-            }
-        }
-    }
-    for (auto i = 1; i <= MAX_PLAYERS; ++i)
+            if (!info.userID)
+                return;
+            const int team = g_pPlayerResource ? g_pPlayerResource->getTeam(i) : 0;
+            slots.push_back({ i, team, info });
+        });
+
+    auto add_matching = [&](auto pred)
     {
-        player_info_s info{};
-        if (GetPlayerInfo(i, &info))
+        for (auto &s : slots)
         {
-            auto idx = GetPlayerForUserID(info.userID);
-            if (g_pPlayerResource->getTeam(idx) == 3)
-            {
-                controller->addPlayer(info.userID, createPlayerListData(info.userID));
-            }
+            if (pred(s.team))
+                controller->addPlayer(s.info.userID, createPlayerListData(s.idx, s.info));
         }
-    }
-    for (auto i = 1; i <= MAX_PLAYERS; ++i)
-    {
-        player_info_s info{};
-        if (GetPlayerInfo(i, &info))
-        {
-            auto idx = GetPlayerForUserID(info.userID);
-            if (g_pPlayerResource->getTeam(idx) != 2 && g_pPlayerResource->getTeam(idx) != 3)
-            {
-                controller->addPlayer(info.userID, createPlayerListData(info.userID));
-            }
-        }
-    }
+    };
+    add_matching([](int team) { return team == TEAM_RED; });
+    add_matching([](int team) { return team == TEAM_BLU; });
+    add_matching([](int team) { return team != TEAM_RED && team != TEAM_BLU; });
 }
 
 class PlayerListEventListener : public IGameEventListener
@@ -242,7 +239,7 @@ bool gui::handleSdlEvent(SDL_Event *event)
 {
     if (!zerokernel::Menu::instance)
         return false;
-    if (controller && CE_GOOD(LOCAL_E) && update_players.test_and_set(10000))
+    if (controller && g_IEngine && g_IEngine->IsInGame() && update_players.test_and_set(10000))
     {
         controller->removeAll();
         sortPList();
@@ -255,6 +252,11 @@ bool gui::handleSdlEvent(SDL_Event *event)
             zerokernel::Menu::instance->setInGame(!zerokernel::Menu::instance->isInGame());
             if (!zerokernel::Menu::instance->isInGame())
             {
+                if (controller)
+                {
+                    controller->removeAll();
+                    sortPList();
+                }
                 g_ISurface->UnlockCursor();
                 g_ISurface->SetCursorAlwaysVisible(true);
             }

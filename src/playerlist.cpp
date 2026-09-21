@@ -131,7 +131,7 @@ rgba_t Color(unsigned steamid)
 
 rgba_t Color(CachedEntity *player)
 {
-    if (CE_GOOD(player))
+    if (CE_VALID(player) && player->player_info)
         return Color(player->player_info->friendsID);
     return colors::empty;
 }

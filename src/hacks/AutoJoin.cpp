@@ -25,9 +25,8 @@ static settings::Boolean auto_accept_q{ "autojoin.auto-accept-q", "false" };
 static settings::Boolean partybypass{ "hack.party-bypass", "false" };
 
 // Protocol SO type IDs from EGCTFProtoObjectTypes (tf_gcmessages.h)
-constexpr int k_SO_GameServerLobby = 2004;
-constexpr int k_SO_LobbyInvite     = 2008;
-constexpr int k_SOChange_Create    = 0;
+constexpr int k_SO_LobbyInvite  = 2008;
+constexpr int k_SOChange_Create = 0;
 
 /*
  * Credits to Blackfire for helping me with auto-requeue!
@@ -51,7 +50,14 @@ Timer queue_time{};
 #endif
 void updateSearch()
 {
-    if (!auto_queue && !auto_requeue)
+    static Timer stuck_connect{};
+    static bool tracking_stuck   = false;
+    static Timer join_retry{};
+    static bool waiting_join     = false;
+    static Timer abandon_stuck{};
+    static bool tracking_abandon = false;
+
+    if (!auto_queue && !auto_requeue && !auto_accept_q)
     {
 #if not ENABLE_VISUALS
         queue_time.update();
@@ -60,18 +66,20 @@ void updateSearch()
     }
     if (g_IEngine->IsInGame())
     {
+        tracking_stuck   = false;
+        waiting_join     = false;
+        tracking_abandon = false;
 #if not ENABLE_VISUALS
         queue_time.update();
 #endif
         return;
     }
-
-    static Timer stuck_connect{};
-    static bool tracking_stuck = false;
     re::CTFGCClientSystem *gc = re::CTFGCClientSystem::GTFGCClientSystem();
     re::CTFPartyClient *pc    = re::CTFPartyClient::GTFPartyClient();
     const bool live_match     = gc && gc->BHaveLiveMatch();
-    if (g_IEngine->IsConnected() && !tfmm::isLoadingMap() && !live_match)
+    const bool connected_mm   = gc && gc->BConnectedToMatchServer(false);
+    const bool loading        = tfmm::isLoadingMap();
+    if (g_IEngine->IsConnected() && !loading && !live_match)
     {
         if (!tracking_stuck)
         {
@@ -90,6 +98,8 @@ void updateSearch()
 
     if (tfmm::shouldHoldQueueForMapLoad())
     {
+        tracking_abandon = false;
+        waiting_join     = false;
 #if not ENABLE_VISUALS
         queue_time.update();
 #endif
@@ -98,21 +108,50 @@ void updateSearch()
 
     int invites = pc ? pc->GetPendingInvites() : 0;
 
-    if (current_user_cmd && gc && gc->BConnectedToMatchServer(false) && gc->BHaveLiveMatch())
+    if (current_user_cmd && connected_mm && live_match)
     {
 #if not ENABLE_VISUALS
         queue_time.update();
 #endif
         tfmm::leaveQueue();
     }
-    //    if (gc && !gc->BConnectedToMatchServer(false) &&
-    //            queuetime.test_and_set(10 * 1000 * 60) &&
-    //            !gc->BHaveLiveMatch())
-    //        tfmm::leaveQueue();
+
+    if (*auto_accept_q && gc && live_match && !connected_mm && !g_IEngine->IsConnected() && !loading)
+    {
+        if (!waiting_join)
+        {
+            join_retry.update();
+            waiting_join = true;
+        }
+        else if (join_retry.test_and_set(2000))
+        {
+            logging::Info("autojoin: joining assigned match");
+            gc->JoinMMMatch();
+        }
+    }
+    else
+        waiting_join = false;
+
+    if (auto_queue && live_match && !loading)
+    {
+        if (!tracking_abandon)
+        {
+            abandon_stuck.update();
+            tracking_abandon = true;
+        }
+        else if (abandon_stuck.test_and_set(45000))
+        {
+            logging::Info("autojoin: abandoning stuck live match");
+            tfmm::disconnectAndAbandon();
+            tracking_abandon = false;
+        }
+    }
+    else
+        tracking_abandon = false;
 
     if (auto_requeue && !*auto_queue)
     {
-        if (startqueue_timer.check(15000) && gc && !gc->BConnectedToMatchServer(false) && !gc->BHaveLiveMatch() && !invites)
+        if (startqueue_timer.check(15000) && gc && !connected_mm && !live_match && !invites)
             if (pc && !(pc->BInQueueForMatchGroup(tfmm::getQueue()) || pc->BInQueueForStandby()))
             {
                 logging::Info("Starting queue for standby, Invites %d", invites);
@@ -122,36 +161,17 @@ void updateSearch()
 
     if (auto_queue)
     {
-        if (gc && gc->BHaveLiveMatch() && !g_IEngine->IsInGame() && !tfmm::isLoadingMap())
-        {
-            static Timer abandon_stuck{};
-            static bool tracking_abandon = false;
-            if (!tracking_abandon)
-            {
-                abandon_stuck.update();
-                tracking_abandon = true;
-            }
-            else if (abandon_stuck.test_and_set(45000))
-            {
-                logging::Info("autojoin: abandoning stuck live match");
-                tfmm::abandon();
-                tracking_abandon = false;
-            }
-        }
         const bool in_queue = pc && (pc->BInQueueForMatchGroup(tfmm::getQueue()) || pc->BInQueueForStandby());
-        static Timer last_queue_sent{};
         static Timer queue_status{};
         if (queue_status.test_and_set(15000))
-            logging::Info("autojoin: inqueue=%d live=%d invites=%d", (int) in_queue, (int) live_match, invites);
-        if (in_queue)
-            last_queue_sent.update();
-        else if (last_queue_sent.check(180000) && gc && !gc->BConnectedToMatchServer(false) && !gc->BHaveLiveMatch() && !invites)
+            logging::Info("autojoin: inqueue=%d live=%d connected=%d invites=%d", (int) in_queue, (int) live_match, (int) connected_mm, invites);
+        if (!in_queue && startqueue_timer.check(5000) && gc && !connected_mm && !live_match && !invites)
         {
             logging::Info("Starting queue, Invites %d", invites);
             tfmm::startQueue();
-            last_queue_sent.update();
         }
     }
+    startqueue_timer.test_and_set(5000);
 #if not ENABLE_VISUALS
     if (queue_time.test_and_set(1200000))
     {
@@ -254,14 +274,12 @@ static uintptr_t so_changed_hook(re::CTFGCClientSystem *this_, void *obj, int ch
     if (type == k_SO_LobbyInvite)
     {
         if (uint64_t id = lobby_invite_group_id(obj))
+        {
+            logging::Info("autojoin: accepting match invite %llu", (unsigned long long) id);
             this_->RequestAcceptMatchInvite(id);
-        return orig(this_, obj, change);
+        }
     }
-
-    auto result = orig(this_, obj, change);
-    if (type == k_SO_GameServerLobby)
-        this_->JoinMMMatch();
-    return result;
+    return orig(this_, obj, change);
 }
 
 static void class_menu_show_panel_hook(void *me, bool show)

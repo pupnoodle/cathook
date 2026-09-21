@@ -16,9 +16,15 @@ settings::Int queue{ "autoqueue.mode", "7" };
 static settings::Boolean no_queue_while_loading{ "autojoin.no-queue-while-loading", "true" };
 
 CatCommand cmd_queue_start("mm_queue_casual", "Start casual queue", []() { tfmm::startQueue(); });
-CatCommand queue_party("mm_queue_party", "Queue for Party", []() {
+CatCommand queue_party("mm_queue_party", "Queue for Party", []() { tfmm::startQueueStandby(); });
+static CatCommand mm_criteria_refresh("mm_criteria_refresh", "Refresh casual criteria (loadsavedcasualcriteria)", []() {
     re::CTFPartyClient *client = re::CTFPartyClient::GTFPartyClient();
-    client->RequestQueueForStandby();
+    if (!client)
+    {
+        logging::Info("mm_criteria_refresh: CTFPartyClient == null!");
+        return;
+    }
+    logging::Info("mm_criteria_refresh: ret=%d", client->LoadSavedCasualCriteria());
 });
 CatCommand cmd_abandon("mm_abandon", "Abandon match", []() { tfmm::abandon(); });
 
@@ -127,8 +133,7 @@ void startQueue()
     {
         if (auto *criteria = client->MutLocalGroupCriteria(client))
             re::ITFGroupMatchCriteria::SetMatchGroup(criteria, (int) queue);
-        if (*queue == 7)
-            client->LoadSavedCasualCriteria();
+        client->LoadSavedCasualCriteria();
         const char ret = client->RequestQueueForMatch((int) queue);
         logging::Info("queue_start: type=%d ret=%d inqueue=%d standby=%d", (int) queue, (int) (unsigned char) ret,
                       (int) client->BInQueueForMatchGroup((int) queue), (int) client->BInQueueForStandby());
@@ -142,8 +147,11 @@ void startQueueStandby()
     re::CTFPartyClient *client = re::CTFPartyClient::GTFPartyClient();
     if (client)
     {
+        client->LoadSavedCasualCriteria();
         client->RequestQueueForStandby();
     }
+    else
+        logging::Info("queue_standby: CTFPartyClient == null!");
 }
 void leaveQueue()
 {

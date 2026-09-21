@@ -128,16 +128,13 @@ void Update()
             if (!ent.player_info)
                 ent.player_info = new player_info_s{};
             GetPlayerInfo(ent.m_IDX, ent.player_info);
+            player_cache.push_back(&ent);
         }
         if (EntIsDormant(raw))
             continue;
         valid_ents.push_back(&ent);
         if ((ent.m_Type() == ENTITY_PLAYER || ent.m_Type() == ENTITY_BUILDING || ent.m_Type() == ENTITY_NPC) && ent.m_bAlivePlayer())
-        {
             ent.hitboxes.UpdateBones();
-            if (ent.m_Type() == ENTITY_PLAYER)
-                player_cache.push_back(&ent);
-        }
     }
 }
 

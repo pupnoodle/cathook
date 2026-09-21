@@ -1846,6 +1846,22 @@ int SharedRandomInt(unsigned iseed, const char *sharedname, int iMinVal, int iMa
     return g_pUniformStream->RandomInt(iMinVal, iMaxVal);
 }
 
+int MaxClientIndex()
+{
+    int n = 32;
+    if (g_IEngine)
+    {
+        const int engine_max = g_IEngine->GetMaxClients();
+        if (engine_max > 0)
+            n = engine_max;
+    }
+    if (g_GlobalVars && g_GlobalVars->maxClients > n)
+        n = g_GlobalVars->maxClients;
+    if (n > MAX_PLAYERS)
+        n = MAX_PLAYERS;
+    return n;
+}
+
 int GetPlayerForUserID(int userID)
 {
     if (userID && g_IEngine)
@@ -1854,12 +1870,10 @@ int GetPlayerForUserID(int userID)
         if (idx > 0)
             return idx;
     }
-    for (auto const &ent : entity_cache::player_cache)
+    const int maxc = MaxClientIndex();
+    for (int i = 1; i <= maxc; ++i)
     {
-        if (!ent || !ent->player_info)
-            continue;
-        player_info_s player_info;
-        int i = ent->m_IDX;
+        player_info_s player_info{};
         if (!GetPlayerInfo(i, &player_info))
             continue;
         if (player_info.userID == userID)

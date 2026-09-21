@@ -6,6 +6,7 @@
  */
 
 #include <settings/Bool.hpp>
+#include <unordered_set>
 #include "CatBot.hpp"
 #include "common.hpp"
 #include "hack.hpp"
@@ -206,23 +207,22 @@ void do_random_votekick()
 
     if (CE_BAD(LOCAL_E) || !GetPlayerInfo(LOCAL_E->m_IDX, &local_info))
         return;
-    for (int i = 1; i < g_GlobalVars->maxClients; ++i)
-    {
-        player_info_s info;
-        if (!GetPlayerInfo(i, &info) || !info.friendsID)
-            continue;
-        if (g_pPlayerResource->GetTeam(i) != g_pLocalPlayer->team)
-            continue;
-        if (info.friendsID == local_info.friendsID)
-            continue;
-        auto &pl = playerlist::AccessData(info.friendsID);
-        if (votekick_rage_only && pl.state != playerlist::k_EState::RAGE)
-            continue;
-        if (pl.state != playerlist::k_EState::RAGE && pl.state != playerlist::k_EState::DEFAULT)
-            continue;
-
-        targets.push_back(info.userID);
-    }
+    ForEachConnectedPlayer(
+        [&](int i, unsigned id, const player_info_s &info)
+        {
+            if (!info.userID)
+                return;
+            if (g_pPlayerResource && g_pPlayerResource->GetTeam(i) != g_pLocalPlayer->team)
+                return;
+            if (id == local_info.friendsID)
+                return;
+            auto &pl = playerlist::AccessData(id);
+            if (votekick_rage_only && pl.state != playerlist::k_EState::RAGE)
+                return;
+            if (pl.state != playerlist::k_EState::RAGE && pl.state != playerlist::k_EState::DEFAULT)
+                return;
+            targets.push_back(info.userID);
+        });
 
     if (targets.empty())
         return;
@@ -566,30 +566,52 @@ Timer micspam_on_timer{};
 Timer micspam_off_timer{};
 static std::atomic_bool can_report = false;
 static std::vector<unsigned> to_report;
+static std::unordered_set<unsigned> already_reported;
+
+static unsigned local_friendsid()
+{
+    if (g_ISteamUser)
+        return g_ISteamUser->GetSteamID().GetAccountID();
+    player_info_s info{};
+    if (g_IEngine && GetPlayerInfo(g_IEngine->GetLocalPlayer(), &info))
+        return info.friendsID;
+    return 0;
+}
+
+static bool on_match_team(int idx)
+{
+    if (!g_pPlayerResource)
+        return true;
+    const int team = g_pPlayerResource->GetTeam(idx);
+    return !team || team == TEAM_RED || team == TEAM_BLU;
+}
+
+static int collect_report_targets(std::vector<unsigned> &out)
+{
+    out.clear();
+    const unsigned self = local_friendsid();
+    int connected       = 0;
+    ForEachConnectedPlayer(
+        [&](int i, unsigned id, const player_info_s &)
+        {
+            if (!on_match_team(i))
+                return;
+            ++connected;
+            if (id == self)
+                return;
+            if (!player_tools::shouldTargetSteamId(id))
+                return;
+            out.push_back(id);
+        });
+    return connected;
+}
+
 void reportall()
 {
-    to_report.clear();
     can_report = false;
-    for (auto const &ent: entity_cache::player_cache)
-    {
-       
-        // We only want a nullptr check since dormant entities are still on the
-        // server
-        if (!ent)
-            continue;
-
-        // Pointer comparison is fine
-        if (ent == LOCAL_E)
-            continue;
-        player_info_s info;
-        if (GetPlayerInfo(ent->m_IDX, &info) && info.friendsID)
-        {
-            if (!player_tools::shouldTargetSteamId(info.friendsID))
-                continue;
-            to_report.push_back(info.friendsID);
-        }
-    }
-    can_report = true;
+    const int connected = collect_report_targets(to_report);
+    logging::Info("reportall: %zu targets, %d on teams", to_report.size(), connected);
+    can_report = !to_report.empty();
 }
 
 static DetourHook report_recent_check_detour;
@@ -604,16 +626,14 @@ static char report_recent_check_hook(uint64_t steamid64, char warn)
 
 static std::string name_for_friendsid(unsigned friendsID)
 {
-    player_info_s info{};
-    if (!g_GlobalVars)
-        return {};
-    for (int i = 1; i <= g_GlobalVars->maxClients; ++i)
-    {
-        if (!GetPlayerInfo(i, &info) || info.friendsID != friendsID)
-            continue;
-        return info.name;
-    }
-    return {};
+    std::string name;
+    ForEachConnectedPlayer(
+        [&](int, unsigned id, const player_info_s &info)
+        {
+            if (name.empty() && id == friendsID && info.name[0])
+                name = info.name;
+        });
+    return name;
 }
 
 static void send_report(unsigned friendsID)
@@ -668,7 +688,9 @@ enum class State
 static State state = State::Idle;
 static Timer state_timer{};
 static std::string reported_match;
-static int settle_tries = 0;
+static int settle_tries   = 0;
+static int last_connected = 0;
+static int stable_ticks   = 0;
 
 static std::string currentMatchId()
 {
@@ -705,16 +727,23 @@ static void startCasualQueue()
 
 static void reset()
 {
-    state         = State::Idle;
-    settle_tries  = 0;
+    state          = State::Idle;
+    settle_tries   = 0;
+    last_connected = 0;
+    stable_ticks   = 0;
     reported_match.clear();
 }
 
 void onLevelInit()
 {
+    settle_tries   = 0;
+    last_connected = 0;
+    stable_ticks   = 0;
+    if (state == State::Reporting)
+        return;
     to_report.clear();
-    can_report   = false;
-    settle_tries = 0;
+    already_reported.clear();
+    can_report = false;
     if (state == State::Abandoning || state == State::PostAbandonCooldown)
     {
         logging::Info("autoqueue-report: new map, starting report cycle");
@@ -779,7 +808,10 @@ void update()
         if (g_pLocalPlayer->team == TEAM_UNK || g_pLocalPlayer->team == TEAM_SPEC || g_pLocalPlayer->clazz == 0)
             break;
         logging::Info("autoqueue-report: class chosen, settling in before reporting");
-        settle_tries = 0;
+        settle_tries   = 0;
+        last_connected = 0;
+        stable_ticks   = 0;
+        can_report     = false;
         state_timer.update();
         state = State::SettlingIn;
         break;
@@ -792,14 +824,29 @@ void update()
         }
         if (state_timer.test_and_set(4000))
         {
-            reportall();
-            if (!to_report.empty())
+            const int connected = collect_report_targets(to_report);
+            can_report          = false;
+            ++settle_tries;
+            if (connected == last_connected && connected > 0)
+                ++stable_ticks;
+            else
+                stable_ticks = 0;
+            last_connected = connected;
+            logging::Info("autoqueue-report: settle %d connected=%d reportable=%zu stable=%d", settle_tries, connected, to_report.size(), stable_ticks);
+
+            const bool fullish = connected >= 10 && stable_ticks >= 1 && !to_report.empty();
+            const bool stable  = stable_ticks >= 2 && connected >= 4 && !to_report.empty();
+            const bool timeout = settle_tries >= 8 && !to_report.empty();
+            if (fullish || stable || timeout)
             {
+                already_reported.clear();
                 reported_match = currentMatchId();
-                state          = State::Reporting;
+                can_report     = true;
+                logging::Info("autoqueue-report: reporting %zu players", to_report.size());
+                state = State::Reporting;
                 break;
             }
-            if (++settle_tries >= 5)
+            if (settle_tries >= 8 && to_report.empty())
             {
                 logging::Info("autoqueue-report: no players to report, abandoning match");
                 reported_match = currentMatchId();
@@ -820,14 +867,30 @@ void update()
             const auto now = currentMatchId();
             if (!now.empty() && !reported_match.empty() && now != reported_match)
             {
-                settle_tries = 0;
-                state        = State::WaitingForClass;
+                settle_tries   = 0;
+                last_connected = 0;
+                stable_ticks   = 0;
+                state          = State::WaitingForClass;
                 break;
             }
         }
         if (!can_report && to_report.empty())
         {
-            logging::Info("autoqueue-report: done reporting, abandoning match");
+            std::vector<unsigned> extra;
+            collect_report_targets(extra);
+            for (unsigned id : extra)
+            {
+                if (already_reported.count(id))
+                    continue;
+                to_report.push_back(id);
+            }
+            if (!to_report.empty())
+            {
+                logging::Info("autoqueue-report: %zu more players showed up, keeping reports", to_report.size());
+                can_report = true;
+                break;
+            }
+            logging::Info("autoqueue-report: done reporting %zu players, abandoning match", already_reported.size());
             tfmm::disconnectAndAbandon();
             state_timer.update();
             state = State::Abandoning;
@@ -967,7 +1030,7 @@ static void cm()
         int classtojoin    = classes[rand() % 3];
         g_IEngine->ClientCmd_Unrestricted(format("disguise ", classtojoin, " ", teamtodisguise).c_str());
     }
-    if (*autoReport && report_timer.test_and_set(60000))
+    if (*autoReport && !*autoqueue_report && report_timer.test_and_set(60000))
         reportall();
 }
 
@@ -989,7 +1052,8 @@ void update()
             {
                 auto rep = to_report.back();
                 to_report.pop_back();
-                send_report(rep);
+                if (already_reported.insert(rep).second)
+                    send_report(rep);
             }
         }
     }
@@ -1030,26 +1094,21 @@ void update()
         ipc_list.clear();
         int count_total = 0;
 
-        for (auto const &ent: entity_cache::player_cache)
-        {
-            int i = ent->m_IDX;
-            if (g_IEntityList->GetClientEntity(i))
-                ++count_total;
-            else
-                continue;
-
-            player_info_s info{};
-            if (!GetPlayerInfo(i, &info))
-                continue;
-            if (playerlist::AccessData(info.friendsID).state == playerlist::k_EState::CAT)
-                --count_total;
-
-            if (playerlist::AccessData(info.friendsID).state == playerlist::k_EState::IPC || playerlist::AccessData(info.friendsID).state == playerlist::k_EState::TEXTMODE)
+        ForEachConnectedPlayer(
+            [&](int i, unsigned id, const player_info_s &)
             {
-                ipc_list.push_back(info.friendsID);
-                ++count_ipc;
-            }
-        }
+                if (!on_match_team(i))
+                    return;
+                const auto state = playerlist::AccessData(id).state;
+                if (state == playerlist::k_EState::CAT)
+                    return;
+                ++count_total;
+                if (state == playerlist::k_EState::IPC || state == playerlist::k_EState::TEXTMODE)
+                {
+                    ipc_list.push_back(id);
+                    ++count_ipc;
+                }
+            });
 
         if (abandon_if_ipc_bots_gte)
         {
