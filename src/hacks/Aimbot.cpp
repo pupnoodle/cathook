@@ -61,6 +61,7 @@ static settings::Float sticky_autoshoot{ "aimbot.projectile.sticky-autoshoot", "
 static settings::Boolean aimbot_debug{ "aimbot.debug", "0" };
 
 static settings::Boolean auto_spin_up{ "aimbot.auto.spin-up", "0" };
+static settings::Float rev_distance{ "aimbot.rev.distance", "1500.0" };
 static settings::Boolean minigun_tapfire{ "aimbot.auto.tapfire", "false" };
 static settings::Boolean auto_zoom{ "aimbot.auto.zoom", "0" };
 static settings::Boolean auto_unzoom{ "aimbot.auto.unzoom", "0" };
@@ -214,9 +215,37 @@ inline bool shouldBacktrack(CachedEntity *ent)
     return true;
 }
 
-static bool HitscanPointVisible(CachedEntity *ent, const Vector &point)
+static constexpr unsigned int kBulletTraceMask = 0x4200400B;
+
+static bool HitscanPointVisible(CachedEntity *ent, const Vector &point, int hitbox)
 {
-    return IsEntityVectorVisible(ent, point, true, MASK_SHOT_HULL, nullptr, true);
+    trace_t tr{};
+    if (!IsEntityVectorVisible(ent, point, true, kBulletTraceMask, &tr, true))
+        return false;
+    return ent->m_Type() != ENTITY_PLAYER || hitbox < 0 || tr.hitbox == hitbox;
+}
+
+static bool BulletRayOnHitbox(const AimbotTarget_t &target)
+{
+    if (!target.ent || CE_BAD(LOCAL_E))
+        return false;
+
+    Vector ang = current_user_cmd->viewangles;
+    if (netvar.vecPunchAngle)
+        ang += CE_VECTOR(LOCAL_E, netvar.vecPunchAngle);
+
+    Vector forward;
+    AngleVectors2(VectorToQAngle(ang), &forward);
+
+    trace_t tr{};
+    Ray_t ray;
+    trace::filter_default.SetSelf(RAW_ENT(LOCAL_E));
+    ray.Init(g_pLocalPlayer->v_Eye, g_pLocalPlayer->v_Eye + forward * 8192.0f);
+    g_ITrace->TraceRay(ray, kBulletTraceMask, &trace::filter_default, &tr);
+
+    if ((IClientEntity *) tr.m_pEnt != RAW_ENT(target.ent))
+        return false;
+    return target.ent->m_Type() != ENTITY_PLAYER || tr.hitbox == target.hitbox;
 }
 
 static bool HitscanBestPoint(CachedEntity *ent, int hitbox, Vector &out)
@@ -227,7 +256,7 @@ static bool HitscanBestPoint(CachedEntity *ent, int hitbox, Vector &out)
 
     if (!*multipoint)
     {
-        if (!HitscanPointVisible(ent, hb->center))
+        if (!HitscanPointVisible(ent, hb->center, hitbox))
             return false;
         out = hb->center;
         return true;
@@ -260,7 +289,7 @@ static bool HitscanBestPoint(CachedEntity *ent, int hitbox, Vector &out)
     bool found = false;
     for (int i = 0; i < n; ++i)
     {
-        if (!HitscanPointVisible(ent, points[i]))
+        if (!HitscanPointVisible(ent, points[i], hitbox))
             continue;
         const float dist = points[i].DistToSqr(points[0]);
         if (!found || dist < best)
@@ -320,7 +349,7 @@ static bool HitscanResolve(AimbotTarget_t &t)
     }
 
     const Vector point = PredictEntity(t);
-    if (!HitscanPointVisible(ent, point))
+    if (!HitscanPointVisible(ent, point, -1))
         return false;
 
     t.aim_position = point;
@@ -545,8 +574,15 @@ void doAutoZoom(bool target_found)
     // Keep track of our zoom time
     static Timer zoomTime{};
 
+    if (g_pLocalPlayer->weapon()->m_iClassID() == CL_CLASS(CTFMinigun) && (target_found || (*rev_distance && nearest.second <= *rev_distance)))
+    {
+        if (target_found)
+            zoomTime.update();
+        if (!g_pLocalPlayer->bRevved || !g_pLocalPlayer->bRevving)
+            current_user_cmd->buttons |= IN_ATTACK2;
+    }
     // Minigun spun up handler
-    if (auto_spin_up && g_pLocalPlayer->weapon()->m_iClassID() == CL_CLASS(CTFMinigun))
+    else if (auto_spin_up && g_pLocalPlayer->weapon()->m_iClassID() == CL_CLASS(CTFMinigun))
     {
         if (target_found)
             zoomTime.update();
@@ -1447,13 +1483,14 @@ void DoAutoshoot(AimbotTarget_t target)
             attack = false;
     }
 
-    // Autoshoot breaks with Slow aimbot, so use a workaround to detect when it
-    // can
-    else if (slow_aim && !slow_can_shoot)
+    else if (slow_aim && !slow_can_shoot && g_pLocalPlayer->weapon_mode != weapon_hitscan)
         attack = false;
 
     // Dont autoshoot without anything in clip
     else if (CE_INT(g_pLocalPlayer->weapon(), netvar.m_iClip1) == 0)
+        attack = false;
+
+    if (attack && g_pLocalPlayer->weapon_mode == weapon_hitscan && target.valid && !BulletRayOnHitbox(target))
         attack = false;
 
     if (attack)
@@ -1687,16 +1724,14 @@ void DoSlowAim(Vector &input_angle)
         while (slow_delta.y < -180)
             slow_delta.y += 360;
 
-        slow_delta /= slow_aim;
-        input_angle = viewangles + slow_delta;
+        Vector step = slow_delta / slow_aim;
+        input_angle = viewangles + step;
+        slow_delta -= step;
 
         // Clamp as we changed angles
         fClampAngle(input_angle);
     }
-    // 0.17 is a good amount in general
-    slow_can_shoot = false;
-    if (std::abs(slow_delta.y) < 0.17 && std::abs(slow_delta.x) < 0.17)
-        slow_can_shoot = true;
+    slow_can_shoot = std::abs(slow_delta.y) < 0.17f && std::abs(slow_delta.x) < 0.17f;
 }
 
 // A function that determins whether aimkey allows aiming

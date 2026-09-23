@@ -42,10 +42,7 @@ struct offsets
     {
         return vtables::input::create_move;
     }
-    static constexpr uint32_t CAM_CapYaw()
-    {
-        return vtables::input::cam_cap_yaw;
-    }
+
     static constexpr uint32_t CreateMove()
     {
         return vtables::client_mode::create_move;

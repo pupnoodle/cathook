@@ -10,12 +10,6 @@
 namespace re
 {
 
-class CEconItem
-{
-public:
-    unsigned long long uniqueid();
-};
-
 class CEconItemView
 {
 public:

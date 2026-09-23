@@ -825,6 +825,8 @@ const studiohdr_t *CStudioHdr::GroupStudioHdr(int i)
         Assert(!m_pVModel->m_Lock.GetOwnerId());
         virtualgroup_t *pGroup = &m_pVModel->m_group[i];
         pStudioHdr             = pGroup->GetStudioHdr();
+        if (pStudioHdr == NULL)
+            return m_pStudioHdr;
         m_pStudioHdrCache[i]   = pStudioHdr;
     }
 

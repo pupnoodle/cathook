@@ -20,6 +20,7 @@
 #include "nospread.hpp"
 #include "Warp.hpp"
 #include "Tickbase.hpp"
+#include <game/shared/imovehelper.h>
 
 settings::Boolean roll_speedhack{ "misc.roll-speedhack", "false" };
 settings::Boolean roll_speedhack_navbot{ "misc.roll-speedhack.navbot", "false" };
@@ -42,7 +43,7 @@ static bool have_ducked;
 
 void RunEnginePrediction(IClientEntity *ent, CUserCmd *ucmd)
 {
-    if (!ent)
+    if (!ent || !g_IMoveHelperServer)
         return;
 
     CMoveData movedata{};
@@ -79,11 +80,14 @@ void RunEnginePrediction(IClientEntity *ent, CUserCmd *ucmd)
     SetPredictionRandomSeed(MD5_PseudoRandom(current_user_cmd->command_number) & 0x7FFFFFFF);
 
     // Run The Prediction
-    g_IGameMovement->StartTrackPredictionErrors(reinterpret_cast<CBasePlayer *>(ent));
-    g_IPrediction->SetupMove(ent, ucmd, NULL, pMoveData);
-    g_IGameMovement->ProcessMovement(reinterpret_cast<CBasePlayer *>(ent), pMoveData);
+    auto *player = reinterpret_cast<CBasePlayer *>(ent);
+    g_IMoveHelperServer->SetHost(player);
+    g_IGameMovement->StartTrackPredictionErrors(player);
+    g_IPrediction->SetupMove(ent, ucmd, g_IMoveHelperServer, pMoveData);
+    g_IGameMovement->ProcessMovement(player, pMoveData);
     g_IPrediction->FinishMove(ent, ucmd, pMoveData);
-    g_IGameMovement->FinishTrackPredictionErrors(reinterpret_cast<CBasePlayer *>(ent));
+    g_IGameMovement->FinishTrackPredictionErrors(player);
+    g_IMoveHelperServer->SetHost(nullptr);
 
     // Reset User CMD
     NET_VAR(ent, netvar.m_pCurrentCommand, CUserCmd *) = nullptr;
@@ -290,10 +294,6 @@ DEFINE_HOOKED_METHOD(CreateMove, bool, void *this_, float input_sample_time, CUs
     if (firstcm)
     {
         DelayTimer.update();
-        if (identify)
-        {
-            sendIdentifyMessage(false);
-        }
         EC::run(EC::FirstCM);
         firstcm = false;
     }

@@ -164,10 +164,12 @@ matrix3x4_t *EntityHitboxCache::GetBones(int numbones)
             }
             if (raw)
             {
-                if (overlay_ok)
-                    bones_setup = EntSetupBones(raw, bones.data(), numbones, 0x7FF00, bones_setup_time);
-                if (!bones_setup && parent_ref->m_Type() == ENTITY_PLAYER)
+                const model_t *mdl = EntGetModel(raw);
+                studiohdr_t *shdr  = (mdl && g_IModelInfo) ? g_IModelInfo->GetStudiomodel(mdl) : nullptr;
+                if (shdr && shdr->numincludemodels > 0)
                     bones_setup = setupbones_reconst::SetupBones(raw, bones.data(), 0x7FF00);
+                else if (overlay_ok && shdr)
+                    bones_setup = EntSetupBones(raw, bones.data(), numbones, 0x7FF00, bones_setup_time);
             }
         }
     }

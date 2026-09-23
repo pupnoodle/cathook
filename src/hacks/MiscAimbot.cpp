@@ -594,12 +594,9 @@ static InitRoutine init(
         EC::Register(EC::CreateMove, CreateMove, "cm_miscaimbot", EC::average);
         EC::Register(EC::CreateMoveWarp, CreateMove, "cmw_miscaimbot", EC::average);
 
-        if (g_IInput)
-        {
-            auto **vt = *reinterpret_cast<void ***>(g_IInput);
-            if (vt && vt[offsets::CAM_CapYaw()])
-                CAM_CapYaw_detour.Init(uintptr_t(vt[offsets::CAM_CapYaw()]), (void *) CAM_CapYaw_Hook);
-        }
+        static uintptr_t cam_cap_yaw_addr = gSignatures.GetClientSignature(sigs::cam_cap_yaw);
+        if (cam_cap_yaw_addr)
+            CAM_CapYaw_detour.Init(cam_cap_yaw_addr, (void *) CAM_CapYaw_Hook);
         EC::Register(
             EC::Shutdown, []() { CAM_CapYaw_detour.Shutdown(); }, "chargeaim_shutdown");
     });

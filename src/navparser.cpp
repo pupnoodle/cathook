@@ -38,9 +38,11 @@ namespace navparser
 static settings::Boolean enabled("nav.enabled", "false");
 static settings::Boolean draw("nav.draw", "false");
 static settings::Boolean look{ "nav.look-at-path", "false" };
+static settings::Boolean look_legit{ "nav.look-at-path-legit", "false" };
 static settings::Boolean draw_debug_areas("nav.draw.debug-areas", "false");
 static settings::Boolean log_pathing{ "nav.log", "false" };
 static settings::Int stuck_time{ "nav.stuck-time", "800" };
+static settings::Int aim_speed{ "nav.smooth-speed", "7" };
 static settings::Int vischeck_cache_time{ "nav.vischeck-cache.time", "240" };
 static settings::Boolean vischeck_runtime{ "nav.vischeck-runtime.enabled", "true" };
 static settings::Int vischeck_time{ "nav.vischeck-runtime.delay", "2000" };
@@ -900,17 +902,27 @@ bool navTo(const Vector &destination, int priority, bool should_repath, bool nav
     if (path.empty())
         return fail(format("pather no path (result ", navdebug.last_solve_result, ", start #", start_area->m_id, " dest #", dest_area->m_id, ")"));
 
+    if (!nav_to_local)
+        path.erase(path.begin());
     crumbs.clear();
 
-    for (size_t i = 0; i + 1 < path.size(); ++i)
+    for (size_t i = 0; i < path.size(); ++i)
     {
-        auto *area      = reinterpret_cast<CNavArea *>(path[i]);
-        auto *next_area = (CNavArea *) path[i + 1];
+        auto *area = reinterpret_cast<CNavArea *>(path.at(i));
 
-        auto points   = determinePoints(area, next_area);
-        points.center = handleDropdown(points.center, points.next);
+        if (i != path.size() - 1)
+        {
+            auto *next_area = (CNavArea *) path.at(i + 1);
 
-        crumbs.push_back({ area, points.center });
+            auto points = determinePoints(area, next_area);
+
+            points.center = handleDropdown(points.center, points.next);
+
+            crumbs.push_back({ area, points.current });
+            crumbs.push_back({ area, points.center });
+        }
+        else
+            crumbs.push_back({ area, area->m_center });
     }
 
     crumbs.push_back({ nullptr, destination });
@@ -1135,8 +1147,67 @@ static void followCrumbs()
         next = GetAimAtAngles(g_pLocalPlayer->v_Eye, next);
 
         // Slow aim to smoothen
-        hacks::tf2::misc_aimbot::DoSlowAim(next);
+        hacks::tf2::misc_aimbot::DoSlowAim(next, *aim_speed);
         current_user_cmd->viewangles = next;
+    }
+
+    if (look_legit && !hacks::shared::aimbot::isAiming())
+    {
+        float best_dist                = FLT_MAX;
+        std::optional<Vector> look_vec = std::nullopt;
+        for (int i = 1; i <= g_IEngine->GetMaxClients(); i++)
+        {
+            CachedEntity *ent = ENTITY(i);
+            if (i == g_pLocalPlayer->entity_idx || CE_INVALID(ent) || !ent->m_bEnemy())
+                continue;
+            auto sound = soundcache::GetSoundLocation(i);
+            if (!sound)
+                continue;
+            sound->z += PLAYER_JUMP_HEIGHT;
+            if (sound->DistTo(g_pLocalPlayer->v_Eye) < best_dist && (IsVectorVisible(g_pLocalPlayer->v_Eye, *sound, true) || sound->DistTo(g_pLocalPlayer->v_Eye) <= 400.0f))
+            {
+                best_dist = sound->DistTo(g_pLocalPlayer->v_Eye);
+                look_vec  = sound;
+            }
+        }
+        if (look_vec)
+        {
+            Vector aim_ang = GetAimAtAngles(g_pLocalPlayer->v_Eye, *look_vec);
+            hacks::tf2::misc_aimbot::DoSlowAim(aim_ang, 20);
+            current_user_cmd->viewangles = aim_ang;
+        }
+        else
+        {
+            static Vector next{};
+            static bool looked_at_point = true;
+            static Timer choose_new_point;
+
+            static int wait_time = 1000;
+            static int speed     = 10;
+
+            if (looked_at_point && choose_new_point.test_and_set(wait_time))
+            {
+                next = { crumbs[0].vec.x, crumbs[0].vec.y, g_pLocalPlayer->v_Eye.z };
+                next = GetAimAtAngles(g_pLocalPlayer->v_Eye, next);
+                next.x += UniformRandomInt(-1, 1);
+                next.y += UniformRandomInt(-45, 45);
+                fClampAngle(next);
+                looked_at_point = false;
+            }
+
+            if ((current_user_cmd->viewangles - next).IsZero(10.0f))
+            {
+                if (!looked_at_point)
+                    choose_new_point.update();
+                looked_at_point = true;
+                wait_time       = 750 + UniformRandomInt(0, 4000);
+                speed           = 10 + UniformRandomInt(0, 2);
+            }
+
+            Vector next_slow = next;
+            hacks::tf2::misc_aimbot::DoSlowAim(next_slow, speed);
+            current_user_cmd->viewangles = next_slow;
+        }
     }
 
     WalkTo(current_vec);

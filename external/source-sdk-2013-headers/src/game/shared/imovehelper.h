@@ -17,7 +17,7 @@
 // Forward declarations
 //-----------------------------------------------------------------------------
 
-enum PLAYER_ANIM;
+enum PLAYER_ANIM : int;
 class IPhysicsSurfaceProps;
 class Vector;
 struct model_t;

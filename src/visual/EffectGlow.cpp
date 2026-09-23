@@ -268,6 +268,17 @@ rgba_t EffectGlow::GlowColor(IClientEntity *entity)
     return colors::EntityF(ent);
 }
 
+static bool GlowEnemyPlayer(CachedEntity *ent)
+{
+    if (g_pPlayerResource && g_pPlayerResource->entity && g_pLocalPlayer && (g_pLocalPlayer->team == TEAM_RED || g_pLocalPlayer->team == TEAM_BLU))
+    {
+        const int team = g_pPlayerResource->GetTeam(ent->m_IDX);
+        if (team == TEAM_RED || team == TEAM_BLU)
+            return team != g_pLocalPlayer->team;
+    }
+    return ent->m_bEnemy();
+}
+
 bool EffectGlow::ShouldRenderGlow(IClientEntity *entity)
 {
 #if ENFORCE_STREAM_SAFETY
@@ -296,9 +307,9 @@ bool EffectGlow::ShouldRenderGlow(IClientEntity *entity)
             return false;
         if (!disguised && IsPlayerDisguised(ent))
             return false;
-        if (!teammates && !ent->m_bEnemy() && playerlist::IsDefault(ent))
+        if (!teammates && !GlowEnemyPlayer(ent))
             return false;
-        if (CE_BYTE(ent, netvar.iLifeState) != LIFE_ALIVE)
+        if (!ent->m_bAliveVisual())
             return false;
         return true;
         break;

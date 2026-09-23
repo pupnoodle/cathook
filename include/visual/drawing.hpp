@@ -120,6 +120,8 @@ void RectangleTextured(float x, float y, float w, float h, rgba_t color, Texture
 void Circle(float x, float y, float radius, rgba_t color, float thickness, int steps);
 
 void UpdateWTS();
+void CaptureModelOrigin(int entity_index, const Vector &origin);
+bool GetModelOrigin(int entity_index, Vector &origin);
 bool WorldToScreen(const Vector &origin, Vector &screen);
 bool EntityCenterToScreen(CachedEntity *entity, Vector &out);
 

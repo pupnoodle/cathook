@@ -49,7 +49,7 @@ IStudioRender *g_IStudioRender                     = nullptr;
 IVDebugOverlay *g_IVDebugOverlay                   = nullptr;
 IMaterialSystemFixed *g_IMaterialSystem            = nullptr;
 CRenderView *g_IVRenderView                       = nullptr;
-IMoveHelperServer *g_IMoveHelperServer             = nullptr;
+IMoveHelper *g_IMoveHelperServer                   = nullptr;
 CBaseClientState *g_IBaseClientState               = nullptr;
 IGameEventManager *g_IGameEventManager             = nullptr;
 TFGCClientSystem *g_TFGCClientSystem               = nullptr;
@@ -338,7 +338,7 @@ void CreateInterfaces()
     rg_pGameRules = reinterpret_cast<CGameRules **>(resolve_lea_rip(reinterpret_cast<void *>(MustClientSig(sigs::gamerules_recvproxy, "g_pGameRules"))));
 
     {
-        auto *storage          = reinterpret_cast<IMoveHelperServer **>(resolve_lea_rip(reinterpret_cast<void *>(MustClientSig(sigs::move_helper, "CMoveHelper"))));
+        auto *storage          = reinterpret_cast<IMoveHelper **>(resolve_lea_rip(reinterpret_cast<void *>(MustClientSig(sigs::move_helper, "CMoveHelper"))));
         g_IMoveHelperServer    = storage ? *storage : nullptr;
         logging::Info("CMoveHelper %p", g_IMoveHelperServer);
     }
@@ -354,7 +354,7 @@ void CreateInterfaces()
 #if ENABLE_VISUALS
     g_IVDebugOverlay    = MustInterface<IVDebugOverlay>("VDebugOverlay003", sharedobj::engine());
     g_ISurface          = MustInterface<CMatSystemSurface>("VGUI_Surface030", sharedobj::vguimatsurface());
-    g_IStudioRender     = TryInterface<IStudioRender>("VStudioRender026", sharedobj::studiorender());
+    g_IStudioRender     = TryInterface<IStudioRender>("VStudioRender025", sharedobj::studiorender());
     g_IVRenderView      = MustInterface<CRenderView>("VEngineRenderView014", sharedobj::engine());
 
     {

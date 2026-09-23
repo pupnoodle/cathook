@@ -49,6 +49,8 @@ constexpr const char* key_values_delete_this =
   "48 85 FF 74 3B 55 48 89 E5 41 54 49 89 FC 48 83 EC 08 E8 ? ? ? ? 41 80 7C 24 23 00 74 ? 4C 89 E7 E8 ? ? ? ? E8 ? ? ? ? 4C 89 E6";
 constexpr const char* random_seed =
   "48 8D 05 ? ? ? ? BA ? ? ? ? 89 10";
+constexpr const char* cam_cap_yaw =
+  "55 48 89 E5 41 54 48 83 EC 18 F3 0F 11 45 EC E8 ? ? ? ? 48 85 C0 74 ? 4C 8D A0 ? ? ? ? BE 11 00 00 00";
 
 constexpr const char* casual_rank_record =
   "55 48 89 E5 41 54 53 48 89 FB 48 83 EC 10 48 8B 87 70 02 00 00 80 B8 B0 00 00 00 00 0F 84 ? ? ? ? 8B 90 AC 00 00 00 48 8D 3D ? ? ? ? 40 84 F6 0F 45 90 A8 00 00 00 41 89 D4";
@@ -70,6 +72,8 @@ constexpr const char* ctf_weapon_base_calc_is_attack_critical =
   "55 48 89 E5 41 57 41 56 41 55 41 54 49 89 FC 53 48 83 EC ? E8 ? ? ? ? 48 85 C0 0F 84 ? ? ? ? 48 8D 15 ? ? ? ? 31 C9 48 89 C7 48 8D 35 ? ? ? ? E8 ? ? ? ? 48 85 C0 49 89 C5 0F 84 ? ? ? ? 48 8B 00 4C 89 EF FF 90 ? ? ? ? 84 C0";
 constexpr const char* ctf_weapon_base_melee_calc_is_attack_critical =
   "55 48 89 E5 41 57 41 56 41 55 41 54 49 89 FC 53 48 83 EC ? E8 ? ? ? ? 48 85 C0 74 ? 48 89 C3 48 8B 00 48 89 DF FF 90 ? ? ? ? 84 C0 74 ? 49 8B 04 24 31 D2 31 F6 4C 89 E7 FF 90 ? ? ? ? 84 C0";
+constexpr const char* ctf_weapon_base_melee_calc_is_attack_critical_helper =
+  "48 8B 05 ? ? ? ? 8B 40 58 85 C0 75 ? 48 8B 07 FF A0 ? ? ? ?";
 constexpr const char* ctf_weapon_base_calc_is_attack_critical_outer =
   "55 48 89 E5 41 55 41 54 53 48 89 FB 48 83 EC 08 E8 ? ? ? ? 48 85 C0 0F 84 ? ? ? ? 48 8D 15 ? ? ? ? 31 C9 48 89 C7 48 8D 35 ? ? ? ? E8 ? ? ? ? 48 85 C0 49 89 C4 74 ? 48 8B 00 4C 89 E7 FF 90 ? ? ? ? 84 C0 74 ? 48 8D 05 ? ? ? ? 48 8B 00 8B 40 04";
 constexpr const char* cinput_validate_usercmd =
@@ -182,6 +186,8 @@ constexpr const char* client_file_system =
   "31 F6 4C 89 EF FF 13 48 83 3D ? ? ? ? 00 48 89 05 ? ? ? ? 0F 85";
 constexpr const char* v_render_view =
   "55 31 C0 48 89 E5 41 56 41 55 41 54 53 48 83 EC 40 4C 8B 2D ? ? ? ? 48 C7 45 A0 00 00 00 00 49 8B 7D 18 48 85 FF 74 ? 48 83 EC 08 45 31 C0 31 C9 48 8D 05 ? ? ? ? 31 D2";
+constexpr const char* vox_shutdown_bad_vcall =
+  "48 8D 3D ? ? ? ? 31 F6 E8 ? ? ? ? E8 ? ? ? ? 48 8B 3D ? ? ? ? 48 85 FF 74 06 48 8B 07 FF 50 08";
 constexpr const char* material_system_swap_buffers =
   "55 31 C0 48 89 E5 41 56 41 55 41 54 53 48 89 FB 48 83 EC 20 4C 8B 25 ? ? ? ? 48 C7 45 C8 00 00 00 00 49 8B 7C 24 10 48 85 FF 74 50";
 constexpr const char* particle_property_create =
@@ -193,6 +199,14 @@ constexpr const char* view_render_perform_screen_overlay =
 
 constexpr const char* play_sequence =
   "48 85 F6 0F 84 ? ? ? ? 55 48 89 E5 41 57 41 56 41 55 41 54 49 89 FC 53 48 83 EC 28 83 BF 00 ? ? ? ?";
+constexpr const char* menu_model_anim_events =
+  "55 48 89 E5 41 57 49 89 FF 48 89 F7 41 56 89 D6 41 89 D6 41 55 4D 89 C5 41 54 53 89 CB 48 83 EC 28 F3 0F 11 45 CC 48 89 7D C0 E8 ? ? ? ? 8B 50 18";
+constexpr const char* menu_model_update =
+  "55 48 89 E5 41 57 41 56 41 55 41 54 53 48 83 EC 18 4C 8B AF 10 0C 00 00 4D 85 ED 0F 84 ? ? ? ? 49 89 FC";
+constexpr const char* menu_model_apply_sequence =
+  "55 48 89 E5 41 57 41 56 41 55 41 54 49 89 FC 53 48 83 EC 28 48 8D 05 ? ? ? ? 48 89 75 C8 48 8B 38 48 8B 07 48 89 7D B8 FF 90 C8 00 00 00 4D 8B BC 24 10 0C 00 00";
+constexpr const char* menu_item_model_set =
+  "55 48 89 E5 41 57 41 56 41 55 41 54 49 89 F4 53 48 89 FB 48 83 EC 68 C7 87 E4 0E 00 00 00 00 00 00 48 8B BF 10 0F 00 00";
 constexpr const char* particle_system_precache =
   "31 C0 48 85 FF 74 ? 55 48 89 E5 41 54 49 89 FC 48 83 EC ? 48 8B 3D ? ? ? ?";
 constexpr const char* particle_effect_create_event =

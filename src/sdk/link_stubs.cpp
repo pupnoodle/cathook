@@ -17,6 +17,7 @@ extern "C" bool __sync_bool_compare_and_swap_16(volatile void *ptr, unsigned __i
 #include <bitbuf.h>
 #include <characterset.h>
 #include <datacache/imdlcache.h>
+#include <mathlib/vmatrix.h>
 #include <studio.h>
 #include <tier1/strtools.h>
 
@@ -396,6 +397,13 @@ int bf_read::ReadSBitLong(int numbits)
 void MatrixCopy(const matrix3x4_t &in, matrix3x4_t &out)
 {
     std::memcpy(&out, &in, sizeof(matrix3x4_t));
+}
+
+VMatrix &VMatrix::operator=(const VMatrix &other)
+{
+    if (this != &other)
+        std::memcpy(m, other.m, sizeof(m));
+    return *this;
 }
 
 void SetIdentityMatrix(matrix3x4_t &matrix)

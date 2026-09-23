@@ -74,11 +74,16 @@ static settings::Boolean entity_info{ "esp.debug.entity", "false" };
 static settings::Boolean entity_model{ "esp.debug.model", "false" };
 static settings::Boolean entity_id{ "esp.debug.id", "true" };
 // Forward declarations
+struct EspString
+{
+    std::string text;
+    rgba_t color;
+};
+
 class ESPData
 {
 public:
-    int string_count{ 0 };
-    boost::unordered_flat_map<std::string, rgba_t> strings{};
+    std::vector<EspString> strings{};
     rgba_t color{ colors::empty };
     bool needs_paint{ false };
     bool has_collide{ false };
@@ -92,8 +97,10 @@ static std::recursive_mutex esp_data_mutex;
 inline void AddEntityString(CachedEntity *entity, const std::string &string, const rgba_t &color = colors::empty)
 {
     ESPData &entity_data = data[entity->m_IDX];
-     if (entity_data.strings.try_emplace(string, color).second)
-        ++(entity_data.string_count);
+    for (const auto &existing : entity_data.strings)
+        if (existing.text == string)
+            return;
+    entity_data.strings.push_back({ string, color });
     entity_data.needs_paint = true;
 }
 // Sets an entitys esp color
@@ -115,6 +122,7 @@ inline void repaintEnt(CachedEntity *ent, float distance)
     if (show_distance)
         AddEntityString(ent, format(int(distance / 64 * 1.22f), 'm'));
     SetEntityColor(ent, color);
+    data[ent->m_IDX].needs_paint = true;
 }
 
 void ResetEntityStrings(bool full_clear);
@@ -606,7 +614,7 @@ void DrawStrings(EntityType &type, bool &transparent, Vector &draw_point, ESPDat
             break;
             case 1:
             { // BOTTOM RIGHT
-                draw_point = Vector(max_x + 2, max_y - data.at(ent->m_IDX).string_count * 16, 0);
+                draw_point = Vector(max_x + 2, max_y - ent_data.strings.size() * 16, 0);
             }
             break;
             case 2:
@@ -616,7 +624,7 @@ void DrawStrings(EntityType &type, bool &transparent, Vector &draw_point, ESPDat
             break;
             case 3:
             { // ABOVE CENTER
-                draw_point = Vector((min_x + max_x) / 2.0f, min_y - data.at(ent->m_IDX).string_count * 16, 0);
+                draw_point = Vector((min_x + max_x) / 2.0f, min_y - ent_data.strings.size() * 16, 0);
             }
             break;
             case 4:
@@ -626,22 +634,21 @@ void DrawStrings(EntityType &type, bool &transparent, Vector &draw_point, ESPDat
             break;
             case 5:
             { // ABOVE LEFT
-                draw_point = Vector(min_x + 2, min_y - data.at(ent->m_IDX).string_count * 16, 0);
+                draw_point = Vector(min_x + 2, min_y - ent_data.strings.size() * 16, 0);
             }
             break;
             case 6:
             { // ABOVE RIGHT
-                draw_point = Vector(max_x + 2, min_y - data.at(ent->m_IDX).string_count * 16, 0);
+                draw_point = Vector(max_x + 2, min_y - ent_data.strings.size() * 16, 0);
             }
             }
         }
     }
 
-    // Loop through strings
-    for (const auto &[string, color_l] : ent_data.strings)
+    for (const auto &entry : ent_data.strings)
     {
-
-        // Pull string from the entity's cached string array
+        const std::string &string = entry.text;
+        const rgba_t &color_l     = entry.color;
 
         // If string has a color assined to it, apply that otherwise use
         // entities color
@@ -832,7 +839,7 @@ void ProcessEntityPT()
     for (auto const &[ent, distance] : entities_need_repaint)
     {
         // Check to prevent crashes
-        if (CE_INVALID(ent) || !ent->m_bAlivePlayer())
+        if (CE_INVALID(ent) || !ent->m_bAliveVisual())
             continue;
         // Dormant
         bool dormant = false;
@@ -897,7 +904,7 @@ void ProcessEntityPT()
             static bonelist_s bl;
             bl.success = false;
             bl.setup   = false;
-            if (!CE_INVALID(ent) && ent->m_bAlivePlayer() && !EntIsDormant(RAW_ENT(ent)))
+            if (!CE_INVALID(ent) && ent->m_bAliveVisual() && !EntIsDormant(RAW_ENT(ent)))
             {
                 if (bones_color)
                     bl.Draw(ent, bone_color);
@@ -912,7 +919,7 @@ void ProcessEntityPT()
         // We only want health bars on players and buildings
 
         // Check if entity has strings to draw
-        if (ent_data.string_count)
+        if (!ent_data.strings.empty())
             DrawStrings(type, transparent, screen, ent_data, ent);
     }
 }
@@ -1009,7 +1016,7 @@ void _FASTCALL ProcessEntity(CachedEntity *ent)
     }
     case ENTITY_PLAYER:
     {
-        if (ent->m_bAlivePlayer())
+        if (ent->m_bAliveVisual())
         {
             // Local player handling
             if (!(local_esp && g_IInput->CAM_IsThirdPerson()) && ent->m_IDX == g_IEngine->GetLocalPlayer())
@@ -1457,7 +1464,7 @@ void _FASTCALL ProcessEntity(CachedEntity *ent)
 // Draw 3D box around player/building
 void _FASTCALL Draw3DBox(CachedEntity *ent, const rgba_t &clr)
 {
-    if (CE_INVALID(ent) || !ent->m_bAlivePlayer())
+    if (CE_INVALID(ent) || !ent->m_bAliveVisual())
         return;
 
     IClientEntity *raw = RAW_ENT(ent);
@@ -1467,11 +1474,9 @@ void _FASTCALL Draw3DBox(CachedEntity *ent, const rgba_t &clr)
     Vector mins = EntOBBMins(raw);
     Vector maxs = EntOBBMaxs(raw);
 
-    // Create a array for storing box points
-    Vector corners[8]; // World vectors
-    Vector points[8];  // Screen vectors
+    Vector corners[8];
+    Vector points[8];
 
-    // Create points for the box based on max and mins
     float x    = maxs.x - mins.x;
     float y    = maxs.y - mins.y;
     float z    = maxs.z - mins.z;
@@ -1484,10 +1489,9 @@ void _FASTCALL Draw3DBox(CachedEntity *ent, const rgba_t &clr)
     corners[6] = mins + Vector(x, y, z);
     corners[7] = mins + Vector(0, y, z);
 
-    // Rotate the box and check if any point of the box isnt on the screen
     for (int i = 0; i < 8; ++i)
     {
-        float yaw    = NET_VECTOR(RAW_ENT(ent), netvar.m_angEyeAngles).y;
+        float yaw    = NET_VECTOR(raw, netvar.m_angEyeAngles).y;
         float s      = sinf(DEG2RAD(yaw));
         float c      = cosf(DEG2RAD(yaw));
         float xx     = corners[i].x;
@@ -1519,7 +1523,7 @@ void _FASTCALL DrawBox(CachedEntity *ent, const rgba_t &clr)
     PROF_SECTION(PT_esp_drawbox);
 
     // Check if ent is bad to prevent crashes
-    if (CE_INVALID(ent) || !ent->m_bAlivePlayer())
+    if (CE_INVALID(ent) || !ent->m_bAliveVisual())
         return;
 
     // Get our collidable bounds
@@ -1597,7 +1601,8 @@ bool EspWorldOrigin(CachedEntity *ent, Vector &origin)
         origin = *vec;
         return true;
     }
-    origin = ent->m_vecOrigin();
+    if (!draw::GetModelOrigin(ent->m_IDX, origin))
+        origin = EntGetRenderOrigin(raw);
     return true;
 }
 
@@ -1607,7 +1612,7 @@ bool GetCollide(CachedEntity *ent)
     PROF_SECTION(PT_esp_getcollide);
 
     // Null check to prevent crashing
-    if (CE_INVALID(ent) || !ent->m_bAlivePlayer())
+    if (CE_INVALID(ent) || !ent->m_bAliveVisual())
         return false;
 
     IClientEntity *raw = RAW_ENT(ent);
@@ -1623,14 +1628,8 @@ bool GetCollide(CachedEntity *ent)
         Vector origin;
         if (!EspWorldOrigin(ent, origin))
             return false;
-        Vector mins = EntOBBMins(raw) + origin;
-        Vector maxs = EntOBBMaxs(raw) + origin;
-
-        // Create a array for storing box points
-        Vector points_r[8]; // World vectors
-        Vector points[8];   // Screen vectors
-
-        // If user setting for box expnad is true, spread the max and mins
+        Vector mins = EntOBBMins(raw);
+        Vector maxs = EntOBBMaxs(raw);
         if (esp_expand)
         {
             const float exp = *esp_expand;
@@ -1641,42 +1640,32 @@ bool GetCollide(CachedEntity *ent)
             mins.y -= exp;
             mins.z -= exp;
         }
+        Vector feet_screen, head_screen;
+        if (!draw::WorldToScreen(origin + Vector(0.f, 0.f, mins.z), feet_screen) || !draw::WorldToScreen(origin + Vector(0.f, 0.f, maxs.z), head_screen))
+            return false;
 
-        // Create points for the box based on max and mins
-        float x     = maxs.x - mins.x;
-        float y     = maxs.y - mins.y;
-        float z     = maxs.z - mins.z;
-        points_r[0] = mins;
-        points_r[1] = mins + Vector(x, 0, 0);
-        points_r[2] = mins + Vector(x, y, 0);
-        points_r[3] = mins + Vector(0, y, 0);
-        points_r[4] = mins + Vector(0, 0, z);
-        points_r[5] = mins + Vector(x, 0, z);
-        points_r[6] = mins + Vector(x, y, z);
-        points_r[7] = mins + Vector(0, y, z);
+        const float center_x = (feet_screen.x + head_screen.x) * 0.5f;
+        float min_y          = std::min(feet_screen.y, head_screen.y);
+        float max_y          = std::max(feet_screen.y, head_screen.y);
+        float height         = max_y - min_y;
+        if (height < 1.f)
+            height = 1.f;
 
-        for (int i = 0; i < 8; ++i)
-        {
-            if (!draw::WorldToScreen(points_r[i], points[i]))
-                return false;
-        }
+        const float hx    = std::max(fabsf(mins.x), fabsf(maxs.x));
+        const float hy    = std::max(fabsf(mins.y), fabsf(maxs.y));
+        const float mid_z = (mins.z + maxs.z) * 0.5f;
+        const Vector mid  = origin + Vector(0.f, 0.f, mid_z);
+        float width       = 0.f;
+        Vector side_a, side_b;
+        if (draw::WorldToScreen(mid + Vector(hx, 0.f, 0.f), side_a) && draw::WorldToScreen(mid + Vector(-hx, 0.f, 0.f), side_b))
+            width = fabsf(side_a.x - side_b.x);
+        if (draw::WorldToScreen(mid + Vector(0.f, hy, 0.f), side_a) && draw::WorldToScreen(mid + Vector(0.f, -hy, 0.f), side_b))
+            width = std::max(width, fabsf(side_a.x - side_b.x));
+        if (width < 6.f)
+            width = std::max(6.f, height * 0.6f);
 
-        // Get max and min of the box using the newly created screen vector
-        int max_x = -1;
-        int max_y = -1;
-        int min_x = 65536;
-        int min_y = 65536;
-        for (int i = 0; i < 8; ++i)
-        {
-            if (points[i].x > max_x)
-                max_x = points[i].x;
-            if (points[i].y > max_y)
-                max_y = points[i].y;
-            if (points[i].x < min_x)
-                min_x = points[i].x;
-            if (points[i].y < min_y)
-                min_y = points[i].y;
-        }
+        const float min_x = center_x - width * 0.5f;
+        const float max_x = center_x + width * 0.5f;
 
         // Save the info to the esp data and notify cached that we cached info.
         ent_data.collide_max = Vector(max_x, max_y, 0);
@@ -1701,18 +1690,16 @@ void ResetEntityStrings(bool full_clear)
         for (auto &[key, val] : data)
         {
 
-            val.string_count = 0;
-            val.color        = colors::empty;
-            val.needs_paint  = false;
+            val.color       = colors::empty;
+            val.needs_paint = false;
             val.strings.clear();
         }
     else
         for (u_int16_t i = 1; i < g_GlobalVars->maxClients; ++i)
         {
-            auto &element        = data[i];
-            element.string_count = 0;
-            element.color        = colors::empty;
-            element.needs_paint  = false;
+            auto &element       = data[i];
+            element.color       = colors::empty;
+            element.needs_paint = false;
             element.strings.clear();
         }
 }

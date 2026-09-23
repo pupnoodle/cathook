@@ -16,6 +16,12 @@ inline void *EntRenderable(IClientEntity *entity)
     return entity ? reinterpret_cast<void *>(uintptr_t(entity) + vtables::renderable::vptr_offset) : nullptr;
 }
 
+inline const Vector &EntGetRenderOrigin(IClientEntity *entity)
+{
+    void *renderable = EntRenderable(entity);
+    return vfunc<const Vector &(*)(void *)>(renderable, vtables::renderable::get_render_origin)(renderable);
+}
+
 inline void *EntNetworkable(IClientEntity *entity)
 {
     return entity ? reinterpret_cast<void *>(uintptr_t(entity) + vtables::networkable::vptr_offset) : nullptr;

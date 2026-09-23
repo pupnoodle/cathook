@@ -11,6 +11,7 @@ constexpr std::size_t get_ref_ehandle         = 3;
 constexpr std::size_t get_collideable         = 4;
 constexpr std::size_t get_abs_origin          = 11;
 constexpr std::size_t get_abs_angles          = 12;
+constexpr std::size_t get_render_angles       = 47;
 constexpr std::size_t should_draw             = 136;
 constexpr std::size_t interpolate             = 143;
 constexpr std::size_t is_base_combat_weapon   = 191;
@@ -28,6 +29,7 @@ namespace renderable
 {
 constexpr std::size_t vptr_offset        = 8;
 constexpr std::size_t get_iclient_unknown = 0;
+constexpr std::size_t get_render_origin   = 1;
 constexpr std::size_t should_draw        = 3;
 constexpr std::size_t get_model          = 9;
 constexpr std::size_t draw_model         = 10;
@@ -219,7 +221,6 @@ constexpr std::size_t get_user_cmd          = 8;
 constexpr std::size_t activate_mouse        = 18;
 constexpr std::size_t deactivate_mouse      = 19;
 constexpr std::size_t cam_is_third_person   = 31;
-constexpr std::size_t cam_cap_yaw           = 51;
 }
 
 namespace prediction
@@ -368,7 +369,7 @@ constexpr std::size_t execute_client_cmd        = 102;
 constexpr std::size_t get_app_id                = 104;
 constexpr std::size_t client_cmd_unrestricted   = 106;
 constexpr std::size_t get_achievement_mgr       = 114;
-constexpr std::size_t server_cmd_key_values     = 127;
+constexpr std::size_t server_cmd_key_values     = 128;
 }
 
 namespace engine_vgui
@@ -455,11 +456,6 @@ constexpr std::size_t element_count            = 0x30;
 namespace hud_element
 {
 constexpr std::size_t get_name = 9;
-}
-
-namespace econ
-{
-constexpr std::size_t get_item_id = 13;
 }
 
 namespace gc

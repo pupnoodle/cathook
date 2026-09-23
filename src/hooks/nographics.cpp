@@ -285,7 +285,7 @@ static InitRoutineEarly nullify_textmode(
 
         ReduceRamUsage();
         static BytePatch patch5(gSignatures.GetEngineSignature(sigs::video_mode_setup_startup_graphic), { 0xC3 });
-        static BytePatch patch6(gSignatures.GetEngineSignature, sigs::material_system_swap_buffers, 0x0, { 0x31, 0xC0, 0x40, 0xC3 });
+        static BytePatch patch6(gSignatures.GetMaterialSystemSignature, sigs::material_system_swap_buffers, 0x0, { 0x31, 0xC0, 0x40, 0xC3 });
         static BytePatch patch7(gSignatures.GetEngineSignature, sigs::v_render_view, 0x0, { 0xC3 });
         sdl_hidden.Patch();
         sdl_skip_vk.Patch();
@@ -318,11 +318,21 @@ static InitRoutine nullifiy_textmode2(
         static BytePatch patch2(gSignatures.GetClientSignature, sigs::view_render_render, 0x0, { 0x31, 0xC0, 0x40, 0xC3 });
         static BytePatch patch_ss(gSignatures.GetClientSignature, sigs::view_render_perform_screen_space_effects, 0x0, { 0xC3 });
         static BytePatch patch_ov(gSignatures.GetClientSignature, sigs::view_render_perform_screen_overlay, 0x0, { 0xC3 });
+        static BytePatch patch_menu_anim(gSignatures.GetClientSignature, sigs::menu_model_anim_events, 0x0, { 0xC3 });
+        static BytePatch patch_menu_update(gSignatures.GetClientSignature, sigs::menu_model_update, 0x0, { 0xC3 });
+        static BytePatch patch_menu_apply(gSignatures.GetClientSignature, sigs::menu_model_apply_sequence, 0x0, { 0xC3 });
+        static BytePatch patch_menu_set(gSignatures.GetClientSignature, sigs::menu_item_model_set, 0x0, { 0xC3 });
+        static BytePatch patch_vox(gSignatures.GetEngineSignature, sigs::vox_shutdown_bad_vcall, 0x22, { 0x90, 0x90, 0x90 });
         static BytePatch patch_scene(gSignatures.GetServerSignature, sigs::server_scene_entity_should_transmit, 0x0, { 0xB8, 0x00, 0x00, 0x00, 0x00, 0xC3 });
         static BytePatch patch_base(gSignatures.GetServerSignature, sigs::server_base_entity_should_transmit, 0x0, { 0xB8, 0x00, 0x00, 0x00, 0x00, 0xC3 });
         patch2.Patch();
         patch_ss.Patch();
         patch_ov.Patch();
+        patch_menu_anim.Patch();
+        patch_menu_update.Patch();
+        patch_menu_apply.Patch();
+        patch_menu_set.Patch();
+        patch_vox.Patch();
         patch_scene.Patch();
         patch_base.Patch();
         uintptr_t textmode_store = gSignatures.GetClientSignature(sigs::client_textmode_flag_store);

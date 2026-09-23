@@ -75,6 +75,7 @@ struct bot_class_config
 };*/
 std::pair<CachedEntity *, float> getNearestPlayerDistance();
 bool isEnabled();
+extern bool isVisible;
 std::vector<std::string> getDebugInfoLines();
 void drawDebugInfo();
 } // namespace hacks::tf2::NavBot

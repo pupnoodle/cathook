@@ -336,6 +336,8 @@ private:
 	KeyValues *m_pSub;	// pointer to Start of a new sub key list
 	KeyValues *m_pChain;// Search here if it's not in our list
 
+	CKeyValuesGrowableStringTable *m_pGrowableStringTable;
+
 private:
 	// Statics to implement the optional growable string table
 	// Function pointers that will determine which mode we are in

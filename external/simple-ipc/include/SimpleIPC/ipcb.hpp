@@ -17,6 +17,7 @@
 #include <thread>
 #include <condition_variable>
 #include <mutex>
+#include <unistd.h>
 
 #include "util.hpp"
 #include "cmp.hpp"
@@ -114,11 +115,15 @@ public:
         return last_command != memory->command_count;
     }
 
-    static void Heartbeat(bool *shutting_down, PeerData *data)
+    static void Heartbeat(bool *shutting_down, PeerData *data, pid_t owner_pid)
     {
         while (!*shutting_down)
         {
-            data->heartbeat = std::time(nullptr);
+            if (data->pid == owner_pid)
+            {
+                data->free      = false;
+                data->heartbeat = std::time(nullptr);
+            }
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
     }
@@ -171,7 +176,7 @@ public:
 
         if (!is_ghost)
         {
-            heartbeat_thread = std::jthread(Heartbeat, &this->shutting_down, &memory->peer_data[client_id]);
+            heartbeat_thread = std::jthread(Heartbeat, &this->shutting_down, &memory->peer_data[client_id], getpid());
             if (!heartbeat_thread.joinable())
                 throw std::runtime_error("Failed to crate heartbeat thread: " + std::string(strerror(errno)));
         }

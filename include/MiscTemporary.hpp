@@ -48,8 +48,3 @@ extern Color menu_color;
 extern int stored_buttons;
 typedef void (*CL_SendMove_t)();
 extern DetourHook cl_sendmove_detour;
-namespace hooked_methods
-{
-void sendIdentifyMessage(bool reply);
-extern settings::Boolean identify;
-} // namespace hooked_methods

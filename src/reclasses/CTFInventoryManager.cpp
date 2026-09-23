@@ -8,6 +8,7 @@
 #include "e8call.hpp"
 #include "DetourHook.hpp"
 #include <cstddef>
+#include <unordered_set>
 using namespace re;
 
 struct inventory_layout
@@ -70,11 +71,7 @@ bool CTFInventoryManager::EquipItemInLoadout(int classid, int slot, unsigned lon
     typedef bool (*fn_t)(void *, int, int, unsigned long long);
     return vfunc<fn_t>(this, vtables::inventory::equip_item_in_loadout, 0)(this, classid, slot, uniqueid);
 }
-unsigned long long int CEconItem::uniqueid()
-{
-    typedef unsigned long long (*fn_t)(CEconItem *);
-    return vfunc<fn_t>(this, vtables::econ::get_item_id)(this);
-}
+
 CTFPlayerInventory *CTFInventoryManager::GTFPlayerInventory()
 {
     typedef CTFPlayerInventory *(*fn_t)(void *);
@@ -167,12 +164,18 @@ static craft_layout live_craft_layout(uint8_t *craft)
             break;
         }
     }
-    for (int i = 0; i < 0x280; ++i)
+    std::unordered_set<int> incremented;
+    for (int i = 0; i + 6 < 0x280; ++i)
     {
-        if (craft[i] == 0x8B && (craft[i + 1] == 0x87 || craft[i + 1] == 0x8F))
+        if (craft[i] == 0x83 && (craft[i + 1] & 0xC7) == 0x87 && craft[i + 6] == 0x01)
+            incremented.insert(*reinterpret_cast<const int *>(craft + i + 2));
+    }
+    for (int i = 0; i + 5 < 0x280; ++i)
+    {
+        if (craft[i] == 0x8B && (craft[i + 1] & 0xC7) == 0x87)
         {
             int disp = *reinterpret_cast<int *>(craft + i + 2);
-            if (disp > out.items_end && disp < out.items_end + 0x200)
+            if (disp > out.items_end && disp < out.items_end + 0x200 && !incremented.count(disp))
             {
                 out.recipe = disp;
                 break;

@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Installs everything needed to build and attach cathook.
+# Safe to re-run: exits early when all tools and dev headers are present.
+
+set -e
+
+need_cmd() { ! command -v "$1" >/dev/null 2>&1; }
+
+has_header() { echo "#include <$1>" | g++ -fsyntax-only -x c++ - >/dev/null 2>&1; }
+
+deps_present() {
+    local cmd
+    for cmd in git cmake make g++ gdb rsync pkg-config; do
+        need_cmd "$cmd" && return 1
+    done
+    pkg-config --exists sdl2 xcb || return 1
+    # freetype dev files are optional: the build falls back to vendored
+    # headers + the runtime lib, so accept either.
+    pkg-config --exists freetype2 || ldconfig -p 2>/dev/null | grep -q 'libfreetype\.so\.6' || return 1
+    has_header GL/gl.h || return 1
+    has_header boost/version.hpp || return 1
+    return 0
+}
+
+run_as_root() {
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo "$@"
+    else
+        echo "Root privileges required to install packages; install sudo or run as root." >&2
+        exit 1
+    fi
+}
+
+if deps_present; then
+    exit 0
+fi
+
+if command -v apt-get >/dev/null 2>&1; then
+    pick_pkg() {
+        local p
+        for p in "$@"; do
+            if apt-cache show "$p" >/dev/null 2>&1; then
+                printf '%s\n' "$p"
+                return
+            fi
+        done
+        printf '%s\n' "$1"
+    }
+    freetype_pkg="$(pick_pkg libfreetype-dev libfreetype6-dev)"
+    apt_pkgs=(build-essential cmake git gdb rsync pkg-config
+        libsdl2-dev libboost-dev libxcb1-dev libgl1-mesa-dev "$freetype_pkg")
+    if ! run_as_root apt-get install -y "${apt_pkgs[@]}"; then
+        run_as_root apt-get update
+        # lists were empty: re-resolve transitional names now that apt-cache works
+        freetype_pkg="$(pick_pkg libfreetype-dev libfreetype6-dev)"
+        apt_pkgs[-1]="$freetype_pkg"
+        run_as_root apt-get install -y "${apt_pkgs[@]}"
+    fi
+elif command -v pacman >/dev/null 2>&1; then
+    run_as_root pacman -Sy --needed --noconfirm \
+        base-devel cmake git gdb rsync pkgconf sdl2 boost freetype2 libxcb libglvnd
+elif command -v dnf >/dev/null 2>&1; then
+    run_as_root dnf -y install \
+        gcc-c++ make cmake git gdb rsync pkgconf-pkg-config \
+        SDL2-devel boost-devel freetype-devel libxcb-devel mesa-libGL-devel libglvnd-devel
+elif command -v yum >/dev/null 2>&1; then
+    run_as_root yum -y install \
+        gcc-c++ make cmake git gdb rsync pkgconf-pkg-config \
+        SDL2-devel boost-devel freetype-devel libxcb-devel mesa-libGL-devel libglvnd-devel
+elif command -v zypper >/dev/null 2>&1; then
+    run_as_root zypper --non-interactive install --no-recommends \
+        gcc-c++ make cmake git gdb rsync pkg-config \
+        libSDL2-devel boost-devel freetype2-devel libxcb-devel Mesa-libGL-devel libglvnd-devel
+elif command -v xbps-install >/dev/null 2>&1; then
+    run_as_root xbps-install -Sy \
+        base-devel cmake git gdb rsync pkg-config \
+        SDL2-devel boost-devel freetype-devel libxcb-devel MesaLib-devel
+elif command -v apk >/dev/null 2>&1; then
+    run_as_root apk add \
+        build-base cmake git gdb rsync pkgconf \
+        sdl2-dev boost-dev freetype-dev libxcb-dev mesa-dev
+else
+    echo "No supported package manager found." >&2
+    echo "Install manually: C++ toolchain, cmake, git, gdb, rsync," >&2
+    echo "SDL2, boost headers, freetype, libxcb and OpenGL dev packages." >&2
+    exit 1
+fi
+
+deps_present || {
+    echo "Some dependencies are still missing after install." >&2
+    exit 1
+}

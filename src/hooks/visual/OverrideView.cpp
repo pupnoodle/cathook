@@ -24,6 +24,8 @@ DEFINE_HOOKED_METHOD(OverrideView, void, void *this_, CViewSetup *setup)
 {
     original::OverrideView(this_, setup);
 
+    if (!setup)
+        return;
     if (!isHackActive() || g_Settings.bInvalid || CE_BAD(LOCAL_E))
         return;
 
@@ -151,6 +153,7 @@ DEFINE_HOOKED_METHOD(OverrideView, void, void *this_, CViewSetup *setup)
         }
         last_zoom_state = current_zoom_state;
     }
+
 }
 static InitRoutine override_init([]() {
     EC::Register(

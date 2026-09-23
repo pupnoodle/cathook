@@ -16,11 +16,6 @@
 
 static settings::Int newlines_msg{ "chat.prefix-newlines", "0" };
 static settings::Boolean log_sent{ "debug.log-sent-chat", "false" };
-static settings::Boolean answerIdentify{ "chat.identify.answer", "true" };
-static Timer identify_timer{};
-constexpr int CAT_IDENTIFY   = 0xCA7;
-constexpr int CAT_REPLY      = 0xCA8;
-constexpr float AUTH_MESSAGE = 1234567.0f;
 
 namespace hacks::shared::catbot
 {
@@ -28,78 +23,6 @@ void SendNetMsg(INetMessage &msg);
 }
 namespace hooked_methods
 {
-
-static bool send_achievement_reply{};
-static Timer send_achievement_reply_timer{};
-
-// Welcome back Achievement based identify.
-void sendAchievementKv(int value)
-{
-    KeyValues *kv = new KeyValues("AchievementEarned");
-    kv->SetInt("achievementID", value);
-    g_IEngine->ServerCmdKeyValues(kv);
-}
-
-// Goodbye old Friend.
-/*void sendDrawlineKv(float x_value, float y_value)
-{
-    KeyValues *kv = new KeyValues("cl_drawline");
-    kv->SetInt("panel", 2);
-    kv->SetInt("line", 0);
-    kv->SetFloat("x", x_value);
-    kv->SetFloat("y", y_value);
-    g_IEngine->ServerCmdKeyValues(kv);
-}*/
-
-void sendIdentifyMessage(bool reply)
-{
-    reply ? sendAchievementKv(CAT_REPLY) : sendAchievementKv(CAT_IDENTIFY);
-    /*reply ? sendDrawlineKv(CAT_REPLY, AUTH_MESSAGE) : sendDrawlineKv(CAT_IDENTIFY, AUTH_MESSAGE);*/
-}
-
-static CatCommand debug_drawpanel("debug_drawline", "debug",
-                                  []()
-                                  {
-                                      KeyValues *kv = new KeyValues("cl_drawline");
-                                      // Has to be this to get broadcasted
-                                      kv->SetInt("panel", 2);
-                                      // "New" line
-                                      kv->SetInt("line", 0);
-
-                                      kv->SetFloat("x", CAT_IDENTIFY);
-                                      kv->SetFloat("y", AUTH_MESSAGE);
-                                      g_IEngine->ServerCmdKeyValues(kv);
-                                  });
-
-#if ENABLE_TEXTMODE
-settings::Boolean identify{ "chat.identify", "true" };
-#else
-settings::Boolean identify{ "chat.identify", "false" };
-#endif
-
-/*void ProcessSendline(IGameEvent *kv)
-{
-    int player_idx = kv->GetInt("player", 0xDEAD);
-
-    auto id            = kv->GetFloat("x");
-    float message_type = kv->GetFloat("y");
-    auto panel_type    = kv->GetInt("panel");
-    auto line_type     = kv->GetInt("line");
-
-    // Verify all the data matches
-    if (player_idx != 0xDEAD && panel_type == 2 && line_type == 0 && message_type == AUTH_MESSAGE && (id == CAT_IDENTIFY || id == CAT_REPLY))
-    {
-        player_info_s info;
-        if (!GetPlayerInfo(player_idx, &info))
-            return;
-        // CA7 = Reply and change state
-        // CA8 = Change state
-        if (id == CAT_IDENTIFY && *answerIdentify && player_idx != g_pLocalPlayer->entity_idx && playerlist::AccessData(info.friendsID).state != playerlist::k_EState::RAGE)
-            send_drawline_reply = true;
-        if (playerlist::ChangeState(info.friendsID, playerlist::k_EState::CAT))
-            PrintChat("\x07%06X%s\x01 Marked as CAT (Cathook user)", 0xe05938, info.name);
-    }
-}*/
 
 std::vector<KeyValues *> Iterate(KeyValues *event, int depth)
 {
@@ -185,61 +108,6 @@ void ParseKeyValue(KeyValues *event)
         }
     }
 }
-
-void ProcessAchievement(IGameEvent *ach)
-{
-    int player_idx  = ach->GetInt("player", 0xDEAD);
-    int achievement = ach->GetInt("achievement", 0xDEAD);
-    if (player_idx != 0xDEAD && (achievement == CAT_IDENTIFY || achievement == CAT_REPLY))
-    {
-        // Always reply and set on CA7 and only set on CA8
-        bool reply = achievement == CAT_IDENTIFY;
-        player_info_s info;
-        if (!g_IEngine->GetPlayerInfo(player_idx, &info))
-            return;
-        if (reply && *answerIdentify && player_idx != g_pLocalPlayer->entity_idx)
-        {
-            send_achievement_reply_timer.update();
-            send_achievement_reply = true;
-        }
-        if (playerlist::ChangeState(info.friendsID, playerlist::k_EState::CAT))
-            PrintChat("\x07%06X%s\x01 Marked as CAT (Cathook user)", 0xe05938, info.name);
-    }
-}
-
-class AchievementListener : public IGameEventListener2
-{
-    virtual void FireGameEvent(IGameEvent *event)
-    {
-        ProcessAchievement(event);
-    }
-};
-static CatCommand send_identify("debug_send_identify", "debug", []() { sendIdentifyMessage(false); });
-
-static AchievementListener event_listener{};
-
-static InitRoutine run_identify(
-    []()
-    {
-        EC::Register(
-            EC::CreateMove,
-            []()
-            {
-                if (send_achievement_reply && send_achievement_reply_timer.check(10000))
-                {
-                    sendIdentifyMessage(true);
-                    send_achievement_reply = false;
-                }
-                // It is safe to send every 15ish seconds, small packet
-                if (!*identify || CE_BAD(LOCAL_E) || !identify_timer.test_and_set(15000))
-                    return;
-                sendIdentifyMessage(false);
-            },
-            "sendnetmsg_createmove");
-        g_IEventManager2->AddListener(&event_listener, "achievement_earned", false);
-        EC::Register(
-            EC::Shutdown, []() { g_IEventManager2->RemoveListener(&event_listener); }, "shutdown_event");
-    });
 
 DEFINE_HOOKED_METHOD(SendNetMsg, bool, INetChannel *this_, INetMessage &msg, bool force_reliable, bool voice)
 {

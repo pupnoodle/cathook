@@ -278,24 +278,65 @@ void setTruce(bool status);
 int GetPlayerForUserID(int userID);
 int MaxClientIndex();
 
+inline unsigned ParseSteamAccountId(const char *guid)
+{
+    if (!guid || !guid[0])
+        return 0;
+    const char *p = guid;
+    if (p[0] == '[')
+    {
+        while (*p && *p != ':')
+            ++p;
+        if (*p == ':')
+            ++p;
+        while (*p && *p != ':')
+            ++p;
+        if (*p == ':')
+            ++p;
+        unsigned id = 0;
+        while (*p >= '0' && *p <= '9')
+        {
+            unsigned d = unsigned(*p - '0');
+            if (id > (0xffffffffu - d) / 10)
+                return 0;
+            id = id * 10 + d;
+            ++p;
+        }
+        return id;
+    }
+    unsigned y = 0, z = 0;
+    const char *colon = nullptr;
+    for (const char *c = p; *c; ++c)
+        if (*c == ':')
+            colon = c;
+    if (!colon)
+        return 0;
+    const char *mid = colon;
+    while (mid > p && *(mid - 1) != ':')
+        --mid;
+    if (mid > p && *(mid - 1) == ':')
+        y = unsigned(*mid == '1');
+    for (const char *c = colon + 1; *c >= '0' && *c <= '9'; ++c)
+    {
+        unsigned d = unsigned(*c - '0');
+        if (z > (0xffffffffu - d) / 10)
+            return 0;
+        z = z * 10 + d;
+    }
+    return z * 2 + y;
+}
+
 inline bool GetPlayerInfo(int idx, player_info_s *info)
 {
     bool res = g_IEngine->GetPlayerInfo(idx, info);
     if (!res)
         return res;
 
-    // First try parsing GUID, should always work unless a server is being malicious
-    try
-    {
-        std::string guid = info->guid;
-        guid             = guid.substr(5, guid.length() - 6);
-        info->friendsID  = std::stoul(guid.c_str());
-    }
-    catch (...)
-    {
-        // Fix friends ID with player resource
+    unsigned parsed = ParseSteamAccountId(info->guid);
+    if (parsed)
+        info->friendsID = parsed;
+    else if (g_pPlayerResource)
         info->friendsID = g_pPlayerResource->GetAccountID(idx);
-    }
     return res;
 }
 

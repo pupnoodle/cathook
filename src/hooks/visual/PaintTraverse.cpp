@@ -160,6 +160,8 @@ DEFINE_HOOKED_METHOD(PaintTraverse, void, vgui::IPanel *this_, vgui::VPANEL pane
 
     if (clean_screenshots && g_IEngine->IsTakingScreenshot())
         return;
-    draw::UpdateWTS();
+    const char *panel_name = g_IPanel->GetName(panel);
+    if (panel_name && !strcmp(panel_name, "MatSystemTopPanel"))
+        draw::UpdateWTS();
 }
 } // namespace hooked_methods

@@ -285,7 +285,7 @@ bool ShouldRenderChams(IClientEntity *entity)
             return false;
         if (!teammates && !ent->m_bEnemy() && playerlist::IsDefault(ent))
             return false;
-        if (CE_BYTE(ent, netvar.iLifeState))
+        if (!ent->m_bAliveVisual())
             return false;
         return true;
     case ENTITY_PROJECTILE:
@@ -537,6 +537,9 @@ void ApplyChams(ChamColors colors, bool recurse, bool render_original, bool over
 
 DEFINE_HOOKED_METHOD(DrawModelExecute, void, IVModelRender *this_, const DrawModelState_t &state, const ModelRenderInfo_t &info, matrix3x4_t *bone)
 {
+    if (isHackActive() && !effect_glow::g_EffectGlow.drawing && !chams_attachment_drawing && !disable_visuals && g_GlobalVars && info.entity_index > 0 && info.entity_index <= g_GlobalVars->maxClients)
+        draw::CaptureModelOrigin(info.entity_index, info.origin);
+
     if (!isHackActive() || effect_glow::g_EffectGlow.drawing || chams_attachment_drawing || (*clean_screenshots && g_IEngine->IsTakingScreenshot()) || disable_visuals || CE_BAD(LOCAL_E) || (!enable && !no_hats && !no_arms && !blend_zoom && !arms_chams && !local_weapon_chams /*&& !(hacks::tf2::backtrack::chams && hacks::tf2::backtrack::isBacktrackEnabled)*/))
         return original::DrawModelExecute(this_, state, info, bone);
 

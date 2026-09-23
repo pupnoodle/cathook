@@ -94,7 +94,7 @@ public:
         auto **vt = *reinterpret_cast<void ***>(self);
         if (!vt)
             return false;
-        static void *melee_helper = reinterpret_cast<void *>(gSignatures.GetClientSignature(sigs::ctf_weapon_base_melee_calc_is_attack_critical));
+        static void *melee_helper = reinterpret_cast<void *>(gSignatures.GetClientSignature(sigs::ctf_weapon_base_melee_calc_is_attack_critical_helper));
         return melee_helper && vt[vtables::weapon::calc_is_attack_critical_helper] == melee_helper;
     }
     inline static bool IsViewModelFlipped(IClientEntity *self)

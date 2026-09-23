@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/uio.h>
 #include <dlfcn.h>
 #include <pthread.h>
 #include <atomic>
@@ -28,6 +29,7 @@
 #endif
 #include <link.h>
 #include <pwd.h>
+#include <ucontext.h>
 
 #include <hacks/hacklist.hpp>
 #include "teamroundtimer.hpp"
@@ -189,14 +191,18 @@ std::string getFileName(std::string filePath)
     return filePath;
 }
 
-void critical_error_handler(int signum)
+void critical_error_handler(int signum, siginfo_t *sinfo, void *uctx)
 {
     namespace st = boost::stacktrace;
     ::signal(SIGSEGV, SIG_DFL);
     ::signal(SIGABRT, SIG_DFL);
     passwd *pwd = getpwuid(getuid());
-    char path[128];
-    snprintf(path, sizeof(path), "/tmp/cathook-%s-%d-segfault.log", pwd ? pwd->pw_name : "unknown", getpid());
+    char path[256];
+    const char *home = getenv("HOME");
+    if (home && home[0])
+        snprintf(path, sizeof(path), "%s/cathook-segfault.log", home);
+    else
+        snprintf(path, sizeof(path), "/tmp/cathook-%s-%d-segfault.log", pwd ? pwd->pw_name : "unknown", getpid());
     int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd >= 0)
     {
@@ -204,6 +210,63 @@ void critical_error_handler(int signum)
         int n = snprintf(hdr, sizeof(hdr), "signal %d\n", signum);
         if (n > 0)
             (void) write(fd, hdr, (size_t) n);
+        if (sinfo || uctx)
+        {
+            char fl[160];
+            int flen = snprintf(fl, sizeof(fl), "si_addr=%p", sinfo ? sinfo->si_addr : nullptr);
+            if (uctx)
+            {
+                ucontext_t *uc = reinterpret_cast<ucontext_t *>(uctx);
+                void *rip       = reinterpret_cast<void *>(uc->uc_mcontext.gregs[REG_RIP]);
+                const auto *regs = uc->uc_mcontext.gregs;
+                char regline[512];
+                int reglen = snprintf(regline, sizeof(regline), "regs rsp=%p rbp=%p rax=%p rbx=%p rcx=%p rdx=%p rsi=%p rdi=%p r8=%p r9=%p r10=%p r11=%p r12=%p r13=%p r14=%p r15=%p\n",
+                                      reinterpret_cast<void *>(regs[REG_RSP]), reinterpret_cast<void *>(regs[REG_RBP]),
+                                      reinterpret_cast<void *>(regs[REG_RAX]), reinterpret_cast<void *>(regs[REG_RBX]),
+                                      reinterpret_cast<void *>(regs[REG_RCX]), reinterpret_cast<void *>(regs[REG_RDX]),
+                                      reinterpret_cast<void *>(regs[REG_RSI]), reinterpret_cast<void *>(regs[REG_RDI]),
+                                      reinterpret_cast<void *>(regs[REG_R8]), reinterpret_cast<void *>(regs[REG_R9]),
+                                      reinterpret_cast<void *>(regs[REG_R10]), reinterpret_cast<void *>(regs[REG_R11]),
+                                      reinterpret_cast<void *>(regs[REG_R12]), reinterpret_cast<void *>(regs[REG_R13]),
+                                      reinterpret_cast<void *>(regs[REG_R14]), reinterpret_cast<void *>(regs[REG_R15]));
+                if (reglen > 0)
+                    (void) write(fd, regline, std::min((size_t) reglen, sizeof(regline) - 1));
+
+                uintptr_t stack_words[8]{};
+                iovec local_iov{ stack_words, sizeof(stack_words) };
+                iovec remote_iov{ reinterpret_cast<void *>(regs[REG_RSP]), sizeof(stack_words) };
+                ssize_t stack_bytes = process_vm_readv(getpid(), &local_iov, 1, &remote_iov, 1, 0);
+                for (size_t i = 0; stack_bytes > 0 && i < size_t(stack_bytes) / sizeof(uintptr_t); ++i)
+                {
+                    char stack_line[256];
+                    Dl_info stack_info{};
+                    int stack_len;
+                    if (dladdr(reinterpret_cast<void *>(stack_words[i]), &stack_info) && stack_info.dli_fname)
+                    {
+                        const char *stack_base = strrchr(stack_info.dli_fname, '/');
+                        stack_len = snprintf(stack_line, sizeof(stack_line), "stack[%zu]=%p %s+0x%lx\n", i,
+                                             reinterpret_cast<void *>(stack_words[i]), stack_base ? stack_base + 1 : stack_info.dli_fname,
+                                             (unsigned long) (stack_words[i] - uintptr_t(stack_info.dli_fbase)));
+                    }
+                    else
+                        stack_len = snprintf(stack_line, sizeof(stack_line), "stack[%zu]=%p\n", i, reinterpret_cast<void *>(stack_words[i]));
+                    if (stack_len > 0)
+                        (void) write(fd, stack_line, std::min((size_t) stack_len, sizeof(stack_line) - 1));
+                }
+
+                Dl_info di{};
+                if (dladdr(rip, &di) && di.dli_fname)
+                {
+                    const char *bas = strrchr(di.dli_fname, '/');
+                    flen += snprintf(fl + flen, sizeof(fl) - flen, " rip=%s+0x%lx", bas ? bas + 1 : di.dli_fname, (unsigned long) (uintptr_t(rip) - uintptr_t(di.dli_fbase)));
+                }
+                else
+                    flen += snprintf(fl + flen, sizeof(fl) - flen, " rip=%p", rip);
+            }
+            flen += snprintf(fl + flen, sizeof(fl) - flen, "\n");
+            if (flen > 0)
+                (void) write(fd, fl, (size_t) flen);
+        }
         void *bt[32];
         int frames = backtrace(bt, 32);
         for (int i = 0; i < frames; ++i)
@@ -251,80 +314,6 @@ void critical_error_handler(int signum)
     ::raise(SIGABRT);
 }
 #endif
-
-namespace
-{
-constexpr const char *server_nav_collect_sig =
-    "55 48 89 E5 41 56 49 89 F6 41 55 41 54 53 48 8D 9F 60 0C 00 00 48 83 EC 10 83 FA 02 74 ? 83 FA 03 74 ? 48 83 C4 10 5B 41 5C 41 5D 41 5E 5D C3 48 8D 9F 80 0C 00 00";
-
-using NavVectorInsert_t = void (*)(uintptr_t vec, unsigned int index, uintptr_t *value);
-
-DetourHook server_nav_collect_detour;
-NavVectorInsert_t server_nav_insert = nullptr;
-uintptr_t server_nav_areas          = 0;
-bool server_nav_collect_hooked      = false;
-
-void NavCollectConnectedAreas(uintptr_t navmesh, uintptr_t out, int team)
-{
-    uintptr_t list;
-    if (team == 2)
-        list = navmesh + 0xC60;
-    else if (team == 3)
-        list = navmesh + 0xC80;
-    else
-        return;
-
-    auto areas = *reinterpret_cast<uintptr_t **>(server_nav_areas);
-    for (int i = 0; i < *reinterpret_cast<int *>(list + 0x10); ++i)
-    {
-        uintptr_t area  = areas[i];
-        uintptr_t best  = 0;
-        float best_score = 0.0f;
-        if (!area)
-            continue;
-        for (auto slot = reinterpret_cast<uintptr_t *>(area + 0x68); slot != reinterpret_cast<uintptr_t *>(area + 0x88); ++slot)
-        {
-            auto header = reinterpret_cast<int *>(*slot);
-            if (!header)
-                continue;
-            for (int j = 0; j < *header; ++j)
-            {
-                uintptr_t conn = *reinterpret_cast<uintptr_t *>(&header[4 * j + 2]);
-                if (conn < (uintptr_t(1) << 40))
-                    continue;
-                if (*reinterpret_cast<uint8_t *>(conn + 0x29C) & 0xE)
-                    continue;
-                float score = (*reinterpret_cast<float *>(conn + 0x18) - *reinterpret_cast<float *>(conn + 0xC)) *
-                              (*reinterpret_cast<float *>(conn + 0x14) - *reinterpret_cast<float *>(conn + 0x8));
-                if (score > best_score)
-                {
-                    best       = conn;
-                    best_score = score;
-                }
-            }
-        }
-        if (best)
-            server_nav_insert(out, *reinterpret_cast<unsigned int *>(out + 0x10), &best);
-    }
-}
-
-void InstallServerNavCrashFix()
-{
-    if (server_nav_collect_hooked)
-        return;
-    if (!sharedobj::server().Load(false))
-        return;
-    uintptr_t fn = gSignatures.GetServerSignature(server_nav_collect_sig);
-    if (!fn)
-        return;
-    server_nav_areas  = fn + 0x45 + *reinterpret_cast<int32_t *>(fn + 0x41);
-    server_nav_insert = reinterpret_cast<NavVectorInsert_t>(fn + 0xE1 + *reinterpret_cast<int32_t *>(fn + 0xDD));
-    server_nav_collect_detour.Init(fn, reinterpret_cast<void *>(&NavCollectConnectedAreas));
-    server_nav_collect_hooked = server_nav_collect_detour.GetOriginalFunc() != nullptr;
-    if (server_nav_collect_hooked)
-        logging::Info("Installed server nav crash fix at %p", reinterpret_cast<void *>(fn));
-}
-}
 
 static void InitRandom()
 {
@@ -469,8 +458,12 @@ void hack::Hook()
 void hack::Initialize()
 {
 #if ENABLE_LOGGING
-    ::signal(SIGSEGV, &critical_error_handler);
-    ::signal(SIGABRT, &critical_error_handler);
+    struct sigaction sa{};
+    sa.sa_sigaction = &critical_error_handler;
+    sa.sa_flags     = SA_SIGINFO | SA_RESETHAND;
+    sigemptyset(&sa.sa_mask);
+    ::sigaction(SIGSEGV, &sa, nullptr);
+    ::sigaction(SIGABRT, &sa, nullptr);
 #endif
     time_injected = time(nullptr);
 /*passwd *pwd   = getpwuid(getuid());
@@ -529,8 +522,6 @@ free(logname);*/
     InitClassTable();
     EC::Register(EC::LevelInit, InitClassTable, "classinfo_levelinit", EC::very_early);
     EC::Register(EC::FirstCM, InitClassTable, "classinfo_firstcm", EC::very_early);
-    EC::Register(EC::LevelInit, InstallServerNavCrashFix, "server_nav_crashfix");
-    InstallServerNavCrashFix();
 
     BeginConVars();
     g_Settings.Init();

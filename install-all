@@ -5,10 +5,19 @@ set -e
 #
 #
 
+./install-deps
+
 proccount=$(grep -c '^processor' /proc/cpuinfo)
+printf 'Build mode: [1] Graphics (default), [2] Textmode: '
+read -r build_mode
+case "$build_mode" in
+    2) visuals_draw_type=Textmode ;;
+    *) visuals_draw_type=IMGUI ;;
+esac
+
 mkdir -p build
 pushd build >/dev/null
-cmake ..
+cmake -DVisuals_DrawType="$visuals_draw_type" ..
 cmake --build . --target cathook -- -j"$proccount"
 popd >/dev/null
 

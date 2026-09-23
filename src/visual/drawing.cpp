@@ -204,6 +204,42 @@ namespace draw
 
 unsigned int texture_white = 0;
 
+namespace
+{
+struct ModelOriginSample
+{
+    Vector origin{};
+    int frame{ -1 };
+};
+
+ModelOriginSample model_origin_samples[MAX_ENTITIES]{};
+}
+
+void CaptureModelOrigin(int entity_index, const Vector &origin)
+{
+    if (!g_GlobalVars || entity_index <= 0 || entity_index >= MAX_ENTITIES)
+        return;
+
+    auto &sample = model_origin_samples[entity_index];
+    if (sample.frame == g_GlobalVars->framecount)
+        return;
+    sample.origin = origin;
+    sample.frame  = g_GlobalVars->framecount;
+}
+
+bool GetModelOrigin(int entity_index, Vector &origin)
+{
+    if (!g_GlobalVars || entity_index <= 0 || entity_index >= MAX_ENTITIES)
+        return false;
+
+    const auto &sample = model_origin_samples[entity_index];
+    const int frame = g_GlobalVars->framecount;
+    if (sample.frame < 0 || sample.frame > frame || frame - sample.frame > 1)
+        return false;
+    origin = sample.origin;
+    return true;
+}
+
 void Initialize()
 {
     if (!draw::width || !draw::height)
@@ -467,9 +503,6 @@ bool EntityCenterToScreen(CachedEntity *entity, Vector &out)
     if (CE_INVALID(entity))
         return false;
     EntGetRenderBounds(RAW_ENT(entity), min, max);
-    world = re::C_BaseEntity::GetAbsOrigin(RAW_ENT(entity));
-
-    // Dormant
     if (EntIsDormant(RAW_ENT(entity)))
     {
         if (entity->m_vecDormantOrigin())
@@ -477,6 +510,8 @@ bool EntityCenterToScreen(CachedEntity *entity, Vector &out)
         else
             return false;
     }
+    else if (!draw::GetModelOrigin(entity->m_IDX, world))
+        world = EntGetRenderOrigin(RAW_ENT(entity));
     world.z += (min.z + max.z) / 2;
     succ = draw::WorldToScreen(world, out);
     return succ;
@@ -486,10 +521,13 @@ VMatrix wts{};
 
 void UpdateWTS()
 {
-    CViewSetup view;
-    VMatrix _, __, ___;
-    g_IBaseClient->GetPlayerView(view);
-    g_IVRenderView->GetMatricesForView(view, &_, &__, &wts, &___);
+    if (!g_IBaseClient || !g_IVRenderView)
+        return;
+    CViewSetup view{};
+    if (!g_IBaseClient->GetPlayerView(view))
+        return;
+    VMatrix world_to_view, view_to_projection, world_to_pixels;
+    g_IVRenderView->GetMatricesForView(view, &world_to_view, &view_to_projection, &wts, &world_to_pixels);
 }
 
 bool WorldToScreen(const Vector &origin, Vector &screen)

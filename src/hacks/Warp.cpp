@@ -10,6 +10,7 @@
     #include "drawing.hpp"
 #endif
 #include "MiscAimbot.hpp"
+#include "NavBot.hpp"
 #include "PlayerTools.hpp"
 #include "WeaponData.hpp"
 #include "MiscTemporary.hpp"
@@ -37,6 +38,7 @@ static settings::Boolean warp_demoknight{ "warp.demoknight", "false" };
 static settings::Boolean warp_peek{ "warp.peek", "false" };
 static settings::Boolean warp_on_damage{ "warp.on-hit", "false" };
 static settings::Boolean warp_forward{ "warp.on-hit.forward", "false" };
+static settings::Boolean warp_melee{ "warp.to.enemy", "true" };
 static settings::Boolean warp_backwards{ "warp.on-hit.backwards", "false" };
 static settings::Boolean warp_left{ "warp.on-hit.left", "true" };
 static settings::Boolean warp_right{ "warp.on-hit.right", "true" };
@@ -238,7 +240,10 @@ static void dodgeProj_cm()
 
 bool shouldWarp(bool check_amount)
 {
-    return g_IEngine->IsInGame() && ((warp_key && warp_key.isKeyDown()) || was_hurt || warp_dodge) && (!check_amount || WarpTicks());
+    if (!g_IEngine->IsInGame())
+        return false;
+    auto nearest = hacks::tf2::NavBot::getNearestPlayerDistance();
+    return ((warp_key && warp_key.isKeyDown()) || was_hurt || warp_dodge || (*warp_melee && nearest.second < 175.0f && hacks::tf2::NavBot::isVisible)) && (!check_amount || WarpTicks());
 }
 
 static int GetWarpUse()

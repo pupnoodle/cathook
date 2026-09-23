@@ -49,7 +49,7 @@ class CMatSystemSurface;
 class CPanel;
 class IMaterialSystemFixed;
 class IMaterialSystem;
-class IMoveHelperServer;
+class IMoveHelper;
 #include "sdk/client_state.hpp"
 class CHud;
 class IGameEventManager;
@@ -92,7 +92,7 @@ extern IVDebugOverlay *g_IVDebugOverlay;
 extern IMaterialSystemFixed *g_IMaterialSystem;
 extern CModelRender *g_IVModelRender;
 extern CRenderView *g_IVRenderView;
-extern IMoveHelperServer *g_IMoveHelperServer;
+extern IMoveHelper *g_IMoveHelperServer;
 extern CBaseClientState *g_IBaseClientState;
 extern IGameEventManager *g_IGameEventManager;
 extern CGameRules **rg_pGameRules;

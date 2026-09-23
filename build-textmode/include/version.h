@@ -1,0 +1,4 @@
+#pragma once
+
+#define GIT_COMMIT_HASH "7691879"
+#define GIT_COMMITTER_DATE "2026-09-21 14:28:32 +0200"

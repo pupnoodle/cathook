@@ -167,5 +167,9 @@ uintptr_t CSignature::GetServerSignature(const char *chPattern)
 {
     return GetSignature(chPattern, sharedobj::server(), CSignature_space::server);
 }
+uintptr_t CSignature::GetMaterialSystemSignature(const char *chPattern)
+{
+    return GetSignature(chPattern, sharedobj::materialsystem(), CSignature_space::materialsystem);
+}
 
 CSignature gSignatures;

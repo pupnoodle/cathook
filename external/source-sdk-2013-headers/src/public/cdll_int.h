@@ -525,11 +525,8 @@ public:
 	virtual void SetGamestatsData( CGamestatsData *pGamestatsData ) = 0;
 	virtual CGamestatsData *GetGamestatsData() = 0;
 
-#if 0
 	// we need to pull delta's from the cocoa mgr, the engine vectors this for us
-	// Live TF2 VEngineClient014 has no GetMouseDelta; ServerCmdKeyValues is vtable[127].
 	virtual void GetMouseDelta( int &x, int &y, bool bIgnoreNextMouseDelta = false ) = 0;
-#endif
 
 	// Sends a key values server command, not allowed from scripts execution
 	// Params:

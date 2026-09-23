@@ -8,6 +8,7 @@
 #include "navparser.hpp"
 #include <settings/Bool.hpp>
 #include <boost/circular_buffer.hpp>
+#include <game/shared/imovehelper.h>
 // CPrediction::StartCommand stores m_pCurrentCommand immediately before m_hConstraintEntity.
 namespace hacks::shared::aimbot
 {
@@ -418,6 +419,9 @@ void Prediction_PaintTraverse()
 
 Vector EnginePrediction(CachedEntity *entity, float time, Vector *vecVelocity)
 {
+    if (!g_IMoveHelperServer)
+        return entity->m_vecOrigin();
+
     Vector result          = entity->m_vecOrigin();
     IClientEntity *ent     = RAW_ENT(entity);
     Vector old_vecVelocity = NET_VECTOR(ent, netvar.vVelocity);
@@ -467,15 +471,18 @@ Vector EnginePrediction(CachedEntity *entity, float time, Vector *vecVelocity)
     NET_VECTOR(ent, netvar.m_vecOrigin) = entity->m_vecOrigin();
 
     SetPredictionRandomSeed(MD5_PseudoRandom(current_user_cmd->command_number) & 0x7FFFFFFF);
-    g_IGameMovement->StartTrackPredictionErrors(reinterpret_cast<CBasePlayer *>(ent));
-    g_IPrediction->SetupMove(ent, &fakecmd, nullptr, pMoveData.get());
+    auto *player = reinterpret_cast<CBasePlayer *>(ent);
+    g_IMoveHelperServer->SetHost(player);
+    g_IGameMovement->StartTrackPredictionErrors(player);
+    g_IPrediction->SetupMove(ent, &fakecmd, g_IMoveHelperServer, pMoveData.get());
 
     if (vecVelocity)
         pMoveData->m_vecVelocity = *vecVelocity;
 
-    g_IGameMovement->ProcessMovement(reinterpret_cast<CBasePlayer *>(ent), pMoveData.get());
+    g_IGameMovement->ProcessMovement(player, pMoveData.get());
     g_IPrediction->FinishMove(ent, &fakecmd, pMoveData.get());
-    g_IGameMovement->FinishTrackPredictionErrors(reinterpret_cast<CBasePlayer *>(ent));
+    g_IGameMovement->FinishTrackPredictionErrors(player);
+    g_IMoveHelperServer->SetHost(nullptr);
 
     NET_VAR(ent, netvar.m_pCurrentCommand, CUserCmd *) = original_cmd;
 

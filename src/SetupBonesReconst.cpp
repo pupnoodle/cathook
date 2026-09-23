@@ -40,13 +40,6 @@ static std::vector<int> ignore_sequences{
 };
 //clang-format on
 
-static QAngle YawOnly(QAngle angles)
-{
-    angles.x = 0;
-    angles.z = 0;
-    return angles;
-}
-
 static Vector PlayerOrigin(IClientEntity *ent)
 {
     const Vector abs = re::C_BaseEntity::GetAbsOrigin(ent);
@@ -62,11 +55,8 @@ static Vector PlayerOrigin(IClientEntity *ent)
 
 static QAngle PlayerAngles(IClientEntity *ent)
 {
-    if (!nolerp)
-        return YawOnly(re::C_BaseEntity::GetAbsAngles(ent));
-    if (netvar.m_angRotation)
-        return YawOnly(VectorToQAngle(NET_VECTOR(ent, netvar.m_angRotation)));
-    return YawOnly(re::C_BaseEntity::GetAbsAngles(ent));
+    using fn_t = const QAngle &(*)(IClientEntity *);
+    return vfunc<fn_t>(ent, vtables::entity::get_render_angles, 0)(ent);
 }
 
 static const float *PoseParameters(IClientEntity *ent)
@@ -140,7 +130,7 @@ void GetSkeleton(IClientEntity *ent, CStudioHdr *pStudioHdr, Vector pos[], Quate
 
 bool SetupBones(IClientEntity *ent, matrix3x4_t *pBoneToWorld, int boneMask)
 {
-    if (!ent || !pBoneToWorld || !g_IModelInfo)
+    if (!ent || !pBoneToWorld || !g_IModelInfo || !g_IMDLCache)
         return false;
 
     const model_t *model = EntGetModel(ent);

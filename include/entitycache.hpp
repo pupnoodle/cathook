@@ -139,6 +139,20 @@ public:
         return m_alive;
     }
 
+    bool m_bAliveVisual() const
+    {
+        if (m_Type() != ENTITY_PLAYER)
+            return m_alive;
+        IClientEntity *e = InternalEntity();
+        if (!e || NET_BYTE(e, netvar.iLifeState) != 0)
+            return false;
+        if (m_iHealth() <= 0)
+            return false;
+        if (g_pPlayerResource && g_pPlayerResource->entity && !g_pPlayerResource->isAlive(m_IDX))
+            return false;
+        return true;
+    }
+
     bool m_bEnemy() const
     {
         if (CE_BAD(g_pLocalPlayer->entity))

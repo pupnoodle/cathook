@@ -282,17 +282,21 @@ CatCommand debug_get_ingame_ipc("ipc_debug_dump_server", "Show other bots on ser
 
 void UpdateServerAddress(bool shutdown)
 {
-    if (not peer)
+    if (not peer || not peer->memory || peer->client_id < 0)
         return;
     const char *s_addr = "0.0.0.0";
-    if (not shutdown and g_IEngine->GetNetChannelInfo())
+    if (not shutdown and g_IEngine && g_IEngine->GetNetChannelInfo())
     {
-        s_addr = g_IEngine->GetNetChannelInfo()->GetAddress();
+        const char *address = g_IEngine->GetNetChannelInfo()->GetAddress();
+        if (address)
+            s_addr = address;
     }
 
     user_data_s &data = peer->memory->peer_user_data[peer->client_id];
-    data.friendid     = g_ISteamUser->GetSteamID().GetAccountID();
-    strncpy(data.ingame.server, s_addr, sizeof(data.ingame.server));
+    if (g_ISteamUser)
+        data.friendid = g_ISteamUser->GetSteamID().GetAccountID();
+    strncpy(data.ingame.server, s_addr, sizeof(data.ingame.server) - 1);
+    data.ingame.server[sizeof(data.ingame.server) - 1] = '\0';
 }
 
 void update_mapname()
@@ -364,18 +368,24 @@ void UpdateTemporaryData()
 
 void StoreClientData()
 {
-    if (!peer)
+    if (!peer || !peer->memory || peer->client_id < 0)
         return;
 
     UpdateServerAddress();
     user_data_s &data = peer->memory->peer_user_data[peer->client_id];
-    data.friendid     = g_ISteamUser->GetSteamID().GetAccountID();
     data.ts_injected  = time_injected;
     data.textmode     = ENABLE_TEXTMODE;
     if (g_ISteamUser)
+        data.friendid = g_ISteamUser->GetSteamID().GetAccountID();
+    const char *persona = "";
+    if (g_ISteamUser && g_ISteamFriends)
     {
-        strncpy(data.name, hooked_methods::methods::GetFriendPersonaName(g_ISteamFriends, g_ISteamUser->GetSteamID()), sizeof(data.name));
+        const char *name = hooked_methods::methods::GetFriendPersonaName(g_ISteamFriends, g_ISteamUser->GetSteamID());
+        if (name)
+            persona = name;
     }
+    strncpy(data.name, persona, sizeof(data.name) - 1);
+    data.name[sizeof(data.name) - 1] = '\0';
 }
 
 void Heartbeat()
