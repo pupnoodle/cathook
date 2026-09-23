@@ -361,8 +361,10 @@ void hack::Hook()
 
     hooks::client.Set(g_IBaseClient);
     hooks::client.HookMethod(HOOK_ARGS(DispatchUserMessage));
-#if ENABLE_VISUALS
+#if ENABLE_VISUALS || ENABLE_TEXTMODE
     hooks::client.HookMethod(HOOK_ARGS(FrameStageNotify));
+#endif
+#if ENABLE_VISUALS
     hooks::client.HookMethod(HOOK_ARGS(IN_KeyEvent));
 #endif
     hooks::client.Apply();

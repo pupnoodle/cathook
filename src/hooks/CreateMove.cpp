@@ -239,6 +239,9 @@ DEFINE_HOOKED_METHOD(CreateMove, bool, void *this_, float input_sample_time, CUs
     {
         g_Settings.bInvalid       = true;
         g_Settings.is_create_move = false;
+#if ENABLE_TEXTMODE
+        hack::PumpEngine();
+#endif
         return true;
     }
 

@@ -295,3 +295,7 @@ scripts/updater-preferences
 # Runtime-generated config autosaves
 data/configs/autosaves/
 *.autosave.conf
+
+build-textmode/
+*.so.bak*
+*.bak-before-*

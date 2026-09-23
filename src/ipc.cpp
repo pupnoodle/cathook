@@ -390,6 +390,8 @@ void StoreClientData()
 
 void Heartbeat()
 {
+    if (!peer || !peer->memory || peer->client_id < 0)
+        return;
     user_data_s &data = peer->memory->peer_user_data[peer->client_id];
     data.heartbeat    = time(nullptr);
 }
