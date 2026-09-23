@@ -322,6 +322,8 @@ static InitRoutine nullifiy_textmode2(
         static BytePatch patch_menu_update(gSignatures.GetClientSignature, sigs::menu_model_update, 0x0, { 0xC3 });
         static BytePatch patch_menu_apply(gSignatures.GetClientSignature, sigs::menu_model_apply_sequence, 0x0, { 0xC3 });
         static BytePatch patch_menu_set(gSignatures.GetClientSignature, sigs::menu_item_model_set, 0x0, { 0xC3 });
+        static BytePatch patch_html_a(gSignatures.GetClientSignature, sigs::html_createbrowser_gate_a, 0x1c, { 0x48, 0x31, 0xFF });
+        static BytePatch patch_html_b(gSignatures.GetClientSignature, sigs::html_createbrowser_gate_b, 0x1c, { 0x48, 0x31, 0xFF });
         static BytePatch patch_vox(gSignatures.GetEngineSignature, sigs::vox_shutdown_bad_vcall, 0x22, { 0x90, 0x90, 0x90 });
         static BytePatch patch_scene(gSignatures.GetServerSignature, sigs::server_scene_entity_should_transmit, 0x0, { 0xB8, 0x00, 0x00, 0x00, 0x00, 0xC3 });
         static BytePatch patch_base(gSignatures.GetServerSignature, sigs::server_base_entity_should_transmit, 0x0, { 0xB8, 0x00, 0x00, 0x00, 0x00, 0xC3 });
@@ -332,6 +334,8 @@ static InitRoutine nullifiy_textmode2(
         patch_menu_update.Patch();
         patch_menu_apply.Patch();
         patch_menu_set.Patch();
+        patch_html_a.Patch();
+        patch_html_b.Patch();
         patch_vox.Patch();
         patch_scene.Patch();
         patch_base.Patch();

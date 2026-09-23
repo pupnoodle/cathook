@@ -207,6 +207,10 @@ constexpr const char* menu_model_apply_sequence =
   "55 48 89 E5 41 57 41 56 41 55 41 54 49 89 FC 53 48 83 EC 28 48 8D 05 ? ? ? ? 48 89 75 C8 48 8B 38 48 8B 07 48 89 7D B8 FF 90 C8 00 00 00 4D 8B BC 24 10 0C 00 00";
 constexpr const char* menu_item_model_set =
   "55 48 89 E5 41 57 41 56 41 55 41 54 49 89 F4 53 48 89 FB 48 83 EC 68 C7 87 E4 0E 00 00 00 00 00 00 48 8B BF 10 0F 00 00";
+constexpr const char* html_createbrowser_gate_a =
+  "41 C7 84 24 18 07 00 00 00 00 00 00 4C 89 F7 E8 21 C0 FF FF 49 8B BC 24 F0 06 00 00 48 85 FF";
+constexpr const char* html_createbrowser_gate_b =
+  "41 C7 84 24 18 07 00 00 00 00 00 00 4C 89 F7 E8 A1 9D FF FF 49 8B BC 24 F0 06 00 00 48 85 FF";
 constexpr const char* particle_system_precache =
   "31 C0 48 85 FF 74 ? 55 48 89 E5 41 54 49 89 FC 48 83 EC ? 48 8B 3D ? ? ? ?";
 constexpr const char* particle_effect_create_event =
