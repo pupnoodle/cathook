@@ -807,11 +807,9 @@ void update()
             reset();
             break;
         }
-        if (CE_BAD(LOCAL_E))
+        if (!g_pPlayerResource)
             break;
-        if (g_pLocalPlayer->team == TEAM_UNK || g_pLocalPlayer->team == TEAM_SPEC || g_pLocalPlayer->clazz == 0)
-            break;
-        logging::Info("autoqueue-report: class chosen, settling in before reporting");
+        logging::Info("autoqueue-report: connected, settling in before reporting");
         settle_tries   = 0;
         last_connected = 0;
         stable_ticks   = 0;
@@ -1020,6 +1018,9 @@ static void cm()
     if (g_Settings.bInvalid)
         return;
 
+    if (*autoReport && !*autoqueue_report && report_timer.test_and_set(60000))
+        reportall();
+
     if (CE_BAD(LOCAL_E) || CE_BAD(LOCAL_W))
         return;
 
@@ -1034,8 +1035,6 @@ static void cm()
         int classtojoin    = classes[rand() % 3];
         g_IEngine->ClientCmd_Unrestricted(format("disguise ", classtojoin, " ", teamtodisguise).c_str());
     }
-    if (*autoReport && !*autoqueue_report && report_timer.test_and_set(60000))
-        reportall();
 }
 
 static Timer unstuck{};
